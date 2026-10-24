@@ -221,6 +221,16 @@ function changePassword(userId, newPassword) {
 }
 
 // ─── PLAYERS & OFFICERS ──────────────────────────────────────
+function getCandidatePlayers() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, name, real_name as realName
+    FROM players
+    WHERE id NOT IN (SELECT player_id FROM users WHERE player_id IS NOT NULL)
+    ORDER BY name COLLATE NOCASE ASC
+  `).all();
+}
+
 function getPlayers() {
   const db = getDb();
   const playerRows = db.prepare('SELECT * FROM players ORDER BY id ASC').all();
@@ -993,6 +1003,7 @@ module.exports = {
   getUsers,
   updateUser,
   changePassword,
+  getCandidatePlayers,
   getPlayers,
   getPlayerById,
   createPlayer,

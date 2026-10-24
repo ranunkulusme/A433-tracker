@@ -187,6 +187,10 @@ function createRequestHandler(staticDir) {
     // ─────────────────────────────────────────────────────────
     // AUTH ENDPOINTS
     // ─────────────────────────────────────────────────────────
+    if (pathname === '/api/auth/candidate-players' && req.method === 'GET') {
+      return sendJson(res, 200, db.getCandidatePlayers());
+    }
+
     if (pathname === '/api/auth/register' && req.method === 'POST') {
       const { username, password, playerId, playerName } = body;
       if (!username || !password) {

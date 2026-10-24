@@ -205,7 +205,8 @@ function officerLabel(officer) {
 }
 function playerLink(player) {
   if (!player) return '—';
-  return `<button class="text-link" onclick="event.stopPropagation();navigate('player_detail',{id:${player.id}})">${player.name}</button>`;
+  if (state.currentRole === 'r3') return `<span>${escapeHtml(player.name)}</span>`;
+  return `<button class="text-link" onclick="event.stopPropagation();navigate('player_detail',{id:${player.id}})">${escapeHtml(player.name)}</button>`;
 }
 function officerLink(officer) {
   const catalog = getCatalogOfficer(officer?.catalogId);
