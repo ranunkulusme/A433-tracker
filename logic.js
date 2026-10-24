@@ -7,6 +7,7 @@
   const MAX_LEVEL = 180;
   const STOCK_ZERO = { coupons: 0, puzzles: 0, chests: 0 };
   const STAR_COSTS = [500, 1000, 6500, 25000, 65000, 98000];
+  const OFFICER_TYPES = ['Танк', 'ПТ', 'Пехота', 'Гарнизон', 'Осада'];
 
   const DEFAULT_OFFICERS = [
     { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 500, medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
@@ -231,6 +232,181 @@
     }));
   }
 
+  function calculateOfficerDeficit({ officer, catalogItem, player, targetLevel = 180, today, includeStock = true }) {
+    const rawCost = Number(catalogItem?.couponPerPuzzle);
+    const costPerPuzzle = rawCost === 0 ? 0 : (rawCost || COUPON_PER_PUZZLE);
+    const target = Math.max(1, Math.min(MAX_LEVEL, Number(targetLevel) || MAX_LEVEL));
+    const targetPuzzles = target * PUZZLES_PER_LEVEL;
+
+    const officerCoupons = Math.max(0, Number(officer?.coupons) || 0);
+    const officerLevel = Math.max(0, Number(officer?.level) || 0);
+    const currentPuzzles = officerLevel * PUZZLES_PER_LEVEL + (costPerPuzzle > 0 ? Math.floor(officerCoupons / costPerPuzzle) : 0);
+
+    let stockPuzzles = 0;
+    if (includeStock) {
+      const stockPuzzlesVal = Math.max(0, Number(player?.stock?.puzzles) || 0);
+      const stockCouponsVal = Math.max(0, Number(player?.stock?.coupons) || 0);
+      stockPuzzles = stockPuzzlesVal + (costPerPuzzle > 0 ? Math.floor(stockCouponsVal / costPerPuzzle) : 0);
+    }
+
+    const deficitPuzzles = Math.max(0, targetPuzzles - currentPuzzles - stockPuzzles);
+    const deficitCoupons = costPerPuzzle > 0 ? deficitPuzzles * costPerPuzzle : 0;
+
+    const daily = dailyRewards(player?.sector);
+    const dailyIncome = daily.puzzlesPerDay;
+
+    const daysWithoutEvents = deficitPuzzles === 0
+      ? 0
+      : (dailyIncome > 0 ? Math.ceil(deficitPuzzles / dailyIncome) : null);
+
+    const baseToday = today || new Date().toISOString().slice(0, 10);
+    const dateWithoutEvents = daysWithoutEvents !== null ? dateAdd(baseToday, daysWithoutEvents) : null;
+
+    const currentStars = Math.max(0, Math.min(6, Number(officer?.stars) || 0));
+    const requiredStars = 6;
+    const isStarReady = currentStars >= requiredStars;
+
+    return {
+      targetLevel: target,
+      targetPuzzles,
+      currentPuzzles,
+      stockPuzzles,
+      deficitPuzzles,
+      deficitCoupons,
+      costPerPuzzle,
+      dailyIncome,
+      daysWithoutEvents,
+      dateWithoutEvents,
+      starRequirement: {
+        currentStars,
+        requiredStars,
+        isStarReady,
+      },
+    };
+  }
+
+  function simulateEventProgress({ deficitPuzzles, costPerPuzzle, dailyIncome, plannedEvents = [], today }) {
+    const rawCost = Number(costPerPuzzle);
+    const effectiveCost = rawCost === 0 ? 0 : (rawCost || COUPON_PER_PUZZLE);
+
+    let puzzlesFromEvents = 0;
+    (plannedEvents || []).forEach(pe => {
+      const count = Math.max(0, Number(pe.count) || 0);
+      const coupons = Math.max(0, Number(pe.coupons) || 0);
+      if (count > 0 && coupons > 0 && effectiveCost > 0) {
+        puzzlesFromEvents += Math.floor((coupons * count) / effectiveCost);
+      }
+    });
+
+    const initialDeficit = Math.max(0, Number(deficitPuzzles) || 0);
+    const remainingDeficitPuzzles = Math.max(0, initialDeficit - puzzlesFromEvents);
+    const remainingDeficitCoupons = effectiveCost > 0 ? remainingDeficitPuzzles * effectiveCost : 0;
+
+    const baseToday = today || new Date().toISOString().slice(0, 10);
+    const baseDays = initialDeficit === 0 ? 0 : (dailyIncome > 0 ? Math.ceil(initialDeficit / dailyIncome) : null);
+    const simulatedDays = remainingDeficitPuzzles === 0 ? 0 : (dailyIncome > 0 ? Math.ceil(remainingDeficitPuzzles / dailyIncome) : null);
+    const savedDays = (baseDays !== null && simulatedDays !== null) ? Math.max(0, baseDays - simulatedDays) : 0;
+    const simulatedDate = simulatedDays !== null ? dateAdd(baseToday, simulatedDays) : null;
+
+    return {
+      puzzlesFromEvents,
+      remainingDeficitPuzzles,
+      remainingDeficitCoupons,
+      simulatedDays,
+      simulatedDate,
+      savedDays,
+    };
+  }
+
+  function smartAutoPick({ places, players, officerCatalog, eventDate }) {
+    const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
+    const today = eventDate || new Date().toISOString().slice(0, 10);
+
+    const candidates = [];
+    (players || []).forEach(player => {
+      (player.officers || []).forEach(officer => {
+        const cat = catalogMap.get(officer.catalogId);
+        if (!cat) return;
+        const costPerPuzzle = Number(cat.couponPerPuzzle);
+        if (costPerPuzzle === 0) return;
+
+        const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: MAX_LEVEL, today });
+        if (def.deficitCoupons <= 0) return;
+
+        candidates.push({
+          playerId: player.id,
+          officerId: officer.id,
+          generation: Number(cat.generation) || 0,
+          level: Number(officer.level) || 0,
+          killPoints: Number(player.sector?.killPoints) || 0,
+          deficitCoupons: def.deficitCoupons,
+          deficitPuzzles: def.deficitPuzzles,
+          costPerPuzzle: def.costPerPuzzle,
+        });
+      });
+    });
+
+    candidates.sort((a, b) =>
+      b.generation - a.generation
+      || b.level - a.level
+      || b.killPoints - a.killPoints
+      || b.deficitCoupons - a.deficitCoupons
+    );
+
+    const indexedPlaces = (places || []).map((p, idx) => ({
+      slotIndex: idx,
+      place: p.place,
+      label: p.label || `Место ${p.place}`,
+      coupons: Math.max(0, Number(p.coupons ?? p.actualCoupons) || 0),
+    }));
+
+    const sortedPlaces = [...indexedPlaces].sort((a, b) => b.coupons - a.coupons || a.slotIndex - b.slotIndex);
+
+    const assignedPlayers = new Set();
+    const assignmentMap = new Map();
+
+    sortedPlaces.forEach(p => {
+      const available = candidates.filter(c => !assignedPlayers.has(c.playerId));
+      if (!available.length) return;
+
+      const fullDeficitCandidates = available.filter(c => c.deficitCoupons >= p.coupons);
+      let chosen = null;
+      if (fullDeficitCandidates.length > 0) {
+        chosen = fullDeficitCandidates[0];
+      } else {
+        chosen = [...available].sort((a, b) => b.deficitCoupons - a.deficitCoupons)[0];
+      }
+
+      if (chosen) {
+        assignedPlayers.add(chosen.playerId);
+        const overflow = Math.max(0, p.coupons - chosen.deficitCoupons);
+        assignmentMap.set(p.slotIndex, {
+          place: p.place,
+          playerId: chosen.playerId,
+          officerId: chosen.officerId,
+          actualCoupons: p.coupons,
+          deficitCoupons: chosen.deficitCoupons,
+          overflowCoupons: overflow,
+          isEfficient: overflow === 0,
+        });
+      }
+    });
+
+    return (places || []).map((p, idx) => {
+      const assigned = assignmentMap.get(idx);
+      if (assigned) return assigned;
+      return {
+        place: p.place,
+        playerId: null,
+        officerId: null,
+        actualCoupons: Number(p.coupons ?? p.actualCoupons) || 0,
+        deficitCoupons: 0,
+        overflowCoupons: 0,
+        isEfficient: true,
+      };
+    });
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -238,6 +414,7 @@
     STOCK_ZERO,
     STAR_COSTS,
     DEFAULT_OFFICERS,
+    OFFICER_TYPES,
     migrateState,
     dailyRewards,
     forecastOfficer,
@@ -249,5 +426,8 @@
     starCostFor,
     validateImportData,
     buildAutoPick,
+    calculateOfficerDeficit,
+    simulateEventProgress,
+    smartAutoPick,
   };
 });

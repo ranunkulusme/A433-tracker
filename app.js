@@ -141,6 +141,21 @@ function applyEvent(officer, couponAmount) {
 }
 
 // ─── UI HELPERS ──────────────────────────────────────────────
+const TANK_ICON = `<svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="display:inline-block;vertical-align:-2px"><rect x="14" y="8" width="8" height="2" rx="0.5"/><path d="M7 11h8V9a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v2z"/><path d="M4 14l1.5-3h13l1.5 3H4z"/><rect x="2" y="14" width="20" height="6" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="17" r="1.3"/><circle cx="10" cy="17" r="1.3"/><circle cx="14" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/></svg>`;
+
+function troopBadge(type) {
+  const map = {
+    'Пехота': { cls: 'badge-troop-infantry', icon: '🪖' },
+    'Танк': { cls: 'badge-troop-tank', icon: TANK_ICON },
+    'ПТ': { cls: 'badge-troop-td', icon: '🎯' },
+    'Гарнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
+    'Осада': { cls: 'badge-troop-siege', icon: '💥' },
+  };
+  const info = map[type];
+  if (!info) return `<span class="badge badge-none">${type || '—'}</span>`;
+  return `<span class="badge ${info.cls}">${info.icon} ${type}</span>`;
+}
+
 function evBadge(et) {
   if (!et) return `<span class="badge badge-none">—</span>`;
   return `<span class="badge" style="background:${et.color}22;color:${et.color};border:1px solid ${et.color}44">${et.name}</span>`;
@@ -160,9 +175,14 @@ function openModal(id) {
 }
 function closeAllModals() {
   document.getElementById('overlay').classList.remove('open');
+  document.getElementById('sidebar')?.classList.remove('open');
   document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));
 }
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('open', sb.classList.contains('open'));
+}
 function setCurrentRole(role) {
   state.currentRole = role;
   save();
@@ -199,11 +219,11 @@ let pageParams = {};
 function navigate(page, params={}) {
   currentPage = page; pageParams = params;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
-  const titles = { calendar:'Календарь ивентов', players:'Игроки', officers:'Офицеры', officer_detail:'Офицер', event_types:'Настройка ивентов', event_detail:'Ивент', player_detail:'Игрок' };
+  const titles = { calendar:'Календарь ивентов', players:'Игроки', officers:'Офицеры', officer_detail:'Офицер', event_types:'Настройка ивентов', event_detail:'Ивент', player_detail:'Игрок', calculator:'Калькулятор и Аналитика' };
   document.getElementById('page-title').textContent = titles[page] || page;
   document.getElementById('role-switch').value = state.currentRole;
   document.getElementById('content').innerHTML = '';
-  ({calendar:renderCalendar, players:renderPlayers, officers:renderOfficers, officer_detail:()=>renderOfficerDetail(params.id), event_types:renderEventTypes, event_detail:()=>renderEventDetail(params.id), player_detail:()=>renderPlayerDetail(params.id)})[page]?.();
+  ({calendar:renderCalendar, players:renderPlayers, officers:renderOfficers, officer_detail:()=>renderOfficerDetail(params.id), event_types:renderEventTypes, event_detail:()=>renderEventDetail(params.id), player_detail:()=>renderPlayerDetail(params.id), calculator:renderCalculator})[page]?.();
   document.getElementById('sidebar').classList.remove('open');
 }
 
@@ -458,7 +478,7 @@ function renderStars(count=0) {
   return `<span class="stars">${Array.from({length:6},(_,i)=>{
     const star = i + 1;
     const cost = starCostFor(star);
-    return `<span class="star-readonly ${count>=star?'active':''}" title="${star < 6 ? `${fmtNum(cost)} медалей до ${star}★` : `Итого ${fmtNum(cost)} медалей`}">${count>=star?'★':'☆'}</span>`;
+    return `<span class="star-readonly ${count>=star?'active':''}" title="${star < 6 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд`}">${count>=star?'★':'☆'}</span>`;
   }).join('')}</span>`;
 }
 
@@ -505,7 +525,7 @@ function renderPlayerDetail(playerId) {
           const cat = getCatalogOfficer(o.catalogId);
           const forecast = forecastOfficer({ today:new Date().toISOString().slice(0,10), officer:o, player:p, officerCatalog:state.officerCatalog, events:state.events, eventTypes:state.eventTypes });
           const variants = forecastOfficerVariants({ today:new Date().toISOString().slice(0,10), officer:o, player:p, officerCatalog:state.officerCatalog, eventType:state.eventTypes[0]||{} });
-          return `<tr><td><strong>${officerLink(o)}</strong></td><td>${cat?.type||'—'}</td><td>${cat ? fmtNum(cat.generation) : '—'}</td><td>${fmtNum(o.level)}</td><td>${renderStars(o.stars)}</td><td>${forecast.date || 'за пределами прогноза'}</td><td style="font-size:12px;color:var(--text2)">1: ${variants.top1.date||'—'} · 2: ${variants.top2.date||'—'} · 3: ${variants.top3.date||'—'} · 4-10: ${variants.top4to10.date||'—'}</td></tr>`;
+          return `<tr><td><strong>${officerLink(o)}</strong></td><td>${cat ? troopBadge(cat.type) : '—'}</td><td>${cat ? fmtNum(cat.generation) : '—'}</td><td>${fmtNum(o.level)}</td><td>${renderStars(o.stars)}</td><td>${forecast.date || 'за пределами прогноза'}</td><td style="font-size:12px;color:var(--text2)">1: ${variants.top1.date||'—'} · 2: ${variants.top2.date||'—'} · 3: ${variants.top3.date||'—'} · 4-10: ${variants.top4to10.date||'—'}</td></tr>`;
         }).join('')}</tbody>
       </table>
     </div>
@@ -553,7 +573,7 @@ function renderOfficers() {
         <thead><tr><th>Имя</th><th>Тип</th><th>Поколение</th><th>Купонов за пазл</th><th>Медали</th><th></th></tr></thead>
         <tbody>${state.officerCatalog.map(o=>`<tr>
           <td><strong>${catalogOfficerLink(o)}</strong></td>
-          <td>${o.type}</td>
+          <td>${troopBadge(o.type)}</td>
           <td style="font-family:var(--mono)">${fmtNum(o.generation)}</td>
           <td style="font-family:var(--mono)">${fmtNum(o.couponPerPuzzle)}</td>
           <td style="font-family:var(--mono)">${fmtNum(o.medalsBeforeTraining)}+${fmtNum(o.medalsTraining)}=${fmtNum(o.medalsTotal)}</td>
@@ -591,7 +611,10 @@ function renderOfficerDetail(catalogId) {
     <div class="section-header">
       <div>
         <div class="section-title">${officer.name}</div>
-        <div style="color:var(--text3);font-size:12px;margin-top:4px">${officer.type} · поколение ${fmtNum(officer.generation)} · ${officer.couponPerPuzzle === 0 ? 'только пазлы' : `${fmtNum(officer.couponPerPuzzle)} купонов за пазл`}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          ${troopBadge(officer.type)}
+          <span style="color:var(--text3);font-size:12px">поколение ${fmtNum(officer.generation)} · ${officer.couponPerPuzzle === 0 ? 'только пазлы' : `${fmtNum(officer.couponPerPuzzle)} купонов за пазл`}</span>
+        </div>
       </div>
       ${canManage()?`<div style="display:flex;gap:8px"><button class="btn-primary btn-sm" onclick="openOfficerCatalogModal('${officer.id}')">Редактировать</button><button class="btn-danger btn-sm" onclick="confirmDeleteOfficerCatalog('${officer.id}')">Удалить</button></div>`:''}
     </div>
@@ -617,6 +640,430 @@ function renderOfficerDetail(catalogId) {
       <table>
         <thead><tr><th>Ивент</th><th>Даты</th><th>Место</th><th>Игрок</th><th>Купоны</th><th>Статус</th></tr></thead>
         <tbody>${eventRows.map(row=>`<tr><td>${row.et?.name||'—'}</td><td>${formatDateShort(row.ev.dateFrom)} — ${formatDateShort(row.ev.dateTo)}</td><td>${row.pi?.label||row.pi?.place||'—'}</td><td>${playerLink(row.p)}</td><td>${fmtNum(row.coupons)}</td><td>${row.ev.accrued?'Начислено':'Не начислено'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty-state">Ивентов нет</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ─── PAGE: CALCULATOR ────────────────────────────────────────
+let calcActiveTab = 'personal';
+let calcPlayerId = null;
+let calcOfficerId = null;
+let calcTargetLevel = 180;
+let calcPlanned = { top1: 0, top2: 0, top3: 0, top4: 0 };
+let matrixFilterType = 'all';
+let matrixFilterGen = 'all';
+let matrixSearch = '';
+let matrixSortCol = 'deficit';
+let matrixSortDir = 'asc';
+
+function setCalcTab(tab) {
+  calcActiveTab = tab;
+  renderCalculator();
+}
+
+function setMatrixSearch(query) {
+  matrixSearch = (query || '').toLowerCase().trim();
+  renderCalculator();
+}
+
+function setMatrixSort(col) {
+  if (matrixSortCol === col) {
+    matrixSortDir = matrixSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    matrixSortCol = col;
+    matrixSortDir = 'asc';
+  }
+  renderCalculator();
+}
+
+function setCalcPlayer(id) {
+  calcPlayerId = id ? parseInt(id) : null;
+  const p = getPlayer(calcPlayerId);
+  calcOfficerId = p?.officers?.[0]?.id || null;
+  renderCalculator();
+}
+
+function setCalcOfficer(id) {
+  calcOfficerId = id;
+  renderCalculator();
+}
+
+function setCalcTargetLevel(lvl) {
+  calcTargetLevel = Math.max(1, Math.min(MAX_LEVEL, parseInt(lvl) || MAX_LEVEL));
+  renderCalculator();
+}
+
+function changeCalcPlanned(tier, delta) {
+  calcPlanned[tier] = Math.max(0, (calcPlanned[tier] || 0) + delta);
+  renderCalculator();
+}
+
+function resetCalcPlanned() {
+  calcPlanned = { top1: 0, top2: 0, top3: 0, top4: 0 };
+  renderCalculator();
+}
+
+function setMatrixFilterType(type) {
+  matrixFilterType = type;
+  renderCalculator();
+}
+
+function setMatrixFilterGen(gen) {
+  matrixFilterGen = gen;
+  renderCalculator();
+}
+
+function renderCalculator() {
+  if (!calcPlayerId && state.players.length) {
+    calcPlayerId = state.players[0].id;
+  }
+  const player = getPlayer(calcPlayerId);
+  if (!calcOfficerId && player?.officers?.length) {
+    calcOfficerId = player.officers[0].id;
+  }
+
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="subnav">
+      <button class="subnav-btn ${calcActiveTab==='personal'?'active':''}" onclick="setCalcTab('personal')">🎯 Персональный симулятор</button>
+      <button class="subnav-btn ${calcActiveTab==='matrix'?'active':''}" onclick="setCalcTab('matrix')">📊 Сводная матрица гильдии</button>
+    </div>
+    ${calcActiveTab === 'personal' ? renderPersonalSimulator() : renderGuildMatrix()}
+  `;
+}
+
+function renderPersonalSimulator() {
+  const player = getPlayer(calcPlayerId);
+  if (!player) return `<div class="empty-state"><p>Нет игроков для расчета</p></div>`;
+  const officer = player.officers.find(o => o.id === calcOfficerId) || player.officers[0];
+  const cat = officer ? getCatalogOfficer(officer.catalogId) : null;
+
+  if (!officer || !cat) {
+    return `
+      <div class="form-row" style="margin-bottom:20px">
+        <div class="form-group">
+          <label>Игрок</label>
+          <select onchange="setCalcPlayer(this.value)">
+            ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${p.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="empty-state"><p>У игрока нет офицеров</p></div>
+    `;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const def = calculateOfficerDeficit({
+    officer,
+    catalogItem: cat,
+    player,
+    targetLevel: calcTargetLevel,
+    today,
+  });
+
+  const et = state.eventTypes[0];
+  const resolvedPlaces = et ? resolveEventPlaces(et, today) : [];
+  const top1Coupons = resolvedPlaces.find(p => p.place === 1)?.coupons || 12500;
+  const top2Coupons = resolvedPlaces.find(p => p.place === 2)?.coupons || 6500;
+  const top3Coupons = resolvedPlaces.find(p => p.place === 3)?.coupons || 3500;
+  const top4Coupons = resolvedPlaces.find(p => p.place >= 4)?.coupons || 2750;
+
+  const sim = simulateEventProgress({
+    deficitPuzzles: def.deficitPuzzles,
+    costPerPuzzle: def.costPerPuzzle,
+    dailyIncome: def.dailyIncome,
+    plannedEvents: [
+      { coupons: top1Coupons, count: calcPlanned.top1 },
+      { coupons: top2Coupons, count: calcPlanned.top2 },
+      { coupons: top3Coupons, count: calcPlanned.top3 },
+      { coupons: top4Coupons, count: calcPlanned.top4 },
+    ],
+    today,
+  });
+
+  const targetPuz = calcTargetLevel * PUZZLES_PER_LEVEL;
+  const currentPuzTotal = def.currentPuzzles + def.stockPuzzles;
+  const progressPct = Math.min(100, Math.round((currentPuzTotal / Math.max(1, targetPuz)) * 100));
+  const simProgressPct = Math.min(100, Math.round(((currentPuzTotal + sim.puzzlesFromEvents) / Math.max(1, targetPuz)) * 100));
+
+  return `
+    <div class="sim-box" style="margin-bottom:20px">
+      <div class="form-row form-row-3" style="margin-bottom:16px">
+        <div class="form-group">
+          <label>Игрок</label>
+          <select onchange="setCalcPlayer(this.value)">
+            ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${p.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Офицер</label>
+          <select onchange="setCalcOfficer(this.value)">
+            ${player.officers.map(o => `<option value="${o.id}" ${o.id===officer.id?'selected':''}>${officerLabel(o)} (ур. ${o.level})</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Целевой уровень подготовки</label>
+          <div style="display:flex;gap:6px">
+            <input type="number" min="1" max="180" value="${calcTargetLevel}" onchange="setCalcTargetLevel(this.value)" style="width:80px">
+            <button class="btn-ghost btn-sm" onclick="setCalcTargetLevel(60)">60</button>
+            <button class="btn-ghost btn-sm" onclick="setCalcTargetLevel(120)">120</button>
+            <button class="btn-ghost btn-sm" onclick="setCalcTargetLevel(180)">180</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="stock-grid" style="margin-bottom:16px">
+        <div class="stock-card">
+          <div class="label">Текущий уровень</div>
+          <div class="value" style="display:flex;align-items:center;gap:8px">
+            <span>Ур. ${fmtNum(officer.level)} <span style="font-size:12px;color:var(--text3)">/ ${calcTargetLevel}</span></span>
+            ${troopBadge(cat.type)}
+          </div>
+          <div style="margin-top:4px">${renderStars(officer.stars)}</div>
+          <div style="font-size:11px;color:${def.starRequirement.isStarReady?'var(--green)':'var(--amber)'};margin-top:4px">
+            ${def.starRequirement.isStarReady ? '★ Готов к максимальной подготовке' : '☆ Для 180 уровня требуется 6★'}
+          </div>
+        </div>
+        <div class="stock-card">
+          <div class="label">Дефицит до цели</div>
+          <div class="value">${fmtNum(def.deficitPuzzles)} <span style="font-size:12px;color:var(--text3)">пазлов</span></div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">
+            ${def.costPerPuzzle > 0 ? `${fmtNum(def.deficitCoupons)} купонов` : 'Только пазлы'}
+          </div>
+        </div>
+        <div class="stock-card">
+          <div class="label">Ежедневный доход</div>
+          <div class="value">+${fmtNum(def.dailyIncome, 2)} <span style="font-size:12px;color:var(--text3)">пазл/день</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">VIP ${player.sector.vipLevel} · Конф. ${player.sector.confidentialityLevel} · 1 сундук/день</div>
+        </div>
+        <div class="stock-card">
+          <div class="label">Без ивентов</div>
+          <div class="value" style="font-size:16px">${def.dateWithoutEvents || '—'}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">
+            ${def.daysWithoutEvents !== null ? `${fmtNum(def.daysWithoutEvents)} дней` : 'Недостижимо'}
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px">
+          <span>Текущий прогресс подготовки</span>
+          <span>${progressPct}%</span>
+        </div>
+        <div class="progress-container">
+          <div class="progress-fill" style="width:${progressPct}%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-box">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <strong style="font-size:15px">Симулятор участия в будущих ивентах</strong>
+          <div style="font-size:12px;color:var(--text3)">Задайте планируемые призовые места для проверки ускорения прокачки</div>
+        </div>
+        <button class="btn-ghost btn-sm" onclick="resetCalcPlanned()">Сбросить симуляцию</button>
+      </div>
+
+      <div class="sim-counter-grid">
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥇 1 место</span>
+            <span class="sim-counter-desc">+${fmtNum(top1Coupons)} купонов</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top1', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned.top1}</span>
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top1', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥈 2 место</span>
+            <span class="sim-counter-desc">+${fmtNum(top2Coupons)} купонов</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top2', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned.top2}</span>
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top2', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥉 3 место</span>
+            <span class="sim-counter-desc">+${fmtNum(top3Coupons)} купонов</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top3', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned.top3}</span>
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top3', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">4–10 место</span>
+            <span class="sim-counter-desc">+${fmtNum(top4Coupons)} купонов</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top4', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned.top4}</span>
+            <button class="sim-step-btn" onclick="changeCalcPlanned('top4', 1)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-result-banner">
+        <div>
+          <div class="sim-result-title">
+            Прогноз с ивентами: <strong>${sim.simulatedDate || def.dateWithoutEvents || '—'}</strong>
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">
+            Остаток после ивентов: <strong>${fmtNum(sim.remainingDeficitPuzzles)}</strong> пазлов (${def.costPerPuzzle > 0 ? fmtNum(sim.remainingDeficitCoupons) + ' куп.' : 'только пазлы'})
+          </div>
+        </div>
+        <div>
+          ${sim.savedDays > 0 ? `<span class="sim-result-badge">⚡ Экономия: −${fmtNum(sim.savedDays)} дней (+${fmtNum(sim.puzzlesFromEvents)} пазл.)</span>` : `<span style="font-size:12px;color:var(--text3)">Призовые места не выбраны</span>`}
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px">
+          <span>Прогресс с учетом симулированных наград</span>
+          <span>${simProgressPct}%</span>
+        </div>
+        <div class="progress-container">
+          <div class="progress-fill green" style="width:${simProgressPct}%"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderGuildMatrix() {
+  const rows = [];
+  const types = ['all', ...OFFICER_TYPES];
+  const gens = ['all', ...Array.from(new Set(state.officerCatalog.map(c => String(c.generation)).filter(Boolean))).sort((a,b)=>Number(a)-Number(b))];
+
+  state.players.forEach(p => {
+    p.officers.forEach(o => {
+      const cat = getCatalogOfficer(o.catalogId);
+      if (!cat) return;
+      if (matrixFilterType !== 'all' && cat.type !== matrixFilterType) return;
+      if (matrixFilterGen !== 'all' && String(cat.generation) !== matrixFilterGen) return;
+
+      if (matrixSearch) {
+        const pName = (p.name || '').toLowerCase();
+        const oName = (o.name || cat.name || '').toLowerCase();
+        if (!pName.includes(matrixSearch) && !oName.includes(matrixSearch)) return;
+      }
+
+      const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player: p, targetLevel: MAX_LEVEL, includeStock: false });
+      let recBadge = '<span class="badge badge-none">4–10 место</span>';
+      if (def.deficitPuzzles === 0) recBadge = '<span class="badge badge-success">Максимум ✓</span>';
+      else if (def.costPerPuzzle === 0) recBadge = '<span class="badge badge-none">Только пазлы</span>';
+      else if (def.deficitCoupons >= 12500) recBadge = '<span class="badge" style="background:#f59e0b22;color:#d97706">🥇 1 место</span>';
+      else if (def.deficitCoupons >= 6500) recBadge = '<span class="badge" style="background:#64748b22;color:#94a3b8">🥈 2 место</span>';
+      else if (def.deficitCoupons >= 3500) recBadge = '<span class="badge" style="background:#b4530922;color:#d97706">🥉 3 место</span>';
+
+      rows.push({
+        player: p,
+        officer: o,
+        catalog: cat,
+        def,
+        recBadge,
+      });
+    });
+  });
+
+  rows.sort((a, b) => {
+    let diff = 0;
+    if (matrixSortCol === 'player') {
+      diff = a.player.name.localeCompare(b.player.name);
+    } else if (matrixSortCol === 'officer') {
+      diff = (a.catalog.name || '').localeCompare(b.catalog.name || '');
+    } else if (matrixSortCol === 'type') {
+      diff = (a.catalog.type || '').localeCompare(b.catalog.type || '');
+    } else if (matrixSortCol === 'generation') {
+      diff = (Number(a.catalog.generation) || 0) - (Number(b.catalog.generation) || 0);
+    } else if (matrixSortCol === 'level') {
+      diff = (Number(a.officer.level) || 0) - (Number(b.officer.level) || 0);
+    } else if (matrixSortCol === 'days') {
+      const da = a.def.daysWithoutEvents !== null ? a.def.daysWithoutEvents : 999999;
+      const db = b.def.daysWithoutEvents !== null ? b.def.daysWithoutEvents : 999999;
+      diff = da - db;
+    } else { // default 'deficit'
+      diff = a.def.deficitPuzzles - b.def.deficitPuzzles;
+    }
+    return matrixSortDir === 'asc' ? diff : -diff;
+  });
+
+  function sortHeader(col, label) {
+    const active = matrixSortCol === col;
+    const arrow = active ? (matrixSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="sortable" onclick="setMatrixSort('${col}')">${label}<span class="sort-arrow">${arrow}</span></th>`;
+  }
+
+  return `
+    <div class="section-header">
+      <div class="section-title">Сводная матрица готовности офицеров (${rows.length})</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" placeholder="🔍 Поиск по игроку или офицеру..." value="${matrixSearch}" oninput="setMatrixSearch(this.value)" style="width:230px;padding:5px 9px;font-size:12px">
+        <label style="font-size:12px;color:var(--text3)">Род войск:</label>
+        <select style="width:130px;padding:4px 8px;font-size:12px" onchange="setMatrixFilterType(this.value)">
+          ${types.map(t => `<option value="${t}" ${t===matrixFilterType?'selected':''}>${t==='all'?'Все войска':t}</option>`).join('')}
+        </select>
+        <label style="font-size:12px;color:var(--text3)">Поколение:</label>
+        <select style="width:100px;padding:4px 8px;font-size:12px" onchange="setMatrixFilterGen(this.value)">
+          ${gens.map(g => `<option value="${g}" ${g===matrixFilterGen?'selected':''}>${g==='all'?'Все':`Gen ${g}`}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            ${sortHeader('player', 'Игрок')}
+            ${sortHeader('officer', 'Офицер')}
+            ${sortHeader('type', 'Род войск')}
+            ${sortHeader('generation', 'Поколение')}
+            ${sortHeader('level', 'Уровень')}
+            <th>Звёзды</th>
+            ${sortHeader('deficit', 'Дефицит до 180')}
+            <th>Склад</th>
+            ${sortHeader('days', 'Без ивентов')}
+            <th>Рекомендация</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td><strong>${playerLink(r.player)}</strong></td>
+              <td><strong>${officerLink(r.officer)}</strong></td>
+              <td>${troopBadge(r.catalog.type)}</td>
+              <td style="font-family:var(--mono)">${r.catalog.generation}</td>
+              <td style="font-family:var(--mono)">Ур. ${fmtNum(r.officer.level)}</td>
+              <td>${renderStars(r.officer.stars)}</td>
+              <td style="font-family:var(--mono)">
+                ${fmtNum(r.def.deficitPuzzles)} пазл.
+                <div style="font-size:11px;color:var(--text3)">${r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы'}</div>
+              </td>
+              <td style="font-family:var(--mono);font-size:12px">
+                ${canSeeStock(r.player.id) ? `${fmtNum(r.player.stock.coupons)} куп. / ${fmtNum(r.player.stock.puzzles)} пазл.` : 'Скрыто'}
+              </td>
+              <td style="font-size:12px">
+                ${r.def.dateWithoutEvents || '—'}
+                <div style="font-size:11px;color:var(--text3)">${r.def.daysWithoutEvents !== null ? `${fmtNum(r.def.daysWithoutEvents)} дн.` : '—'}</div>
+              </td>
+              <td>${r.recBadge}</td>
+              <td>
+                <button class="action-btn" onclick="setCalcPlayer(${r.player.id});setCalcOfficer('${r.officer.id}');setCalcTab('personal')" title="Открыть симулятор">🎯</button>
+              </td>
+            </tr>
+          `).join('') || '<tr><td colspan="11" class="empty-state">Нет офицеров по выбранным фильтрам</td></tr>'}
+        </tbody>
       </table>
     </div>
   `;
@@ -697,7 +1144,7 @@ function renderOfficerRows() {
       <span class="stars">${Array.from({length:6},(_,s)=>{
         const star = s + 1;
         const cost = starCostFor(star);
-        const label = star < 6 ? `${fmtNum(cost)} медалей до ${star} звезды` : `Итого ${fmtNum(cost)} медалей`;
+        const label = star < 6 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд`;
         return `<button type="button" class="star-btn ${(o.stars||0)>s?'active':''}" title="${label}" aria-label="${label}" onclick="setOfficerStars(${i},${star})">${(o.stars||0)>s?'★':'☆'}</button>`;
       }).join('')}</span>
       <button class="action-btn danger" onclick="officerRows.splice(${i},1);renderOfficerRows()">✕</button>
@@ -907,6 +1354,13 @@ function openEventModal(eventId=null) {
 }
 
 function onEventTypeChange() {
+  if (eventAssignments.some(a => a.playerId)) {
+    if (!confirm('Сменить тип ивента? Текущие назначения игроков будут сброшены.')) {
+      const currentEv = editEventId ? getEvent(editEventId) : null;
+      document.getElementById('fe-type').value = currentEv?.typeId || state.eventTypes[0]?.id;
+      return;
+    }
+  }
   const etId = parseInt(document.getElementById('fe-type').value);
   const et = getEventType(etId);
   if (et) {
@@ -924,20 +1378,43 @@ function renderEventAssignments() {
     const pi = placeInfo(et, a.place, document.getElementById('fe-from')?.value);
     const player = a.playerId ? getPlayer(a.playerId) : null;
     const officerOptions = player
-      ? player.officers.map(o=>`<option value="${o.id}" ${o.id===a.officerId?'selected':''}>${officerLabel(o)} (ур.${fmtNum(o.level)})</option>`).join('')
+      ? player.officers.map(o=>{
+          const c = getCatalogOfficer(o.catalogId);
+          const typeStr = c?.type ? `${c.type}, ` : '';
+          return `<option value="${o.id}" ${o.id===a.officerId?'selected':''}>${officerLabel(o)} (${typeStr}ур.${fmtNum(o.level)})</option>`;
+        }).join('')
       : '';
+
+    let efficiencyBadge = `<span class="badge badge-none" style="font-size:10px">Свободно</span>`;
+    if (a.playerId) {
+      const o = player?.officers?.find(x => x.id === a.officerId) || player?.officers?.[0];
+      const cat = o ? getCatalogOfficer(o.catalogId) : null;
+      if (o && cat) {
+        const couponsPrize = a.actualCoupons ?? pi?.coupons ?? 0;
+        const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player, targetLevel: MAX_LEVEL });
+        if (def.costPerPuzzle === 0) {
+          efficiencyBadge = `<span class="badge badge-warning" style="font-size:10px" title="Офицер качается только пазлами!">Только пазлы</span>`;
+        } else if (def.deficitCoupons < couponsPrize) {
+          const overflow = couponsPrize - def.deficitCoupons;
+          efficiencyBadge = `<span class="badge badge-warning" style="font-size:10px" title="Дефицит ${fmtNum(def.deficitCoupons)} куп.">Перерасход: +${fmtNum(overflow)}</span>`;
+        } else {
+          efficiencyBadge = `<span class="badge badge-success" style="font-size:10px" title="Дефицит ${fmtNum(def.deficitCoupons)} куп.">✓ 100% полезно</span>`;
+        }
+      }
+    }
 
     return `<div class="assign-card">
       <span class="assign-place">${pi?.label || 'Место ' + a.place}</span>
-      <input type="number" value="${a.actualCoupons ?? pi?.coupons ?? 0}" min="0" step="500" title="Фактические купоны" oninput="eventAssignments[${i}].actualCoupons=parseInt(this.value)||0">
+      <input type="number" value="${a.actualCoupons ?? pi?.coupons ?? 0}" min="0" step="500" title="Фактические купоны" oninput="eventAssignments[${i}].actualCoupons=parseInt(this.value)||0;renderEventAssignments()">
       <select onchange="onAssignPlayerChange(${i},this.value)">
         <option value="">— Игрок —</option>
         ${state.players.map(p=>'<option value="' + p.id + '" ' + (p.id===a.playerId?'selected':'') + '>' + p.name + '</option>').join('')}
       </select>
-      <select ${!player?'disabled':''} onchange="eventAssignments[${i}].officerId=this.value">
+      <select ${!player?'disabled':''} onchange="eventAssignments[${i}].officerId=this.value;renderEventAssignments()">
         <option value="">— Офицер —</option>
         ${officerOptions}
       </select>
+      <div style="display:flex;align-items:center">${efficiencyBadge}</div>
       <button class="action-btn danger" onclick="eventAssignments.splice(${i},1);renderEventAssignments()">✕</button>
     </div>`;
   }).join('');
@@ -945,8 +1422,9 @@ function renderEventAssignments() {
 
 function onAssignPlayerChange(idx, val) {
   const playerId = val ? parseInt(val) : null;
+  const player = playerId ? getPlayer(playerId) : null;
   eventAssignments[idx].playerId = playerId;
-  eventAssignments[idx].officerId = null;
+  eventAssignments[idx].officerId = player?.officers?.[0]?.id || null;
   renderEventAssignments();
 }
 
@@ -962,11 +1440,14 @@ function addAssignmentRow() {
 function autoPickAssignments() {
   const etId = parseInt(document.getElementById('fe-type').value);
   const et = getEventType(etId);
-  eventAssignments = buildAutoPick({
-    places: eventAssignments.length ? eventAssignments : et?.places || [],
+  const eventDate = document.getElementById('fe-from')?.value || new Date().toISOString().slice(0, 10);
+  eventAssignments = smartAutoPick({
+    places: eventAssignments.length ? eventAssignments : resolveEventPlaces(et, eventDate),
     players: state.players,
     officerCatalog: state.officerCatalog,
+    eventDate,
   });
+  toast('Автоподбор выполнен (с защитой от перерасхода)');
   renderEventAssignments();
 }
 

@@ -12,6 +12,10 @@ const {
   starCostFor,
   validateImportData,
   buildAutoPick,
+  OFFICER_TYPES,
+  calculateOfficerDeficit,
+  simulateEventProgress,
+  smartAutoPick,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -177,4 +181,158 @@ test('returns officer star tooltip costs including total sixth marker', () => {
   assert.equal(starCostFor(1), 500);
   assert.equal(starCostFor(5), 65000);
   assert.equal(starCostFor(6), 98000);
+});
+
+test('exports full list of 5 officer types', () => {
+  assert.deepEqual(OFFICER_TYPES, ['Танк', 'ПТ', 'Пехота', 'Гарнизон', 'Осада']);
+});
+
+test('calculates officer deficit and star requirement for standard and puzzle-only officers', () => {
+  const defStandard = calculateOfficerDeficit({
+    officer: { level: 100, coupons: 1000, stars: 4 },
+    catalogItem: { couponPerPuzzle: 500 },
+    player: { stock: { puzzles: 50, coupons: 2500 }, sector: { vipLevel: 12, confidentialityLevel: 25 } },
+    targetLevel: 180,
+    today: '2026-10-24'
+  });
+  assert.equal(defStandard.targetPuzzles, 900);
+  assert.equal(defStandard.currentPuzzles, 502);
+  assert.equal(defStandard.stockPuzzles, 55);
+  assert.equal(defStandard.deficitPuzzles, 343);
+  assert.equal(defStandard.deficitCoupons, 171500);
+  assert.equal(defStandard.starRequirement.requiredStars, 6);
+  assert.equal(defStandard.starRequirement.isStarReady, false);
+  assert.ok(defStandard.daysWithoutEvents > 0);
+  assert.ok(typeof defStandard.dateWithoutEvents === 'string');
+
+  const defPuzzleOnly = calculateOfficerDeficit({
+    officer: { level: 170, coupons: 0, stars: 6 },
+    catalogItem: { couponPerPuzzle: 0 },
+    player: { stock: { puzzles: 10, coupons: 100000 }, sector: { vipLevel: 10 } },
+    targetLevel: 180,
+    today: '2026-10-24'
+  });
+  assert.equal(defPuzzleOnly.deficitPuzzles, 40);
+  assert.equal(defPuzzleOnly.deficitCoupons, 0);
+  assert.equal(defPuzzleOnly.starRequirement.isStarReady, true);
+});
+
+test('simulates event progress, remaining deficit and saved days', () => {
+  const sim = simulateEventProgress({
+    deficitPuzzles: 343,
+    costPerPuzzle: 500,
+    dailyIncome: 3.666667,
+    plannedEvents: [
+      { coupons: 12500, count: 2 },
+      { coupons: 6500, count: 1 }
+    ],
+    today: '2026-10-24'
+  });
+  assert.equal(sim.puzzlesFromEvents, 63);
+  assert.equal(sim.remainingDeficitPuzzles, 280);
+  assert.equal(sim.remainingDeficitCoupons, 140000);
+  assert.ok(sim.savedDays > 0);
+  assert.ok(typeof sim.simulatedDate === 'string');
+});
+
+test('smartAutoPick distributes places avoiding overflow and enforcing unique players', () => {
+  const catalog = [
+    { id: 'cat-std', name: 'Нейтон', generation: 8, couponPerPuzzle: 500 },
+    { id: 'cat-puzzle-only', name: 'Спец', generation: 9, couponPerPuzzle: 0 },
+  ];
+  const places = [
+    { place: 1, label: '1 место', coupons: 12500 },
+    { place: 2, label: '2 место', coupons: 6500 },
+    { place: 4, label: '4-10 место', coupons: 2750 },
+  ];
+  const players = [
+    // Игрок 1: высокий KP, но дефицит всего 2 000 купонов (ур 179)
+    { id: 1, name: 'Топ 1', sector: { killPoints: 100 }, stock: { coupons: 0, puzzles: 0 }, officers: [
+      { id: 'o1', catalogId: 'cat-std', level: 179, coupons: 3000 }, // 180*5=900, 179*5+6=901 -> дефицит 0!
+      { id: 'o1_b', catalogId: 'cat-std', level: 178, coupons: 0 }  // дефицит 10 пазлов = 5 000 купонов
+    ] },
+    // Игрок 2: чуть ниже уровень чем у Топ 1, но огромный дефицит (ур 150) -> 75 000 купонов
+    { id: 2, name: 'Топ 2', sector: { killPoints: 80 }, stock: { coupons: 0, puzzles: 0 }, officers: [
+      { id: 'o2', catalogId: 'cat-std', level: 150, coupons: 0 }
+    ] },
+    // Игрок 3: офицер только за пазлы (couponPerPuzzle = 0)
+    { id: 3, name: 'Пазловый', sector: { killPoints: 90 }, stock: { coupons: 0, puzzles: 0 }, officers: [
+      { id: 'o3', catalogId: 'cat-puzzle-only', level: 100, coupons: 0 }
+    ] },
+    // Игрок 4: обычный кандидат
+    { id: 4, name: 'Топ 4', sector: { killPoints: 60 }, stock: { coupons: 0, puzzles: 0 }, officers: [
+      { id: 'o4', catalogId: 'cat-std', level: 120, coupons: 0 }
+    ] },
+  ];
+
+  const pick = smartAutoPick({
+    places,
+    players,
+    officerCatalog: catalog,
+    eventDate: '2026-10-24'
+  });
+
+  // 1 место достается игроку 2 (может впитать 12500 купонов без перерасхода)
+  assert.equal(pick.find(p => p.place === 1).playerId, 2);
+  // Игрок 3 (puzzle-only) не должен получить назначение
+  assert.equal(pick.some(p => p.playerId === 3), false);
+  // Игрок 1 получает более низкое место (где дефицит 5000 купонов лучше вписывается в призовой фонд)
+  assert.ok(pick.some(p => p.playerId === 1 && p.place > 1));
+  // Уникальность: ни один игрок не занимает 2 места
+  const playerIds = pick.map(p => p.playerId).filter(Boolean);
+  assert.equal(playerIds.length, new Set(playerIds).size);
+});
+
+test('smartAutoPick prioritizes full-deficit candidate over candidate with 70-99% deficit', () => {
+  const catalog = [{ id: 'cat-std', name: 'Нейтон', generation: 8, couponPerPuzzle: 500 }];
+  const places = [{ place: 1, label: '1 место', coupons: 12500 }];
+  const players = [
+    // Игрок 1: выше по силе (ур 176, дефицит 20 пазлов = 10 000 купонов, что составляет 80% от 12 500)
+    { id: 1, name: 'Игрок 1', sector: { killPoints: 100 }, stock: { coupons: 0, puzzles: 0 }, officers: [
+      { id: 'o1', catalogId: 'cat-std', level: 176, coupons: 0 }
+    ] },
+    // Игрок 2: чуть ниже по уровню (ур 150), но имеет полный дефицит (150 пазлов = 75 000 купонов >= 12 500)
+    { id: 2, name: 'Игрок 2', sector: { killPoints: 50 }, stock: { coupons: 0, puzzles: 0 }, officers: [
+      { id: 'o2', catalogId: 'cat-std', level: 150, coupons: 0 }
+    ] },
+  ];
+
+  const pick = smartAutoPick({ places, players, officerCatalog: catalog, eventDate: '2026-10-24' });
+  // Должен быть выбран Игрок 2, так как у него полный дефицит, а у Игрока 1 купоны сгорят!
+  assert.equal(pick[0].playerId, 2);
+  assert.equal(pick[0].overflowCoupons, 0);
+  assert.equal(pick[0].isEfficient, true);
+});
+
+test('smartAutoPick handles duplicate place numbers without duplicate players', () => {
+  const catalog = [{ id: 'cat-std', name: 'Нейтон', generation: 8, couponPerPuzzle: 500 }];
+  const places = [
+    { place: 4, label: '4 место (слот 1)', coupons: 2750 },
+    { place: 4, label: '4 место (слот 2)', coupons: 2750 },
+  ];
+  const players = [
+    { id: 1, name: 'Игрок 1', sector: { killPoints: 50 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o1', catalogId: 'cat-std', level: 100, coupons: 0 }] },
+    { id: 2, name: 'Игрок 2', sector: { killPoints: 40 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o2', catalogId: 'cat-std', level: 100, coupons: 0 }] },
+  ];
+
+  const pick = smartAutoPick({ places, players, officerCatalog: catalog, eventDate: '2026-10-24' });
+  assert.equal(pick.length, 2);
+  assert.notEqual(pick[0].playerId, pick[1].playerId);
+  assert.ok(pick.some(p => p.playerId === 1));
+  assert.ok(pick.some(p => p.playerId === 2));
+});
+
+test('calculateOfficerDeficit respects includeStock = false for matrix view', () => {
+  const def = calculateOfficerDeficit({
+    officer: { level: 100, coupons: 0 },
+    catalogItem: { couponPerPuzzle: 500 },
+    player: { stock: { puzzles: 50, coupons: 25000 }, sector: { vipLevel: 10 } },
+    targetLevel: 180,
+    includeStock: false,
+  });
+  // 180 * 5 = 900. Офицер: 500. Склад НЕ должен учитываться!
+  assert.equal(def.currentPuzzles, 500);
+  assert.equal(def.stockPuzzles, 0);
+  assert.equal(def.deficitPuzzles, 400);
+  assert.equal(def.deficitCoupons, 200000);
 });
