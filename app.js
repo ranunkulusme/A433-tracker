@@ -16,6 +16,104 @@ let state = {
   nextId: 1,
 };
 
+let currentUser = null;
+let pendingRequestsCount = 0;
+
+// ─── API HELPER ──────────────────────────────────────────────
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('kow_token');
+  const headers = { ...(options.headers || {}) };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(options.body);
+  }
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    localStorage.removeItem('kow_token');
+    currentUser = null;
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
+    const err = new Error('UNAUTHORIZED');
+    err.status = 401;
+    throw err;
+  }
+
+  let data = null;
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    data = await res.json();
+  } else {
+    data = await res.text();
+  }
+
+  if (!res.ok) {
+    const message = (data && data.message) || (data && data.error) || res.statusText || 'API Error';
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+
+  return data;
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatDateTime(s) {
+  if (!s) return '—';
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return s;
+  }
+}
+
+async function loadDataFromServer() {
+  try {
+    const [cat, et, evs] = await Promise.all([
+      apiFetch('/api/catalog').catch(() => null),
+      apiFetch('/api/event-types').catch(() => null),
+      apiFetch('/api/events').catch(() => null)
+    ]);
+    if (Array.isArray(cat)) state.officerCatalog = cat;
+    if (Array.isArray(et)) state.eventTypes = et;
+    if (Array.isArray(evs)) state.events = evs;
+
+    if (canManage()) {
+      const pl = await apiFetch('/api/players').catch(() => null);
+      if (Array.isArray(pl)) state.players = pl;
+      await updatePendingCount();
+    } else if (currentUser?.playerId) {
+      const myPl = await apiFetch('/api/my-profile').catch(() => null);
+      if (myPl) {
+        const existingIdx = state.players.findIndex(p => p.id === myPl.id);
+        if (existingIdx >= 0) state.players[existingIdx] = myPl;
+        else state.players.push(myPl);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync data with server:', err);
+  }
+}
+
 // ─── STORAGE ─────────────────────────────────────────────────
 function save() {
   try { localStorage.setItem('kow_v2', JSON.stringify(state)); } catch(e) {}
@@ -117,8 +215,14 @@ function officerLink(officer) {
 function catalogOfficerLink(officer) {
   return `<button class="text-link" onclick="event.stopPropagation();navigate('officer_detail',{id:'${officer.id}'})">${officer.name}</button>`;
 }
-function canManage() { return state.currentRole === 'r4' || state.currentRole === 'r5'; }
-function canSeeStock(playerId) { return canManage() || state.currentPlayerId === playerId; }
+function canManage() {
+  const role = currentUser?.rank || state.currentRole;
+  return role === 'r4' || role === 'r5';
+}
+function canSeeStock(playerId) {
+  const myId = currentUser?.playerId ?? state.currentPlayerId;
+  return canManage() || myId === playerId;
+}
 function placeInfo(eventType, place, eventDate=null) {
   if (!eventType) return null;
   const places = eventDate ? resolveEventPlaces(eventType, eventDate) : eventType.places;
@@ -174,6 +278,9 @@ function openModal(id) {
   document.getElementById(id).classList.add('open');
 }
 function closeAllModals() {
+  if (!currentUser && document.getElementById('modal-auth')?.classList.contains('open')) {
+    return;
+  }
   document.getElementById('overlay').classList.remove('open');
   document.getElementById('sidebar')?.classList.remove('open');
   document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));
@@ -185,8 +292,655 @@ function toggleSidebar() {
 }
 function setCurrentRole(role) {
   state.currentRole = role;
+  if (currentUser) currentUser.rank = role;
   save();
+  renderTopbarProfile();
+  renderSidebarNav();
   navigate(currentPage, pageParams);
+}
+
+// ─── AUTH & SESSION ──────────────────────────────────────────
+function openAuthModal(tab = 'login', alertMessage = null) {
+  openModal('modal-auth');
+  switchAuthTab(tab);
+  if (alertMessage) {
+    showAuthAlert(alertMessage, 'info');
+  } else {
+    hideAuthAlert();
+  }
+  const closeBtn = document.getElementById('auth-modal-close');
+  if (closeBtn) {
+    closeBtn.style.display = currentUser ? 'block' : 'none';
+  }
+}
+
+function switchAuthTab(tab) {
+  const loginForm = document.getElementById('auth-form-login');
+  const regForm = document.getElementById('auth-form-register');
+  const loginBtn = document.getElementById('tab-btn-login');
+  const regBtn = document.getElementById('tab-btn-register');
+
+  hideAuthAlert();
+
+  if (tab === 'register') {
+    if (loginForm) loginForm.style.display = 'none';
+    if (regForm) regForm.style.display = 'flex';
+    loginBtn?.classList.remove('active');
+    regBtn?.classList.add('active');
+    loadCandidatePlayers();
+    setTimeout(() => document.getElementById('auth-reg-username')?.focus(), 50);
+  } else {
+    if (loginForm) loginForm.style.display = 'flex';
+    if (regForm) regForm.style.display = 'none';
+    loginBtn?.classList.add('active');
+    regBtn?.classList.remove('active');
+    setTimeout(() => document.getElementById('auth-login-username')?.focus(), 50);
+  }
+}
+
+function showAuthAlert(msg, type = 'error') {
+  const el = document.getElementById('auth-alert');
+  if (!el) return;
+  el.className = `auth-alert ${type}`;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideAuthAlert() {
+  const el = document.getElementById('auth-alert');
+  if (!el) return;
+  el.style.display = 'none';
+  el.textContent = '';
+}
+
+async function loadCandidatePlayers() {
+  const select = document.getElementById('auth-reg-player-select');
+  if (!select) return;
+  select.innerHTML = '<option value="">— Новый персонаж (ввести имя) —</option>';
+  try {
+    let list = await fetch('/api/auth/candidate-players').then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!list || !Array.isArray(list)) {
+      list = await fetch('/api/players').then(r => r.ok ? r.json() : null).catch(() => null);
+    }
+    if (Array.isArray(list) && list.length > 0) {
+      list.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+      });
+    }
+  } catch (e) {}
+}
+
+function onAuthRegPlayerSelectChange(val) {
+  const nameInput = document.getElementById('auth-reg-player-name');
+  if (!nameInput) return;
+  if (val) {
+    nameInput.style.display = 'none';
+  } else {
+    nameInput.style.display = 'block';
+    nameInput.focus();
+  }
+}
+
+async function handleLoginSubmit(e) {
+  if (e) e.preventDefault();
+  const username = document.getElementById('auth-login-username')?.value.trim();
+  const password = document.getElementById('auth-login-password')?.value;
+  const submitBtn = document.getElementById('auth-login-submit');
+
+  if (!username || !password) {
+    showAuthAlert('Введите логин и пароль', 'error');
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Вход...';
+  }
+  hideAuthAlert();
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (res.status === 403 && data.error === 'PENDING_APPROVAL') {
+      showAuthAlert('Заявка отправлена руководству гильдии (Р4/Р5). После одобрения вы сможете войти.', 'warning');
+      return;
+    }
+    if (!res.ok) {
+      showAuthAlert(data.message || data.error || 'Неверный логин или пароль', 'error');
+      return;
+    }
+
+    localStorage.setItem('kow_token', data.token);
+    currentUser = data.user;
+    state.currentRole = currentUser.rank;
+    state.currentPlayerId = currentUser.playerId || null;
+    toast(`Добро пожаловать, ${currentUser.playerName || currentUser.username}!`);
+    closeAllModals();
+    renderTopbarProfile();
+    renderSidebarNav();
+    await loadDataFromServer();
+    if (currentUser.rank === 'r3') {
+      navigate('my_cabinet');
+    } else {
+      navigate('calendar');
+    }
+  } catch (err) {
+    showAuthAlert('Ошибка соединения с сервером', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Войти';
+    }
+  }
+}
+
+async function handleRegisterSubmit(e) {
+  if (e) e.preventDefault();
+  const username = document.getElementById('auth-reg-username')?.value.trim();
+  const password = document.getElementById('auth-reg-password')?.value;
+  const playerSelect = document.getElementById('auth-reg-player-select');
+  const playerNameInput = document.getElementById('auth-reg-player-name');
+  const submitBtn = document.getElementById('auth-reg-submit');
+
+  if (!username || !password) {
+    showAuthAlert('Заполните логин и пароль', 'error');
+    return;
+  }
+  if (password.length < 4) {
+    showAuthAlert('Пароль должен быть не менее 4 символов', 'error');
+    return;
+  }
+
+  const playerId = playerSelect?.value ? Number(playerSelect.value) : null;
+  const playerName = playerNameInput?.value.trim() || '';
+
+  if (!playerId && !playerName) {
+    showAuthAlert('Выберите персонажа из списка или введите имя', 'error');
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Отправка...';
+  }
+  hideAuthAlert();
+
+  try {
+    const body = { username, password };
+    if (playerId) body.playerId = playerId;
+    if (playerName) body.playerName = playerName;
+
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.error === 'USERNAME_TAKEN') {
+        showAuthAlert('Логин уже занят другим пользователем', 'error');
+      } else {
+        showAuthAlert(data.message || data.error || 'Ошибка при регистрации', 'error');
+      }
+      return;
+    }
+
+    if (data.pendingApproval) {
+      switchAuthTab('login');
+      showAuthAlert('Заявка отправлена руководству гильдии (Р4/Р5). После одобрения вы сможете войти.', 'success');
+      const loginUserInput = document.getElementById('auth-login-username');
+      const loginPassInput = document.getElementById('auth-login-password');
+      if (loginUserInput) loginUserInput.value = username;
+      if (loginPassInput) loginPassInput.value = '';
+    } else {
+      toast('Регистрация успешна! Первый пользователь назначен Главой (Р5).');
+      const loginUserInput = document.getElementById('auth-login-username');
+      const loginPassInput = document.getElementById('auth-login-password');
+      if (loginUserInput) loginUserInput.value = username;
+      if (loginPassInput) loginPassInput.value = password;
+      await handleLoginSubmit();
+    }
+  } catch (err) {
+    showAuthAlert('Ошибка соединения с сервером', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Зарегистрироваться';
+    }
+  }
+}
+
+async function logout() {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  } finally {
+    localStorage.removeItem('kow_token');
+    currentUser = null;
+    toast('Вы вышли из системы', 'info');
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login');
+  }
+}
+
+async function checkAuth() {
+  const token = localStorage.getItem('kow_token');
+  if (!token) {
+    currentUser = null;
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login');
+    return false;
+  }
+  try {
+    const data = await apiFetch('/api/auth/me');
+    if (data && data.user) {
+      currentUser = data.user;
+      if (data.player) {
+        currentUser.player = data.player;
+        currentUser.playerName = data.player.name;
+      }
+      state.currentRole = currentUser.rank;
+      state.currentPlayerId = currentUser.playerId || null;
+      renderTopbarProfile();
+      renderSidebarNav();
+      await loadDataFromServer();
+      closeAllModals();
+      return true;
+    }
+  } catch (err) {
+    localStorage.removeItem('kow_token');
+    currentUser = null;
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login');
+    return false;
+  }
+}
+
+// ─── PENDING REQUESTS & BADGES ───────────────────────────────
+async function updatePendingCount() {
+  if (!canManage()) {
+    pendingRequestsCount = 0;
+    renderPendingBadge();
+    return 0;
+  }
+  try {
+    const pendingList = await apiFetch('/api/users/pending');
+    pendingRequestsCount = Array.isArray(pendingList) ? pendingList.length : 0;
+  } catch (e) {
+    pendingRequestsCount = 0;
+  }
+  renderPendingBadge();
+  return pendingRequestsCount;
+}
+
+function pluralizeRequests(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod100 >= 11 && mod100 <= 19) return 'заявок';
+  if (mod10 === 1) return 'заявка';
+  if (mod10 >= 2 && mod10 <= 4) return 'заявки';
+  return 'заявок';
+}
+
+function renderPendingBadge() {
+  const topbarBadge = document.getElementById('topbar-pending-badge');
+  if (topbarBadge) {
+    if (pendingRequestsCount > 0 && canManage()) {
+      topbarBadge.style.display = 'inline-flex';
+      topbarBadge.innerHTML = `<span class="badge-alert">🔔 ${pendingRequestsCount} ${pluralizeRequests(pendingRequestsCount)}</span>`;
+    } else {
+      topbarBadge.style.display = 'none';
+    }
+  }
+
+  const navItem = document.querySelector('.nav-item[data-page="pending_registrations"]');
+  if (navItem) {
+    let pill = navItem.querySelector('.nav-pill');
+    if (pendingRequestsCount > 0 && canManage()) {
+      if (pill) {
+        pill.textContent = pendingRequestsCount;
+      } else {
+        pill = document.createElement('span');
+        pill.className = 'nav-pill badge-alert';
+        pill.textContent = pendingRequestsCount;
+        navItem.appendChild(pill);
+      }
+    } else if (pill) {
+      pill.remove();
+    }
+  }
+}
+
+function renderTopbarProfile() {
+  const container = document.getElementById('topbar-profile');
+  if (!container) return;
+
+  if (!currentUser) {
+    container.innerHTML = `
+      <button class="btn-primary btn-sm" onclick="openAuthModal('login')">Войти</button>
+    `;
+    return;
+  }
+
+  const role = (currentUser.rank || 'r3').toUpperCase();
+  const name = currentUser.playerName || (currentUser.player && currentUser.player.name) || currentUser.username || 'Пользователь';
+  const showPending = canManage() && pendingRequestsCount > 0;
+
+  container.innerHTML = `
+    <button id="topbar-pending-badge" class="badge-alert-btn" style="display:${showPending ? 'inline-flex' : 'none'}" onclick="navigate('pending_registrations')" title="Ожидают одобрения">
+      <span class="badge-alert">🔔 ${pendingRequestsCount} ${pluralizeRequests(pendingRequestsCount)}</span>
+    </button>
+    <div class="user-profile-badge">
+      <span class="badge badge-rank badge-rank-${currentUser.rank || 'r3'}">[${role}]</span>
+      <span class="user-profile-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+    </div>
+    <button class="btn-ghost btn-sm btn-logout" onclick="logout()" title="Выйти из аккаунта">
+      🚪 Выйти
+    </button>
+  `;
+}
+
+function renderSidebarNav() {
+  const nav = document.getElementById('sidebar-nav');
+  if (!nav) return;
+
+  const role = currentUser?.rank || state.currentRole || 'r3';
+  let items = [];
+
+  if (role === 'r3') {
+    items = [
+      { page: 'my_cabinet', label: 'Мой кабинет', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` },
+      { page: 'calendar', label: 'Календарь ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="8" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
+      { page: 'calculator', label: 'Персональный калькулятор', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` }
+    ];
+  } else {
+    // R4 / R5
+    items = [
+      { page: 'calendar', label: 'Календарь', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
+      { page: 'players', label: 'Игроки', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>` },
+      { page: 'officers', label: 'Офицеры', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>` },
+      { page: 'event_types', label: 'Типы ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>` },
+      { page: 'calculator', label: 'Калькулятор и Аналитика', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` },
+      { page: 'pending_registrations', label: 'Заявки на регистрацию', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`, pill: pendingRequestsCount }
+    ];
+    if (role === 'r5') {
+      items.push({
+        page: 'users',
+        label: 'Пользователи',
+        icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
+      });
+    }
+  }
+
+  nav.innerHTML = items.map(item => `
+    <a href="#" class="nav-item ${currentPage === item.page ? 'active' : ''}" data-page="${item.page}">
+      ${item.icon}
+      <span>${item.label}</span>
+      ${item.pill ? `<span class="nav-pill badge-alert">${item.pill}</span>` : ''}
+    </a>
+  `).join('');
+
+  nav.querySelectorAll('.nav-item').forEach(el => {
+    el.addEventListener('click', e => {
+      e.preventDefault();
+      navigate(el.dataset.page);
+    });
+  });
+
+  const footer = document.querySelector('.sidebar-footer');
+  if (footer) {
+    if (role === 'r3') {
+      footer.style.display = 'none';
+    } else {
+      footer.style.display = 'flex';
+      const importBtn = document.getElementById('btn-import-json');
+      if (importBtn) {
+        importBtn.style.display = role === 'r5' ? 'flex' : 'none';
+      }
+    }
+  }
+}
+
+// ─── PAGE: MY CABINET (R3) ───────────────────────────────────
+function renderMyCabinet() {
+  const c = document.getElementById('content');
+  const playerName = currentUser?.playerName || (currentUser?.player && currentUser.player.name) || currentUser?.username || 'Боец';
+  c.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">👤 Мой кабинет</div>
+    </div>
+    <div class="sim-box">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span class="badge badge-rank badge-rank-r3">[Р3]</span>
+        <span style="font-size:16px;font-weight:600;color:var(--text)">${escapeHtml(playerName)}</span>
+      </div>
+      <p style="color:var(--text2);font-size:13.5px;line-height:1.5">
+        Добро пожаловать в личный кабинет гильдии KoW. Здесь вы можете просматривать календарь ивентов, подавать заявки на призовые места и рассчитывать прокачку офицеров.
+      </p>
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="navigate('calendar')">📅 Календарь ивентов</button>
+        <button class="btn-ghost" onclick="navigate('calculator')">📊 Персональный калькулятор</button>
+      </div>
+    </div>
+  `;
+}
+
+// ─── PAGE: PENDING REGISTRATIONS ─────────────────────────────
+async function renderPendingRegistrations() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">Заявки на регистрацию участников</div>
+      <button class="btn-ghost btn-sm" onclick="renderPendingRegistrations()">🔄 Обновить</button>
+    </div>
+    <div id="pending-users-container">
+      <div class="empty-state"><p>Загрузка заявок...</p></div>
+    </div>
+  `;
+
+  try {
+    const pendingUsers = await apiFetch('/api/users/pending');
+    pendingRequestsCount = Array.isArray(pendingUsers) ? pendingUsers.length : 0;
+    renderPendingBadge();
+    const container = document.getElementById('pending-users-container');
+    if (!container) return;
+
+    if (!pendingUsers || pendingUsers.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div style="font-size:32px;margin-bottom:8px">🎉</div>
+          <p style="font-weight:600;font-size:15px;color:var(--text)">Нет активных заявок на регистрацию</p>
+          <p style="color:var(--text3);font-size:13px;margin-top:4px">Все поступившие заявки обработаны руководствами гильдии.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const isR5 = (currentUser?.rank || state.currentRole) === 'r5';
+
+    container.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Логин</th>
+              <th>Персонаж в гильдии</th>
+              <th>Дата заявки</th>
+              <th>Статус</th>
+              <th style="text-align:right">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pendingUsers.map(u => `
+              <tr>
+                <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
+                <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
+                <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">Новый персонаж</span>'}</td>
+                <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
+                <td><span class="badge badge-pending">⏳ Ожидает</span></td>
+                <td style="text-align:right">
+                  <div style="display:inline-flex;gap:6px;justify-content:flex-end">
+                    <button class="btn-primary btn-sm" onclick="handleApproveUser(${u.id}, 'r3')">Одобрить (Р3)</button>
+                    ${isR5 ? `<button class="btn-primary btn-sm" style="background:#8b5cf6" onclick="handleApproveUser(${u.id}, 'r4')">Одобрить (Р4)</button>` : ''}
+                    <button class="btn-danger btn-sm" onclick="handleRejectUser(${u.id}, '${escapeHtml(u.username)}')">Отклонить</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    const container = document.getElementById('pending-users-container');
+    if (container) {
+      container.innerHTML = `<div class="empty-state"><p style="color:var(--red)">Ошибка загрузки заявок: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+}
+
+async function handleApproveUser(userId, rank) {
+  try {
+    await apiFetch(`/api/users/${userId}/approve`, {
+      method: 'POST',
+      body: { rank }
+    });
+    toast(`Пользователь #${userId} одобрен в ранге ${rank.toUpperCase()}`);
+    await updatePendingCount();
+    await renderPendingRegistrations();
+  } catch (err) {
+    toast(`Ошибка одобрения: ${err.message}`, 'error');
+  }
+}
+
+async function handleRejectUser(userId, username) {
+  if (!confirm(`Отклонить заявку пользователя "${username}"?`)) return;
+  try {
+    await apiFetch(`/api/users/${userId}/reject`, {
+      method: 'POST'
+    });
+    toast(`Заявка пользователя "${username}" отклонена`);
+    await updatePendingCount();
+    await renderPendingRegistrations();
+  } catch (err) {
+    toast(`Ошибка отклонения: ${err.message}`, 'error');
+  }
+}
+
+// ─── PAGE: USERS (R5) ────────────────────────────────────────
+async function renderUsers() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">🔐 Управление пользователями гильдии</div>
+      <button class="btn-ghost btn-sm" onclick="renderUsers()">🔄 Обновить</button>
+    </div>
+    <div id="users-table-container">
+      <div class="empty-state"><p>Загрузка пользователей...</p></div>
+    </div>
+  `;
+
+  try {
+    const users = await apiFetch('/api/users');
+    const container = document.getElementById('users-table-container');
+    if (!container) return;
+
+    if (!users || users.length === 0) {
+      container.innerHTML = `<div class="empty-state"><p>Пользователей не найдено</p></div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Логин</th>
+              <th>Персонаж</th>
+              <th>Ранг</th>
+              <th>Статус</th>
+              <th>Регистрация</th>
+              <th style="text-align:right">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${users.map(u => `
+              <tr>
+                <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
+                <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
+                <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
+                <td>
+                  <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
+                    <option value="r3" ${u.rank === 'r3' ? 'selected' : ''}>Р3 (Боец)</option>
+                    <option value="r4" ${u.rank === 'r4' ? 'selected' : ''}>Р4 (Чиновник)</option>
+                    <option value="r5" ${u.rank === 'r5' ? 'selected' : ''}>Р5 (Глава)</option>
+                  </select>
+                </td>
+                <td>${u.is_approved ? '<span class="badge badge-success">✓ Активен</span>' : '<span class="badge badge-pending">⏳ Ожидает</span>'}</td>
+                <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
+                <td style="text-align:right">
+                  <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">🔑 Пароль</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    const container = document.getElementById('users-table-container');
+    if (container) {
+      container.innerHTML = `<div class="empty-state"><p style="color:var(--red)">Ошибка: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+}
+
+async function handleChangeUserRank(userId, newRank) {
+  try {
+    await apiFetch(`/api/users/${userId}`, {
+      method: 'PATCH',
+      body: { rank: newRank }
+    });
+    toast(`Ранг пользователя #${userId} изменен на ${newRank.toUpperCase()}`);
+    if (currentUser && currentUser.id === userId) {
+      currentUser.rank = newRank;
+      state.currentRole = newRank;
+      renderTopbarProfile();
+      renderSidebarNav();
+    }
+  } catch (err) {
+    toast(`Ошибка изменения ранга: ${err.message}`, 'error');
+    renderUsers();
+  }
+}
+
+async function handleResetUserPassword(userId, username) {
+  const newPass = prompt(`Введите новый пароль для пользователя "${username}":`);
+  if (!newPass) return;
+  if (newPass.length < 4) {
+    toast('Пароль должен содержать не менее 4 символов', 'error');
+    return;
+  }
+  try {
+    await apiFetch(`/api/users/${userId}`, {
+      method: 'PATCH',
+      body: { password: newPass }
+    });
+    toast(`Пароль для "${username}" успешно обновлен`);
+  } catch (err) {
+    toast(`Ошибка смены пароля: ${err.message}`, 'error');
+  }
 }
 
 function formatDate(s) {
@@ -217,14 +971,70 @@ let currentPage = 'calendar';
 let pageParams = {};
 
 function navigate(page, params={}) {
-  currentPage = page; pageParams = params;
+  const role = currentUser?.rank || state.currentRole || 'r3';
+
+  // Role permissions check
+  if (role === 'r3') {
+    const allowedR3 = ['my_cabinet', 'calendar', 'calculator', 'officer_detail', 'event_detail'];
+    if (!allowedR3.includes(page)) {
+      page = 'my_cabinet';
+    }
+  } else if (role === 'r4') {
+    if (page === 'users') {
+      page = 'calendar';
+    }
+  }
+
+  currentPage = page;
+  pageParams = params;
+
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
-  const titles = { calendar:'Календарь ивентов', players:'Игроки', officers:'Офицеры', officer_detail:'Офицер', event_types:'Настройка ивентов', event_detail:'Ивент', player_detail:'Игрок', calculator:'Калькулятор и Аналитика' };
-  document.getElementById('page-title').textContent = titles[page] || page;
-  document.getElementById('role-switch').value = state.currentRole;
-  document.getElementById('content').innerHTML = '';
-  ({calendar:renderCalendar, players:renderPlayers, officers:renderOfficers, officer_detail:()=>renderOfficerDetail(params.id), event_types:renderEventTypes, event_detail:()=>renderEventDetail(params.id), player_detail:()=>renderPlayerDetail(params.id), calculator:renderCalculator})[page]?.();
-  document.getElementById('sidebar').classList.remove('open');
+  const titles = {
+    my_cabinet: 'Мой кабинет',
+    calendar: 'Календарь ивентов',
+    players: 'Игроки',
+    officers: 'Офицеры',
+    officer_detail: 'Офицер',
+    event_types: 'Настройка ивентов',
+    event_detail: 'Ивент',
+    player_detail: 'Игрок',
+    calculator: 'Калькулятор и Аналитика',
+    pending_registrations: 'Заявки на регистрацию',
+    users: 'Управление пользователями'
+  };
+  const titleEl = document.getElementById('page-title');
+  if (titleEl) {
+    titleEl.textContent = titles[page] || page;
+  }
+  const roleSwitchEl = document.getElementById('role-switch');
+  if (roleSwitchEl) {
+    roleSwitchEl.value = role;
+  }
+  const contentEl = document.getElementById('content');
+  if (contentEl) {
+    contentEl.innerHTML = '';
+  }
+
+  const pageRenderers = {
+    my_cabinet: renderMyCabinet,
+    calendar: renderCalendar,
+    players: renderPlayers,
+    officers: renderOfficers,
+    officer_detail: () => renderOfficerDetail(params.id),
+    event_types: renderEventTypes,
+    event_detail: () => renderEventDetail(params.id),
+    player_detail: () => renderPlayerDetail(params.id),
+    calculator: renderCalculator,
+    pending_registrations: renderPendingRegistrations,
+    users: renderUsers
+  };
+
+  const renderer = pageRenderers[page];
+  if (renderer) {
+    renderer();
+  }
+
+  document.getElementById('sidebar')?.classList.remove('open');
 }
 
 document.querySelectorAll('.nav-item').forEach(el=>{
@@ -1602,4 +2412,14 @@ function handleImport(e) {
 
 // ─── INIT ────────────────────────────────────────────────────
 load();
-navigate('calendar');
+renderSidebarNav();
+renderTopbarProfile();
+checkAuth().then(isAuth => {
+  if (isAuth) {
+    if (currentUser?.rank === 'r3') {
+      navigate('my_cabinet');
+    } else {
+      navigate('calendar');
+    }
+  }
+});
