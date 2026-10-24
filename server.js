@@ -267,7 +267,13 @@ function createRequestHandler(staticDir) {
     if (approveMatch && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
       const targetUserId = Number(approveMatch[1]);
-      const rank = body.rank || 'r3';
+      let rank = body.rank === 'r4' ? 'r4' : 'r3';
+      if (req.user.rank === 'r4' && body.rank && body.rank !== 'r3') {
+        return sendJson(res, 403, { error: 'Чиновник (Р4) может одобрять только в ранге Р3' });
+      }
+      if (req.user.rank === 'r5' && ['r3', 'r4'].includes(body.rank)) {
+        rank = body.rank;
+      }
       const updatedUser = db.approveUser(targetUserId, rank);
       return sendJson(res, 200, { success: true, user: updatedUser });
     }
