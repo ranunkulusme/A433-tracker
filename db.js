@@ -1,0 +1,1022 @@
+const { DatabaseSync } = require('node:sqlite');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { DEFAULT_OFFICERS, migrateState } = require('./logic.js');
+
+let currentDb = null;
+
+function getDb() {
+  if (!currentDb) {
+    initDb();
+  }
+  return currentDb;
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const buf = crypto.scryptSync(password, salt, 64);
+  return `${salt}:${buf.toString('hex')}`;
+}
+
+function verifyPassword(password, hash) {
+  if (!hash || !password || typeof hash !== 'string' || !hash.includes(':')) return false;
+  const [salt, key] = hash.split(':');
+  if (!salt || !key) return false;
+  try {
+    const keyBuffer = Buffer.from(key, 'hex');
+    const derived = crypto.scryptSync(password, salt, keyBuffer.length);
+    return crypto.timingSafeEqual(keyBuffer, derived);
+  } catch (e) {
+    return false;
+  }
+}
+
+function createSession(userId, token = null) {
+  const sessionToken = token || crypto.randomBytes(32).toString('hex');
+  const createdAt = new Date().toISOString();
+  getDb().prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)').run(sessionToken, userId, createdAt);
+  return sessionToken;
+}
+
+function verifySession(token) {
+  if (!token) return null;
+  const row = getDb().prepare(`
+    SELECT s.token, s.user_id, s.created_at, s.expires_at,
+           u.id, u.username, u.rank, u.is_approved, u.player_id,
+           p.name as player_name
+    FROM sessions s
+    JOIN users u ON s.user_id = u.id
+    LEFT JOIN players p ON u.player_id = p.id
+    WHERE s.token = ?
+  `).get(token);
+  if (!row || row.is_approved !== 1) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    rank: row.rank,
+    is_approved: row.is_approved,
+    playerId: row.player_id,
+    player_id: row.player_id,
+    playerName: row.player_name || ''
+  };
+}
+
+function deleteSession(token) {
+  getDb().prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  return true;
+}
+
+function clearUserSessions(userId) {
+  getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  return true;
+}
+
+function findUserByUsername(username) {
+  if (!username) return null;
+  const user = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+  return user || null;
+}
+
+function findUserById(id) {
+  const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id);
+  return user || null;
+}
+
+function registerUser({ username, password, playerId, playerName }) {
+  const db = getDb();
+  const existing = findUserByUsername(username);
+  if (existing) {
+    return { error: 'USERNAME_TAKEN' };
+  }
+
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  const isFirstUser = userCount === 0;
+  const rank = isFirstUser ? 'r5' : 'r3';
+  const isApproved = isFirstUser ? 1 : 0;
+
+  let assignedPlayerId = playerId ? Number(playerId) : null;
+  if (!assignedPlayerId && playerName) {
+    const now = new Date().toISOString();
+    const res = db.prepare(`
+      INSERT INTO players (name, real_name, rank, updated_at)
+      VALUES (?, '', ?, ?)
+    `).run(playerName, rank, now);
+    assignedPlayerId = Number(res.lastInsertRowid);
+  }
+
+  const hash = hashPassword(password);
+  const now = new Date().toISOString();
+  const res = db.prepare(`
+    INSERT INTO users (username, password_hash, rank, is_approved, player_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(username, hash, rank, isApproved, assignedPlayerId, now);
+
+  const userId = Number(res.lastInsertRowid);
+  return {
+    userId,
+    id: userId,
+    username,
+    rank,
+    is_approved: isApproved,
+    playerId: assignedPlayerId,
+    player_id: assignedPlayerId,
+    pendingApproval: isApproved === 0
+  };
+}
+
+function loginUser(username, password) {
+  const user = findUserByUsername(username);
+  if (!user) {
+    return { error: 'INVALID_CREDENTIALS' };
+  }
+  if (!verifyPassword(password, user.password_hash)) {
+    return { error: 'INVALID_CREDENTIALS' };
+  }
+  if (user.is_approved === 0) {
+    return { error: 'PENDING_APPROVAL' };
+  }
+  const token = createSession(user.id);
+  let playerName = '';
+  if (user.player_id) {
+    const player = getPlayerById(user.player_id);
+    if (player) playerName = player.name;
+  }
+  return {
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      rank: user.rank,
+      is_approved: user.is_approved,
+      playerId: user.player_id,
+      player_id: user.player_id,
+      playerName
+    }
+  };
+}
+
+function approveUser(userId, rank = 'r3') {
+  const db = getDb();
+  db.prepare('UPDATE users SET is_approved = 1, rank = ? WHERE id = ?').run(rank, userId);
+  const user = findUserById(userId);
+  if (user && user.player_id) {
+    db.prepare('UPDATE players SET rank = ? WHERE id = ?').run(rank, user.player_id);
+  }
+  return user;
+}
+
+function rejectUser(userId) {
+  const db = getDb();
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  return true;
+}
+
+function getPendingUsers() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
+           u.created_at as createdAt, u.created_at,
+           p.name as playerName
+    FROM users u
+    LEFT JOIN players p ON u.player_id = p.id
+    WHERE u.is_approved = 0
+    ORDER BY u.id ASC
+  `).all();
+}
+
+function getUsers() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
+           u.created_at as createdAt, u.created_at,
+           p.name as playerName
+    FROM users u
+    LEFT JOIN players p ON u.player_id = p.id
+    ORDER BY u.id ASC
+  `).all();
+}
+
+function updateUser(userId, updates = {}) {
+  const db = getDb();
+  const existing = findUserById(userId);
+  if (!existing) return null;
+  const rank = updates.rank !== undefined ? updates.rank : existing.rank;
+  const isApproved = updates.is_approved !== undefined ? updates.is_approved : existing.is_approved;
+  const playerId = updates.player_id !== undefined ? updates.player_id : (updates.playerId !== undefined ? updates.playerId : existing.player_id);
+
+  db.prepare(`
+    UPDATE users SET rank = ?, is_approved = ?, player_id = ? WHERE id = ?
+  `).run(rank, isApproved, playerId, userId);
+
+  return findUserById(userId);
+}
+
+function changePassword(userId, newPassword) {
+  const db = getDb();
+  const hash = hashPassword(newPassword);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  return true;
+}
+
+// ─── PLAYERS & OFFICERS ──────────────────────────────────────
+function getPlayers() {
+  const db = getDb();
+  const playerRows = db.prepare('SELECT * FROM players ORDER BY id ASC').all();
+  const officerRows = db.prepare('SELECT * FROM player_officers ORDER BY rowid ASC').all();
+  const officersByPlayer = new Map();
+  for (const o of officerRows) {
+    if (!officersByPlayer.has(o.player_id)) officersByPlayer.set(o.player_id, []);
+    officersByPlayer.get(o.player_id).push({
+      id: o.id,
+      catalogId: o.catalog_id,
+      name: o.name,
+      level: o.level,
+      coupons: o.coupons,
+      stars: o.stars
+    });
+  }
+
+  return playerRows.map(p => ({
+    id: p.id,
+    name: p.name,
+    realName: p.real_name || '',
+    rank: p.rank || 'r3',
+    sector: {
+      vipLevel: p.vip_level || 0,
+      confidentialityLevel: p.confidentiality_level || 0,
+      power: p.power || 0,
+      kills: p.kills || 0,
+      killPoints: p.kill_points || p.kills || 0
+    },
+    stock: {
+      coupons: p.stock_coupons || 0,
+      puzzles: p.stock_puzzles || 0,
+      chests: p.stock_chests || 0
+    },
+    officers: officersByPlayer.get(p.id) || []
+  }));
+}
+
+function getPlayerById(id) {
+  const db = getDb();
+  const p = db.prepare('SELECT * FROM players WHERE id = ?').get(id);
+  if (!p) return null;
+  const officerRows = db.prepare('SELECT * FROM player_officers WHERE player_id = ? ORDER BY rowid ASC').all(id);
+  return {
+    id: p.id,
+    name: p.name,
+    realName: p.real_name || '',
+    rank: p.rank || 'r3',
+    sector: {
+      vipLevel: p.vip_level || 0,
+      confidentialityLevel: p.confidentiality_level || 0,
+      power: p.power || 0,
+      kills: p.kills || 0,
+      killPoints: p.kill_points || p.kills || 0
+    },
+    stock: {
+      coupons: p.stock_coupons || 0,
+      puzzles: p.stock_puzzles || 0,
+      chests: p.stock_chests || 0
+    },
+    officers: officerRows.map(o => ({
+      id: o.id,
+      catalogId: o.catalog_id,
+      name: o.name,
+      level: o.level,
+      coupons: o.coupons,
+      stars: o.stars
+    }))
+  };
+}
+
+function createPlayer(data = {}) {
+  const db = getDb();
+  const name = data.name || '';
+  const realName = data.realName || data.real_name || '';
+  const rank = data.rank || 'r3';
+  const sector = data.sector || {};
+  const vipLevel = sector.vipLevel ?? data.vipLevel ?? data.vip_level ?? 0;
+  const confLevel = sector.confidentialityLevel ?? data.confidentialityLevel ?? data.confidentiality_level ?? 0;
+  const power = sector.power ?? data.power ?? 0;
+  const kills = sector.kills ?? data.kills ?? 0;
+  const killPoints = sector.killPoints ?? data.killPoints ?? data.kill_points ?? kills;
+  const stock = data.stock || {};
+  const coupons = stock.coupons ?? data.stock_coupons ?? 0;
+  const puzzles = stock.puzzles ?? data.stock_puzzles ?? 0;
+  const chests = stock.chests ?? data.stock_chests ?? 0;
+  const now = new Date().toISOString();
+
+  let playerId = data.id ? Number(data.id) : null;
+  if (playerId) {
+    db.prepare(`
+      INSERT INTO players (id, name, real_name, rank, vip_level, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        real_name = excluded.real_name,
+        rank = excluded.rank,
+        vip_level = excluded.vip_level,
+        confidentiality_level = excluded.confidentiality_level,
+        power = excluded.power,
+        kills = excluded.kills,
+        kill_points = excluded.kill_points,
+        stock_coupons = excluded.stock_coupons,
+        stock_puzzles = excluded.stock_puzzles,
+        stock_chests = excluded.stock_chests,
+        updated_at = excluded.updated_at
+    `).run(playerId, name, realName, rank, vipLevel, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
+  } else {
+    const res = db.prepare(`
+      INSERT INTO players (name, real_name, rank, vip_level, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, realName, rank, vipLevel, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
+    playerId = Number(res.lastInsertRowid);
+  }
+
+  if (Array.isArray(data.officers)) {
+    for (const o of data.officers) {
+      addPlayerOfficer(playerId, o);
+    }
+  }
+
+  return getPlayerById(playerId);
+}
+
+function updatePlayer(id, updates = {}) {
+  const db = getDb();
+  const existing = getPlayerById(id);
+  if (!existing) return null;
+
+  const name = updates.name !== undefined ? updates.name : existing.name;
+  const realName = updates.realName !== undefined ? updates.realName : (updates.real_name !== undefined ? updates.real_name : existing.realName);
+  const rank = updates.rank !== undefined ? updates.rank : existing.rank;
+
+  const sec = updates.sector || {};
+  const vipLevel = sec.vipLevel !== undefined ? sec.vipLevel : (updates.vipLevel !== undefined ? updates.vipLevel : (updates.vip_level !== undefined ? updates.vip_level : existing.sector.vipLevel));
+  const confLevel = sec.confidentialityLevel !== undefined ? sec.confidentialityLevel : (updates.confidentialityLevel !== undefined ? updates.confidentialityLevel : (updates.confidentiality_level !== undefined ? updates.confidentiality_level : existing.sector.confidentialityLevel));
+  const power = sec.power !== undefined ? sec.power : (updates.power !== undefined ? updates.power : existing.sector.power);
+  const kills = sec.kills !== undefined ? sec.kills : (updates.kills !== undefined ? updates.kills : existing.sector.kills);
+  const killPoints = sec.killPoints !== undefined ? sec.killPoints : (updates.killPoints !== undefined ? updates.killPoints : (updates.kill_points !== undefined ? updates.kill_points : existing.sector.killPoints));
+
+  const stk = updates.stock || {};
+  const coupons = stk.coupons !== undefined ? stk.coupons : (updates.stock_coupons !== undefined ? updates.stock_coupons : existing.stock.coupons);
+  const puzzles = stk.puzzles !== undefined ? stk.puzzles : (updates.stock_puzzles !== undefined ? updates.stock_puzzles : existing.stock.puzzles);
+  const chests = stk.chests !== undefined ? stk.chests : (updates.stock_chests !== undefined ? updates.stock_chests : existing.stock.chests);
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE players
+    SET name = ?, real_name = ?, rank = ?,
+        vip_level = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
+        stock_coupons = ?, stock_puzzles = ?, stock_chests = ?, updated_at = ?
+    WHERE id = ?
+  `).run(name, realName, rank, vipLevel, confLevel, power, kills, killPoints, coupons, puzzles, chests, now, id);
+
+  return getPlayerById(id);
+}
+
+function deletePlayer(id) {
+  const db = getDb();
+  db.prepare('DELETE FROM players WHERE id = ?').run(id);
+  return true;
+}
+
+function addPlayerOfficer(playerId, officerData) {
+  const db = getDb();
+  const id = officerData.id || `po-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const catalogId = officerData.catalogId || officerData.catalog_id || '';
+  const name = officerData.name || '';
+  const level = Number(officerData.level) || 0;
+  const coupons = Number(officerData.coupons) || 0;
+  const stars = Number(officerData.stars) || 0;
+
+  db.prepare(`
+    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      catalog_id = excluded.catalog_id,
+      name = excluded.name,
+      level = excluded.level,
+      coupons = excluded.coupons,
+      stars = excluded.stars
+  `).run(id, playerId, catalogId, name, level, coupons, stars);
+
+  return { id, playerId, catalogId, name, level, coupons, stars };
+}
+
+function updatePlayerOfficer(playerId, officerId, updates) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM player_officers WHERE id = ? AND player_id = ?').get(officerId, playerId);
+  if (!existing) return null;
+
+  const level = updates.level !== undefined ? Number(updates.level) : existing.level;
+  const coupons = updates.coupons !== undefined ? Number(updates.coupons) : existing.coupons;
+  const stars = updates.stars !== undefined ? Number(updates.stars) : existing.stars;
+  const name = updates.name !== undefined ? updates.name : existing.name;
+
+  db.prepare(`
+    UPDATE player_officers
+    SET level = ?, coupons = ?, stars = ?, name = ?
+    WHERE id = ? AND player_id = ?
+  `).run(level, coupons, stars, name, officerId, playerId);
+
+  return {
+    id: officerId,
+    catalogId: existing.catalog_id,
+    name,
+    level,
+    coupons,
+    stars
+  };
+}
+
+function deletePlayerOfficer(playerId, officerId) {
+  const db = getDb();
+  db.prepare('DELETE FROM player_officers WHERE id = ? AND player_id = ?').run(officerId, playerId);
+  return true;
+}
+
+// ─── CATALOG ─────────────────────────────────────────────────
+function getCatalog() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM officer_catalog ORDER BY generation DESC, name ASC').all();
+  return rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    generation: r.generation,
+    couponPerPuzzle: r.coupon_per_puzzle,
+    medalsBeforeTraining: r.medals_before_training,
+    medalsTraining: r.medals_training,
+    medalsTotal: r.medals_total
+  }));
+}
+
+function saveCatalogItem(item) {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO officer_catalog (id, name, type, generation, coupon_per_puzzle, medals_before_training, medals_training, medals_total)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      type = excluded.type,
+      generation = excluded.generation,
+      coupon_per_puzzle = excluded.coupon_per_puzzle,
+      medals_before_training = excluded.medals_before_training,
+      medals_training = excluded.medals_training,
+      medals_total = excluded.medals_total
+  `).run(
+    item.id,
+    item.name,
+    item.type || 'Пехота',
+    item.generation || 7,
+    item.couponPerPuzzle ?? item.coupon_per_puzzle ?? 500,
+    item.medalsBeforeTraining ?? item.medals_before_training ?? 690,
+    item.medalsTraining ?? item.medals_training ?? 900,
+    item.medalsTotal ?? item.medals_total ?? 1590
+  );
+  return item;
+}
+
+function deleteCatalogItem(id) {
+  const db = getDb();
+  db.prepare('DELETE FROM officer_catalog WHERE id = ?').run(id);
+  return true;
+}
+
+// ─── EVENT TYPES & EVENTS ────────────────────────────────────
+function getEventTypes() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM event_types ORDER BY id ASC').all();
+  return rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    places: JSON.parse(r.places_json || '[]')
+  }));
+}
+
+function saveEventType(data) {
+  const db = getDb();
+  const placesJson = JSON.stringify(data.places || []);
+  if (data.id) {
+    db.prepare(`
+      INSERT INTO event_types (id, name, color, places_json)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        color = excluded.color,
+        places_json = excluded.places_json
+    `).run(data.id, data.name, data.color || '#8b5cf6', placesJson);
+    return data;
+  } else {
+    const res = db.prepare(`
+      INSERT INTO event_types (name, color, places_json)
+      VALUES (?, ?, ?)
+    `).run(data.name, data.color || '#8b5cf6', placesJson);
+    return { ...data, id: Number(res.lastInsertRowid) };
+  }
+}
+
+function deleteEventType(id) {
+  const db = getDb();
+  db.prepare('DELETE FROM event_types WHERE id = ?').run(id);
+  return true;
+}
+
+function getEvents() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM events ORDER BY date_from ASC, id ASC').all();
+  return rows.map(r => ({
+    id: r.id,
+    typeId: r.type_id,
+    dateFrom: r.date_from,
+    dateTo: r.date_to,
+    note: r.note || '',
+    assignments: JSON.parse(r.assignments_json || '[]')
+  }));
+}
+
+function getEventById(id) {
+  const db = getDb();
+  const r = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+  if (!r) return null;
+  return {
+    id: r.id,
+    typeId: r.type_id,
+    dateFrom: r.date_from,
+    dateTo: r.date_to,
+    note: r.note || '',
+    assignments: JSON.parse(r.assignments_json || '[]')
+  };
+}
+
+function saveEvent(data) {
+  const db = getDb();
+  const assignmentsJson = JSON.stringify(data.assignments || []);
+  if (data.id) {
+    db.prepare(`
+      INSERT INTO events (id, type_id, date_from, date_to, note, assignments_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        type_id = excluded.type_id,
+        date_from = excluded.date_from,
+        date_to = excluded.date_to,
+        note = excluded.note,
+        assignments_json = excluded.assignments_json
+    `).run(data.id, data.typeId, data.dateFrom, data.dateTo, data.note || '', assignmentsJson);
+    return data;
+  } else {
+    const res = db.prepare(`
+      INSERT INTO events (type_id, date_from, date_to, note, assignments_json)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(data.typeId, data.dateFrom, data.dateTo, data.note || '', assignmentsJson);
+    return { ...data, id: Number(res.lastInsertRowid) };
+  }
+}
+
+function deleteEvent(id) {
+  const db = getDb();
+  db.prepare('DELETE FROM events WHERE id = ?').run(id);
+  return true;
+}
+
+// ─── EVENT REGISTRATIONS ─────────────────────────────────────
+function getRegistrationsByEventId(eventId) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT r.id, r.event_id as eventId, r.player_id as playerId,
+           r.officer_id as officerId, r.desired_place as desiredPlace,
+           r.created_at as createdAt,
+           p.name as playerName
+    FROM event_registrations r
+    LEFT JOIN players p ON r.player_id = p.id
+    WHERE r.event_id = ?
+    ORDER BY r.id ASC
+  `).all(eventId);
+  return rows;
+}
+
+function getUserRegistration(eventId, playerId) {
+  const db = getDb();
+  const r = db.prepare(`
+    SELECT r.id, r.event_id as eventId, r.player_id as playerId,
+           r.officer_id as officerId, r.desired_place as desiredPlace,
+           r.created_at as createdAt,
+           p.name as playerName
+    FROM event_registrations r
+    LEFT JOIN players p ON r.player_id = p.id
+    WHERE r.event_id = ? AND r.player_id = ?
+  `).get(eventId, playerId);
+  return r || null;
+}
+
+function registerForEvent({ eventId, playerId, officerId, desiredPlace }) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO event_registrations (event_id, player_id, officer_id, desired_place, created_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(event_id, player_id) DO UPDATE SET
+      officer_id = excluded.officer_id,
+      desired_place = excluded.desired_place,
+      created_at = excluded.created_at
+  `).run(eventId, playerId, officerId, desiredPlace, now);
+  return getUserRegistration(eventId, playerId);
+}
+
+function unregisterFromEvent(eventId, playerId) {
+  const db = getDb();
+  db.prepare('DELETE FROM event_registrations WHERE event_id = ? AND player_id = ?').run(eventId, playerId);
+  return true;
+}
+
+// ─── STOCK HISTORY ───────────────────────────────────────────
+function getStockHistory() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM stock_history ORDER BY date ASC, id ASC').all();
+  return rows.map(r => ({
+    id: r.id,
+    playerId: r.player_id,
+    date: r.date,
+    coupons: r.coupons,
+    puzzles: r.puzzles,
+    chests: r.chests
+  }));
+}
+
+function recordStockHistory(playerId, stock, date = null) {
+  const db = getDb();
+  const d = date || new Date().toISOString().slice(0, 10);
+  db.prepare(`
+    INSERT INTO stock_history (player_id, date, coupons, puzzles, chests)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(playerId, d, stock.coupons || 0, stock.puzzles || 0, stock.chests || 0);
+}
+
+// ─── IMPORT / EXPORT ─────────────────────────────────────────
+function exportKowJson() {
+  const players = getPlayers();
+  const officerCatalog = getCatalog();
+  const eventTypes = getEventTypes();
+  const events = getEvents();
+  const stockHistory = getStockHistory();
+
+  const maxId = Math.max(
+    0,
+    ...players.map(p => Number(p.id) || 0),
+    ...eventTypes.map(t => Number(t.id) || 0),
+    ...events.map(e => Number(e.id) || 0)
+  );
+
+  return {
+    version: 3,
+    players,
+    officerCatalog,
+    eventTypes,
+    events,
+    stockHistory,
+    currentRole: 'r5',
+    currentPlayerId: players[0]?.id || null,
+    nextId: maxId + 1
+  };
+}
+
+function importKowJson(rawJson) {
+  const state = migrateState(typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson);
+  const db = getDb();
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    for (const item of state.officerCatalog || []) {
+      saveCatalogItem(item);
+    }
+    for (const et of state.eventTypes || []) {
+      saveEventType(et);
+    }
+    for (const p of state.players || []) {
+      createPlayer(p);
+    }
+    for (const ev of state.events || []) {
+      saveEvent(ev);
+    }
+    for (const sh of state.stockHistory || []) {
+      recordStockHistory(sh.playerId || sh.player_id, {
+        coupons: sh.coupons,
+        puzzles: sh.puzzles,
+        chests: sh.chests
+      }, sh.date);
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// ─── BOOTSTRAP ───────────────────────────────────────────────
+function seedDemoData(db) {
+  // 1. Officer catalog
+  for (const item of DEFAULT_OFFICERS) {
+    saveCatalogItem(item);
+  }
+
+  // 2. Event types
+  const kwType = saveEventType({
+    id: 1,
+    name: 'Король Войны',
+    color: '#8b5cf6',
+    places: [
+      { place: 1, label: '🥇 1 место', coupons: 12500 },
+      { place: 2, label: '🥈 2 место', coupons: 6500 },
+      { place: 3, label: '🥉 3 место', coupons: 3500 },
+      { place: 4, label: '4–10 место', coupons: 2750 },
+    ]
+  });
+
+  const msType = saveEventType({
+    id: 2,
+    name: 'Мощные Силы',
+    color: '#06b6d4',
+    places: [
+      { place: 1, label: '🥇 1 место', coupons: 12500 },
+      { place: 2, label: '🥈 2 место', coupons: 6500 },
+      { place: 3, label: '🥉 3 место', coupons: 3500 },
+      { place: 4, label: '4–10 место', coupons: 2750 },
+    ]
+  });
+
+  // 3. Demo players
+  const demoPlayers = [
+    {
+      id: 1,
+      name: 'Командор',
+      rank: 'r5',
+      officers: [
+        { id: 'o1', catalogId: 'admiral-nathon', name: 'Адмирал Нейтон', level: 8, coupons: 750, stars: 0 },
+        { id: 'o2', catalogId: 'general-rex', name: 'Генерал Рекс', level: 2, coupons: 0, stars: 0 }
+      ]
+    },
+    {
+      id: 2,
+      name: 'Морской Волк',
+      rank: 'r3',
+      officers: [
+        { id: 'o3', catalogId: 'captain-black', name: 'Капитан Блэк', level: 3, coupons: 2200, stars: 0 }
+      ]
+    },
+    {
+      id: 3,
+      name: 'Шторм',
+      rank: 'r3',
+      officers: [
+        { id: 'o4', catalogId: 'admiral-nathon', name: 'Адмирал Нейтон', level: 22, coupons: 1500, stars: 0 }
+      ]
+    },
+    {
+      id: 4,
+      name: 'Флотоводец',
+      rank: 'r3',
+      officers: [
+        { id: 'o5', catalogId: 'general-rex', name: 'Генерал Рекс', level: 1, coupons: 500, stars: 0 },
+        { id: 'o6', catalogId: 'captain-black', name: 'Капитан Блэк', level: 0, coupons: 0, stars: 0 }
+      ]
+    },
+    {
+      id: 5,
+      name: 'Навигатор',
+      rank: 'r3',
+      officers: [
+        { id: 'o7', catalogId: 'admiral-nathon', name: 'Адмирал Нейтон', level: 35, coupons: 0, stars: 0 }
+      ]
+    }
+  ];
+
+  for (const p of demoPlayers) {
+    createPlayer(p);
+  }
+
+  // 4. Demo events
+  const demoEvents = [
+    {
+      id: 1,
+      typeId: kwType.id,
+      dateFrom: '2025-06-02',
+      dateTo: '2025-06-08',
+      note: '',
+      assignments: [
+        { place: 1, playerId: 3, officerId: 'o4' },
+        { place: 2, playerId: 1, officerId: 'o1' },
+        { place: 3, playerId: 2, officerId: 'o3' },
+        { place: 4, playerId: 5, officerId: 'o7' },
+      ]
+    },
+    {
+      id: 2,
+      typeId: msType.id,
+      dateFrom: '2025-06-09',
+      dateTo: '2025-06-15',
+      note: '',
+      assignments: [
+        { place: 1, playerId: 5, officerId: 'o7' },
+        { place: 2, playerId: 3, officerId: 'o4' },
+        { place: 3, playerId: 4, officerId: 'o5' },
+      ]
+    },
+    {
+      id: 3,
+      typeId: kwType.id,
+      dateFrom: '2025-06-23',
+      dateTo: '2025-06-29',
+      note: 'Предстоящий',
+      assignments: [
+        { place: 1, playerId: 5, officerId: 'o7' },
+        { place: 2, playerId: 3, officerId: 'o4' },
+        { place: 3, playerId: 2, officerId: 'o3' },
+      ]
+    }
+  ];
+
+  for (const ev of demoEvents) {
+    saveEvent(ev);
+  }
+
+  // 5. Initial Admin user (R5, approved)
+  const adminHash = hashPassword('admin123');
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO users (username, password_hash, rank, is_approved, player_id, created_at)
+    VALUES (?, ?, 'r5', 1, 1, ?)
+  `).run('admin', adminHash, now);
+}
+
+// ─── INIT DB ─────────────────────────────────────────────────
+function initDb(filePath) {
+  const dbPath = filePath || process.env.DB_PATH || path.join(__dirname, 'data', 'kow.db');
+
+  if (dbPath !== ':memory:') {
+    const dir = path.dirname(dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  const db = new DatabaseSync(dbPath);
+  currentDb = db;
+
+  if (dbPath !== ':memory:') {
+    try {
+      db.exec('PRAGMA journal_mode = WAL;');
+    } catch (e) {}
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      rank TEXT NOT NULL DEFAULT 'r3',
+      is_approved INTEGER NOT NULL DEFAULT 0,
+      player_id INTEGER NULL REFERENCES players(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS players (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      real_name TEXT DEFAULT '',
+      rank TEXT NOT NULL DEFAULT 'r3',
+      vip_level INTEGER DEFAULT 0,
+      confidentiality_level INTEGER DEFAULT 0,
+      power REAL DEFAULT 0,
+      kills REAL DEFAULT 0,
+      kill_points REAL DEFAULT 0,
+      stock_coupons INTEGER DEFAULT 0,
+      stock_puzzles INTEGER DEFAULT 0,
+      stock_chests INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS player_officers (
+      id TEXT PRIMARY KEY,
+      player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      catalog_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      level INTEGER NOT NULL DEFAULT 0,
+      coupons INTEGER NOT NULL DEFAULT 0,
+      stars INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS officer_catalog (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 7,
+      coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+      medals_before_training INTEGER DEFAULT 690,
+      medals_training INTEGER DEFAULT 900,
+      medals_total INTEGER DEFAULT 1590
+    );
+
+    CREATE TABLE IF NOT EXISTS event_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#8b5cf6',
+      places_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type_id INTEGER NOT NULL REFERENCES event_types(id),
+      date_from TEXT NOT NULL,
+      date_to TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      assignments_json TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE TABLE IF NOT EXISTS event_registrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      officer_id TEXT NOT NULL,
+      desired_place INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(event_id, player_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS stock_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      coupons INTEGER NOT NULL,
+      puzzles INTEGER NOT NULL,
+      chests INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT
+    );
+  `);
+
+  // Check if empty to auto-bootstrap
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  if (userCount === 0) {
+    seedDemoData(db);
+  }
+
+  return db;
+}
+
+module.exports = {
+  initDb,
+  getDb,
+  hashPassword,
+  verifyPassword,
+  createSession,
+  verifySession,
+  deleteSession,
+  clearUserSessions,
+  findUserByUsername,
+  findUserById,
+  registerUser,
+  loginUser,
+  approveUser,
+  rejectUser,
+  getPendingUsers,
+  getUsers,
+  updateUser,
+  changePassword,
+  getPlayers,
+  getPlayerById,
+  createPlayer,
+  updatePlayer,
+  deletePlayer,
+  addPlayerOfficer,
+  updatePlayerOfficer,
+  deletePlayerOfficer,
+  getCatalog,
+  saveCatalogItem,
+  deleteCatalogItem,
+  getEventTypes,
+  saveEventType,
+  deleteEventType,
+  getEvents,
+  getEventById,
+  saveEvent,
+  deleteEvent,
+  getRegistrationsByEventId,
+  getUserRegistration,
+  registerForEvent,
+  unregisterFromEvent,
+  getStockHistory,
+  recordStockHistory,
+  exportKowJson,
+  importKowJson,
+};
