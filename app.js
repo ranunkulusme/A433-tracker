@@ -2771,7 +2771,7 @@ function setOfficerStars(index, stars) {
   renderOfficerRows();
 }
 
-function savePlayer() {
+async function savePlayer() {
   const name = document.getElementById('fp-name').value.trim();
   if (!name) { toast('Введите имя игрока','error'); return; }
   const realName = document.getElementById('fp-real-name').value.trim();
@@ -2796,22 +2796,58 @@ function savePlayer() {
     coupons: Math.max(0,parseInt(o.coupons)||0),
     stars: Math.max(0,Math.min(6,parseInt(o.stars)||0)),
   }));
-  if (editPlayerId) {
-    Object.assign(getPlayer(editPlayerId), { name, realName, rank, sector, stock, officers });
-    toast(`Игрок «${name}» обновлён`);
-  } else {
-    const id = state.nextId++;
-    state.players.push({ id, name, realName, rank, sector, stock, officers });
-    state.currentPlayerId ||= id;
-    toast(`Игрок «${name}» добавлён`);
+
+  const payload = { name, realName, rank, sector, stock, officers };
+
+  try {
+    if (editPlayerId) {
+      const res = await apiFetch(`/api/players/${editPlayerId}`, {
+        method: 'PUT',
+        body: payload
+      });
+      const p = getPlayer(editPlayerId);
+      if (p) Object.assign(p, res || payload);
+      toast(`Игрок «${name}» обновлён`);
+    } else {
+      const res = await apiFetch('/api/players', {
+        method: 'POST',
+        body: payload
+      });
+      if (res && res.id) {
+        state.players.push(res);
+        state.currentPlayerId ||= res.id;
+      } else {
+        const id = state.nextId++;
+        state.players.push({ id, ...payload });
+        state.currentPlayerId ||= id;
+      }
+      toast(`Игрок «${name}» добавлён`);
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('players');
+  } catch (err) {
+    toast('Ошибка сохранения игрока: ' + err.message, 'error');
   }
-  save(); closeAllModals(); navigate('players');
 }
 
 function confirmDeletePlayer(id) {
   const p = getPlayer(id);
-  document.getElementById('confirm-text').textContent = `Удалить игрока «${p.name}»?`;
-  document.getElementById('confirm-btn').onclick = ()=>{ state.players = state.players.filter(x=>x.id!==id); save(); closeAllModals(); toast('Удалено','info'); navigate('players'); };
+  document.getElementById('confirm-text').textContent = `Удалить игрока «${p?.name || ''}»?`;
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/players/${id}`, { method: 'DELETE' });
+      state.players = state.players.filter(x => x.id !== id);
+      save();
+      closeAllModals();
+      await loadDataFromServer();
+      toast('Удалено', 'info');
+      navigate('players');
+    } catch (err) {
+      toast('Ошибка удаления игрока: ' + err.message, 'error');
+    }
+  };
   openModal('modal-confirm');
 }
 
@@ -2829,7 +2865,7 @@ function openOfficerCatalogModal(id=null) {
   openModal('modal-officer');
 }
 
-function saveOfficerCatalog() {
+async function saveOfficerCatalog() {
   const name = document.getElementById('fo-name').value.trim();
   if (!name) { toast('Введите имя офицера','error'); return; }
   const data = {
@@ -2841,9 +2877,31 @@ function saveOfficerCatalog() {
     medalsTraining: 900,
     medalsTotal: 1590,
   };
-  if (editCatalogOfficerId) Object.assign(getCatalogOfficer(editCatalogOfficerId), data);
-  else state.officerCatalog.push({ id:'catalog-'+state.nextId++, ...data });
-  save(); closeAllModals(); toast('Офицер сохранён'); navigate('officers');
+  try {
+    if (editCatalogOfficerId) {
+      const res = await apiFetch(`/api/catalog/${editCatalogOfficerId}`, {
+        method: 'PUT',
+        body: { id: editCatalogOfficerId, ...data }
+      });
+      const off = getCatalogOfficer(editCatalogOfficerId);
+      if (off) Object.assign(off, res || data);
+      toast('Офицер сохранён');
+    } else {
+      const res = await apiFetch('/api/catalog', {
+        method: 'POST',
+        body: data
+      });
+      if (res && res.id) state.officerCatalog.push(res);
+      else state.officerCatalog.push({ id:'catalog-'+state.nextId++, ...data });
+      toast('Офицер сохранён');
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('officers');
+  } catch (err) {
+    toast('Ошибка сохранения офицера: ' + err.message, 'error');
+  }
 }
 
 function confirmDeleteOfficerCatalog(id) {
@@ -2853,10 +2911,19 @@ function confirmDeleteOfficerCatalog(id) {
     toast(`Нельзя удалить: используют ${result.blockers.map(p=>p.name).join(', ')}`,'error');
     return;
   }
-  document.getElementById('confirm-text').textContent = `Удалить офицера «${officer.name}»?`;
-  document.getElementById('confirm-btn').onclick = ()=>{
-    state.officerCatalog = state.officerCatalog.filter(o=>o.id!==id);
-    save(); closeAllModals(); toast('Офицер удалён','info'); navigate('officers');
+  document.getElementById('confirm-text').textContent = `Удалить офицера «${officer?.name || id}»?`;
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/catalog/${id}`, { method: 'DELETE' });
+      state.officerCatalog = state.officerCatalog.filter(o => o.id !== id);
+      save();
+      closeAllModals();
+      await loadDataFromServer();
+      toast('Офицер удалён', 'info');
+      navigate('officers');
+    } catch (err) {
+      toast('Ошибка удаления офицера: ' + err.message, 'error');
+    }
   };
   openModal('modal-confirm');
 }
@@ -2903,28 +2970,63 @@ function addEtPlaceRow() {
   renderEtPlaceRows();
 }
 
-function saveEventType() {
+async function saveEventType() {
   const name = document.getElementById('fet-name').value.trim();
   if (!name) { toast('Введите название','error'); return; }
   const color = document.getElementById('fet-color').value;
   const places = etPlaceRows.filter(p=>p.label.trim()).sort((a,b)=>a.place-b.place);
   if (!places.length) { toast('Добавьте хотя бы одно место','error'); return; }
-  if (editEtId) {
-    const et = getEventType(editEtId);
-    const prizeHistory = [...(et.prizeHistory || []), { date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }];
-    Object.assign(et, { name, color, places, prizeHistory });
-    toast(`Тип «${name}» обновлён`);
-  } else {
-    state.eventTypes.push({ id:state.nextId++, name, color, places, prizeHistory:[{ date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }] });
-    toast(`Тип «${name}» добавлен`);
+
+  try {
+    if (editEtId) {
+      const et = getEventType(editEtId);
+      const prizeHistory = [...(et?.prizeHistory || []), { date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }];
+      const payload = { id: editEtId, name, color, places, prizeHistory };
+      const res = await apiFetch(`/api/event-types/${editEtId}`, {
+        method: 'PUT',
+        body: payload
+      });
+      if (et) Object.assign(et, res || payload);
+      toast(`Тип «${name}» обновлён`);
+    } else {
+      const payload = {
+        name,
+        color,
+        places,
+        prizeHistory: [{ date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }]
+      };
+      const res = await apiFetch('/api/event-types', {
+        method: 'POST',
+        body: payload
+      });
+      state.eventTypes.push(res || { id:state.nextId++, ...payload });
+      toast(`Тип «${name}» добавлен`);
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('event_types');
+  } catch (err) {
+    toast('Ошибка сохранения типа ивента: ' + err.message, 'error');
   }
-  save(); closeAllModals(); navigate('event_types');
 }
 
 function confirmDeleteEventType(id) {
   const et = getEventType(id);
-  document.getElementById('confirm-text').textContent = `Удалить тип ивента «${et.name}»? Все ивенты этого типа потеряют привязку.`;
-  document.getElementById('confirm-btn').onclick = ()=>{ state.eventTypes = state.eventTypes.filter(x=>x.id!==id); save(); closeAllModals(); toast('Удалено','info'); navigate('event_types'); };
+  document.getElementById('confirm-text').textContent = `Удалить тип ивента «${et?.name || '?'}»? Все ивенты этого типа потеряют привязку.`;
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/event-types/${id}`, { method: 'DELETE' });
+      state.eventTypes = state.eventTypes.filter(x => x.id !== id);
+      save();
+      closeAllModals();
+      await loadDataFromServer();
+      toast('Удалено', 'info');
+      navigate('event_types');
+    } catch (err) {
+      toast('Ошибка удаления типа ивента: ' + err.message, 'error');
+    }
+  };
   openModal('modal-confirm');
 }
 

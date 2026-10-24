@@ -87,16 +87,24 @@ function registerUser({ username, password, playerId, playerName }) {
   const db = getDb();
   const existing = findUserByUsername(username);
   if (existing) {
-    return { error: 'USERNAME_TAKEN' };
+    return { error: 'USERNAME_TAKEN', message: 'Имя пользователя уже занято' };
   }
 
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-  const isFirstUser = userCount === 0;
-  const rank = isFirstUser ? 'r5' : 'r3';
-  const isApproved = isFirstUser ? 1 : 0;
-
-  let assignedPlayerId = playerId ? Number(playerId) : null;
-  if (!assignedPlayerId && playerName) {
+  let assignedPlayerId = null;
+  if (playerId !== undefined && playerId !== null && playerId !== '') {
+    assignedPlayerId = Number(playerId);
+    const player = db.prepare('SELECT id FROM players WHERE id = ?').get(assignedPlayerId);
+    if (!player) {
+      return { error: 'PLAYER_NOT_FOUND', message: 'Игрок не найден' };
+    }
+    const alreadyLinked = db.prepare('SELECT id FROM users WHERE player_id = ?').get(assignedPlayerId);
+    if (alreadyLinked) {
+      return { error: 'PLAYER_ALREADY_LINKED', message: 'Этот персонаж уже привязан к другому аккаунту' };
+    }
+  } else if (playerName) {
+    const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+    const isFirstUser = userCount === 0;
+    const rank = isFirstUser ? 'r5' : 'r3';
     const now = new Date().toISOString();
     const res = db.prepare(`
       INSERT INTO players (name, real_name, rank, updated_at)
@@ -104,6 +112,11 @@ function registerUser({ username, password, playerId, playerName }) {
     `).run(playerName, rank, now);
     assignedPlayerId = Number(res.lastInsertRowid);
   }
+
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  const isFirstUser = userCount === 0;
+  const rank = isFirstUser ? 'r5' : 'r3';
+  const isApproved = isFirstUser ? 1 : 0;
 
   const hash = hashPassword(password);
   const now = new Date().toISOString();

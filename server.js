@@ -95,15 +95,16 @@ const FORBIDDEN_FILES = new Set([
   'package-lock.json',
   'server.js',
   'db.js',
-  'Dockerfile',
+  'dockerfile',
   'docker-compose.yml',
   'readme.md'
 ]);
 
 function isForbiddenFile(basename) {
-  if (basename.startsWith('.')) return true;
-  if (basename.endsWith('.db') || basename.endsWith('.test.js') || basename.endsWith('.md')) return true;
-  return FORBIDDEN_FILES.has(basename);
+  const lower = basename.toLowerCase();
+  if (lower.startsWith('.')) return true;
+  if (lower.endsWith('.db') || lower.endsWith('.test.js') || lower.endsWith('.md')) return true;
+  return FORBIDDEN_FILES.has(lower);
 }
 
 function serveStaticFile(req, res, staticDir, pathname) {
@@ -149,64 +150,65 @@ function serveStaticFile(req, res, staticDir, pathname) {
 
 function createRequestHandler(staticDir) {
   return async (req, res) => {
-    // CORS Preflight
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-      });
-      return res.end();
-    }
-
-    const parsedUrl = new URL(req.url, 'http://localhost');
-    const pathname = parsedUrl.pathname;
-
-    // Attach user from token if present
-    authenticate(req);
-
-    // Non-API routes -> Static files
-    if (!pathname.startsWith('/api/')) {
-      if (req.method === 'GET' || req.method === 'HEAD') {
-        return serveStaticFile(req, res, staticDir, pathname);
+    try {
+      // CORS Preflight
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+        });
+        return res.end();
       }
-      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('Method Not Allowed');
-    }
 
-    // Parse body for write operations
-    let body = {};
-    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-      try {
-        body = await readJsonBody(req);
-      } catch (err) {
-        return sendError(res, 400, 'INVALID_JSON', 'Некорректный JSON в теле запроса');
-      }
-    }
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      const pathname = parsedUrl.pathname;
 
-    // ─────────────────────────────────────────────────────────
-    // AUTH ENDPOINTS
-    // ─────────────────────────────────────────────────────────
-    if (pathname === '/api/auth/candidate-players' && req.method === 'GET') {
-      return sendJson(res, 200, db.getCandidatePlayers());
-    }
+      // Attach user from token if present
+      authenticate(req);
 
-    if (pathname === '/api/auth/register' && req.method === 'POST') {
-      const { username, password, playerId, playerName } = body;
-      if (!username || !password) {
-        return sendError(res, 400, 'MISSING_FIELDS', 'Логин и пароль обязательны');
+      // Non-API routes -> Static files
+      if (!pathname.startsWith('/api/')) {
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          return serveStaticFile(req, res, staticDir, pathname);
+        }
+        res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Method Not Allowed');
       }
-      const regRes = db.registerUser({ username, password, playerId, playerName });
-      if (regRes.error) {
-        return sendError(res, 400, regRes.error, 'Ошибка при регистрации');
+
+      // Parse body for write operations
+      let body = {};
+      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        try {
+          body = await readJsonBody(req);
+        } catch (err) {
+          return sendError(res, 400, 'INVALID_JSON', 'Некорректный JSON в теле запроса');
+        }
       }
-      return sendJson(res, 200, {
-        success: true,
-        pendingApproval: regRes.pendingApproval,
-        userId: regRes.userId,
-        is_approved: regRes.is_approved
-      });
-    }
+
+      // ─────────────────────────────────────────────────────────
+      // AUTH ENDPOINTS
+      // ─────────────────────────────────────────────────────────
+      if (pathname === '/api/auth/candidate-players' && req.method === 'GET') {
+        return sendJson(res, 200, db.getCandidatePlayers());
+      }
+
+      if (pathname === '/api/auth/register' && req.method === 'POST') {
+        const { username, password, playerId, playerName } = body;
+        if (!username || !password) {
+          return sendError(res, 400, 'MISSING_FIELDS', 'Логин и пароль обязательны');
+        }
+        const regRes = db.registerUser({ username, password, playerId, playerName });
+        if (regRes.error) {
+          return sendError(res, 400, regRes.error, regRes.message || 'Ошибка при регистрации');
+        }
+        return sendJson(res, 200, {
+          success: true,
+          pendingApproval: regRes.pendingApproval,
+          userId: regRes.userId,
+          is_approved: regRes.is_approved
+        });
+      }
 
     if (pathname === '/api/auth/login' && req.method === 'POST') {
       const { username, password } = body;
@@ -329,6 +331,8 @@ function createRequestHandler(staticDir) {
       if (!req.user.playerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
+      delete body.rank;
+      delete body.id;
       const updated = db.updatePlayer(req.user.playerId, body);
       if (body.stock) {
         db.recordStockHistory(req.user.playerId, body.stock);
@@ -426,8 +430,8 @@ function createRequestHandler(staticDir) {
     if (catMatch && req.method === 'DELETE') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
       const id = catMatch[1];
-      if (!logic.canDeleteOfficer(id, db.getPlayers())) {
-        return sendError(res, 400, 'IN_USE', 'Нельзя удалить офицера, так как он используется игроками');
+      if (!logic.canDeleteOfficer(id, db.getPlayers()).ok) {
+        return sendError(res, 400, 'OFFICER_IN_USE', 'Офицер используется игроками');
       }
       db.deleteCatalogItem(id);
       return sendJson(res, 200, { success: true });
@@ -524,7 +528,7 @@ function createRequestHandler(staticDir) {
       }
       const eventTypes = db.getEventTypes();
       const et = eventTypes.find(t => t.id === ev.typeId);
-      const places = et ? et.places : [];
+      const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
 
       const players = db.getPlayers();
       const officerCatalog = db.getCatalog();
@@ -595,6 +599,9 @@ function createRequestHandler(staticDir) {
 
     // Unmatched API endpoint
     return sendError(res, 404, 'NOT_FOUND', `Endpoint ${pathname} not found`);
+    } catch (err) {
+      sendError(res, 500, 'INTERNAL_SERVER_ERROR', err.message);
+    }
   };
 }
 

@@ -34,6 +34,14 @@ test('API serves static assets (index.html, logic.js) and 404s missing files / p
     // 4. Path traversal attempt -> 403 or 404
     const resTraversal = await fetch(`${baseUrl}/../package.json`);
     assert(resTraversal.status === 403 || resTraversal.status === 404);
+
+    // 5. Forbidden files case-insensitive check
+    const resForbidden1 = await fetch(`${baseUrl}/SERVER.JS`);
+    assert.equal(resForbidden1.status, 403);
+    const resForbidden2 = await fetch(`${baseUrl}/server.js`);
+    assert.equal(resForbidden2.status, 403);
+    const resForbidden3 = await fetch(`${baseUrl}/db.js`);
+    assert.equal(resForbidden3.status, 403);
   } finally {
     await server.close();
   }
@@ -73,6 +81,34 @@ test('API enforces registration flow, pending approval, and login RBAC', async (
     assert.equal(regRes.status, 200);
     const regData = await regRes.json();
     assert.equal(regData.pendingApproval, true);
+
+    // Registration with non-existent playerId -> 400 PLAYER_NOT_FOUND
+    const badPlayerReg = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'ghost', password: 'password123', playerId: 99999 })
+    });
+    assert.equal(badPlayerReg.status, 400);
+    const badPlayerData = await badPlayerReg.json();
+    assert.equal(badPlayerData.error, 'PLAYER_NOT_FOUND');
+
+    // Link unlinked player id 2 to a new user
+    const linkedReg = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'linked_user', password: 'password123', playerId: 2 })
+    });
+    assert.equal(linkedReg.status, 200);
+
+    // Registration with already linked playerId -> 400 PLAYER_ALREADY_LINKED
+    const dupPlayerReg = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'intruder', password: 'password123', playerId: 2 })
+    });
+    assert.equal(dupPlayerReg.status, 400);
+    const dupPlayerData = await dupPlayerReg.json();
+    assert.equal(dupPlayerData.error, 'PLAYER_ALREADY_LINKED');
 
     // 4. Try logging in before approval -> 403
     const blockedLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
@@ -360,6 +396,20 @@ test('API Player Cabinet /api/my-profile: read, update sector/stock, and officer
     const updatedProf = await putProfRes.json();
     assert.equal(updatedProf.sector.vipLevel, 12);
     assert.equal(updatedProf.stock.coupons, 15000);
+
+    // 2b. PUT /api/my-profile should ignore sensitive fields like rank and id
+    const escalateRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${soldierLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rank: 'r5',
+        id: 999
+      })
+    });
+    assert.equal(escalateRes.status, 200);
+    const escalatedProf = await escalateRes.json();
+    assert.equal(escalatedProf.rank, 'r3');
+    assert.notEqual(escalatedProf.id, 999);
 
     // 3. POST /api/my-profile/officers -> add officer
     const addOffRes = await fetch(`${baseUrl}/api/my-profile/officers`, {
@@ -720,6 +770,22 @@ test('API Catalog and Event-Types CRUD with RBAC', async () => {
       body: JSON.stringify({ id: 'new-officer', name: 'Новый Офицер', type: 'Танк' })
     });
     assert.equal(r5AddCat.status, 200);
+
+    // 3b. Deleting officer in use -> 400 OFFICER_IN_USE
+    const deleteInUse = await fetch(`${baseUrl}/api/catalog/admiral-nathon`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(deleteInUse.status, 400);
+    const deleteInUseErr = await deleteInUse.json();
+    assert.equal(deleteInUseErr.error, 'OFFICER_IN_USE');
+
+    // 3c. Deleting unused officer -> 200
+    const deleteUnused = await fetch(`${baseUrl}/api/catalog/new-officer`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(deleteUnused.status, 200);
 
     // 4. GET /api/event-types is public/available to all
     const etRes = await fetch(`${baseUrl}/api/event-types`);

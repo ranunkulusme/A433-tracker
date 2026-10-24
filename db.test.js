@@ -56,6 +56,22 @@ test('handles duplicate usernames and linking to existing playerId', () => {
   assert.equal(regLinked.playerId, existingPlayer.id);
   assert.equal(regLinked.is_approved, 0);
 
+  // Attempt to link already linked player
+  const dupPlayer = dbModule.registerUser({
+    username: 'another_user',
+    password: 'password789',
+    playerId: existingPlayer.id
+  });
+  assert.equal(dupPlayer.error, 'PLAYER_ALREADY_LINKED');
+
+  // Attempt to link non-existent player
+  const missingPlayer = dbModule.registerUser({
+    username: 'missing_user',
+    password: 'password789',
+    playerId: 999999
+  });
+  assert.equal(missingPlayer.error, 'PLAYER_NOT_FOUND');
+
   // Approve as r4
   dbModule.approveUser(regLinked.userId, 'r4');
   const user = dbModule.findUserById(regLinked.userId);
