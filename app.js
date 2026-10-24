@@ -1231,6 +1231,10 @@ async function saveMyOfficerSubmit() {
       toast('Офицер обновлен');
     } else {
       const catalogId = document.getElementById('my-officer-catalog-select').value;
+      if (!catalogId) {
+        toast('Выберите офицера из каталога', 'error');
+        return;
+      }
       const cat = getCatalogOfficer(catalogId);
       await apiFetch('/api/my-profile/officers', {
         method: 'POST',
@@ -3156,13 +3160,15 @@ async function autoPickWithRegistrationsServer() {
     const etId = parseInt(document.getElementById('fe-type').value);
     const et = getEventType(etId);
     const eventDate = document.getElementById('fe-from')?.value || new Date().toISOString().slice(0, 10);
-    const result = logic.smartAutoPickWithRegistrations({
-      event: { places: eventAssignments.length ? eventAssignments : resolveEventPlaces(et, eventDate) },
-      players: state.players,
-      registrations: currentEventRegistrations,
-      officerCatalog: state.officerCatalog,
-      eventDate
-    });
+    const result = typeof smartAutoPickWithRegistrations === 'function'
+      ? smartAutoPickWithRegistrations({
+          event: { places: eventAssignments.length ? eventAssignments : resolveEventPlaces(et, eventDate) },
+          players: state.players,
+          registrations: currentEventRegistrations,
+          officerCatalog: state.officerCatalog,
+          eventDate
+        })
+      : { assignments: [] };
     eventAssignments = result.assignments;
     toast('⚡ Автоподбор с учетом заявок выполнен');
     renderEventAssignments();
