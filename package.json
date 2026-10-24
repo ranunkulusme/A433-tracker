@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node logic.test.js && node db.test.js",
+    "test": "node logic.test.js && node db.test.js && node api.test.js",
+    "test:api": "node api.test.js",
     "test:db": "node db.test.js",
     "test:logic": "node logic.test.js"
   },
