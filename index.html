@@ -314,8 +314,12 @@
       </div>
     </div>
     <div class="form-group">
+      <div id="fe-registrations-container"></div>
       <label>Назначения по местам</label>
-      <button class="btn-outline btn-sm" onclick="autoPickAssignments()" style="margin-bottom:8px">Автоподбор</button>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <button type="button" class="btn-primary btn-sm" onclick="autoPickWithRegistrationsServer()">⚡ Автоподбор с учетом заявок</button>
+        <button type="button" class="btn-ghost btn-sm" onclick="autoPickAssignments()">Простой автоподбор</button>
+      </div>
       <div id="fe-assignments"></div>
       <button class="btn-outline btn-sm" onclick="addAssignmentRow()" style="margin-top:8px">+ Добавить место</button>
     </div>
@@ -323,6 +327,71 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
     <button class="btn-primary" onclick="saveEvent()">Сохранить</button>
+  </div>
+</div>
+
+<!-- Modal: Event Registration -->
+<div class="modal" id="modal-event-register">
+  <div class="modal-header">
+    <h3 id="modal-event-register-title">Запись на ивент</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div id="reg-event-info" class="auth-demo-hint" style="margin-bottom:6px"></div>
+    <div class="form-group">
+      <label for="reg-officer-select">Офицер для прокачки *</label>
+      <select id="reg-officer-select" onchange="onRegisterModalChange()"></select>
+    </div>
+    <div class="form-group">
+      <label for="reg-place-select">Желаемое призовое место *</label>
+      <select id="reg-place-select" onchange="onRegisterModalChange()"></select>
+    </div>
+    <div id="reg-warning-box" style="display:none;padding:10px 14px;border-radius:var(--radius);font-size:12.5px;line-height:1.4"></div>
+  </div>
+  <div class="modal-footer" id="reg-modal-footer">
+    <button class="btn-ghost" onclick="closeAllModals()">Закрыть</button>
+    <button class="btn-danger" id="reg-btn-cancel" style="display:none" onclick="handleCancelRegistration()">Отменить заявку</button>
+    <button class="btn-primary" id="reg-btn-submit" onclick="handleSubmitRegistration()">Подать заявку</button>
+  </div>
+</div>
+
+<!-- Modal: My Officer -->
+<div class="modal" id="modal-my-officer">
+  <div class="modal-header">
+    <h3 id="modal-my-officer-title">Офицер</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group" id="my-officer-catalog-group">
+      <label for="my-officer-catalog-select">Офицер из каталога *</label>
+      <select id="my-officer-catalog-select"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="my-officer-level">Уровень подготовки (0-180)</label>
+        <input type="number" id="my-officer-level" min="0" max="180" value="0">
+      </div>
+      <div class="form-group">
+        <label for="my-officer-coupons">Купоны на уровне</label>
+        <input type="number" id="my-officer-coupons" min="0" value="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="my-officer-stars">Количество звёзд (0-6★)</label>
+      <select id="my-officer-stars">
+        <option value="0">0★ (Без звёзд)</option>
+        <option value="1">1★ (500 звёзд)</option>
+        <option value="2">2★ (1 000 звёзд)</option>
+        <option value="3">3★ (6 500 звёзд)</option>
+        <option value="4">4★ (25 000 звёзд)</option>
+        <option value="5">5★ (65 000 звёзд)</option>
+        <option value="6">6★ (98 000 звёзд - Максимум)</option>
+      </select>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button class="btn-primary" id="my-officer-save-btn" onclick="saveMyOfficerSubmit()">Сохранить</button>
   </div>
 </div>
 
