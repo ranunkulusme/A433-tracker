@@ -149,7 +149,10 @@
 <div class="modal" id="modal-player">
   <div class="modal-header">
     <h3 id="modal-player-title">Новый игрок</h3>
-    <button class="modal-close" onclick="closeAllModals()">✕</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button type="button" class="btn btn-secondary btn-sm btn-scanner" onclick="openSmartScannerModal('player')">📷 Smart Scanner</button>
+      <button class="modal-close" onclick="closeAllModals()">✕</button>
+    </div>
   </div>
   <div class="modal-body">
     <div class="form-group">
@@ -187,16 +190,39 @@
     <div id="vip-progress-hint" class="vip-progress-hint" style="display:none;margin-bottom:12px"></div>
     <div class="form-row form-row-3">
       <div class="form-group">
-        <label>Купоны</label>
+        <label for="fp-stock-coupons">Купон готовности офицера</label>
         <input type="number" id="fp-stock-coupons" min="0" value="0">
       </div>
       <div class="form-group">
-        <label>Пазлы</label>
+        <label for="fp-stock-puzzles">Медаль легендарного офицера</label>
         <input type="number" id="fp-stock-puzzles" min="0" value="0">
       </div>
       <div class="form-group">
-        <label>Сундуки</label>
+        <label for="fp-stock-star-coupons">Купон готовности звезды</label>
+        <input type="number" id="fp-stock-star-coupons" min="0" value="0">
+      </div>
+    </div>
+    <div class="form-row form-row-3">
+      <div class="form-group">
+        <label for="fp-stock-legendary-stars-1">Легендарная звезда I (110)</label>
+        <input type="number" id="fp-stock-legendary-stars-1" min="0" value="0" oninput="updatePlayerModalStarPoints()">
+      </div>
+      <div class="form-group">
+        <label for="fp-stock-legendary-stars-2">Легендарная звезда II (420)</label>
+        <input type="number" id="fp-stock-legendary-stars-2" min="0" value="0" oninput="updatePlayerModalStarPoints()">
+      </div>
+      <div class="form-group">
+        <label for="fp-stock-legendary-stars-3">Легендарная звезда III (960)</label>
+        <input type="number" id="fp-stock-legendary-stars-3" min="0" value="0" oninput="updatePlayerModalStarPoints()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="fp-stock-chests">Сундук выбора</label>
         <input type="number" id="fp-stock-chests" min="0" value="0">
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end">
+        <div id="fp-total-star-points-badge" class="total-star-badge">✨ Итого очков звезд: 0</div>
       </div>
     </div>
     <div class="form-row form-row-3">
@@ -505,8 +531,123 @@
   </div>
 </div>
 
+<!-- Modal: Smart Scanner (OCR) -->
+<div class="modal modal-lg" id="modal-smart-scanner">
+  <div class="modal-header">
+    <h3 id="modal-smart-scanner-title">📷 Smart Scanner (OCR)</h3>
+    <button class="modal-close" onclick="closeSmartScannerModal()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="scanner-description" style="color:var(--text2);font-size:13px;line-height:1.45">
+      Загрузите один или несколько скриншотов профиля и/или склада («Вещи» → «Другие»).
+      Поддерживается выбор файлов, перетаскивание (Drag &amp; Drop) и вставка из буфера обмена (<strong>Ctrl+V</strong> / <strong>Cmd+V</strong>).
+    </div>
+
+    <!-- Dropzone -->
+    <div id="scanner-dropzone" class="scanner-dropzone" onclick="document.getElementById('scanner-file-input').click()">
+      <input type="file" id="scanner-file-input" multiple accept="image/*" style="display:none">
+      <div class="scanner-dropzone-icon">📷</div>
+      <div class="scanner-dropzone-title">Перетащите скриншоты сюда или нажмите для выбора</div>
+      <div class="scanner-dropzone-hint">Поддерживаются PNG, JPG, WebP. Вы можете загрузить сразу несколько скриншотов.</div>
+      <div class="scanner-dropzone-hint" style="margin-top:4px;font-size:11.5px;color:var(--blue)">💡 Или вставьте изображение из буфера обмена: Ctrl+V / Cmd+V</div>
+    </div>
+
+    <!-- Progress Container (hidden by default) -->
+    <div id="scanner-progress-container" class="scanner-progress-container" style="display:none">
+      <div class="scanner-progress-header">
+        <span id="scanner-progress-status" class="scanner-progress-status">Подготовка OCR...</span>
+        <span id="scanner-progress-percent" class="scanner-progress-percent">0%</span>
+      </div>
+      <div class="progress-container" style="height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
+        <div id="scanner-progress-bar" class="progress-bar scanner-progress-bar" style="width:0%;height:100%;transition:width 0.2s"></div>
+      </div>
+      <div id="scanner-progress-details" class="scanner-progress-details" style="font-size:12px;color:var(--text3);margin-top:4px"></div>
+    </div>
+
+    <!-- Results Preview Container (hidden by default) -->
+    <div id="scanner-results-container" class="scanner-results-container" style="display:none">
+      <div id="scanner-results-summary" class="scanner-results-summary"></div>
+
+      <!-- Character stats section -->
+      <div class="scanner-section" id="scanner-character-section">
+        <div class="scanner-section-title">👤 Статистика персонажа</div>
+        <div class="form-row">
+          <div class="form-group" style="flex:2">
+            <label for="scanner-preview-nickname">Никнейм</label>
+            <input type="text" id="scanner-preview-nickname" placeholder="Никнейм">
+          </div>
+          <div class="form-group" style="flex:1;display:flex;align-items:flex-end;padding-bottom:10px">
+            <label class="checkbox-label" style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="scanner-preview-update-nickname" checked>
+              <span>Обновить ник</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-row form-row-3">
+          <div class="form-group">
+            <label for="scanner-preview-power">Сила (Мощь)</label>
+            <input type="number" id="scanner-preview-power" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="scanner-preview-kills">Убито</label>
+            <input type="number" id="scanner-preview-kills" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="scanner-preview-kill-points">Очки за убийство</label>
+            <input type="number" id="scanner-preview-kill-points" min="0" step="0.1" value="0">
+          </div>
+        </div>
+        <div class="scanner-vip-notice" style="font-size:11.5px;color:var(--text3);margin-top:2px">
+          ℹ️ Уровень VIP сканером не распознается — укажите его вручную в профиле.
+        </div>
+      </div>
+
+      <!-- Warehouse section -->
+      <div class="scanner-section" id="scanner-warehouse-section">
+        <div class="scanner-section-title">📦 Запасы склада</div>
+        <div class="form-row form-row-3">
+          <div class="form-group">
+            <label for="scanner-preview-coupons">Купон готовности офицера</label>
+            <input type="number" id="scanner-preview-coupons" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="scanner-preview-puzzles">Медаль легендарного офицера</label>
+            <input type="number" id="scanner-preview-puzzles" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="scanner-preview-star-coupons">Купон готовности звезды</label>
+            <input type="number" id="scanner-preview-star-coupons" min="0" value="0">
+          </div>
+        </div>
+        <div class="form-row form-row-3">
+          <div class="form-group">
+            <label for="scanner-preview-stars-1">Легендарная звезда I (110)</label>
+            <input type="number" id="scanner-preview-stars-1" min="0" value="0" oninput="updateScannerPreviewStarPoints()">
+          </div>
+          <div class="form-group">
+            <label for="scanner-preview-stars-2">Легендарная звезда II (420)</label>
+            <input type="number" id="scanner-preview-stars-2" min="0" value="0" oninput="updateScannerPreviewStarPoints()">
+          </div>
+          <div class="form-group">
+            <label for="scanner-preview-stars-3">Легендарная звезда III (960)</label>
+            <input type="number" id="scanner-preview-stars-3" min="0" value="0" oninput="updateScannerPreviewStarPoints()">
+          </div>
+        </div>
+        <div style="margin-top:6px">
+          <div id="scanner-preview-star-points-badge" class="total-star-badge">✨ Итого очков звезд: 0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeSmartScannerModal()">Отмена</button>
+    <button class="btn-primary" id="scanner-btn-apply" onclick="applyScanResultsToProfile()" disabled>✓ Применить в профиль</button>
+  </div>
+</div>
+
 <div class="toast-container" id="toasts"></div>
 <script src="logic.js"></script>
+<script src="/ocr.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
