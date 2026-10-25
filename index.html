@@ -161,16 +161,21 @@
         </select>
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row form-row-3">
       <div class="form-group">
-        <label>VIP</label>
-        <input type="number" id="fp-vip" min="0" max="30" value="0">
+        <label for="fp-vip">VIP (0-30)</label>
+        <input type="number" id="fp-vip" min="0" max="30" value="0" oninput="updateVipProgressHint()">
       </div>
       <div class="form-group">
-        <label>Конфиденциальность</label>
+        <label for="fp-vip-points">Очки VIP</label>
+        <input type="number" id="fp-vip-points" min="0" value="0" oninput="updateVipProgressHint()">
+      </div>
+      <div class="form-group">
+        <label for="fp-conf">Конфиденциальность</label>
         <input type="number" id="fp-conf" min="0" value="0">
       </div>
     </div>
+    <div id="vip-progress-hint" class="vip-progress-hint" style="display:none;margin-bottom:12px"></div>
     <div class="form-row form-row-3">
       <div class="form-group">
         <label>Купоны</label>
@@ -237,10 +242,17 @@
         </select>
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row form-row-3">
       <div class="form-group">
         <label>Поколение</label>
         <input type="number" id="fo-generation" min="1" value="7">
+      </div>
+      <div class="form-group">
+        <label>Тип прокачки</label>
+        <select id="fo-upgrade-type" onchange="onFoUpgradeTypeChange(this.value)">
+          <option value="standard">Купонный 500/1 (standard)</option>
+          <option value="special">Только пазлы (special)</option>
+        </select>
       </div>
       <div class="form-group">
         <label>Купонов за пазл</label>
@@ -330,6 +342,40 @@
   </div>
 </div>
 
+<!-- Modal: Season Scheduler -->
+<div class="modal" id="modal-season-scheduler">
+  <div class="modal-header">
+    <h3 id="modal-season-scheduler-title">⚡ Создать сезон по шаблону</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group">
+      <label for="sched-preset">Шаблон ивента *</label>
+      <select id="sched-preset">
+        <option value="king-of-war">«Король Войны» (цикл 14 дней, 7 дней активности)</option>
+        <option value="mightiest-commander">«Сильнейший Командир» (цикл 28 дней, 7 дней активности)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="sched-start-date">Дата старта первого ивента *</label>
+        <input type="date" id="sched-start-date">
+      </div>
+      <div class="form-group">
+        <label for="sched-cycles">Количество циклов (1–6)</label>
+        <input type="number" id="sched-cycles" min="1" max="6" value="3">
+      </div>
+    </div>
+    <div class="form-hint" style="color:var(--text3);font-size:12px;margin-top:4px">
+      ℹ️ Будут автоматически созданы события с интервалами согласно выбранному шаблону.
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button class="btn-primary" id="sched-btn-submit" onclick="submitSeasonSchedule()">Создать сезон</button>
+  </div>
+</div>
+
 <!-- Modal: Event Registration -->
 <div class="modal" id="modal-event-register">
   <div class="modal-header">
@@ -387,6 +433,10 @@
         <option value="5">5★ (65 000 звёзд)</option>
         <option value="6">6★ (98 000 звёзд - Максимум)</option>
       </select>
+    </div>
+    <div class="form-group">
+      <label>Навыки офицера (5-5-5-5)</label>
+      <div id="my-officer-modal-skills"></div>
     </div>
   </div>
   <div class="modal-footer">

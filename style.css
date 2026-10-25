@@ -388,6 +388,173 @@ select option { background: var(--bg3); }
 .badge-troop-garrison { background: rgba(168,85,247,0.15); color: #a855f7; border: 1px solid rgba(168,85,247,0.3); }
 .badge-troop-siege { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
 
+/* ── OFFICER SKILLS (5-5-5-5) ── */
+.skill-level-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg3);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  margin-top: 4px;
+}
+.skill-group-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.skill-selectors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.skill-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+.skill-idx-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text3);
+  padding: 0 3px;
+  user-select: none;
+}
+.skill-btn-group {
+  display: inline-flex;
+  gap: 1px;
+}
+.skill-btn {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s, color .12s;
+  padding: 0;
+}
+.skill-btn:hover {
+  background: var(--bg4);
+  color: var(--text);
+}
+.skill-btn.active {
+  background: var(--blue);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 0 6px rgba(26,110,245,0.4);
+}
+.skill-progress-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text2);
+  font-family: var(--mono);
+}
+.skill-progress-badge strong {
+  color: var(--text);
+}
+.skill-progress-badge.max-skills {
+  color: var(--green);
+}
+.skill-remaining {
+  font-size: 10.5px;
+  color: var(--text3);
+}
+
+/* ── VIP PROGRESS & WIDGET ── */
+.vip-progress-hint {
+  background: rgba(210,153,34,0.08);
+  border: 1px solid rgba(210,153,34,0.3);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.4;
+  margin-top: 6px;
+}
+.vip-progress-hint strong {
+  color: #f1e05a;
+}
+.vip-badge-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+/* ── COMMANDER PAIRINGS ── */
+.pairings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.pairing-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color .15s, transform .15s;
+}
+.pairing-card:hover {
+  border-color: var(--border2);
+  transform: translateY(-1px);
+}
+.pairing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pairing-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.pairing-synergy {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+.badge-role {
+  background: rgba(139,92,246,0.15);
+  color: #c084fc;
+  border: 1px solid rgba(139,92,246,0.35);
+  font-size: 10.5px;
+  padding: 1px 6px;
+}
+
+/* ── COOLDOWN BADGE (FAIR PLAY) ── */
+.cooldown-badge {
+  background: rgba(234,179,8,0.15) !important;
+  color: #facc15 !important;
+  border: 1px solid rgba(234,179,8,0.4) !important;
+  font-size: 10px !important;
+  font-weight: 600;
+}
+
 /* ── RESPONSIVE ── */
 @media (max-width: 768px) {
   .sidebar { transform: translateX(-100%); }
