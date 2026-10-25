@@ -608,7 +608,7 @@
     });
   }
 
-  function smartAutoPickWithRegistrations({ event, candidates, registrations, players, officerCatalog, eventDate } = {}) {
+  function smartAutoPickWithRegistrations({ event, candidates, registrations, players, officerCatalog, eventDate, recentWinners = [] } = {}) {
     const rawPlaces = event?.places || [];
     const indexedPlaces = rawPlaces.map((p, idx) => ({
       slotIndex: idx,
@@ -616,6 +616,12 @@
       label: p.label || `Место ${p.place || idx + 1}`,
       coupons: Math.max(0, Number(p.coupons ?? p.actualCoupons) || 0),
     }));
+
+    const recentWinnersSet = new Set((recentWinners || []).map(id => String(id)));
+    function isRecentWinner(playerId) {
+      if (playerId === undefined || playerId === null) return false;
+      return recentWinnersSet.has(String(playerId));
+    }
 
     function getCandidateDeficit(c) {
       return Math.max(0, Number(c.deficitCoupons ?? c.deficit) || 0);
@@ -627,7 +633,10 @@
 
     let candidateList = [];
     if (Array.isArray(candidates)) {
-      candidateList = candidates.map(c => ({ ...c }));
+      candidateList = candidates.map(c => ({
+        ...c,
+        isCooldown: c.isCooldown !== undefined ? Boolean(c.isCooldown) : isRecentWinner(c.playerId),
+      }));
     } else if (Array.isArray(players)) {
       const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
       const today = eventDate || new Date().toISOString().slice(0, 10);
@@ -651,6 +660,7 @@
             deficitCoupons: def.deficitCoupons,
             deficitPuzzles: def.deficitPuzzles,
             costPerPuzzle: def.costPerPuzzle,
+            isCooldown: isRecentWinner(player.id),
           });
         });
       });
@@ -674,6 +684,9 @@
     const assignmentMap = new Map();
 
     function compareCandidates(a, b) {
+      const coolA = isRecentWinner(a.playerId) ? 1 : 0;
+      const coolB = isRecentWinner(b.playerId) ? 1 : 0;
+      if (coolA !== coolB) return coolA - coolB;
       const defA = getCandidateDeficit(a);
       const defB = getCandidateDeficit(b);
       if (defB !== defA) return defB - defA;
@@ -727,7 +740,16 @@
         return !regMap.has(String(c.playerId));
       }).sort(compareCandidates);
 
-      const chosen = group1[0] || group2[0] || group3[0] || group4[0] || null;
+      const g1Clean = group1.find(c => !isRecentWinner(c.playerId));
+      const g2Clean = group2.find(c => !isRecentWinner(c.playerId));
+      const g1Cooldown = group1.find(c => isRecentWinner(c.playerId));
+      const g2Cooldown = group2.find(c => isRecentWinner(c.playerId));
+      const g3Clean = group3.find(c => !isRecentWinner(c.playerId));
+      const g3Cooldown = group3.find(c => isRecentWinner(c.playerId));
+      const g4Clean = group4.find(c => !isRecentWinner(c.playerId));
+      const g4Cooldown = group4.find(c => isRecentWinner(c.playerId));
+
+      const chosen = g1Clean || g2Clean || g1Cooldown || g2Cooldown || g3Clean || g3Cooldown || g4Clean || g4Cooldown || null;
 
       if (chosen) {
         assignedPlayers.add(String(chosen.playerId));
@@ -746,6 +768,7 @@
           deficitCoupons: deficit,
           overflowCoupons: 0,
           isEfficient: true,
+          isCooldown: isRecentWinner(chosen.playerId),
         });
       } else {
         assignmentMap.set(slot.slotIndex, {
@@ -761,6 +784,7 @@
           deficitCoupons: 0,
           overflowCoupons: 0,
           isEfficient: true,
+          isCooldown: false,
         });
       }
     });

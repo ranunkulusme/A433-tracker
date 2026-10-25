@@ -471,5 +471,28 @@ test('community officers roster, vip deficit, skills and pairings', () => {
   assert.strictEqual(schedule[1].dateFrom, '2026-11-15');
 });
 
+test('smartAutoPickWithRegistrations respects fair play cooldown', () => {
+  const catalog = [{ id: 'rex', name: 'Рекс', generation: 7, couponPerPuzzle: 500 }];
+  const event = { places: [{ place: 1, coupons: 12500 }] };
+  const players = [
+    { id: 1, name: 'Победитель', sector: { killPoints: 100 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o1', catalogId: 'rex', level: 0, coupons: 0 }] },
+    { id: 2, name: 'Претендент', sector: { killPoints: 95 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o2', catalogId: 'rex', level: 0, coupons: 0 }] }
+  ];
+
+  // Без кулдауна место получает Игрок 1
+  const resWithoutCooldown = smartAutoPickWithRegistrations({ event, players, officerCatalog: catalog });
+  assert.strictEqual(resWithoutCooldown.assignments[0].playerId, 1);
+
+  // С кулдауном место получает Игрок 2
+  const resWithCooldown = smartAutoPickWithRegistrations({
+    event,
+    players,
+    officerCatalog: catalog,
+    recentWinners: [1]
+  });
+  assert.strictEqual(resWithCooldown.assignments[0].playerId, 2, 'Candidate in cooldown should yield place to eligible competitor');
+});
+
+
 
 
