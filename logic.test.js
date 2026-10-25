@@ -32,6 +32,13 @@ const {
   createOutboxItem,
   addToOutboxQueue,
   filterOutboxQueue,
+  STAR_ITEM_VALUES,
+  calculateTotalStarPoints,
+  cleanOcrNumber,
+  parseProfileScreenshotText,
+  parseWarehouseScreenshotText,
+  mergeScanResults,
+  normalizeStock,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -59,7 +66,15 @@ test('migrates old players into catalog-linked officers and stock fields', () =>
   assert.equal(migrated.officerCatalog.length >= DEFAULT_OFFICERS.length, true);
   assert.equal(migrated.players[0].realName, '');
   assert.equal(migrated.players[0].rank, 'r3');
-  assert.deepEqual(migrated.players[0].stock, { coupons: 0, puzzles: 0, chests: 0 });
+  assert.deepEqual(migrated.players[0].stock, {
+    coupons: 0,
+    puzzles: 0,
+    starCoupons: 0,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 0,
+    chests: 0,
+  });
   assert.equal(migrated.players[0].sector.killPoints, 1234.6);
   assert.equal(migrated.players[0].officers[0].catalogId, migrated.officerCatalog[0].id);
   assert.equal(migrated.players[0].officers[0].stars, 0);
@@ -747,6 +762,235 @@ test('filterOutboxQueue removes completed items by id immutably', () => {
   assert.deepStrictEqual(filterOutboxQueue([], 'item-1'), []);
   assert.deepStrictEqual(filterOutboxQueue(null, 'item-1'), []);
 });
+
+test('calculates total star points and validates stock constants', () => {
+  assert.deepStrictEqual(STAR_ITEM_VALUES, {
+    legendaryStars1: 110,
+    legendaryStars2: 420,
+    legendaryStars3: 960,
+  });
+
+  // Formula check: (1097 * 110) + (95 * 420) + (22 * 960) = 120670 + 39900 + 21120 = 181690
+  const total = calculateTotalStarPoints({
+    legendaryStars1: 1097,
+    legendaryStars2: 95,
+    legendaryStars3: 22,
+  });
+  assert.strictEqual(total, 181690);
+
+  // Safe defaults on empty/null/negative
+  assert.strictEqual(calculateTotalStarPoints(), 0);
+  assert.strictEqual(calculateTotalStarPoints(null), 0);
+  assert.strictEqual(calculateTotalStarPoints({ legendaryStars1: -10, legendaryStars2: 'abc' }), 0);
+
+  // Supports db column snake_case names
+  const totalDb = calculateTotalStarPoints({
+    stock_legendary_stars_1: 10,
+    stock_legendary_stars_2: 2,
+    stock_legendary_stars_3: 1,
+  });
+  assert.strictEqual(totalDb, 10 * 110 + 2 * 420 + 1 * 960);
+
+  // normalizeStock handles all 7 inventory fields
+  const normalized = normalizeStock({
+    coupons: '419202',
+    puzzles: 2077,
+    starCoupons: 244712,
+    legendaryStars1: '1097',
+    legendaryStars2: 95,
+    legendaryStars3: 22,
+    chests: 5,
+  });
+  assert.deepStrictEqual(normalized, {
+    coupons: 419202,
+    puzzles: 2077,
+    starCoupons: 244712,
+    legendaryStars1: 1097,
+    legendaryStars2: 95,
+    legendaryStars3: 22,
+    chests: 5,
+  });
+});
+
+test('cleanOcrNumber removes artifacts, replaces O/I/l and handles K/M/B multipliers', () => {
+  assert.strictEqual(cleanOcrNumber(' 157,660,593 '), 157660593);
+  assert.strictEqual(cleanOcrNumber('7 588 164 323'), 7588164323);
+  assert.strictEqual(cleanOcrNumber('419.202'), 419202);
+  assert.strictEqual(cleanOcrNumber('2,077'), 2077);
+  assert.strictEqual(cleanOcrNumber('l,097'), 1097); // letter l -> 1
+  assert.strictEqual(cleanOcrNumber('I097'), 1097); // letter I -> 1
+  assert.strictEqual(cleanOcrNumber('95o'), 950); // letter o -> 0
+  assert.strictEqual(cleanOcrNumber('42O'), 420); // letter O -> 0
+  assert.strictEqual(cleanOcrNumber("1'097"), 1097); // apostrophe delimiter
+  assert.strictEqual(cleanOcrNumber('7.6B'), 7600000000); // multiplier B
+  assert.strictEqual(cleanOcrNumber('7,6 b'), 7600000000); // multiplier b with comma
+  assert.strictEqual(cleanOcrNumber('15M'), 15000000); // multiplier M
+  assert.strictEqual(cleanOcrNumber('2.5K'), 2500); // multiplier K
+  assert.strictEqual(cleanOcrNumber(419202), 419202); // numeric input
+  assert.strictEqual(cleanOcrNumber(''), 0);
+  assert.strictEqual(cleanOcrNumber(null), 0);
+  assert.strictEqual(cleanOcrNumber(undefined), 0);
+  assert.strictEqual(cleanOcrNumber('invalid text'), 0);
+});
+
+test('parseProfileScreenshotText extracts player stats and ignores VIP level', () => {
+  const ocrText1 = `
+[A433]ranu
+Сила: 157,660,593
+VIP 12
+Убито: 84,778,517
+Очки за убийства: 7.6B
+  `;
+
+  const parsed1 = parseProfileScreenshotText(ocrText1);
+  assert.strictEqual(parsed1.isProfile, true);
+  assert.strictEqual(parsed1.sector.name, 'ranu');
+  assert.strictEqual(parsed1.sector.allianceTag, 'A433');
+  assert.strictEqual(parsed1.sector.power, 157660593);
+  assert.strictEqual(parsed1.sector.kills, 84778517);
+  assert.strictEqual(parsed1.sector.killPoints, 7600000000);
+  assert.strictEqual('vip' in parsed1.sector, false, 'VIP must not be extracted');
+  assert.strictEqual('vipLevel' in parsed1.sector, false, 'vipLevel must not be extracted');
+
+  // Detailed stats table with exact integer killPoints
+  const ocrText2 = `
+[A433]ranu
+Сила: 157,660,593
+VIP 12
+Уничтожено юнитов: 84,778,517
+Подробная статистика
+Очки за убийство: 7,588,164,323
+  `;
+
+  const parsed2 = parseProfileScreenshotText(ocrText2);
+  assert.strictEqual(parsed2.isProfile, true);
+  assert.strictEqual(parsed2.sector.killPoints, 7588164323, 'exact killPoints preferred over 7.6B');
+  assert.strictEqual('vip' in parsed2.sector, false);
+
+  // Non-profile text returns isProfile false
+  const nonProfile = parseProfileScreenshotText('Привет мир, здесь нет статистики');
+  assert.strictEqual(nonProfile.isProfile, false);
+  assert.deepStrictEqual(nonProfile.sector, {});
+});
+
+test('parseWarehouseScreenshotText extracts coupons, puzzles, starCoupons and legendary stars 1-3', () => {
+  const warehouseTextPart1 = `
+Купон готовности офицера
+Использовать
+В наличии: 419,202
+Медаль легендарного офицера
+Использовать
+В наличии: 2,077
+  `;
+
+  const parsed1 = parseWarehouseScreenshotText(warehouseTextPart1);
+  assert.strictEqual(parsed1.isWarehouse, true);
+  assert.strictEqual(parsed1.stock.coupons, 419202);
+  assert.strictEqual(parsed1.stock.puzzles, 2077);
+  assert.strictEqual(parsed1.stock.starCoupons, undefined, 'unseen items not included');
+  assert.strictEqual(parsed1.stock.legendaryStars1, undefined);
+
+  const warehouseTextPart2 = `
+Купон готовности звезды
+В наличии: 244,712
+Легендарная звезда I
+110
+В наличии: 1,097
+Легендарная звезда II
+420
+В наличии: 95
+Легендарная звезда III
+960
+В наличии: 22
+  `;
+
+  const parsed2 = parseWarehouseScreenshotText(warehouseTextPart2);
+  assert.strictEqual(parsed2.isWarehouse, true);
+  assert.strictEqual(parsed2.stock.starCoupons, 244712);
+  assert.strictEqual(parsed2.stock.legendaryStars1, 1097);
+  assert.strictEqual(parsed2.stock.legendaryStars2, 95);
+  assert.strictEqual(parsed2.stock.legendaryStars3, 22);
+
+  // Roman/Arabic numeral variants and apostrophe delimiters
+  const warehouseTextVariants = `
+Купон готовности звезд
+В наличии: 244'712
+Легендарная звезда 1
+110
+В наличии: l,097
+Легендарная звезда 2
+420
+В наличии: 95
+Легендарная звезда 3
+960
+В наличии: 22
+  `;
+  const parsedVariants = parseWarehouseScreenshotText(warehouseTextVariants);
+  assert.strictEqual(parsedVariants.stock.starCoupons, 244712);
+  assert.strictEqual(parsedVariants.stock.legendaryStars1, 1097);
+  assert.strictEqual(parsedVariants.stock.legendaryStars2, 95);
+  assert.strictEqual(parsedVariants.stock.legendaryStars3, 22);
+
+  const nonWarehouse = parseWarehouseScreenshotText('Никаких складов');
+  assert.strictEqual(nonWarehouse.isWarehouse, false);
+  assert.deepStrictEqual(nonWarehouse.stock, {});
+});
+
+test('mergeScanResults combines multiple screenshots without losing or overwriting data', () => {
+  const scan1 = {
+    isProfile: true,
+    sector: { name: 'ranu', allianceTag: 'A433', power: 157660593, kills: 84778517, killPoints: 7600000000 },
+  };
+  const scan2 = {
+    isProfile: true,
+    sector: { name: 'ranu', allianceTag: 'A433', power: 157660593, kills: 84778517, killPoints: 7588164323 },
+  };
+  const scan3 = {
+    isWarehouse: true,
+    stock: { coupons: 419202, puzzles: 2077 },
+  };
+  const scan4 = {
+    isWarehouse: true,
+    stock: { starCoupons: 244712, legendaryStars1: 1097, legendaryStars2: 95, legendaryStars3: 22 },
+  };
+
+  // Step 1: Scan 1 (profile top)
+  let merged = mergeScanResults({}, scan1);
+  assert.strictEqual(merged.sector.killPoints, 7600000000);
+  assert.strictEqual(merged.sector.power, 157660593);
+
+  // Step 2: Scan 2 (profile detailed) overrides rounded killPoints with exact number
+  merged = mergeScanResults(merged, scan2);
+  assert.strictEqual(merged.sector.killPoints, 7588164323);
+  assert.strictEqual(merged.sector.power, 157660593);
+  assert.strictEqual(merged.sector.name, 'ranu');
+
+  // Step 3: Scan 3 (warehouse part 1) adds coupons/puzzles without touching sector
+  merged = mergeScanResults(merged, scan3);
+  assert.strictEqual(merged.sector.power, 157660593);
+  assert.strictEqual(merged.stock.coupons, 419202);
+  assert.strictEqual(merged.stock.puzzles, 2077);
+
+  // Step 4: Scan 4 (warehouse part 2) adds star coupons and stars without erasing coupons/puzzles
+  merged = mergeScanResults(merged, scan4);
+  assert.strictEqual(merged.sector.name, 'ranu');
+  assert.strictEqual(merged.sector.power, 157660593);
+  assert.strictEqual(merged.stock.coupons, 419202);
+  assert.strictEqual(merged.stock.puzzles, 2077);
+  assert.strictEqual(merged.stock.starCoupons, 244712);
+  assert.strictEqual(merged.stock.legendaryStars1, 1097);
+  assert.strictEqual(merged.stock.legendaryStars2, 95);
+  assert.strictEqual(merged.stock.legendaryStars3, 22);
+
+  // Total star points on merged stock equals 181690
+  assert.strictEqual(calculateTotalStarPoints(merged.stock), 181690);
+
+  // Preserves existing chests
+  const withChests = mergeScanResults({ stock: { chests: 42 } }, scan3);
+  assert.strictEqual(withChests.stock.chests, 42);
+  assert.strictEqual(withChests.stock.coupons, 419202);
+});
+
 
 
 
