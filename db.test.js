@@ -461,6 +461,15 @@ test('db migrates legacy database schema safely adding missing columns', () => {
 
     const playerCols = dbModule.getDb().prepare("PRAGMA table_info(players)").all().map(c => c.name);
     assert(playerCols.includes('vip_points'));
+    assert(playerCols.includes('stock_star_coupons'));
+    assert(playerCols.includes('stock_legendary_stars_1'));
+    assert(playerCols.includes('stock_legendary_stars_2'));
+    assert(playerCols.includes('stock_legendary_stars_3'));
+
+    assert.strictEqual(player.stock.starCoupons, 0);
+    assert.strictEqual(player.stock.legendaryStars1, 0);
+    assert.strictEqual(player.stock.legendaryStars2, 0);
+    assert.strictEqual(player.stock.legendaryStars3, 0);
 
     const officerCols = dbModule.getDb().prepare("PRAGMA table_info(player_officers)").all().map(c => c.name);
     assert(officerCols.includes('skills_json'));
@@ -551,3 +560,78 @@ test('initDb upserts all community officers into existing database with 3 legacy
     } catch (e) {}
   }
 });
+
+test('player CRUD and export/import support star stock fields (starCoupons, legendaryStars1-3)', () => {
+  const dbModule = require('./db.js');
+  const db = dbModule.initDb(':memory:');
+
+  // 1. Create player with star stock
+  const player = dbModule.createPlayer({
+    name: 'Звездный Маршал',
+    realName: 'Алексей',
+    rank: 'r4',
+    stock: {
+      coupons: 10000,
+      puzzles: 50,
+      starCoupons: 25000,
+      legendaryStars1: 15,
+      legendaryStars2: 8,
+      legendaryStars3: 3,
+      chests: 5
+    }
+  });
+
+  assert(player.id);
+  assert.equal(player.stock.starCoupons, 25000);
+  assert.equal(player.stock.legendaryStars1, 15);
+  assert.equal(player.stock.legendaryStars2, 8);
+  assert.equal(player.stock.legendaryStars3, 3);
+  assert.equal(player.stock.coupons, 10000);
+
+  // 2. Fetch by ID
+  const fetched = dbModule.getPlayerById(player.id);
+  assert.equal(fetched.stock.starCoupons, 25000);
+  assert.equal(fetched.stock.legendaryStars1, 15);
+  assert.equal(fetched.stock.legendaryStars2, 8);
+  assert.equal(fetched.stock.legendaryStars3, 3);
+
+  // 3. Update player star stock
+  dbModule.updatePlayer(player.id, {
+    stock: {
+      starCoupons: 30000,
+      legendaryStars1: 20,
+      legendaryStars2: 10,
+      legendaryStars3: 5
+    }
+  });
+
+  const updated = dbModule.getPlayerById(player.id);
+  assert.equal(updated.stock.starCoupons, 30000);
+  assert.equal(updated.stock.legendaryStars1, 20);
+  assert.equal(updated.stock.legendaryStars2, 10);
+  assert.equal(updated.stock.legendaryStars3, 5);
+  // Unmodified stock fields should be preserved from existing
+  assert.equal(updated.stock.coupons, 10000);
+  assert.equal(updated.stock.puzzles, 50);
+  assert.equal(updated.stock.chests, 5);
+
+  // 4. Export / Import roundtrip
+  const dump = dbModule.exportKowJson();
+  const exportedPlayer = dump.players.find(p => p.id === player.id);
+  assert(exportedPlayer);
+  assert.equal(exportedPlayer.stock.starCoupons, 30000);
+  assert.equal(exportedPlayer.stock.legendaryStars1, 20);
+  assert.equal(exportedPlayer.stock.legendaryStars2, 10);
+  assert.equal(exportedPlayer.stock.legendaryStars3, 5);
+
+  // Fresh DB and import
+  dbModule.initDb(':memory:');
+  dbModule.importKowJson(dump);
+  const reimported = dbModule.getPlayerById(player.id);
+  assert(reimported);
+  assert.equal(reimported.stock.starCoupons, 30000);
+  assert.equal(reimported.stock.legendaryStars1, 20);
+  assert.equal(reimported.stock.legendaryStars2, 10);
+  assert.equal(reimported.stock.legendaryStars3, 5);
+});
+

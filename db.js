@@ -293,6 +293,10 @@ function getPlayers() {
     stock: {
       coupons: p.stock_coupons || 0,
       puzzles: p.stock_puzzles || 0,
+      starCoupons: p.stock_star_coupons || 0,
+      legendaryStars1: p.stock_legendary_stars_1 || 0,
+      legendaryStars2: p.stock_legendary_stars_2 || 0,
+      legendaryStars3: p.stock_legendary_stars_3 || 0,
       chests: p.stock_chests || 0
     },
     officers: officersByPlayer.get(p.id) || []
@@ -320,6 +324,10 @@ function getPlayerById(id) {
     stock: {
       coupons: p.stock_coupons || 0,
       puzzles: p.stock_puzzles || 0,
+      starCoupons: p.stock_star_coupons || 0,
+      legendaryStars1: p.stock_legendary_stars_1 || 0,
+      legendaryStars2: p.stock_legendary_stars_2 || 0,
+      legendaryStars3: p.stock_legendary_stars_3 || 0,
       chests: p.stock_chests || 0
     },
     officers: officerRows.map(o => ({
@@ -349,14 +357,18 @@ function createPlayer(data = {}) {
   const stock = data.stock || {};
   const coupons = stock.coupons ?? data.stock_coupons ?? 0;
   const puzzles = stock.puzzles ?? data.stock_puzzles ?? 0;
+  const starCoupons = Number(stock.starCoupons ?? data.stock_star_coupons) || 0;
+  const legendaryStars1 = Number(stock.legendaryStars1 ?? data.stock_legendary_stars_1) || 0;
+  const legendaryStars2 = Number(stock.legendaryStars2 ?? data.stock_legendary_stars_2) || 0;
+  const legendaryStars3 = Number(stock.legendaryStars3 ?? data.stock_legendary_stars_3) || 0;
   const chests = stock.chests ?? data.stock_chests ?? 0;
   const now = new Date().toISOString();
 
   let playerId = data.id ? Number(data.id) : null;
   if (playerId) {
     db.prepare(`
-      INSERT INTO players (id, name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO players (id, name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         real_name = excluded.real_name,
@@ -369,14 +381,18 @@ function createPlayer(data = {}) {
         kill_points = excluded.kill_points,
         stock_coupons = excluded.stock_coupons,
         stock_puzzles = excluded.stock_puzzles,
+        stock_star_coupons = excluded.stock_star_coupons,
+        stock_legendary_stars_1 = excluded.stock_legendary_stars_1,
+        stock_legendary_stars_2 = excluded.stock_legendary_stars_2,
+        stock_legendary_stars_3 = excluded.stock_legendary_stars_3,
         stock_chests = excluded.stock_chests,
         updated_at = excluded.updated_at
-    `).run(playerId, name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
+    `).run(playerId, name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
   } else {
     const res = db.prepare(`
-      INSERT INTO players (name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
+      INSERT INTO players (name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
     playerId = Number(res.lastInsertRowid);
   }
 
@@ -409,6 +425,10 @@ function updatePlayer(id, updates = {}) {
   const stk = updates.stock || {};
   const coupons = stk.coupons !== undefined ? stk.coupons : (updates.stock_coupons !== undefined ? updates.stock_coupons : existing.stock.coupons);
   const puzzles = stk.puzzles !== undefined ? stk.puzzles : (updates.stock_puzzles !== undefined ? updates.stock_puzzles : existing.stock.puzzles);
+  const starCoupons = stk.starCoupons !== undefined ? Number(stk.starCoupons) || 0 : (updates.stock_star_coupons !== undefined ? Number(updates.stock_star_coupons) || 0 : (existing.stock.starCoupons || 0));
+  const legendaryStars1 = stk.legendaryStars1 !== undefined ? Number(stk.legendaryStars1) || 0 : (updates.stock_legendary_stars_1 !== undefined ? Number(updates.stock_legendary_stars_1) || 0 : (existing.stock.legendaryStars1 || 0));
+  const legendaryStars2 = stk.legendaryStars2 !== undefined ? Number(stk.legendaryStars2) || 0 : (updates.stock_legendary_stars_2 !== undefined ? Number(updates.stock_legendary_stars_2) || 0 : (existing.stock.legendaryStars2 || 0));
+  const legendaryStars3 = stk.legendaryStars3 !== undefined ? Number(stk.legendaryStars3) || 0 : (updates.stock_legendary_stars_3 !== undefined ? Number(updates.stock_legendary_stars_3) || 0 : (existing.stock.legendaryStars3 || 0));
   const chests = stk.chests !== undefined ? stk.chests : (updates.stock_chests !== undefined ? updates.stock_chests : existing.stock.chests);
   const now = new Date().toISOString();
 
@@ -416,9 +436,9 @@ function updatePlayer(id, updates = {}) {
     UPDATE players
     SET name = ?, real_name = ?, rank = ?,
         vip_level = ?, vip_points = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
-        stock_coupons = ?, stock_puzzles = ?, stock_chests = ?, updated_at = ?
+        stock_coupons = ?, stock_puzzles = ?, stock_star_coupons = ?, stock_legendary_stars_1 = ?, stock_legendary_stars_2 = ?, stock_legendary_stars_3 = ?, stock_chests = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, chests, now, id);
+  `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now, id);
 
   return getPlayerById(id);
 }
@@ -1008,8 +1028,22 @@ function migrateSchema(db) {
   }
 
   const playerCols = getColumns('players');
-  if (playerCols.length > 0 && !playerCols.includes('vip_points')) {
-    db.exec("ALTER TABLE players ADD COLUMN vip_points INTEGER NOT NULL DEFAULT 0;");
+  if (playerCols.length > 0) {
+    if (!playerCols.includes('vip_points')) {
+      db.exec("ALTER TABLE players ADD COLUMN vip_points INTEGER NOT NULL DEFAULT 0;");
+    }
+    if (!playerCols.includes('stock_star_coupons')) {
+      db.exec("ALTER TABLE players ADD COLUMN stock_star_coupons INTEGER NOT NULL DEFAULT 0;");
+    }
+    if (!playerCols.includes('stock_legendary_stars_1')) {
+      db.exec("ALTER TABLE players ADD COLUMN stock_legendary_stars_1 INTEGER NOT NULL DEFAULT 0;");
+    }
+    if (!playerCols.includes('stock_legendary_stars_2')) {
+      db.exec("ALTER TABLE players ADD COLUMN stock_legendary_stars_2 INTEGER NOT NULL DEFAULT 0;");
+    }
+    if (!playerCols.includes('stock_legendary_stars_3')) {
+      db.exec("ALTER TABLE players ADD COLUMN stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0;");
+    }
   }
 
   const officerCols = getColumns('player_officers');
@@ -1068,6 +1102,10 @@ function initDb(filePath) {
       kill_points REAL DEFAULT 0,
       stock_coupons INTEGER DEFAULT 0,
       stock_puzzles INTEGER DEFAULT 0,
+      stock_star_coupons INTEGER NOT NULL DEFAULT 0,
+      stock_legendary_stars_1 INTEGER NOT NULL DEFAULT 0,
+      stock_legendary_stars_2 INTEGER NOT NULL DEFAULT 0,
+      stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0,
       stock_chests INTEGER DEFAULT 0,
       updated_at TEXT NOT NULL
     );
