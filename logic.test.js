@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   DEFAULT_OFFICERS,
   migrateState,
@@ -514,6 +516,42 @@ test('smartAutoPickWithRegistrations respects candidate explicit isCooldown over
   assert.strictEqual(resOverride.assignments[0].playerId, 1);
   assert.strictEqual(resOverride.assignments[0].isCooldown, false);
 });
+
+test('PWA manifest and mobile app icons exist and are valid', () => {
+  const manifestPath = path.join(__dirname, 'manifest.json');
+  assert.ok(fs.existsSync(manifestPath), 'manifest.json must exist');
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  assert.strictEqual(manifest.name, 'KoW Tracker - Kingdom of Winners');
+  assert.strictEqual(manifest.short_name, 'KoW Tracker');
+  assert.strictEqual(manifest.display, 'standalone');
+  assert.strictEqual(manifest.theme_color, '#0f172a');
+  assert.strictEqual(manifest.background_color, '#0f172a');
+  assert.ok(Array.isArray(manifest.icons), 'manifest.icons must be an array');
+
+  const icon192 = manifest.icons.find(i => i.sizes === '192x192');
+  const icon512 = manifest.icons.find(i => i.sizes === '512x512');
+  assert.ok(icon192, 'manifest must have 192x192 icon');
+  assert.ok(icon512, 'manifest must have 512x512 icon');
+  assert.strictEqual(icon192.type, 'image/png');
+  assert.strictEqual(icon512.type, 'image/png');
+
+  const file192 = path.join(__dirname, icon192.src.replace(/^\//, ''));
+  const file512 = path.join(__dirname, icon512.src.replace(/^\//, ''));
+
+  assert.ok(fs.existsSync(file192), 'icon-192.png must exist');
+  assert.ok(fs.statSync(file192).size > 0, 'icon-192.png must not be empty');
+
+  assert.ok(fs.existsSync(file512), 'icon-512.png must exist');
+  assert.ok(fs.statSync(file512).size > 0, 'icon-512.png must not be empty');
+
+  const htmlPath = path.join(__dirname, 'index.html');
+  const html = fs.readFileSync(htmlPath, 'utf-8');
+  assert.ok(html.includes('<link rel="manifest" href="/manifest.json">'), 'index.html must link manifest.json');
+  assert.ok(html.includes('<meta name="theme-color" content="#0f172a">'), 'index.html must have theme-color');
+  assert.ok(html.includes('<meta name="apple-mobile-web-app-capable" content="yes">'), 'index.html must have apple-mobile-web-app-capable');
+});
+
 
 
 
