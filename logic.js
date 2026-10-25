@@ -852,11 +852,15 @@
         q => q && q.endpoint === item.endpoint && (q.method || '').toUpperCase() === 'PUT'
       );
       if (existingIndex !== -1) {
+        const isObj = o => o && typeof o === 'object' && !Array.isArray(o);
         return qList.map((q, idx) => {
           if (idx === existingIndex) {
+            const mergedBody = (isObj(q.body) && isObj(item.body))
+              ? { ...q.body, ...item.body }
+              : item.body;
             return {
               ...q,
-              body: item.body,
+              body: mergedBody,
               timestamp: item.timestamp || Date.now(),
             };
           }

@@ -699,6 +699,31 @@ test('addToOutboxQueue appends items and deduplicates repeated PUT mutations to 
   assert.strictEqual(q4.length, 3, 'POST requests should not be deduplicated');
 });
 
+test('addToOutboxQueue merges object properties when deduplicating PUT requests', () => {
+  const item1 = {
+    id: 'put-1',
+    endpoint: '/api/my-profile',
+    method: 'PUT',
+    body: { sector: { power: 100 } },
+    timestamp: 1000,
+  };
+  const item2 = {
+    id: 'put-2',
+    endpoint: '/api/my-profile',
+    method: 'PUT',
+    body: { stock: { coupons: 50 } },
+    timestamp: 2000,
+  };
+  const queue = addToOutboxQueue([item1], item2);
+  assert.strictEqual(queue.length, 1);
+  assert.deepStrictEqual(queue[0].body, {
+    sector: { power: 100 },
+    stock: { coupons: 50 },
+  });
+  assert.strictEqual(queue[0].id, 'put-1');
+  assert.strictEqual(queue[0].timestamp, 2000);
+});
+
 test('filterOutboxQueue removes completed items by id immutably', () => {
   const initialQueue = [
     { id: 'item-1', endpoint: '/api/my-profile' },

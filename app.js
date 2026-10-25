@@ -275,6 +275,9 @@ function handleOfflineApiRequest(url, method, bodyObj) {
     updateNetworkStatusUI();
 
     applyOptimisticUpdate(url, m, bodyObj);
+    if (typeof save === 'function') {
+      save();
+    }
 
     toast('Изменения сохранены локально и будут отправлены на сервер при появлении сети', 'info');
     return { success: true, offline: true };
@@ -855,6 +858,7 @@ async function handleLoginSubmit(e) {
     renderTopbarProfile();
     renderSidebarNav();
     await loadDataFromServer();
+    flushOutboxQueue();
     if (currentUser.rank === 'r3') {
       navigate('my_cabinet');
     } else {

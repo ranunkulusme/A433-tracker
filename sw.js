@@ -52,8 +52,8 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
 
-  // 2. Игнорировать запросы к API — пропускать прямо в сеть без кэширования
-  if (url.pathname.startsWith('/api/')) {
+  // 2. Игнорировать запросы к sw.js и API — пропускать прямо в сеть без кэширования
+  if (url.pathname === '/sw.js' || url.pathname.startsWith('/api/')) {
     return;
   }
 
