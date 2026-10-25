@@ -1055,6 +1055,156 @@ test('API schedule-season, fair play autopick, profile skills and vip points', a
   }
 });
 
+test('API supports WASM static serving and star stock fields sanitization in profile and players API', async () => {
+  const { startServer, MIME_TYPES } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const dummyWasmPath = path.join(__dirname, 'test_dummy_asset.wasm');
+  fs.writeFileSync(dummyWasmPath, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+
+  try {
+    // 1. WASM MIME type check in dictionary and static file server response
+    assert(MIME_TYPES && MIME_TYPES['.wasm'] === 'application/wasm', 'MIME_TYPES must map .wasm to application/wasm');
+    const wasmRes = await fetch(`${baseUrl}/test_dummy_asset.wasm`);
+    assert.equal(wasmRes.status, 200);
+    assert.equal(wasmRes.headers.get('content-type'), 'application/wasm');
+
+    // 2. Auth login as admin to create/approve player
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const regRes = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'star_commander', password: 'secretpassword', playerName: 'Звездный Маршал' })
+    })).json();
+
+    await fetch(`${baseUrl}/api/users/${regRes.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+
+    const userLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'star_commander', password: 'secretpassword' })
+    })).json();
+
+    // 3. PUT /api/my-profile with screenshot OCR values (testing sanitization of strings and negative numbers)
+    const updateRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${userLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        stock: {
+          coupons: '419202',
+          puzzles: '2077',
+          starCoupons: '244712',
+          legendaryStars1: '1097',
+          legendaryStars2: 95,
+          legendaryStars3: 22,
+          chests: 15
+        }
+      })
+    });
+    assert.equal(updateRes.status, 200);
+    const updatedBody = await updateRes.json();
+    assert.equal(updatedBody.stock.starCoupons, 244712);
+    assert.equal(updatedBody.stock.legendaryStars1, 1097);
+    assert.equal(updatedBody.stock.legendaryStars2, 95);
+    assert.equal(updatedBody.stock.legendaryStars3, 22);
+    assert.equal(updatedBody.stock.coupons, 419202);
+    assert.equal(updatedBody.stock.puzzles, 2077);
+    assert.equal(updatedBody.stock.chests, 15);
+
+    // 4. GET /api/my-profile verifies persistent retrieval
+    const getRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${userLogin.token}` }
+    });
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.stock.starCoupons, 244712);
+    assert.equal(getBody.stock.legendaryStars1, 1097);
+    assert.equal(getBody.stock.legendaryStars2, 95);
+    assert.equal(getBody.stock.legendaryStars3, 22);
+
+    // 5. Negative numbers sanitization in PUT /api/my-profile (must be clamped to >= 0)
+    const clampRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${userLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        stock: {
+          starCoupons: -500,
+          legendaryStars1: -10,
+          legendaryStars2: -5,
+          legendaryStars3: -1
+        }
+      })
+    });
+    assert.equal(clampRes.status, 200);
+    const clampedBody = await clampRes.json();
+    assert.equal(clampedBody.stock.starCoupons, 0);
+    assert.equal(clampedBody.stock.legendaryStars1, 0);
+    assert.equal(clampedBody.stock.legendaryStars2, 0);
+    assert.equal(clampedBody.stock.legendaryStars3, 0);
+
+    // 6. R4/R5 endpoints POST /api/players and PUT /api/players/:id sanitize stock fields
+    const createPlayerRes = await fetch(`${baseUrl}/api/players`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: 'Новый Рекрут Звезд',
+        stock: {
+          starCoupons: '3000',
+          legendaryStars1: 50,
+          legendaryStars2: 20,
+          legendaryStars3: 5
+        }
+      })
+    });
+    assert.equal(createPlayerRes.status, 200);
+    const createdPlayer = await createPlayerRes.json();
+    assert.equal(createdPlayer.stock.starCoupons, 3000);
+    assert.equal(createdPlayer.stock.legendaryStars1, 50);
+
+    const updatePlayerRes = await fetch(`${baseUrl}/api/players/${createdPlayer.id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        stock: {
+          starCoupons: -10,
+          legendaryStars1: '120'
+        }
+      })
+    });
+    assert.equal(updatePlayerRes.status, 200);
+    const updatedPlayer = await updatePlayerRes.json();
+    assert.equal(updatedPlayer.stock.starCoupons, 0);
+    assert.equal(updatedPlayer.stock.legendaryStars1, 120);
+  } finally {
+    if (fs.existsSync(dummyWasmPath)) {
+      fs.unlinkSync(dummyWasmPath);
+    }
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;
