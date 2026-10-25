@@ -28,6 +28,10 @@ const {
   getRecommendedPairings,
   EVENT_PRESETS,
   generateSeasonSchedule,
+  isOfflineMutationAllowed,
+  createOutboxItem,
+  addToOutboxQueue,
+  filterOutboxQueue,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -551,6 +555,169 @@ test('PWA manifest and mobile app icons exist and are valid', () => {
   assert.ok(html.includes('<meta name="theme-color" content="#0f172a">'), 'index.html must have theme-color');
   assert.ok(html.includes('<meta name="apple-mobile-web-app-capable" content="yes">'), 'index.html must have apple-mobile-web-app-capable');
 });
+
+test('isOfflineMutationAllowed distinguishes R3 profile and registration mutations from administrative actions', () => {
+  // Allowed R3 mutations
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'PUT' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'put' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers', method: 'PUT' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers/off-123', method: 'PUT' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers/off-123', method: 'DELETE' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'DELETE' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations/reg-456', method: 'DELETE' }), true);
+
+  // Forbidden read or non-mutation methods on allowed endpoints
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'GET' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'POST' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'DELETE' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'GET' }), false);
+
+  // Forbidden administrative actions (R4 / R5)
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/schedule-season', method: 'POST' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/autopick', method: 'POST' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players', method: 'POST' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/1', method: 'PUT' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/catalog', method: 'POST' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/users/2', method: 'PATCH' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/import', method: 'POST' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/export', method: 'GET' }), false);
+
+  // Empty or invalid input
+  assert.strictEqual(isOfflineMutationAllowed(), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '', method: 'PUT' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: '' }), false);
+  assert.strictEqual(isOfflineMutationAllowed(null), false);
+});
+
+test('createOutboxItem creates structured item with id, timestamp, normalized method and cloned body', () => {
+  const customTime = 1700000000000;
+  const initialBody = { sector: { vipLevel: 12 }, nested: [1, 2] };
+
+  const item1 = createOutboxItem({
+    endpoint: '/api/my-profile',
+    method: 'put',
+    body: initialBody,
+  });
+
+  assert.ok(item1.id && typeof item1.id === 'string', 'item id should be generated');
+  assert.ok(item1.id.startsWith('outbox_'), 'item id should start with outbox_');
+  assert.strictEqual(item1.endpoint, '/api/my-profile');
+  assert.strictEqual(item1.method, 'PUT', 'method should be uppercased');
+  assert.deepStrictEqual(item1.body, initialBody);
+  assert.ok(typeof item1.timestamp === 'number' && item1.timestamp > 0);
+  assert.strictEqual(item1.retryCount, 0);
+
+  // Deep clone verification: mutating original object does not affect item.body
+  initialBody.sector.vipLevel = 99;
+  initialBody.nested.push(3);
+  assert.strictEqual(item1.body.sector.vipLevel, 12);
+  assert.deepStrictEqual(item1.body.nested, [1, 2]);
+
+  // Custom id and timestamp preservation, default method fallback to POST
+  const item2 = createOutboxItem({
+    id: 'custom-id-77',
+    endpoint: '/api/events/5/registrations',
+    timestamp: customTime,
+  });
+
+  assert.strictEqual(item2.id, 'custom-id-77');
+  assert.strictEqual(item2.method, 'POST');
+  assert.strictEqual(item2.timestamp, customTime);
+  assert.strictEqual(item2.body, null);
+  assert.strictEqual(item2.retryCount, 0);
+});
+
+test('addToOutboxQueue appends items and deduplicates repeated PUT mutations to the same endpoint', () => {
+  const itemPut1 = {
+    id: 'id-put-1',
+    endpoint: '/api/my-profile',
+    method: 'PUT',
+    body: { stock: { coupons: 100 } },
+    timestamp: 1000,
+    retryCount: 0,
+  };
+
+  const itemPost1 = {
+    id: 'id-post-1',
+    endpoint: '/api/events/1/registrations',
+    method: 'POST',
+    body: { officerId: 'o1' },
+    timestamp: 1500,
+    retryCount: 0,
+  };
+
+  // Add to empty queue
+  const q1 = addToOutboxQueue([], itemPut1);
+  assert.strictEqual(q1.length, 1);
+  assert.deepStrictEqual(q1[0], itemPut1);
+
+  // Append different item (POST)
+  const q2 = addToOutboxQueue(q1, itemPost1);
+  assert.strictEqual(q2.length, 2);
+  assert.strictEqual(q2[0].id, 'id-put-1');
+  assert.strictEqual(q2[1].id, 'id-post-1');
+
+  // Deduplication: Repeated PUT to /api/my-profile
+  const itemPut2 = {
+    id: 'id-put-2',
+    endpoint: '/api/my-profile',
+    method: 'PUT',
+    body: { stock: { coupons: 250 } },
+    timestamp: 2000,
+    retryCount: 0,
+  };
+
+  const q3 = addToOutboxQueue(q2, itemPut2);
+  assert.strictEqual(q3.length, 2, 'queue length should remain 2 after deduplicating PUT');
+  assert.strictEqual(q3[0].id, 'id-put-1', 'original id should be retained');
+  assert.deepStrictEqual(q3[0].body, { stock: { coupons: 250 } }, 'body should be updated');
+  assert.strictEqual(q3[0].timestamp, 2000, 'timestamp should be updated');
+  assert.strictEqual(q3[1].id, 'id-post-1', 'second item should remain untouched');
+
+  // Immutability: previous queues are not modified
+  assert.strictEqual(q1.length, 1);
+  assert.strictEqual(q2.length, 2);
+  assert.strictEqual(q2[0].body.stock.coupons, 100);
+
+  // Repeated POST to same endpoint should NOT be deduplicated
+  const itemPost2 = {
+    id: 'id-post-2',
+    endpoint: '/api/events/1/registrations',
+    method: 'POST',
+    body: { officerId: 'o2' },
+    timestamp: 2500,
+    retryCount: 0,
+  };
+  const q4 = addToOutboxQueue(q3, itemPost2);
+  assert.strictEqual(q4.length, 3, 'POST requests should not be deduplicated');
+});
+
+test('filterOutboxQueue removes completed items by id immutably', () => {
+  const initialQueue = [
+    { id: 'item-1', endpoint: '/api/my-profile' },
+    { id: 'item-2', endpoint: '/api/events/1/registrations' },
+    { id: 'item-3', endpoint: '/api/my-profile/officers' },
+  ];
+
+  const filtered = filterOutboxQueue(initialQueue, 'item-2');
+  assert.strictEqual(filtered.length, 2);
+  assert.deepStrictEqual(filtered.map(x => x.id), ['item-1', 'item-3']);
+
+  // Immutability
+  assert.strictEqual(initialQueue.length, 3);
+
+  // Removing non-existent id
+  const unchanged = filterOutboxQueue(initialQueue, 'non-existent');
+  assert.strictEqual(unchanged.length, 3);
+  assert.notStrictEqual(unchanged, initialQueue, 'should return a new array instance');
+
+  // Empty queue handling
+  assert.deepStrictEqual(filterOutboxQueue([], 'item-1'), []);
+  assert.deepStrictEqual(filterOutboxQueue(null, 'item-1'), []);
+});
+
 
 
 
