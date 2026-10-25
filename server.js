@@ -468,6 +468,15 @@ function createRequestHandler(staticDir) {
         body.vipPoints = sanitizeVipPoints(body.vipPoints);
       }
       if (Array.isArray(body.officers)) {
+        const existingPlayer = db.getPlayerById(targetPlayerId);
+        if (existingPlayer && Array.isArray(existingPlayer.officers)) {
+          const keepIds = new Set(body.officers.map(o => o && o.id).filter(Boolean));
+          for (const oldOff of existingPlayer.officers) {
+            if (!keepIds.has(oldOff.id)) {
+              db.deletePlayerOfficer(targetPlayerId, oldOff.id);
+            }
+          }
+        }
         for (const o of body.officers) {
           if (o.skills !== undefined) {
             o.skills = sanitizeSkills(o.skills);

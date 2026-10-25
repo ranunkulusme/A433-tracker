@@ -315,8 +315,10 @@ test('handles persistent file path and creates parent directory', () => {
     assert.equal(admin.rank, 'r5');
   } finally {
     try {
-      if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
-      if (fs.existsSync(testDbDir)) fs.rmdirSync(testDbDir);
+      dbModule.getDb().close();
+    } catch (e) {}
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
     } catch (e) {}
   }
 });
@@ -464,8 +466,88 @@ test('db migrates legacy database schema safely adding missing columns', () => {
     assert(officerCols.includes('skills_json'));
   } finally {
     try {
-      if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
-      if (fs.existsSync(testDbDir)) fs.rmdirSync(testDbDir);
+      dbModule.getDb().close();
+    } catch (e) {}
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
+});
+
+test('initDb upserts all community officers into existing database with 3 legacy officers', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const dbModule = require('./db.js');
+  const testDbDir = path.join(__dirname, 'data-test-community');
+  const testDbPath = path.join(testDbDir, 'kow-community.db');
+
+  try {
+    if (!fs.existsSync(testDbDir)) fs.mkdirSync(testDbDir, { recursive: true });
+    if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
+
+    const legacyDb = new DatabaseSync(testDbPath);
+    legacyDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        is_approved INTEGER NOT NULL DEFAULT 0,
+        player_id INTEGER NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE player_officers (
+        id TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL REFERENCES players(id),
+        catalog_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        level INTEGER NOT NULL DEFAULT 0,
+        coupons INTEGER NOT NULL DEFAULT 0,
+        stars INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE officer_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        generation INTEGER NOT NULL DEFAULT 7,
+        coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+        upgrade_type TEXT NOT NULL DEFAULT 'standard',
+        medals_before_training INTEGER DEFAULT 690,
+        medals_training INTEGER DEFAULT 900,
+        medals_total INTEGER DEFAULT 1590
+      );
+      INSERT INTO users (username, password_hash, rank, is_approved, created_at)
+      VALUES ('admin', 'hash', 'r5', 1, '2026-01-01');
+      INSERT INTO officer_catalog (id, name, type) VALUES ('admiral-nathon', 'Адмирал Нейтон', 'Пехота');
+      INSERT INTO officer_catalog (id, name, type) VALUES ('general-rex', 'Генерал Рекс', 'Танки');
+      INSERT INTO officer_catalog (id, name, type) VALUES ('captain-black', 'Капитан Блэк', 'Артиллерия');
+    `);
+    legacyDb.close();
+
+    // Запускаем initDb на существующей БД с 3 офицерами
+    dbModule.initDb(testDbPath);
+
+    // Должно стать 12 офицеров (все community officers добавлены/обновлены)
+    const catalog = dbModule.getCatalog();
+    assert.strictEqual(catalog.length, 12);
+    const aurora = catalog.find(o => o.id === 'aurora');
+    assert(aurora);
+    assert.strictEqual(aurora.generation, 8);
+    assert.strictEqual(aurora.upgradeType, 'standard');
+    const angel = catalog.find(o => o.id === 'angel');
+    assert(angel);
+    assert.strictEqual(angel.upgradeType, 'special');
+  } finally {
+    try {
+      dbModule.getDb().close();
+    } catch (e) {}
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
     } catch (e) {}
   }
 });

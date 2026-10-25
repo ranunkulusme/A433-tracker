@@ -623,6 +623,11 @@
       return recentWinnersSet.has(String(playerId));
     }
 
+    function candidateIsCooldown(c) {
+      if (!c) return false;
+      return Boolean(c.isCooldown !== undefined ? c.isCooldown : isRecentWinner(c.playerId));
+    }
+
     function getCandidateDeficit(c) {
       return Math.max(0, Number(c.deficitCoupons ?? c.deficit) || 0);
     }
@@ -635,7 +640,7 @@
     if (Array.isArray(candidates)) {
       candidateList = candidates.map(c => ({
         ...c,
-        isCooldown: c.isCooldown !== undefined ? Boolean(c.isCooldown) : isRecentWinner(c.playerId),
+        isCooldown: candidateIsCooldown(c),
       }));
     } else if (Array.isArray(players)) {
       const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
@@ -684,8 +689,8 @@
     const assignmentMap = new Map();
 
     function compareCandidates(a, b) {
-      const coolA = isRecentWinner(a.playerId) ? 1 : 0;
-      const coolB = isRecentWinner(b.playerId) ? 1 : 0;
+      const coolA = candidateIsCooldown(a) ? 1 : 0;
+      const coolB = candidateIsCooldown(b) ? 1 : 0;
       if (coolA !== coolB) return coolA - coolB;
       const defA = getCandidateDeficit(a);
       const defB = getCandidateDeficit(b);
@@ -740,14 +745,14 @@
         return !regMap.has(String(c.playerId));
       }).sort(compareCandidates);
 
-      const g1Clean = group1.find(c => !isRecentWinner(c.playerId));
-      const g2Clean = group2.find(c => !isRecentWinner(c.playerId));
-      const g1Cooldown = group1.find(c => isRecentWinner(c.playerId));
-      const g2Cooldown = group2.find(c => isRecentWinner(c.playerId));
-      const g3Clean = group3.find(c => !isRecentWinner(c.playerId));
-      const g3Cooldown = group3.find(c => isRecentWinner(c.playerId));
-      const g4Clean = group4.find(c => !isRecentWinner(c.playerId));
-      const g4Cooldown = group4.find(c => isRecentWinner(c.playerId));
+      const g1Clean = group1.find(c => !candidateIsCooldown(c));
+      const g2Clean = group2.find(c => !candidateIsCooldown(c));
+      const g1Cooldown = group1.find(c => candidateIsCooldown(c));
+      const g2Cooldown = group2.find(c => candidateIsCooldown(c));
+      const g3Clean = group3.find(c => !candidateIsCooldown(c));
+      const g3Cooldown = group3.find(c => candidateIsCooldown(c));
+      const g4Clean = group4.find(c => !candidateIsCooldown(c));
+      const g4Cooldown = group4.find(c => candidateIsCooldown(c));
 
       const chosen = g1Clean || g2Clean || g1Cooldown || g2Cooldown || g3Clean || g3Cooldown || g4Clean || g4Cooldown || null;
 
@@ -768,7 +773,7 @@
           deficitCoupons: deficit,
           overflowCoupons: 0,
           isEfficient: true,
-          isCooldown: isRecentWinner(chosen.playerId),
+          isCooldown: candidateIsCooldown(chosen),
         });
       } else {
         assignmentMap.set(slot.slotIndex, {

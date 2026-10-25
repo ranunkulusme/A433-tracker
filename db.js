@@ -513,8 +513,15 @@ function getCatalog() {
   }));
 }
 
-function saveCatalogItem(item) {
-  const db = getDb();
+function saveCatalogItem(itemOrDb, maybeItem) {
+  let db, item;
+  if (itemOrDb && typeof itemOrDb.prepare === 'function') {
+    db = itemOrDb;
+    item = maybeItem;
+  } else {
+    db = getDb();
+    item = itemOrDb;
+  }
   const upgradeType = item.upgradeType || item.upgrade_type || 'standard';
   db.prepare(`
     INSERT INTO officer_catalog (id, name, type, generation, coupon_per_puzzle, upgrade_type, medals_before_training, medals_training, medals_total)
@@ -1137,12 +1144,13 @@ function initDb(filePath) {
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
   if (userCount === 0) {
     seedDemoData(db);
-  } else {
-    const catalogCount = db.prepare('SELECT COUNT(*) as count FROM officer_catalog').get().count;
-    if (catalogCount === 0 && COMMUNITY_OFFICERS && COMMUNITY_OFFICERS.length) {
-      for (const item of COMMUNITY_OFFICERS) {
-        saveCatalogItem(item);
-      }
+  }
+
+  // Ensure all community officers are present/upserted in officer_catalog on startup
+  // (both for newly seeded databases and existing v3.0.0 databases with partial catalog)
+  if (COMMUNITY_OFFICERS && COMMUNITY_OFFICERS.length) {
+    for (const item of COMMUNITY_OFFICERS) {
+      saveCatalogItem(db, item);
     }
   }
 

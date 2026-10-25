@@ -493,6 +493,28 @@ test('smartAutoPickWithRegistrations respects fair play cooldown', () => {
   assert.strictEqual(resWithCooldown.assignments[0].playerId, 2, 'Candidate in cooldown should yield place to eligible competitor');
 });
 
+test('smartAutoPickWithRegistrations respects candidate explicit isCooldown over isRecentWinner', () => {
+  const event = { places: [{ place: 1, coupons: 12500 }] };
+  const candidates = [
+    { playerId: 1, officerId: 'o1', deficit: 50000, killPoints: 100, isCooldown: true },
+    { playerId: 2, officerId: 'o2', deficit: 50000, killPoints: 95, isCooldown: false }
+  ];
+
+  // Игрок 1 имеет явный isCooldown = true, поэтому уступает Игроку 2
+  const res = smartAutoPickWithRegistrations({ event, candidates });
+  assert.strictEqual(res.assignments[0].playerId, 2);
+  assert.strictEqual(res.assignments[0].isCooldown, false);
+
+  // Игрок 1 в recentWinners, но явный isCooldown = false переопределяет кулдаун
+  const candidatesOverride = [
+    { playerId: 1, officerId: 'o1', deficit: 50000, killPoints: 100, isCooldown: false },
+    { playerId: 2, officerId: 'o2', deficit: 50000, killPoints: 95, isCooldown: false }
+  ];
+  const resOverride = smartAutoPickWithRegistrations({ event, candidates: candidatesOverride, recentWinners: [1] });
+  assert.strictEqual(resOverride.assignments[0].playerId, 1);
+  assert.strictEqual(resOverride.assignments[0].isCooldown, false);
+});
+
 
 
 

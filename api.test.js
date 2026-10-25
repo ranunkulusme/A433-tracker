@@ -514,21 +514,35 @@ test('API RBAC for /api/players: R3 is forbidden (403), R4/R5 can manage players
     const createPlayerRes = await fetch(`${baseUrl}/api/players`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Новый Воин', rank: 'r3' })
+      body: JSON.stringify({
+        name: 'Новый Воин',
+        rank: 'r3',
+        officers: [
+          { catalogId: 'aurora', name: 'Аврора', level: 10 },
+          { catalogId: 'rex', name: 'Рекс', level: 5 }
+        ]
+      })
     });
     assert.equal(createPlayerRes.status, 200);
     const createdPlayer = await createPlayerRes.json();
     assert.equal(createdPlayer.name, 'Новый Воин');
+    assert.equal(createdPlayer.officers.length, 2);
 
-    // 4. R5 updates the player
+    // 4. R5 updates the player and syncs officers (omitted officer is deleted)
+    const keepOfficer = createdPlayer.officers[0];
     const updatePlayerRes = await fetch(`${baseUrl}/api/players/${createdPlayer.id}`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Ветеран Войны' })
+      body: JSON.stringify({
+        name: 'Ветеран Войны',
+        officers: [keepOfficer]
+      })
     });
     assert.equal(updatePlayerRes.status, 200);
     const updated = await updatePlayerRes.json();
     assert.equal(updated.name, 'Ветеран Войны');
+    assert.equal(updated.officers.length, 1);
+    assert.equal(updated.officers[0].id, keepOfficer.id);
 
     // 5. R5 deletes player
     const delRes = await fetch(`${baseUrl}/api/players/${createdPlayer.id}`, {
