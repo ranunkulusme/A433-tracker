@@ -4505,11 +4505,12 @@ function displayScannerResults(result) {
 
   const nickInput = document.getElementById('scanner-preview-nickname');
   const updateNickCheck = document.getElementById('scanner-preview-update-nickname');
+  const detectedName = s.name || s.nickname || '';
   if (nickInput) {
-    nickInput.value = s.nickname || currentName || '';
+    nickInput.value = detectedName || currentName || '';
   }
   if (updateNickCheck) {
-    updateNickCheck.checked = Boolean(s.nickname);
+    updateNickCheck.checked = Boolean(detectedName);
   }
 
   const powerInput = document.getElementById('scanner-preview-power');

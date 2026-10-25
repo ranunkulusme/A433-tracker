@@ -348,7 +348,7 @@
     const h = canvas.height;
 
     const forceSplit = Boolean(options.forceSplit);
-    const isWideEnough = w >= 600 && (w / h) >= 0.45;
+    const isWideEnough = w >= 600 && (w / h) >= 0.40;
 
     if (!forceSplit && !isWideEnough) {
       return [canvas];

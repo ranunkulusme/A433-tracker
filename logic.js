@@ -250,7 +250,7 @@
 
     const sector = {};
 
-    const tagMatch = text.match(/\[([A-Za-z0-9_#]{2,10})\]\s*([^\r\n,;:()]{1,35})/);
+    const tagMatch = text.match(/\[([A-Za-zА-Яа-яЁё0-9_#]{2,12})\]\s*([^\r\n,;:()]{1,35})/);
     if (tagMatch) {
       sector.allianceTag = tagMatch[1].trim();
       sector.name = tagMatch[2].trim();
@@ -258,7 +258,7 @@
       const nameMatch = text.match(/(?:Ник(?:нейм)?|Имя|Командир)\s*[:：]?\s*([^\r\n,;:()]{1,35})/i);
       if (nameMatch) {
         const rawName = nameMatch[1].trim();
-        const innerTag = rawName.match(/^\[([A-Za-z0-9_#]+)\]\s*(.*)$/);
+        const innerTag = rawName.match(/^\[([A-Za-zА-Яа-яЁё0-9_#]+)\]\s*(.*)$/);
         if (innerTag) {
           sector.allianceTag = innerTag[1].trim();
           sector.name = innerTag[2].trim();

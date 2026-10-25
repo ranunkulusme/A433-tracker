@@ -734,6 +734,10 @@ select option { background: var(--bg3); }
   width: min(640px, calc(100vw - 32px));
 }
 
+#modal-smart-scanner {
+  z-index: 105;
+}
+
 .scanner-dropzone {
   border: 2px dashed var(--border2);
   border-radius: var(--radius-lg);

@@ -873,6 +873,33 @@ VIP 12
   assert.deepStrictEqual(nonProfile.sector, {});
 });
 
+test('parseProfileScreenshotText recognizes profiles with Cyrillic alliance tags and names', () => {
+  const ocrCyrillic = `
+[РФ]Медведь
+Сила: 98,540,120
+Убито: 42,100,000
+Очки за убийства: 3.2B
+  `;
+  const parsed = parseProfileScreenshotText(ocrCyrillic);
+  assert.strictEqual(parsed.isProfile, true);
+  assert.strictEqual(parsed.sector.allianceTag, 'РФ');
+  assert.strictEqual(parsed.sector.name, 'Медведь');
+  assert.strictEqual(parsed.sector.power, 98540120);
+  assert.strictEqual(parsed.sector.kills, 42100000);
+  assert.strictEqual(parsed.sector.killPoints, 3200000000);
+
+  // With prefix "Командир: [РУС] Добрыня"
+  const ocrPrefix = `
+Командир: [РУС] Добрыня
+Мощь: 120,000,000
+  `;
+  const parsedPrefix = parseProfileScreenshotText(ocrPrefix);
+  assert.strictEqual(parsedPrefix.isProfile, true);
+  assert.strictEqual(parsedPrefix.sector.allianceTag, 'РУС');
+  assert.strictEqual(parsedPrefix.sector.name, 'Добрыня');
+  assert.strictEqual(parsedPrefix.sector.power, 120000000);
+});
+
 test('parseWarehouseScreenshotText extracts coupons, puzzles, starCoupons and legendary stars 1-3', () => {
   const warehouseTextPart1 = `
 Купон готовности офицера
