@@ -30,6 +30,7 @@ let currentEventRegistrations = [];
 
 // ─── API & OUTBOX QUEUE HELPERS ──────────────────────────────
 let isFlushingOutbox = false;
+let deferredPrompt = null;
 
 function getLogic() {
   if (typeof logic !== 'undefined') return logic;
@@ -64,24 +65,90 @@ function updateNetworkStatusUI() {
   const queue = getOutboxQueue();
 
   if (isFlushingOutbox) {
-    badge.className = 'network-status syncing';
+    badge.className = 'network-badge syncing';
     badge.innerHTML = '🔄 <span class="badge-text">Синхронизация...</span>';
     badge.title = 'Отправка сохраненных оффлайн-изменений на сервер';
   } else if (!isOnline) {
-    badge.className = 'network-status offline';
+    badge.className = 'network-badge offline';
     const queueText = queue.length > 0 ? ` (${queue.length})` : '';
     badge.innerHTML = `🟡 <span class="badge-text">Оффлайн${queueText}</span>`;
     badge.title = queue.length > 0
       ? `Оффлайн-режим. В очереди на синхронизацию: ${queue.length}`
       : 'Оффлайн-режим';
   } else if (queue.length > 0) {
-    badge.className = 'network-status pending';
+    badge.className = 'network-badge pending';
     badge.innerHTML = `🟡 <span class="badge-text">В очереди: ${queue.length}</span>`;
     badge.title = `В очереди на синхронизацию: ${queue.length}`;
   } else {
-    badge.className = 'network-status online';
+    badge.className = 'network-badge online';
     badge.innerHTML = '🟢 <span class="badge-text">Онлайн</span>';
     badge.title = 'Подключено к серверу, все данные сохранены';
+  }
+}
+
+function handleNetworkBadgeClick() {
+  const isOnline = typeof navigator === 'undefined' || navigator.onLine;
+  const queue = getOutboxQueue();
+
+  if (isFlushingOutbox) {
+    toast('Идет синхронизация с сервером...', 'info');
+    return;
+  }
+
+  if (queue.length > 0 && isOnline) {
+    toast('Запуск синхронизации очереди...', 'info');
+    flushOutboxQueue();
+    return;
+  }
+
+  if (!isOnline && queue.length > 0) {
+    toast('Оффлайн-режим. Сохранено в очереди: ' + queue.length + ' действий. Нажмите при появлении сети для синхронизации.', 'info');
+    return;
+  }
+
+  if (!isOnline && queue.length === 0) {
+    toast('Оффлайн-режим. Очередь синхронизации пуста. Все изменения сохраняются локально.', 'info');
+    return;
+  }
+
+  toast('Все данные синхронизированы с сервером', 'success');
+}
+
+async function handleInstallPwaClick() {
+  if (deferredPrompt) {
+    try {
+      deferredPrompt.prompt();
+      const choiceResult = await deferredPrompt.userChoice;
+      if (choiceResult && choiceResult.outcome === 'accepted') {
+        deferredPrompt = null;
+        const btn = document.getElementById('pwa-install-btn');
+        if (btn) btn.style.display = 'none';
+      }
+    } catch (e) {
+      console.warn('Install prompt error', e);
+    }
+    return;
+  }
+
+  const isIos = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = !!((typeof window !== 'undefined' && window.navigator && window.navigator.standalone)
+    || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+
+  if (isIos && !isStandalone) {
+    openModal('modal-ios-install');
+    return;
+  }
+
+  toast('Для установки приложения используйте пункт меню браузера «Установить» или «Добавить на главный экран»', 'info');
+}
+
+function checkPwaInstallable() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+  const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = !!(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+  if (isIos && !isStandalone) {
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'inline-flex';
   }
 }
 
@@ -345,8 +412,8 @@ async function flushOutboxQueue() {
 
       if (res.status >= 200 && res.status < 300) {
         queue = typeof logicApi.filterOutboxQueue === 'function'
-          ? logicApi.filterOutboxQueue(queue, item.id)
-          : queue.filter(q => q.id !== item.id);
+          ? logicApi.filterOutboxQueue(getOutboxQueue(), item.id)
+          : getOutboxQueue().filter(q => q.id !== item.id);
         saveOutboxQueue(queue);
         updateNetworkStatusUI();
       } else if (res.status === 401) {
@@ -364,8 +431,8 @@ async function flushOutboxQueue() {
         }
         toast(`Не удалось применить оффлайн-изменение (${item.endpoint}): ${errMsg}`, 'error');
         queue = typeof logicApi.filterOutboxQueue === 'function'
-          ? logicApi.filterOutboxQueue(queue, item.id)
-          : queue.filter(q => q.id !== item.id);
+          ? logicApi.filterOutboxQueue(getOutboxQueue(), item.id)
+          : getOutboxQueue().filter(q => q.id !== item.id);
         saveOutboxQueue(queue);
         updateNetworkStatusUI();
       } else {
@@ -375,7 +442,7 @@ async function flushOutboxQueue() {
   } finally {
     isFlushingOutbox = false;
     updateNetworkStatusUI();
-    if (queue.length === 0) {
+    if (getOutboxQueue().length === 0) {
       loadDataFromServer().catch(() => {});
     }
   }
@@ -4182,6 +4249,7 @@ function initApp() {
   renderSidebarNav();
   renderTopbarProfile();
   updateNetworkStatusUI();
+  checkPwaInstallable();
   checkAuth().then(isAuth => {
     if (isAuth) {
       if (currentUser?.rank === 'r3') {
@@ -4212,6 +4280,20 @@ function initApp() {
 }
 
 if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'inline-flex';
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredPrompt = null;
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'none';
+    toast('Приложение KoW Tracker успешно установлено!', 'success');
+  });
+
   window.addEventListener('online', () => {
     updateNetworkStatusUI();
     flushOutboxQueue();
@@ -4244,4 +4326,7 @@ if (typeof window !== 'undefined') {
   window.saveOutboxQueue = saveOutboxQueue;
   window.flushOutboxQueue = flushOutboxQueue;
   window.updateNetworkStatusUI = updateNetworkStatusUI;
+  window.handleNetworkBadgeClick = handleNetworkBadgeClick;
+  window.handleInstallPwaClick = handleInstallPwaClick;
+  window.checkPwaInstallable = checkPwaInstallable;
 }
