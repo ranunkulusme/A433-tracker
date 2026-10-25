@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_OFFICERS, migrateState } = require('./logic.js');
+const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState } = require('./logic.js');
 
 let currentDb = null;
 
@@ -234,6 +234,21 @@ function changePassword(userId, newPassword) {
 }
 
 // ─── PLAYERS & OFFICERS ──────────────────────────────────────
+function parseSkills(skillsData) {
+  let skills = [1, 1, 1, 1];
+  if (Array.isArray(skillsData) && skillsData.length === 4) {
+    skills = skillsData.map(n => Math.max(1, Math.min(5, Number(n) || 1)));
+  } else if (typeof skillsData === 'string') {
+    try {
+      const parsed = JSON.parse(skillsData);
+      if (Array.isArray(parsed) && parsed.length === 4) {
+        skills = parsed.map(n => Math.max(1, Math.min(5, Number(n) || 1)));
+      }
+    } catch (e) {}
+  }
+  return skills;
+}
+
 function getCandidatePlayers() {
   const db = getDb();
   return db.prepare(`
@@ -257,7 +272,8 @@ function getPlayers() {
       name: o.name,
       level: o.level,
       coupons: o.coupons,
-      stars: o.stars
+      stars: o.stars,
+      skills: parseSkills(o.skills_json)
     });
   }
 
@@ -268,6 +284,7 @@ function getPlayers() {
     rank: p.rank || 'r3',
     sector: {
       vipLevel: p.vip_level || 0,
+      vipPoints: p.vip_points || 0,
       confidentialityLevel: p.confidentiality_level || 0,
       power: p.power || 0,
       kills: p.kills || 0,
@@ -294,6 +311,7 @@ function getPlayerById(id) {
     rank: p.rank || 'r3',
     sector: {
       vipLevel: p.vip_level || 0,
+      vipPoints: p.vip_points || 0,
       confidentialityLevel: p.confidentiality_level || 0,
       power: p.power || 0,
       kills: p.kills || 0,
@@ -310,7 +328,8 @@ function getPlayerById(id) {
       name: o.name,
       level: o.level,
       coupons: o.coupons,
-      stars: o.stars
+      stars: o.stars,
+      skills: parseSkills(o.skills_json)
     }))
   };
 }
@@ -322,6 +341,7 @@ function createPlayer(data = {}) {
   const rank = data.rank || 'r3';
   const sector = data.sector || {};
   const vipLevel = sector.vipLevel ?? data.vipLevel ?? data.vip_level ?? 0;
+  const vipPoints = Number(sector.vipPoints ?? data.vipPoints ?? data.vip_points ?? 0) || 0;
   const confLevel = sector.confidentialityLevel ?? data.confidentialityLevel ?? data.confidentiality_level ?? 0;
   const power = sector.power ?? data.power ?? 0;
   const kills = sector.kills ?? data.kills ?? 0;
@@ -335,13 +355,14 @@ function createPlayer(data = {}) {
   let playerId = data.id ? Number(data.id) : null;
   if (playerId) {
     db.prepare(`
-      INSERT INTO players (id, name, real_name, rank, vip_level, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO players (id, name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         real_name = excluded.real_name,
         rank = excluded.rank,
         vip_level = excluded.vip_level,
+        vip_points = excluded.vip_points,
         confidentiality_level = excluded.confidentiality_level,
         power = excluded.power,
         kills = excluded.kills,
@@ -350,12 +371,12 @@ function createPlayer(data = {}) {
         stock_puzzles = excluded.stock_puzzles,
         stock_chests = excluded.stock_chests,
         updated_at = excluded.updated_at
-    `).run(playerId, name, realName, rank, vipLevel, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
+    `).run(playerId, name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
   } else {
     const res = db.prepare(`
-      INSERT INTO players (name, real_name, rank, vip_level, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name, realName, rank, vipLevel, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
+      INSERT INTO players (name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, chests, now);
     playerId = Number(res.lastInsertRowid);
   }
 
@@ -379,6 +400,7 @@ function updatePlayer(id, updates = {}) {
 
   const sec = updates.sector || {};
   const vipLevel = sec.vipLevel !== undefined ? sec.vipLevel : (updates.vipLevel !== undefined ? updates.vipLevel : (updates.vip_level !== undefined ? updates.vip_level : existing.sector.vipLevel));
+  const vipPoints = sec.vipPoints !== undefined ? Number(sec.vipPoints) || 0 : (updates.vipPoints !== undefined ? Number(updates.vipPoints) || 0 : (updates.vip_points !== undefined ? Number(updates.vip_points) || 0 : (existing.sector.vipPoints || 0)));
   const confLevel = sec.confidentialityLevel !== undefined ? sec.confidentialityLevel : (updates.confidentialityLevel !== undefined ? updates.confidentialityLevel : (updates.confidentiality_level !== undefined ? updates.confidentiality_level : existing.sector.confidentialityLevel));
   const power = sec.power !== undefined ? sec.power : (updates.power !== undefined ? updates.power : existing.sector.power);
   const kills = sec.kills !== undefined ? sec.kills : (updates.kills !== undefined ? updates.kills : existing.sector.kills);
@@ -393,10 +415,10 @@ function updatePlayer(id, updates = {}) {
   db.prepare(`
     UPDATE players
     SET name = ?, real_name = ?, rank = ?,
-        vip_level = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
+        vip_level = ?, vip_points = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
         stock_coupons = ?, stock_puzzles = ?, stock_chests = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, realName, rank, vipLevel, confLevel, power, kills, killPoints, coupons, puzzles, chests, now, id);
+  `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, chests, now, id);
 
   return getPlayerById(id);
 }
@@ -415,19 +437,22 @@ function addPlayerOfficer(playerId, officerData) {
   const level = Number(officerData.level) || 0;
   const coupons = Number(officerData.coupons) || 0;
   const stars = Number(officerData.stars) || 0;
+  const skills = parseSkills(officerData.skills ?? officerData.skills_json);
+  const skillsJson = JSON.stringify(skills);
 
   db.prepare(`
-    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, skills_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       catalog_id = excluded.catalog_id,
       name = excluded.name,
       level = excluded.level,
       coupons = excluded.coupons,
-      stars = excluded.stars
-  `).run(id, playerId, catalogId, name, level, coupons, stars);
+      stars = excluded.stars,
+      skills_json = excluded.skills_json
+  `).run(id, playerId, catalogId, name, level, coupons, stars, skillsJson);
 
-  return { id, playerId, catalogId, name, level, coupons, stars };
+  return { id, playerId, catalogId, name, level, coupons, stars, skills };
 }
 
 function updatePlayerOfficer(playerId, officerId, updates) {
@@ -440,11 +465,19 @@ function updatePlayerOfficer(playerId, officerId, updates) {
   const stars = updates.stars !== undefined ? Number(updates.stars) : existing.stars;
   const name = updates.name !== undefined ? updates.name : existing.name;
 
+  let skills;
+  if (updates.skills !== undefined || updates.skills_json !== undefined) {
+    skills = parseSkills(updates.skills ?? updates.skills_json);
+  } else {
+    skills = parseSkills(existing.skills_json);
+  }
+  const skillsJson = JSON.stringify(skills);
+
   db.prepare(`
     UPDATE player_officers
-    SET level = ?, coupons = ?, stars = ?, name = ?
+    SET level = ?, coupons = ?, stars = ?, name = ?, skills_json = ?
     WHERE id = ? AND player_id = ?
-  `).run(level, coupons, stars, name, officerId, playerId);
+  `).run(level, coupons, stars, name, skillsJson, officerId, playerId);
 
   return {
     id: officerId,
@@ -452,7 +485,8 @@ function updatePlayerOfficer(playerId, officerId, updates) {
     name,
     level,
     coupons,
-    stars
+    stars,
+    skills
   };
 }
 
@@ -472,6 +506,7 @@ function getCatalog() {
     type: r.type,
     generation: r.generation,
     couponPerPuzzle: r.coupon_per_puzzle,
+    upgradeType: r.upgrade_type || 'standard',
     medalsBeforeTraining: r.medals_before_training,
     medalsTraining: r.medals_training,
     medalsTotal: r.medals_total
@@ -480,14 +515,16 @@ function getCatalog() {
 
 function saveCatalogItem(item) {
   const db = getDb();
+  const upgradeType = item.upgradeType || item.upgrade_type || 'standard';
   db.prepare(`
-    INSERT INTO officer_catalog (id, name, type, generation, coupon_per_puzzle, medals_before_training, medals_training, medals_total)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO officer_catalog (id, name, type, generation, coupon_per_puzzle, upgrade_type, medals_before_training, medals_training, medals_total)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       type = excluded.type,
       generation = excluded.generation,
       coupon_per_puzzle = excluded.coupon_per_puzzle,
+      upgrade_type = excluded.upgrade_type,
       medals_before_training = excluded.medals_before_training,
       medals_training = excluded.medals_training,
       medals_total = excluded.medals_total
@@ -497,11 +534,15 @@ function saveCatalogItem(item) {
     item.type || 'Пехота',
     item.generation || 7,
     item.couponPerPuzzle ?? item.coupon_per_puzzle ?? 500,
+    upgradeType,
     item.medalsBeforeTraining ?? item.medals_before_training ?? 690,
     item.medalsTraining ?? item.medals_training ?? 900,
     item.medalsTotal ?? item.medals_total ?? 1590
   );
-  return item;
+  return {
+    ...item,
+    upgradeType
+  };
 }
 
 function deleteCatalogItem(id) {
@@ -607,6 +648,33 @@ function deleteEvent(id) {
   return true;
 }
 
+function getRecentWinners(eventTypeId, limit = 2, excludeEventId = null) {
+  const db = getDb();
+  const typeId = Number(eventTypeId);
+  const numLimit = Number(limit) || 2;
+  const rows = db.prepare(`
+    SELECT assignments_json
+    FROM events
+    WHERE type_id = ? ${excludeEventId ? 'AND id != ?' : ''}
+    ORDER BY date_from DESC, id DESC
+  `).all(...(excludeEventId ? [typeId, excludeEventId] : [typeId]));
+
+  const winners = [];
+  for (const row of rows) {
+    if (winners.length >= numLimit) break;
+    try {
+      const assignments = JSON.parse(row.assignments_json || '[]');
+      const firstPlace = assignments.find(a => Number(a.place) === 1 && (a.playerId !== undefined && a.playerId !== null));
+      if (firstPlace && firstPlace.playerId) {
+        if (!winners.includes(firstPlace.playerId)) {
+          winners.push(firstPlace.playerId);
+        }
+      }
+    } catch (e) {}
+  }
+  return winners;
+}
+
 // ─── EVENT REGISTRATIONS ─────────────────────────────────────
 function getRegistrationsByEventId(eventId) {
   const db = getDb();
@@ -709,18 +777,64 @@ function exportKowJson() {
 }
 
 function importKowJson(rawJson) {
-  const state = migrateState(typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson);
+  const raw = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+  const state = migrateState(raw);
   const db = getDb();
+
+  const rawOfficersByPlayerAndId = new Map();
+  const rawPlayerVipPoints = new Map();
+  if (Array.isArray(raw?.players)) {
+    for (const rp of raw.players) {
+      if (rp && rp.id !== undefined) {
+        const vp = rp.sector?.vipPoints ?? rp.vipPoints ?? rp.vip_points ?? 0;
+        rawPlayerVipPoints.set(rp.id, vp);
+      }
+      if (Array.isArray(rp?.officers)) {
+        for (const ro of rp.officers) {
+          if (ro && ro.id) {
+            rawOfficersByPlayerAndId.set(`${rp.id}:${ro.id}`, ro);
+          }
+        }
+      }
+    }
+  }
+  const rawCatalogUpgradeTypes = new Map();
+  if (Array.isArray(raw?.officerCatalog)) {
+    for (const rc of raw.officerCatalog) {
+      if (rc && rc.id) {
+        rawCatalogUpgradeTypes.set(rc.id, rc.upgradeType || rc.upgrade_type || 'standard');
+      }
+    }
+  }
 
   db.exec('BEGIN TRANSACTION');
   try {
     for (const item of state.officerCatalog || []) {
+      if (rawCatalogUpgradeTypes.has(item.id)) {
+        item.upgradeType = rawCatalogUpgradeTypes.get(item.id);
+      }
       saveCatalogItem(item);
     }
     for (const et of state.eventTypes || []) {
       saveEventType(et);
     }
     for (const p of state.players || []) {
+      if (rawPlayerVipPoints.has(p.id)) {
+        p.sector = p.sector || {};
+        p.sector.vipPoints = rawPlayerVipPoints.get(p.id);
+      }
+      if (Array.isArray(p.officers)) {
+        for (const o of p.officers) {
+          const rawOfficer = rawOfficersByPlayerAndId.get(`${p.id}:${o.id}`);
+          if (rawOfficer) {
+            if (rawOfficer.skills !== undefined) {
+              o.skills = rawOfficer.skills;
+            } else if (rawOfficer.skills_json !== undefined) {
+              o.skills_json = rawOfficer.skills_json;
+            }
+          }
+        }
+      }
       createPlayer(p);
     }
     for (const ev of state.events || []) {
@@ -743,7 +857,8 @@ function importKowJson(rawJson) {
 // ─── BOOTSTRAP ───────────────────────────────────────────────
 function seedDemoData(db) {
   // 1. Officer catalog
-  for (const item of DEFAULT_OFFICERS) {
+  const catalogToSeed = (COMMUNITY_OFFICERS && COMMUNITY_OFFICERS.length) ? COMMUNITY_OFFICERS : DEFAULT_OFFICERS;
+  for (const item of catalogToSeed) {
     saveCatalogItem(item);
   }
 
@@ -876,6 +991,31 @@ function seedDemoData(db) {
   `).run('admin', adminHash, now);
 }
 
+function migrateSchema(db) {
+  function getColumns(table) {
+    try {
+      return db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  const playerCols = getColumns('players');
+  if (playerCols.length > 0 && !playerCols.includes('vip_points')) {
+    db.exec("ALTER TABLE players ADD COLUMN vip_points INTEGER NOT NULL DEFAULT 0;");
+  }
+
+  const officerCols = getColumns('player_officers');
+  if (officerCols.length > 0 && !officerCols.includes('skills_json')) {
+    db.exec("ALTER TABLE player_officers ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]';");
+  }
+
+  const catalogCols = getColumns('officer_catalog');
+  if (catalogCols.length > 0 && !catalogCols.includes('upgrade_type')) {
+    db.exec("ALTER TABLE officer_catalog ADD COLUMN upgrade_type TEXT NOT NULL DEFAULT 'standard';");
+  }
+}
+
 // ─── INIT DB ─────────────────────────────────────────────────
 function initDb(filePath) {
   const dbPath = filePath || process.env.DB_PATH || path.join(__dirname, 'data', 'kow.db');
@@ -914,6 +1054,7 @@ function initDb(filePath) {
       real_name TEXT DEFAULT '',
       rank TEXT NOT NULL DEFAULT 'r3',
       vip_level INTEGER DEFAULT 0,
+      vip_points INTEGER NOT NULL DEFAULT 0,
       confidentiality_level INTEGER DEFAULT 0,
       power REAL DEFAULT 0,
       kills REAL DEFAULT 0,
@@ -931,7 +1072,8 @@ function initDb(filePath) {
       name TEXT NOT NULL,
       level INTEGER NOT NULL DEFAULT 0,
       coupons INTEGER NOT NULL DEFAULT 0,
-      stars INTEGER NOT NULL DEFAULT 0
+      stars INTEGER NOT NULL DEFAULT 0,
+      skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]'
     );
 
     CREATE TABLE IF NOT EXISTS officer_catalog (
@@ -940,6 +1082,7 @@ function initDb(filePath) {
       type TEXT NOT NULL,
       generation INTEGER NOT NULL DEFAULT 7,
       coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+      upgrade_type TEXT NOT NULL DEFAULT 'standard',
       medals_before_training INTEGER DEFAULT 690,
       medals_training INTEGER DEFAULT 900,
       medals_total INTEGER DEFAULT 1590
@@ -988,10 +1131,19 @@ function initDb(filePath) {
     );
   `);
 
+  migrateSchema(db);
+
   // Check if empty to auto-bootstrap
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
   if (userCount === 0) {
     seedDemoData(db);
+  } else {
+    const catalogCount = db.prepare('SELECT COUNT(*) as count FROM officer_catalog').get().count;
+    if (catalogCount === 0 && COMMUNITY_OFFICERS && COMMUNITY_OFFICERS.length) {
+      for (const item of COMMUNITY_OFFICERS) {
+        saveCatalogItem(item);
+      }
+    }
   }
 
   return db;
@@ -1035,6 +1187,7 @@ module.exports = {
   getEventById,
   saveEvent,
   deleteEvent,
+  getRecentWinners,
   getRegistrationsByEventId,
   getUserRegistration,
   registerForEvent,
