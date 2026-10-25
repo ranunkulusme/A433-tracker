@@ -315,8 +315,239 @@ test('handles persistent file path and creates parent directory', () => {
     assert.equal(admin.rank, 'r5');
   } finally {
     try {
-      if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
-      if (fs.existsSync(testDbDir)) fs.rmdirSync(testDbDir);
+      dbModule.getDb().close();
+    } catch (e) {}
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
+});
+
+test('db stores skills, vip_points, upgrade_type and retrieves recent winners', () => {
+  const dbModule = require('./db.js');
+  const db = dbModule.initDb(':memory:');
+
+  // 1. Проверка сохранения vipPoints и навыков офицера
+  const player = dbModule.createPlayer({
+    name: 'Командор VIP',
+    sector: { vipLevel: 12, vipPoints: 450000 },
+    officers: [{ id: 'o-vip', catalogId: 'general-rex', name: 'Генерал Рекс', level: 10, skills: [5, 5, 1, 1] }]
+  });
+
+  const fetched = dbModule.getPlayerById(player.id);
+  assert.strictEqual(fetched.sector.vipPoints, 450000);
+  assert.deepStrictEqual(fetched.officers[0].skills, [5, 5, 1, 1]);
+
+  // 2. Обновление vipPoints и навыков
+  dbModule.updatePlayer(player.id, { sector: { vipPoints: 520000 } });
+  const updatedPlayer = dbModule.getPlayerById(player.id);
+  assert.strictEqual(updatedPlayer.sector.vipPoints, 520000);
+
+  dbModule.updatePlayerOfficer(player.id, 'o-vip', { skills: [5, 5, 5, 2] });
+  const updatedOfficer = dbModule.getPlayerById(player.id);
+  assert.deepStrictEqual(updatedOfficer.officers[0].skills, [5, 5, 5, 2]);
+
+  // 3. Каталог и upgradeType
+  const catalog = dbModule.getCatalog();
+  assert(catalog.length >= 12, 'Catalog should be seeded with COMMUNITY_OFFICERS');
+  const angel = catalog.find(c => c.id === 'angel');
+  assert(angel, 'Angel officer should exist in catalog');
+  assert.strictEqual(angel.upgradeType, 'special');
+
+  dbModule.saveCatalogItem({
+    id: 'custom-hero',
+    name: 'Кастом Герой',
+    type: 'Танк',
+    upgradeType: 'special'
+  });
+  const custom = dbModule.getCatalog().find(c => c.id === 'custom-hero');
+  assert.strictEqual(custom.upgradeType, 'special');
+
+  // 4. Проверка метода getRecentWinners
+  assert(typeof dbModule.getRecentWinners === 'function');
+  const kwWinners = dbModule.getRecentWinners(1, 2);
+  assert.deepStrictEqual(kwWinners, [5, 3]);
+
+  const kwWinnerSingle = dbModule.getRecentWinners(1, 1);
+  assert.deepStrictEqual(kwWinnerSingle, [5]);
+
+  const kwWinnerExclude = dbModule.getRecentWinners(1, 2, 3);
+  assert.deepStrictEqual(kwWinnerExclude, [3]);
+
+  // 5. Проверка exportKowJson и importKowJson с новыми полями
+  const exported = dbModule.exportKowJson();
+  const exportedPlayer = exported.players.find(p => p.id === player.id);
+  assert.strictEqual(exportedPlayer.sector.vipPoints, 520000);
+  assert.deepStrictEqual(exportedPlayer.officers[0].skills, [5, 5, 5, 2]);
+
+  // Чистый импорт в новую базу
+  dbModule.initDb(':memory:');
+  dbModule.importKowJson(exported);
+  const reFetched = dbModule.getPlayerById(player.id);
+  assert.strictEqual(reFetched.sector.vipPoints, 520000);
+  assert.deepStrictEqual(reFetched.officers[0].skills, [5, 5, 5, 2]);
+});
+
+test('db migrates legacy database schema safely adding missing columns', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const testDbDir = path.join('/tmp', 'kow-legacy-' + Date.now());
+  const testDbPath = path.join(testDbDir, 'legacy.db');
+  fs.mkdirSync(testDbDir, { recursive: true });
+
+  try {
+    // 1. Создаем старую схему v3.0.0 без новых колонок
+    const legacyDb = new DatabaseSync(testDbPath);
+    legacyDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        is_approved INTEGER NOT NULL DEFAULT 0,
+        player_id INTEGER NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        real_name TEXT DEFAULT '',
+        rank TEXT NOT NULL DEFAULT 'r3',
+        vip_level INTEGER DEFAULT 0,
+        confidentiality_level INTEGER DEFAULT 0,
+        power REAL DEFAULT 0,
+        kills REAL DEFAULT 0,
+        kill_points REAL DEFAULT 0,
+        stock_coupons INTEGER DEFAULT 0,
+        stock_puzzles INTEGER DEFAULT 0,
+        stock_chests INTEGER DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE player_officers (
+        id TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL REFERENCES players(id),
+        catalog_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        level INTEGER NOT NULL DEFAULT 0,
+        coupons INTEGER NOT NULL DEFAULT 0,
+        stars INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE officer_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        generation INTEGER NOT NULL DEFAULT 7,
+        coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+        medals_before_training INTEGER DEFAULT 690,
+        medals_training INTEGER DEFAULT 900,
+        medals_total INTEGER DEFAULT 1590
+      );
+      INSERT INTO users (username, password_hash, rank, is_approved, created_at)
+      VALUES ('admin', 'hash', 'r5', 1, '2026-01-01');
+      INSERT INTO players (name, rank, updated_at) VALUES ('Ветеран', 'r3', '2026-01-01');
+      INSERT INTO player_officers (id, player_id, catalog_id, name) VALUES ('po-legacy', 1, 'admiral-nathon', 'Адмирал');
+    `);
+    legacyDb.close();
+
+    // 2. Инициализируем через initDb — должна произойти безопасная миграция
+    const dbModule = require('./db.js');
+    dbModule.initDb(testDbPath);
+
+    const player = dbModule.getPlayerById(1);
+    assert.strictEqual(player.sector.vipPoints, 0);
+    assert.deepStrictEqual(player.officers[0].skills, [1, 1, 1, 1]);
+
+    const catalogCols = dbModule.getDb().prepare("PRAGMA table_info(officer_catalog)").all().map(c => c.name);
+    assert(catalogCols.includes('upgrade_type'));
+
+    const playerCols = dbModule.getDb().prepare("PRAGMA table_info(players)").all().map(c => c.name);
+    assert(playerCols.includes('vip_points'));
+
+    const officerCols = dbModule.getDb().prepare("PRAGMA table_info(player_officers)").all().map(c => c.name);
+    assert(officerCols.includes('skills_json'));
+  } finally {
+    try {
+      dbModule.getDb().close();
+    } catch (e) {}
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
+});
+
+test('initDb upserts all community officers into existing database with 3 legacy officers', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const dbModule = require('./db.js');
+  const testDbDir = path.join(__dirname, 'data-test-community');
+  const testDbPath = path.join(testDbDir, 'kow-community.db');
+
+  try {
+    if (!fs.existsSync(testDbDir)) fs.mkdirSync(testDbDir, { recursive: true });
+    if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
+
+    const legacyDb = new DatabaseSync(testDbPath);
+    legacyDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        is_approved INTEGER NOT NULL DEFAULT 0,
+        player_id INTEGER NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE player_officers (
+        id TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL REFERENCES players(id),
+        catalog_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        level INTEGER NOT NULL DEFAULT 0,
+        coupons INTEGER NOT NULL DEFAULT 0,
+        stars INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE officer_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        generation INTEGER NOT NULL DEFAULT 7,
+        coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+        upgrade_type TEXT NOT NULL DEFAULT 'standard',
+        medals_before_training INTEGER DEFAULT 690,
+        medals_training INTEGER DEFAULT 900,
+        medals_total INTEGER DEFAULT 1590
+      );
+      INSERT INTO users (username, password_hash, rank, is_approved, created_at)
+      VALUES ('admin', 'hash', 'r5', 1, '2026-01-01');
+      INSERT INTO officer_catalog (id, name, type) VALUES ('admiral-nathon', 'Адмирал Нейтон', 'Пехота');
+      INSERT INTO officer_catalog (id, name, type) VALUES ('general-rex', 'Генерал Рекс', 'Танки');
+      INSERT INTO officer_catalog (id, name, type) VALUES ('captain-black', 'Капитан Блэк', 'Артиллерия');
+    `);
+    legacyDb.close();
+
+    // Запускаем initDb на существующей БД с 3 офицерами
+    dbModule.initDb(testDbPath);
+
+    // Должно стать 12 офицеров (все community officers добавлены/обновлены)
+    const catalog = dbModule.getCatalog();
+    assert.strictEqual(catalog.length, 12);
+    const aurora = catalog.find(o => o.id === 'aurora');
+    assert(aurora);
+    assert.strictEqual(aurora.generation, 8);
+    assert.strictEqual(aurora.upgradeType, 'standard');
+    const angel = catalog.find(o => o.id === 'angel');
+    assert(angel);
+    assert.strictEqual(angel.upgradeType, 'special');
+  } finally {
+    try {
+      dbModule.getDb().close();
+    } catch (e) {}
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
     } catch (e) {}
   }
 });

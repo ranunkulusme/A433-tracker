@@ -309,6 +309,44 @@ function setCurrentRole(role) {
   navigate(currentPage, pageParams);
 }
 
+// ─── VIP DEFICIT HINT ────────────────────────────────────────
+function updateVipProgressHint(isCabinet = false) {
+  const vipInput = isCabinet
+    ? (document.getElementById('my-sector-vip') || document.getElementById('fp-vip'))
+    : document.getElementById('fp-vip');
+  const ptsInput = isCabinet
+    ? (document.getElementById('my-sector-vip-points') || document.getElementById('fp-vip-points'))
+    : document.getElementById('fp-vip-points');
+  const hintEl = isCabinet
+    ? (document.getElementById('my-cabinet-vip-progress-hint') || document.getElementById('vip-progress-hint'))
+    : document.getElementById('vip-progress-hint');
+
+  if (!hintEl) return;
+
+  const vip = Math.max(0, Math.min(30, parseInt(vipInput?.value) || 0));
+  const pts = Math.max(0, parseInt(ptsInput?.value) || 0);
+
+  if (vip >= 30) {
+    hintEl.style.display = 'block';
+    hintEl.innerHTML = `<span class="badge badge-success" style="font-size:11px">⭐ VIP 30 (Максимальный уровень)</span>`;
+    return;
+  }
+
+  const defFn = (typeof logic !== 'undefined' && logic.calculateVipDeficit)
+    ? logic.calculateVipDeficit
+    : (typeof calculateVipDeficit === 'function' ? calculateVipDeficit : null);
+
+  if (!defFn) return;
+
+  const def = defFn({ currentLevel: vip, currentPoints: pts, targetLevel: vip + 1 });
+  hintEl.style.display = 'block';
+  hintEl.innerHTML = `⭐ <strong>До VIP ${def.targetLevel}</strong> осталось <strong>${fmtNum(def.pointsNeeded)}</strong> очков (+${def.dailyPuzzlesIncrease} пазлов/день)`;
+}
+
+function updateCabinetVipProgressHint() {
+  updateVipProgressHint(true);
+}
+
 // ─── AUTH & SESSION ──────────────────────────────────────────
 function openAuthModal(tab = 'login', alertMessage = null) {
   openModal('modal-auth');
@@ -800,16 +838,21 @@ async function renderMyCabinet() {
           <span>⚙️ Параметры сектора</span>
           <span class="badge badge-none">+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день</span>
         </div>
-        <div class="form-row">
+        <div class="form-row form-row-3">
           <div class="form-group">
             <label for="my-sector-vip">Уровень VIP (0-30)</label>
-            <input type="number" id="my-sector-vip" min="0" max="30" value="${profile.sector.vipLevel}">
+            <input type="number" id="my-sector-vip" min="0" max="30" value="${profile.sector.vipLevel}" oninput="updateCabinetVipProgressHint()">
+          </div>
+          <div class="form-group">
+            <label for="my-sector-vip-points">Очки VIP</label>
+            <input type="number" id="my-sector-vip-points" min="0" value="${profile.sector.vipPoints || 0}" oninput="updateCabinetVipProgressHint()">
           </div>
           <div class="form-group">
             <label for="my-sector-conf">Конфиденциальность</label>
             <input type="number" id="my-sector-conf" min="0" value="${profile.sector.confidentialityLevel}">
           </div>
         </div>
+        <div id="my-cabinet-vip-progress-hint" class="vip-progress-hint" style="margin-bottom:12px"></div>
         <div class="form-row form-row-3">
           <div class="form-group">
             <label for="my-sector-power">Мощь / Сила</label>
@@ -916,6 +959,11 @@ async function renderMyCabinet() {
                 </div>
               </div>
 
+              <!-- Interactive Skills -->
+              <div style="margin:4px 0">
+                ${renderCabinetOfficerSkills(o)}
+              </div>
+
               <!-- Level and Progress -->
               <div>
                 <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
@@ -956,6 +1004,7 @@ async function renderMyCabinet() {
       ${renderCabinetSimulatorHtml()}
     </div>
   `;
+  updateCabinetVipProgressHint();
 }
 
 function renderCabinetSimulatorHtml() {
@@ -1127,8 +1176,59 @@ function renderCabinetSimulatorHtml() {
   `;
 }
 
+function renderCabinetOfficerSkills(o) {
+  const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
+  const medalsFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress)
+    ? logic.calculateSkillMedalsProgress
+    : (typeof calculateSkillMedalsProgress === 'function' ? calculateSkillMedalsProgress : null);
+  const progress = medalsFn ? medalsFn(skills) : { spentMedals: 0, remainingMedals: 690, isMaxSkills: false };
+
+  return `
+    <div class="skill-level-group">
+      <div style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:2px">
+        <span class="skill-group-title">Навыки 5-5-5-5:</span>
+        <div class="skill-progress-badge ${progress.isMaxSkills ? 'max-skills' : ''}">
+          <span>Медали: <strong>${progress.spentMedals}</strong> / 690</span>
+          ${progress.isMaxSkills ? '<span class="badge badge-success" style="font-size:10px">MAX</span>' : `<span class="skill-remaining">(-${progress.remainingMedals})</span>`}
+        </div>
+      </div>
+      <div class="skill-selectors" style="width:100%">
+        ${[0, 1, 2, 3].map(sIdx => `
+          <div class="skill-selector" title="Навык ${sIdx + 1}: уровень ${skills[sIdx]}/5">
+            <span class="skill-idx-badge">Н${sIdx + 1}</span>
+            <div class="skill-btn-group">
+              ${[1, 2, 3, 4, 5].map(lvl => `
+                <button type="button" class="skill-btn ${skills[sIdx] === lvl ? 'active' : ''}" onclick="setMyOfficerSkill('${o.id}', ${sIdx}, ${lvl})">${lvl}</button>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+async function setMyOfficerSkill(officerId, skillIndex, level) {
+  const off = myCabinetProfile?.officers?.find(x => x.id === officerId);
+  if (!off) return;
+  const skills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
+  skills[skillIndex] = Math.max(1, Math.min(5, Number(level) || 1));
+  try {
+    await apiFetch(`/api/my-profile/officers/${officerId}`, {
+      method: 'PUT',
+      body: { skills }
+    });
+    off.skills = skills;
+    toast(`Навык ${skillIndex + 1} обновлен: ${skills[skillIndex]}/5`);
+    await renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка обновления навыка: ' + err.message, 'error');
+  }
+}
+
 async function saveMySector() {
   const vipLevel = Math.max(0, parseInt(document.getElementById('my-sector-vip').value) || 0);
+  const vipPoints = Math.max(0, parseInt(document.getElementById('my-sector-vip-points')?.value) || 0);
   const confidentialityLevel = Math.max(0, parseInt(document.getElementById('my-sector-conf').value) || 0);
   const power = Math.max(0, parseInt(document.getElementById('my-sector-power').value) || 0);
   const kills = Math.max(0, parseInt(document.getElementById('my-sector-kills').value) || 0);
@@ -1138,13 +1238,43 @@ async function saveMySector() {
     await apiFetch('/api/my-profile', {
       method: 'PUT',
       body: {
-        sector: { vipLevel, confidentialityLevel, power, kills, killPoints }
+        sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
       }
     });
     toast('Параметры сектора успешно сохранены');
     await renderMyCabinet();
   } catch (err) {
     toast('Ошибка сохранения сектора: ' + err.message, 'error');
+  }
+}
+
+async function saveMyCabinetProfile() {
+  if (!myCabinetProfile) return;
+  const vipLevel = Math.max(0, parseInt(document.getElementById('my-sector-vip')?.value) || myCabinetProfile.sector?.vipLevel || 0);
+  const vipPoints = Math.max(0, parseInt(document.getElementById('my-sector-vip-points')?.value || document.getElementById('fp-vip-points')?.value) || myCabinetProfile.sector?.vipPoints || 0);
+  const confidentialityLevel = Math.max(0, parseInt(document.getElementById('my-sector-conf')?.value) || myCabinetProfile.sector?.confidentialityLevel || 0);
+  const power = Math.max(0, parseInt(document.getElementById('my-sector-power')?.value) || myCabinetProfile.sector?.power || 0);
+  const kills = Math.max(0, parseInt(document.getElementById('my-sector-kills')?.value) || myCabinetProfile.sector?.kills || 0);
+  const killPoints = Math.max(0, parseFloat(document.getElementById('my-sector-kill-points')?.value) || myCabinetProfile.sector?.killPoints || 0);
+
+  const coupons = Math.max(0, parseInt(document.getElementById('my-stock-coupons')?.value) || myCabinetProfile.stock?.coupons || 0);
+  const puzzles = Math.max(0, parseInt(document.getElementById('my-stock-puzzles')?.value) || myCabinetProfile.stock?.puzzles || 0);
+  const chests = Math.max(0, parseInt(document.getElementById('my-stock-chests')?.value) || myCabinetProfile.stock?.chests || 0);
+
+  try {
+    const res = await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: {
+        sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
+        stock: { coupons, puzzles, chests }
+      }
+    });
+    toast('Профиль успешно сохранен');
+    await renderMyCabinet();
+    return res;
+  } catch (err) {
+    toast('Ошибка сохранения профиля: ' + err.message, 'error');
+    throw err;
   }
 }
 
@@ -1179,6 +1309,46 @@ function renderInteractiveStars(officer) {
   }).join('')}</span>`;
 }
 
+let myOfficerModalSkills = [1, 1, 1, 1];
+
+function renderMyOfficerModalSkills() {
+  const container = document.getElementById('my-officer-modal-skills');
+  if (!container) return;
+  const medalsFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress)
+    ? logic.calculateSkillMedalsProgress
+    : (typeof calculateSkillMedalsProgress === 'function' ? calculateSkillMedalsProgress : null);
+  const progress = medalsFn ? medalsFn(myOfficerModalSkills) : { spentMedals: 0, remainingMedals: 690, isMaxSkills: false };
+
+  container.innerHTML = `
+    <div class="skill-level-group">
+      <div style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:4px">
+        <span class="skill-group-title">Уровни навыков:</span>
+        <span class="skill-progress-badge ${progress.isMaxSkills ? 'max-skills' : ''}">
+          Медали: <strong>${progress.spentMedals}</strong> / 690
+          ${progress.isMaxSkills ? '<span class="badge badge-success" style="font-size:10px">MAX</span>' : `<span class="skill-remaining">(-${progress.remainingMedals})</span>`}
+        </span>
+      </div>
+      <div class="skill-selectors" style="width:100%">
+        ${[0, 1, 2, 3].map(sIdx => `
+          <div class="skill-selector">
+            <span class="skill-idx-badge">Н${sIdx + 1}</span>
+            <div class="skill-btn-group">
+              ${[1, 2, 3, 4, 5].map(lvl => `
+                <button type="button" class="skill-btn ${myOfficerModalSkills[sIdx] === lvl ? 'active' : ''}" onclick="setMyOfficerModalSkill(${sIdx}, ${lvl})">${lvl}</button>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function setMyOfficerModalSkill(sIdx, lvl) {
+  myOfficerModalSkills[sIdx] = Math.max(1, Math.min(5, Number(lvl) || 1));
+  renderMyOfficerModalSkills();
+}
+
 function openAddMyOfficerModal() {
   myOfficerEditId = null;
   document.getElementById('modal-my-officer-title').textContent = 'Добавить офицера в кабинет';
@@ -1197,6 +1367,8 @@ function openAddMyOfficerModal() {
   document.getElementById('my-officer-level').value = 0;
   document.getElementById('my-officer-coupons').value = 0;
   document.getElementById('my-officer-stars').value = 0;
+  myOfficerModalSkills = [1, 1, 1, 1];
+  renderMyOfficerModalSkills();
 
   openModal('modal-my-officer');
 }
@@ -1213,6 +1385,8 @@ function openEditMyOfficerModal(officerId) {
   document.getElementById('my-officer-level').value = off.level || 0;
   document.getElementById('my-officer-coupons').value = off.coupons || 0;
   document.getElementById('my-officer-stars').value = off.stars || 0;
+  myOfficerModalSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
+  renderMyOfficerModalSkills();
 
   openModal('modal-my-officer');
 }
@@ -1221,12 +1395,15 @@ async function saveMyOfficerSubmit() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('my-officer-level').value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('my-officer-coupons').value) || 0);
   const stars = Math.max(0, Math.min(6, parseInt(document.getElementById('my-officer-stars').value) || 0));
+  const skills = Array.isArray(myOfficerModalSkills) && myOfficerModalSkills.length === 4
+    ? myOfficerModalSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
+    : [1, 1, 1, 1];
 
   try {
     if (myOfficerEditId) {
       await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
         method: 'PUT',
-        body: { level, coupons, stars }
+        body: { level, coupons, stars, skills }
       });
       toast('Офицер обновлен');
     } else {
@@ -1238,7 +1415,7 @@ async function saveMyOfficerSubmit() {
       const cat = getCatalogOfficer(catalogId);
       await apiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: { catalogId, name: cat?.name || '', level, coupons, stars }
+        body: { catalogId, name: cat?.name || '', level, coupons, stars, skills }
       });
       toast('Офицер добавлен в профиль');
     }
@@ -1612,7 +1789,11 @@ function renderCalendar() {
   c.innerHTML = `
     <div class="section-header">
       <div class="section-title">Ивенты</div>
-      ${canManage() ? `<button class="btn-primary" onclick="openEventModal()">+ Создать ивент</button>` : ''}
+      ${canManage() ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-outline" onclick="openSeasonSchedulerModal()">⚡ Создать сезон</button>
+          <button class="btn-primary" onclick="openEventModal()">+ Создать ивент</button>
+        </div>` : ''}
     </div>
 
     ${active.length ? `
@@ -2180,11 +2361,16 @@ function renderOfficers() {
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Имя</th><th>Тип</th><th>Поколение</th><th>Купонов за пазл</th><th>Медали</th><th></th></tr></thead>
-        <tbody>${state.officerCatalog.map(o=>`<tr>
+        <thead><tr><th>Имя</th><th>Тип</th><th>Поколение</th><th>Прокачка</th><th>Купонов за пазл</th><th>Медали</th><th></th></tr></thead>
+        <tbody>${state.officerCatalog.map(o => {
+          const upgradeBadge = (o.upgradeType === 'special' || o.couponPerPuzzle === 0)
+            ? `<span class="badge badge-warning" title="Прокачка только пазлами">Только пазлы</span>`
+            : `<span class="badge badge-info" title="Купонная прокачка 500/1">Купонный 500/1</span>`;
+          return `<tr>
           <td><strong>${catalogOfficerLink(o)}</strong></td>
           <td>${troopBadge(o.type)}</td>
           <td style="font-family:var(--mono)">${fmtNum(o.generation)}</td>
+          <td>${upgradeBadge}</td>
           <td style="font-family:var(--mono)">${fmtNum(o.couponPerPuzzle)}</td>
           <td style="font-family:var(--mono)">${fmtNum(o.medalsBeforeTraining)}+${fmtNum(o.medalsTraining)}=${fmtNum(o.medalsTotal)}</td>
           <td>
@@ -2192,7 +2378,8 @@ function renderOfficers() {
               ${canManage()?`<button class="action-btn" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑</button>`:''}
             </div>
           </td>
-        </tr>`).join('')}</tbody>
+        </tr>`;
+        }).join('')}</tbody>
       </table>
     </div>
   `;
@@ -2214,6 +2401,15 @@ function renderOfficerDetail(catalogId) {
     });
   });
 
+  const upgradeBadge = (officer.upgradeType === 'special' || officer.couponPerPuzzle === 0)
+    ? `<span class="badge badge-warning">Только пазлы</span>`
+    : `<span class="badge badge-info">Купонный 500/1</span>`;
+
+  const pairingsFn = (typeof logic !== 'undefined' && logic.getRecommendedPairings)
+    ? logic.getRecommendedPairings
+    : (typeof getRecommendedPairings === 'function' ? getRecommendedPairings : null);
+  const pairings = pairingsFn ? pairingsFn(officer.id) : [];
+
   document.getElementById('content').innerHTML = `
     <div style="margin-bottom:20px">
       <button class="btn-ghost btn-sm" onclick="navigate('officers')">← Офицеры</button>
@@ -2221,8 +2417,9 @@ function renderOfficerDetail(catalogId) {
     <div class="section-header">
       <div>
         <div class="section-title">${officer.name}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
           ${troopBadge(officer.type)}
+          ${upgradeBadge}
           <span style="color:var(--text3);font-size:12px">поколение ${fmtNum(officer.generation)} · ${officer.couponPerPuzzle === 0 ? 'только пазлы' : `${fmtNum(officer.couponPerPuzzle)} купонов за пазл`}</span>
         </div>
       </div>
@@ -2234,7 +2431,29 @@ function renderOfficerDetail(catalogId) {
       <div class="stock-card"><div class="label">Всего медалей</div><div class="value">${fmtNum(officer.medalsTotal)}</div></div>
     </div>
 
-    <div class="section-header"><div class="section-title">Игроки, которые качают офицера</div></div>
+    <!-- Рекомендуемые связки командиров -->
+    <div class="section-header" style="margin-top:24px">
+      <div class="section-title">⚔️ Рекомендуемые связки командиров</div>
+    </div>
+    ${pairings.length ? `
+      <div class="pairings-grid">
+        ${pairings.map(pair => `
+          <div class="pairing-card">
+            <div class="pairing-header">
+              <span class="pairing-name">${escapeHtml(pair.partnerName)}</span>
+              <span class="badge badge-role">${escapeHtml(pair.role)}</span>
+            </div>
+            <div class="pairing-synergy">${escapeHtml(pair.synergy)}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : `
+      <div class="empty-state" style="padding:16px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius)">
+        <p>Для данного офицера ещё нет связок в справочнике мета-связок.</p>
+      </div>
+    `}
+
+    <div class="section-header" style="margin-top:24px"><div class="section-title">Игроки, которые качают офицера</div></div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Игрок</th><th>Уровень</th><th>Купоны</th><th>Звезды</th><th>Запасы</th><th>Прогноз</th></tr></thead>
@@ -2245,7 +2464,7 @@ function renderOfficerDetail(catalogId) {
       </table>
     </div>
 
-    <div class="section-header"><div class="section-title">История участия в ивентах</div></div>
+    <div class="section-header" style="margin-top:24px"><div class="section-title">История участия в ивентах</div></div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Ивент</th><th>Даты</th><th>Место</th><th>Игрок</th><th>Купоны</th><th>Статус</th></tr></thead>
@@ -2731,6 +2950,7 @@ function openPlayerModal(playerId=null) {
   document.getElementById('fp-real-name').value = p?.realName || '';
   document.getElementById('fp-rank').value = p?.rank || 'r3';
   document.getElementById('fp-vip').value = p?.sector?.vipLevel || 0;
+  document.getElementById('fp-vip-points').value = p?.sector?.vipPoints || 0;
   document.getElementById('fp-conf').value = p?.sector?.confidentialityLevel || 0;
   document.getElementById('fp-stock-coupons').value = p?.stock?.coupons || 0;
   document.getElementById('fp-stock-puzzles').value = p?.stock?.puzzles || 0;
@@ -2738,31 +2958,85 @@ function openPlayerModal(playerId=null) {
   document.getElementById('fp-power').value = p?.sector?.power || 0;
   document.getElementById('fp-kills').value = p?.sector?.kills || 0;
   document.getElementById('fp-kill-points').value = p?.sector?.killPoints || 0;
-  officerRows = p ? p.officers.map(o=>({...o})) : [{ id:'new_'+Date.now(), catalogId:state.officerCatalog[0]?.id, level:0, coupons:0, stars:0 }];
+  officerRows = p
+    ? p.officers.map(o=>({...o, skills: Array.isArray(o.skills) && o.skills.length === 4 ? [...o.skills] : [1, 1, 1, 1]}))
+    : [{ id:'new_'+Date.now(), catalogId:state.officerCatalog[0]?.id, level:0, coupons:0, stars:0, skills: [1, 1, 1, 1] }];
   renderOfficerRows();
+  updateVipProgressHint();
   openModal('modal-player');
 }
 
-function renderOfficerRows() {
-  document.getElementById('fp-officers-list').innerHTML = officerRows.map((o,i)=>`
-    <div class="officer-row">
-      <select onchange="officerRows[${i}].catalogId=this.value">
-        ${state.officerCatalog.map(co=>`<option value="${co.id}" ${co.id===o.catalogId?'selected':''}>${co.name}</option>`).join('')}
-      </select>
-      <input type="number" placeholder="Уровень" value="${o.level}" min="0" max="179" style="width:80px" oninput="officerRows[${i}].level=parseInt(this.value)||0">
-      <input type="number" placeholder="Купонов" value="${o.coupons}" min="0" step="500" style="width:100px" oninput="officerRows[${i}].coupons=parseInt(this.value)||0">
-      <span class="stars">${Array.from({length:6},(_,s)=>{
-        const star = s + 1;
-        const cost = starCostFor(star);
-        const label = star < 6 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд`;
-        return `<button type="button" class="star-btn ${(o.stars||0)>s?'active':''}" title="${label}" aria-label="${label}" onclick="setOfficerStars(${i},${star})">${(o.stars||0)>s?'★':'☆'}</button>`;
-      }).join('')}</span>
-      <button class="action-btn danger" onclick="officerRows.splice(${i},1);renderOfficerRows()">✕</button>
-    </div>`).join('');
+function renderOfficerRows(containerId = 'fp-officers-list') {
+  const el = document.getElementById(containerId) || document.getElementById('fp-officers-list');
+  if (!el) return;
+
+  const medalsFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress)
+    ? logic.calculateSkillMedalsProgress
+    : (typeof calculateSkillMedalsProgress === 'function' ? calculateSkillMedalsProgress : null);
+
+  el.innerHTML = officerRows.map((o,i)=>{
+    const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
+    o.skills = skills;
+    const progress = medalsFn ? medalsFn(skills) : { spentMedals: 0, remainingMedals: 690, isMaxSkills: false };
+
+    return `
+      <div class="officer-row-container" style="border-bottom:1px solid var(--border);padding:6px 0">
+        <div class="officer-row" style="border-bottom:none;padding:0">
+          <select onchange="officerRows[${i}].catalogId=this.value">
+            ${state.officerCatalog.map(co=>`<option value="${co.id}" ${co.id===o.catalogId?'selected':''}>${escapeHtml(co.name)}</option>`).join('')}
+          </select>
+          <input type="number" placeholder="Уровень" value="${o.level}" min="0" max="179" style="width:80px" oninput="officerRows[${i}].level=parseInt(this.value)||0">
+          <input type="number" placeholder="Купонов" value="${o.coupons}" min="0" step="500" style="width:100px" oninput="officerRows[${i}].coupons=parseInt(this.value)||0">
+          <span class="stars">${Array.from({length:6},(_,s)=>{
+            const star = s + 1;
+            const cost = starCostFor(star);
+            const label = star < 6 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд`;
+            return `<button type="button" class="star-btn ${(o.stars||0)>s?'active':''}" title="${label}" aria-label="${label}" onclick="setOfficerStars(${i},${star})">${(o.stars||0)>s?'★':'☆'}</button>`;
+          }).join('')}</span>
+          <button type="button" class="action-btn danger" onclick="officerRows.splice(${i},1);renderOfficerRows()">✕</button>
+        </div>
+        <div class="skill-level-group" style="margin-top:6px">
+          <span class="skill-group-title">Навыки 5-5-5-5:</span>
+          <div class="skill-selectors">
+            ${[0, 1, 2, 3].map(sIdx => `
+              <div class="skill-selector" title="Навык ${sIdx + 1}: ${skills[sIdx]}/5">
+                <span class="skill-idx-badge">Н${sIdx + 1}</span>
+                <div class="skill-btn-group">
+                  ${[1, 2, 3, 4, 5].map(lvl => `
+                    <button type="button" class="skill-btn ${skills[sIdx] === lvl ? 'active' : ''}" onclick="setOfficerSkill(${i}, ${sIdx}, ${lvl})">${lvl}</button>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <div class="skill-progress-badge ${progress.isMaxSkills ? 'max-skills' : ''}">
+            <span>Медали: <strong>${progress.spentMedals}</strong> / 690</span>
+            ${progress.isMaxSkills ? '<span class="badge badge-success" style="font-size:10px">MAX</span>' : `<span class="skill-remaining">(-${progress.remainingMedals})</span>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function setOfficerSkill(rowIndex, skillIndex, level) {
+  if (!officerRows[rowIndex]) return;
+  if (!Array.isArray(officerRows[rowIndex].skills) || officerRows[rowIndex].skills.length !== 4) {
+    officerRows[rowIndex].skills = [1, 1, 1, 1];
+  }
+  officerRows[rowIndex].skills[skillIndex] = Math.max(1, Math.min(5, Number(level) || 1));
+  renderOfficerRows();
 }
 
 function addOfficerRow() {
-  officerRows.push({ id:'new_'+Date.now(), catalogId:state.officerCatalog[0]?.id, level:0, coupons:0, stars:0 });
+  officerRows.push({
+    id: 'new_' + Date.now(),
+    catalogId: state.officerCatalog[0]?.id,
+    level: 0,
+    coupons: 0,
+    stars: 0,
+    skills: [1, 1, 1, 1]
+  });
   renderOfficerRows();
 }
 
@@ -2778,6 +3052,7 @@ async function savePlayer() {
   const rank = document.getElementById('fp-rank').value;
   const sector = {
     vipLevel: Math.max(0,parseInt(document.getElementById('fp-vip').value)||0),
+    vipPoints: Math.max(0,parseInt(document.getElementById('fp-vip-points')?.value)||0),
     confidentialityLevel: Math.max(0,parseInt(document.getElementById('fp-conf').value)||0),
     power: Math.max(0,parseInt(document.getElementById('fp-power').value)||0),
     kills: Math.max(0,parseInt(document.getElementById('fp-kills').value)||0),
@@ -2795,6 +3070,7 @@ async function savePlayer() {
     level: Math.max(0,Math.min(MAX_LEVEL-1,parseInt(o.level)||0)),
     coupons: Math.max(0,parseInt(o.coupons)||0),
     stars: Math.max(0,Math.min(6,parseInt(o.stars)||0)),
+    skills: Array.isArray(o.skills) && o.skills.length === 4 ? o.skills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1))) : [1, 1, 1, 1],
   }));
 
   const payload = { name, realName, rank, sector, stock, officers };
@@ -2861,18 +3137,34 @@ function openOfficerCatalogModal(id=null) {
   document.getElementById('fo-name').value = officer?.name || '';
   document.getElementById('fo-type').value = officer?.type || 'Танк';
   document.getElementById('fo-generation').value = officer?.generation || 7;
-  document.getElementById('fo-coupon-per-puzzle').value = officer?.couponPerPuzzle ?? 500;
+  const upType = officer?.upgradeType || (officer?.couponPerPuzzle === 0 ? 'special' : 'standard');
+  const upTypeSelect = document.getElementById('fo-upgrade-type');
+  if (upTypeSelect) upTypeSelect.value = upType;
+  document.getElementById('fo-coupon-per-puzzle').value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 500);
   openModal('modal-officer');
+}
+
+function onFoUpgradeTypeChange(val) {
+  const couponInput = document.getElementById('fo-coupon-per-puzzle');
+  if (!couponInput) return;
+  if (val === 'special') {
+    couponInput.value = 0;
+  } else if (parseInt(couponInput.value) === 0) {
+    couponInput.value = 500;
+  }
 }
 
 async function saveOfficerCatalog() {
   const name = document.getElementById('fo-name').value.trim();
   if (!name) { toast('Введите имя офицера','error'); return; }
+  const couponPerPuzzle = Math.max(0,parseInt(document.getElementById('fo-coupon-per-puzzle').value)||0);
+  const upgradeType = document.getElementById('fo-upgrade-type')?.value || (couponPerPuzzle === 0 ? 'special' : 'standard');
   const data = {
     name,
     type: document.getElementById('fo-type').value,
     generation: Math.max(1,parseInt(document.getElementById('fo-generation').value)||7),
-    couponPerPuzzle: Math.max(0,parseInt(document.getElementById('fo-coupon-per-puzzle').value)||0),
+    couponPerPuzzle,
+    upgradeType,
     medalsBeforeTraining: 690,
     medalsTraining: 900,
     medalsTotal: 1590,
@@ -3030,6 +3322,39 @@ function confirmDeleteEventType(id) {
   openModal('modal-confirm');
 }
 
+// ─── SEASON SCHEDULER MODAL ──────────────────────────────────
+function openSeasonSchedulerModal() {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const defDate = tomorrow.toISOString().slice(0, 10);
+  const dateInput = document.getElementById('sched-start-date');
+  if (dateInput) dateInput.value = defDate;
+  const cyclesInput = document.getElementById('sched-cycles');
+  if (cyclesInput) cyclesInput.value = 3;
+  const presetSelect = document.getElementById('sched-preset');
+  if (presetSelect) presetSelect.value = 'king-of-war';
+  openModal('modal-season-scheduler');
+}
+
+async function submitSeasonSchedule() {
+  const presetId = document.getElementById('sched-preset')?.value || 'king-of-war';
+  const startDate = document.getElementById('sched-start-date')?.value || new Date().toISOString().slice(0, 10);
+  const cyclesCount = Math.max(1, Math.min(6, parseInt(document.getElementById('sched-cycles')?.value) || 1));
+
+  try {
+    const res = await apiFetch('/api/events/schedule-season', {
+      method: 'POST',
+      body: { presetId, startDate, cyclesCount }
+    });
+    toast(`Сезон успешно создан: ${res?.createdCount || cyclesCount} ивент(ов)`);
+    closeAllModals();
+    await loadDataFromServer();
+    if (currentPage === 'calendar') renderCalendar();
+  } catch (err) {
+    toast('Ошибка создания сезона: ' + err.message, 'error');
+  }
+}
+
 // ─── EVENT MODAL ─────────────────────────────────────────────
 let editEventId = null;
 let eventAssignments = []; // [{place, playerId, officerId, actualCoupons?}]
@@ -3151,6 +3476,7 @@ function renderEventRegistrationsBlock() {
           <span style="color:var(--text3)">→</span>
           <span style="color:var(--text2)">${escapeHtml(officerLabel(off))} (ур. ${off?.level ?? '?'})</span>
           <span class="badge badge-none" style="font-size:10px">${escapeHtml(placeLabel)}</span>
+          ${r.isCooldown ? `<span class="cooldown-badge badge" style="font-size:10px">⏳ Кулдаун</span>` : ''}
           ${def ? `<span style="font-size:11px;color:var(--text3)">(дефицит: ${fmtNum(def.deficitCoupons)} куп.)</span>` : ''}
         </div>
         <div>${statusBadge}</div>
@@ -3208,6 +3534,11 @@ function renderEventAssignments() {
       }
     }
 
+    let cooldownBadge = '';
+    if (a.isCooldown) {
+      cooldownBadge = `<span class="cooldown-badge badge" style="font-size:10px" title="Кулдаун после победы на предыдущем ивенте (Fair Play)">⏳ Кулдаун после Топ-1</span>`;
+    }
+
     return `<div class="assign-card">
       <span class="assign-place">${pi?.label || 'Место ' + a.place}</span>
       <input type="number" value="${a.actualCoupons ?? pi?.coupons ?? 0}" min="0" step="500" title="Фактические купоны" oninput="eventAssignments[${i}].actualCoupons=parseInt(this.value)||0;renderEventAssignments()">
@@ -3219,7 +3550,7 @@ function renderEventAssignments() {
         <option value="">— Офицер —</option>
         ${officerOptions}
       </select>
-      <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">${efficiencyBadge}${regBadge}</div>
+      <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">${efficiencyBadge}${regBadge}${cooldownBadge}</div>
       <button class="action-btn danger" onclick="eventAssignments.splice(${i},1);renderEventAssignments()">✕</button>
     </div>`;
   }).join('');
@@ -3483,3 +3814,11 @@ checkAuth().then(isAuth => {
     }
   }
 });
+
+if (typeof window !== 'undefined') {
+  window.saveMyCabinetProfile = saveMyCabinetProfile;
+  window.renderOfficerRows = renderOfficerRows;
+  window.updateVipProgressHint = updateVipProgressHint;
+  window.openSeasonSchedulerModal = openSeasonSchedulerModal;
+  window.submitSeasonSchedule = submitSeasonSchedule;
+}

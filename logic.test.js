@@ -17,6 +17,15 @@ const {
   simulateEventProgress,
   smartAutoPick,
   smartAutoPickWithRegistrations,
+  COMMUNITY_OFFICERS,
+  VIP_TIERS_DATA,
+  calculateVipDeficit,
+  SKILL_UPGRADE_COSTS,
+  calculateSkillMedalsProgress,
+  OFFICER_PAIRINGS,
+  getRecommendedPairings,
+  EVENT_PRESETS,
+  generateSeasonSchedule,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -417,5 +426,95 @@ test('smartAutoPickWithRegistrations handles desiredPlace=0 (любое подх
   assert.equal(result.unassignedCandidates.length, 1);
   assert.equal(result.unassignedCandidates[0].playerId, 1);
 });
+
+test('community officers roster, vip deficit, skills and pairings', () => {
+  // Тест каталога
+  assert(Array.isArray(COMMUNITY_OFFICERS) && COMMUNITY_OFFICERS.length >= 10);
+  const rex = COMMUNITY_OFFICERS.find(o => o.id === 'general-rex');
+  assert.strictEqual(rex.type, 'Танк');
+
+  // Тест VIP дефицита
+  const vipRes = calculateVipDeficit({ currentLevel: 10, currentPoints: 350000, targetLevel: 12 });
+  assert.strictEqual(vipRes.pointsNeeded, 400000);
+  assert.strictEqual(vipRes.dailyPuzzlesIncrease, 2);
+
+  // Граничные условия VIP: уровень 30
+  const vipMax = calculateVipDeficit({ currentLevel: 30, currentPoints: 99999999, targetLevel: 30 });
+  assert.strictEqual(vipMax.pointsNeeded, 0);
+  assert.strictEqual(vipMax.dailyPuzzlesIncrease, 0);
+
+  // Тест навыков 5-5-5-5 (690 медалей)
+  const skillsZero = calculateSkillMedalsProgress([1, 1, 1, 1]);
+  assert.strictEqual(skillsZero.spentMedals, 0);
+  assert.strictEqual(skillsZero.remainingMedals, 690);
+
+  const skillsMax = calculateSkillMedalsProgress([5, 5, 5, 5]);
+  assert.strictEqual(skillsMax.spentMedals, 690);
+  assert.strictEqual(skillsMax.remainingMedals, 0);
+  assert.strictEqual(skillsMax.isMaxSkills, true);
+
+  // Промежуточная прокачка навыка 1 до 5
+  const skillsPartial = calculateSkillMedalsProgress([5, 1, 1, 1]);
+  assert.strictEqual(skillsPartial.spentMedals, 100);
+  assert.strictEqual(skillsPartial.remainingMedals, 590);
+
+  // Тест связок
+  const pairings = getRecommendedPairings('general-rex');
+  assert(pairings.length > 0 && pairings[0].partnerName);
+
+  // Неизвестный офицер
+  assert.deepEqual(getRecommendedPairings('unknown-officer'), []);
+
+  // Тест генератора расписания
+  const schedule = generateSeasonSchedule({ startDate: '2026-11-01', cyclesCount: 2, presetId: 'king-of-war' });
+  assert.strictEqual(schedule.length, 2);
+  assert.strictEqual(schedule[1].dateFrom, '2026-11-15');
+});
+
+test('smartAutoPickWithRegistrations respects fair play cooldown', () => {
+  const catalog = [{ id: 'rex', name: 'Рекс', generation: 7, couponPerPuzzle: 500 }];
+  const event = { places: [{ place: 1, coupons: 12500 }] };
+  const players = [
+    { id: 1, name: 'Победитель', sector: { killPoints: 100 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o1', catalogId: 'rex', level: 0, coupons: 0 }] },
+    { id: 2, name: 'Претендент', sector: { killPoints: 95 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o2', catalogId: 'rex', level: 0, coupons: 0 }] }
+  ];
+
+  // Без кулдауна место получает Игрок 1
+  const resWithoutCooldown = smartAutoPickWithRegistrations({ event, players, officerCatalog: catalog });
+  assert.strictEqual(resWithoutCooldown.assignments[0].playerId, 1);
+
+  // С кулдауном место получает Игрок 2
+  const resWithCooldown = smartAutoPickWithRegistrations({
+    event,
+    players,
+    officerCatalog: catalog,
+    recentWinners: [1]
+  });
+  assert.strictEqual(resWithCooldown.assignments[0].playerId, 2, 'Candidate in cooldown should yield place to eligible competitor');
+});
+
+test('smartAutoPickWithRegistrations respects candidate explicit isCooldown over isRecentWinner', () => {
+  const event = { places: [{ place: 1, coupons: 12500 }] };
+  const candidates = [
+    { playerId: 1, officerId: 'o1', deficit: 50000, killPoints: 100, isCooldown: true },
+    { playerId: 2, officerId: 'o2', deficit: 50000, killPoints: 95, isCooldown: false }
+  ];
+
+  // Игрок 1 имеет явный isCooldown = true, поэтому уступает Игроку 2
+  const res = smartAutoPickWithRegistrations({ event, candidates });
+  assert.strictEqual(res.assignments[0].playerId, 2);
+  assert.strictEqual(res.assignments[0].isCooldown, false);
+
+  // Игрок 1 в recentWinners, но явный isCooldown = false переопределяет кулдаун
+  const candidatesOverride = [
+    { playerId: 1, officerId: 'o1', deficit: 50000, killPoints: 100, isCooldown: false },
+    { playerId: 2, officerId: 'o2', deficit: 50000, killPoints: 95, isCooldown: false }
+  ];
+  const resOverride = smartAutoPickWithRegistrations({ event, candidates: candidatesOverride, recentWinners: [1] });
+  assert.strictEqual(resOverride.assignments[0].playerId, 1);
+  assert.strictEqual(resOverride.assignments[0].isCooldown, false);
+});
+
+
 
 

@@ -1,34 +1,38 @@
-# Community Data and Game Mechanics Implementation Plan
+# Community Data and Game Mechanics Implementation Plan (v3.1.0 Architecture)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Интегрировать в KoW Tracker систематизированные данные сообщества Kiss of War (полный реестр легендарных офицеров Gen 1–9, шкалу очков VIP с расчетом дней до следующего тира, расчет медалей навыков 5-5-5-5, пресеты циклов ивентов, кулдауны побед в автоподборе и мета-связки командиров).
+**Goal:** Интегрировать данные сообщества Kiss of War (реестр офицеров Gen 1–9, шкалу очков VIP, расчет навыков 5-5-5-5, генератор расписания сезонов, кулдауны Fair Play в автоподборе и мета-связки) в клиент-серверную архитектуру KoW Tracker с сохранением в SQLite и поддержкой через REST API.
 
-**Architecture:** Расширить чистые функции и константы модуля `logic.js` новыми структурами данных сообщества (`OFFICER_CATALOG_DATA`, `VIP_TIERS_DATA`, `SKILL_UPGRADE_COSTS`, `EVENT_PRESETS`, `OFFICER_PAIRINGS`), функциями расчета дефицита VIP, прогрессии навыков, генерации расписания и автоподбора с защитой от монополизации мест. В интерфейсе (`app.js`, `index.html`, `style.css`) внедрить селекторы навыков, рекомендации связок и генератор сезонных ивентов.
+**Architecture:** Полноценный full-stack проход:
+1. Вычислительное ядро `logic.js`: чистые функции расчета VIP-дефицита, прогресса навыков, пресетов расписания, связок командиров и кулдауна автоподбора.
+2. База данных `db.js`: расширение схемы SQLite новыми полями (`skills_json`, `vip_points`, `upgrade_type`), сидирование реальных офицеров, методы выборки недавних победителей.
+3. Сервер `server.js`: новые REST-эндпоинты (`/api/events/schedule-season`), санитизация `skills` и `vipPoints` в кабинете игрока (`/api/my-profile`), передача недавних победителей в автоподбор.
+4. Клиент `app.js` / `index.html` / `style.css`: интерактивные элементы управления навыками, виджет окупаемости VIP, модальное окно генератора сезонов, подсказки связок.
 
-**Tech Stack:** Vanilla JavaScript (ES6+, UMD), HTML5, CSS3, `localStorage`, Node.js для тестов (`/opt/homebrew/bin/node logic.test.js`).
+**Tech Stack:** Vanilla JavaScript (ES6+, UMD), Node.js HTTP (`node:http`), SQLite (`node:sqlite`), HTML5, CSS3, модульные тесты (`logic.test.js`, `db.test.js`, `api.test.js`).
 
 **Spec:** [`docs/superpowers/specs/2026-10-24-community-data-and-game-mechanics-spec.md`](file:///Users/ranunkulus/Downloads/KOW/docs/superpowers/specs/2026-10-24-community-data-and-game-mechanics-spec.md)
 
 ## Global Constraints
 
-- Сохранять полную обратную совместимость со структурой состояния `kow_v2` в `localStorage` (все старые профили игроков и офицеров корректно мигрируют).
-- Любые новые параметры моделей должны иметь безопасные дефолты (`skills = [1, 1, 1, 1]`, `vipPoints = 0`).
-- Офицеры с `couponPerPuzzle === 0` (эксклюзивные/пазловые) не могут получать купонные призы в автоподборе.
-- Все расчетные функции в `logic.js` являются чистыми функциями без сайд-эффектов и зависимостей от DOM.
-- Прогон тестов выполняется локально через команду `/opt/homebrew/bin/node logic.test.js`.
+- **Строгое соблюдение GitFlow:** разработка ведется в ветке `feature/community-data-integration`, созданной от актуального `master` (v3.0.0). Прямые коммиты в `master` запрещены.
+- **Нулевые внешние зависимости сервера:** бэкенд использует исключительно нативные возможности Node.js (`node:http`, `node:sqlite`, `node:crypto`).
+- **Обратная совместимость SQLite:** существующая база данных `data/kow.db` должна мигрировать прозрачно при вызове `initDb()`.
+- **RBAC:** рядовой игрок (Р3) может изменять навыки и очки VIP только в своем личном кабинете; генерация сезонов и редактирование каталога доступны только Р4/Р5.
+- Все команды верификации должны выполняться локально: `node logic.test.js && node db.test.js && node api.test.js`.
 
 ## Review Focus
 
-- Миграция старых данных: игроки без поля `skills` у офицеров получают массив `[1, 1, 1, 1]`, не ломая существующие расчеты уровней и дефицита.
-- Офицеры со специальной прокачкой (`upgradeType === 'special'` или `couponPerPuzzle === 0`): дефицит купонов строго равен 0, расчет идет только в пазлах.
-- Расчет очков VIP: при вводе очков, превышающих максимальный уровень (VIP 30), функция возвращает дефицит 0 и не падает с ошибкой переполнения массива.
-- Кулдаун автоподбора: если абсолютно все подходящие игроки находятся в кулдауне, автоподбор не должен оставлять места пустыми — он назначает наименее штрафуемого кандидата.
-- Пресеты ивентов: генератор расписания проверяет корректность начальной даты и не допускает дублирования ID ивентов в существующей базе.
+- Миграция БД: при запуске на существующей БД v3.0.0 таблицы `players`, `player_officers`, `officer_catalog` корректно дополняются новыми колонками без потери существующих данных.
+- Санитизация навыков: массив `skills` строго валидируется на бэкенде (ровно 4 целых числа от 1 до 5); попытка передать невалидные значения корректируется дефолтом `[1, 1, 1, 1]`.
+- VIP-дефицит: при достижении максимального уровня (VIP 30) или превышении порога функция не выбрасывает ошибок переполнения массива и возвращает `pointsNeeded: 0`.
+- Кулдаун автоподбора: если абсолютно все кандидаты имеют кулдаун, автоподбор не оставляет призовые места пустыми, а распределяет их по стандартному скорингу.
+- Импорт/Экспорт JSON: файл бэкапа содержит `skills`, `vipPoints` и `upgradeType`, а импорт старых версий (v2/v3) корректно проставляет значения по умолчанию.
 
 ---
 
-### Task 1: Расширение каталога офицеров реальным ростером (Gen 1–9) и поддержка навыков
+### Task 1: Математическое ядро в `logic.js` (Реестр офицеров, VIP, Навыки 5-5-5-5, Связки и Пресеты)
 
 **Files:**
 - Modify: `logic.js`
@@ -36,330 +40,265 @@
 
 **Interfaces:**
 - Produces:
-  - `COMMUNITY_OFFICERS`: массив легендарных офицеров Gen 1–9 с типами войск, стоимостью пазлов и флагом `upgradeType`.
-  - Обновленный `DEFAULT_OFFICERS` и `migrateState(raw)` с безопасной инициализацией поля `skills: [1, 1, 1, 1]` для каждого офицера игрока.
+  - `COMMUNITY_OFFICERS`: массив легендарных командиров Gen 1–9.
+  - `VIP_TIERS_DATA` и `calculateVipDeficit({ currentLevel, currentPoints, targetLevel })`.
+  - `SKILL_UPGRADE_COSTS` и `calculateSkillMedalsProgress(skills)`.
+  - `OFFICER_PAIRINGS` и `getRecommendedPairings(officerId)`.
+  - `EVENT_PRESETS` и `generateSeasonSchedule({ startDate, cyclesCount, presetId, startId })`.
 
-- [ ] **Step 1: Написать падающий тест в `logic.test.js`**
+- [ ] **Step 1: Написать падающие тесты в `logic.test.js`**
 
-Добавить тест проверки расширенного каталога и миграции навыков:
+Добавить тесты проверки новых чистых функций в `logic.test.js`:
 ```javascript
-const { COMMUNITY_OFFICERS, migrateState } = require('./logic');
+const {
+  COMMUNITY_OFFICERS,
+  calculateVipDeficit,
+  calculateSkillMedalsProgress,
+  getRecommendedPairings,
+  generateSeasonSchedule
+} = require('./logic');
 
-assert(Array.isArray(COMMUNITY_OFFICERS) && COMMUNITY_OFFICERS.length >= 10, 'COMMUNITY_OFFICERS should contain at least 10 officers');
-const jessica = COMMUNITY_OFFICERS.find(o => o.id === 'jessica');
-assert(jessica && jessica.type === 'Танк' && jessica.generation === 1, 'Jessica should be Gen 1 Tank');
+// Тест каталога
+assert(Array.isArray(COMMUNITY_OFFICERS) && COMMUNITY_OFFICERS.length >= 10);
+const rex = COMMUNITY_OFFICERS.find(o => o.id === 'general-rex');
+assert.strictEqual(rex.type, 'Танк');
 
-const migrated = migrateState({
-  players: [{ id: 1, name: 'Ветеран', officers: [{ id: 'o1', name: 'Джессика', level: 50 }] }]
-});
-assert.deepStrictEqual(migrated.players[0].officers[0].skills, [1, 1, 1, 1], 'Legacy officer should receive default [1, 1, 1, 1] skills');
-console.log('ok - community officers catalog and legacy skills migration');
+// Тест VIP дефицита
+const vipRes = calculateVipDeficit({ currentLevel: 10, currentPoints: 350000, targetLevel: 12 });
+assert.strictEqual(vipRes.pointsNeeded, 400000);
+assert.strictEqual(vipRes.dailyPuzzlesIncrease, 2);
+
+// Тест навыков 5-5-5-5 (690 медалей)
+const skillsZero = calculateSkillMedalsProgress([1, 1, 1, 1]);
+assert.strictEqual(skillsZero.spentMedals, 0);
+assert.strictEqual(skillsZero.remainingMedals, 690);
+
+const skillsMax = calculateSkillMedalsProgress([5, 5, 5, 5]);
+assert.strictEqual(skillsMax.spentMedals, 690);
+assert.strictEqual(skillsMax.remainingMedals, 0);
+assert.strictEqual(skillsMax.isMaxSkills, true);
+
+// Тест связок
+const pairings = getRecommendedPairings('general-rex');
+assert(pairings.length > 0 && pairings[0].partnerName);
+
+// Тест генератора расписания
+const schedule = generateSeasonSchedule({ startDate: '2026-11-01', cyclesCount: 2, presetId: 'king-of-war' });
+assert.strictEqual(schedule.length, 2);
+assert.strictEqual(schedule[1].dateFrom, '2026-11-15');
+console.log('ok - logic community mechanics and pure calculations');
 ```
 
 - [ ] **Step 2: Запустить тест и убедиться, что он падает**
 
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: FAIL (`COMMUNITY_OFFICERS is not defined`).
+Запуск: `node logic.test.js`  
+Ожидается: FAIL (`calculateVipDeficit is not defined`).
 
-- [ ] **Step 3: Реализовать `COMMUNITY_OFFICERS` и обновить `migrateState` в `logic.js`**
+- [ ] **Step 3: Реализовать константы и функции в `logic.js`**
 
-В `logic.js` объявить массив `COMMUNITY_OFFICERS`, содержащий ключевых командиров:
-- Gen 1: Джессика (Танк), Грейс (Танк), Марджори (Пехота), Эвелин (Пехота), Кэтрин (ПТ), Линда (ПТ).
-- Gen 2–3: Ангел (Танк), Мария (Пехота), Келли (ПТ), Белла (Гарнизон), Виктория (Осада).
-- Gen 4–6: Оливия (Танк), София (ПТ), Хлоя (Пехота), Зоя (Гарнизон).
-- Gen 7–9: Генерал Рекс (Танк, Gen 7), Капитан Блэк (ПТ, Gen 7), Адмирал Нейтон (Пехота, Gen 8), Аврора (Гарнизон, Gen 8), Валькирия (Осада, Gen 9).
-Объединить их с `DEFAULT_OFFICERS`.  
-В `migrateState` при маппинге офицеров игрока добавить поле:
-```javascript
-skills: Array.isArray(officer.skills) && officer.skills.length === 4
-  ? officer.skills.map(s => Math.max(1, Math.min(5, Number(s) || 1)))
-  : [1, 1, 1, 1],
-```
-
-- [ ] **Step 4: Запустить тесты и проверить результат**
-
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: PASS для всех тестов, включая новый.
-
-- [ ] **Step 5: Сделать git commit**
-
-```bash
-git add logic.js logic.test.js
-git commit -m "feat: add community officers roster and skills migration"
-```
-
----
-
-### Task 2: Шкала VIP-очков и калькулятор дефицита до следующего уровня
-
-**Files:**
-- Modify: `logic.js`
-- Modify: `logic.test.js`
-
-**Interfaces:**
-- Produces:
-  - `VIP_TIERS_DATA`: таблица порогов очков VIP (1–30) и ежедневных наград пазлами.
-  - `calculateVipDeficit({ currentLevel, currentPoints, targetLevel })`: возвращает `{ pointsNeeded, dailyPuzzlesIncrease, targetLevel }`.
-
-- [ ] **Step 1: Написать падающий тест в `logic.test.js`**
-
-```javascript
-const { VIP_TIERS_DATA, calculateVipDeficit } = require('./logic');
-
-assert(Array.isArray(VIP_TIERS_DATA) && VIP_TIERS_DATA.length >= 20);
-// Игрок VIP 10 с 350,000 очками хочет VIP 12 (порог 750,000)
-const vipDeficit = calculateVipDeficit({ currentLevel: 10, currentPoints: 350000, targetLevel: 12 });
-assert.strictEqual(vipDeficit.pointsNeeded, 400000);
-assert.strictEqual(vipDeficit.dailyPuzzlesIncrease, 2); // VIP 12 дает 3 пазла, VIP 10 дает 1 пазл -> прибавка +2
-console.log('ok - vip points table and deficit calculator');
-```
-
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
-
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: FAIL (`VIP_TIERS_DATA is not defined`).
-
-- [ ] **Step 3: Реализовать таблицу `VIP_TIERS_DATA` и функцию `calculateVipDeficit` в `logic.js`**
-
-В `logic.js` определить таблицу порогов очков и суточных пазлов для каждого уровня с 1 по 30.  
-Реализовать чистую функцию `calculateVipDeficit`:
-1. Нормализовать входные уровни (ограничить от 1 до 30) и очки.
-2. Найти целевой порог очков `targetPoints`.
-3. Рассчитать `pointsNeeded = Math.max(0, targetPoints - currentPoints)`.
-4. Рассчитать разницу в суточных пазлах `dailyPuzzlesIncrease = targetReward - currentReward`.
+1. Добавить `COMMUNITY_OFFICERS` и объединить с базовым списком.
+2. Реализовать `calculateVipDeficit`, `calculateSkillMedalsProgress`, `getRecommendedPairings`, `generateSeasonSchedule`.
+3. Экспортировать все функции и константы через модуль.
 
 - [ ] **Step 4: Запустить тесты и убедиться, что они проходят**
 
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
+Запуск: `node logic.test.js`  
 Ожидается: PASS.
 
 - [ ] **Step 5: Сделать git commit**
 
 ```bash
 git add logic.js logic.test.js
-git commit -m "feat: add vip tiers data and calculateVipDeficit"
+git commit -m "feat(logic): add community officers roster, vip deficit, skills and pairings"
 ```
 
 ---
 
-### Task 3: Модуль прогрессии прокачки навыков офицера (5-5-5-5)
+### Task 2: Автоподбор с правилом справедливости (Fair Play Cooldown) в `logic.js`
 
 **Files:**
 - Modify: `logic.js`
 - Modify: `logic.test.js`
 
 **Interfaces:**
-- Produces:
-  - `SKILL_UPGRADE_COSTS`: матрица стоимости медалей на каждый шаг навыка 1->5.
-  - `calculateSkillMedalsProgress(skills = [1, 1, 1, 1])`: возвращает `{ spentMedals, remainingMedals, isMaxSkills }`, где максимум равен 690 медалям.
+- Modifies: `smartAutoPickWithRegistrations({ event, players, registrations, officerCatalog, eventDate, recentWinners = [] })`.
+- Produces: штраф к приоритету для кандидатов, занимавших 1-е место в недавних ивентах (`recentWinners.includes(player.id)`).
 
 - [ ] **Step 1: Написать падающий тест в `logic.test.js`**
 
 ```javascript
-const { calculateSkillMedalsProgress } = require('./logic');
+const { smartAutoPickWithRegistrations } = require('./logic');
 
-const base = calculateSkillMedalsProgress([1, 1, 1, 1]);
-assert.strictEqual(base.spentMedals, 0);
-assert.strictEqual(base.remainingMedals, 690);
-assert.strictEqual(base.isMaxSkills, false);
-
-const maxed = calculateSkillMedalsProgress([5, 5, 5, 5]);
-assert.strictEqual(maxed.spentMedals, 690);
-assert.strictEqual(maxed.remainingMedals, 0);
-assert.strictEqual(maxed.isMaxSkills, true);
-
-const half = calculateSkillMedalsProgress([5, 1, 1, 1]);
-assert(half.spentMedals > 0 && half.remainingMedals === 690 - half.spentMedals);
-console.log('ok - skill progression calculation 5-5-5-5 for 690 medals');
-```
-
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
-
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: FAIL (`calculateSkillMedalsProgress is not defined`).
-
-- [ ] **Step 3: Реализовать `SKILL_UPGRADE_COSTS` и `calculateSkillMedalsProgress` в `logic.js`**
-
-В `logic.js` зафиксировать стоимость шагов каждого из 4 навыков, суммарно дающих 690 медалей.  
-Реализовать функцию подсчета потраченных и недостающих медалей.
-
-- [ ] **Step 4: Запустить тесты и убедиться, что они проходят**
-
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: PASS.
-
-- [ ] **Step 5: Сделать git commit**
-
-```bash
-git add logic.js logic.test.js
-git commit -m "feat: add 5-5-5-5 skill medals progress calculator"
-```
-
----
-
-### Task 4: Шаблоны типовых ивентов и генератор сезонного расписания
-
-**Files:**
-- Modify: `logic.js`
-- Modify: `logic.test.js`
-
-**Interfaces:**
-- Produces:
-  - `EVENT_PRESETS`: пресеты «Король Войны» (King of War, 14 дней), «Сильнейший Командир» (Mightiest Commander, 28 дней).
-  - `generateSeasonSchedule({ startDate, cyclesCount, presetId, startId })`: генерирует массив объектов ивентов с датами `dateFrom`, `dateTo`, типом и местами.
-
-- [ ] **Step 1: Написать падающий тест в `logic.test.js`**
-
-```javascript
-const { EVENT_PRESETS, generateSeasonSchedule } = require('./logic');
-
-assert(EVENT_PRESETS['king-of-war'] && EVENT_PRESETS['mightiest-commander']);
-const schedule = generateSeasonSchedule({
-  startDate: '2026-11-01',
-  cyclesCount: 3,
-  presetId: 'king-of-war',
-  startId: 100
-});
-assert.strictEqual(schedule.length, 3);
-assert.strictEqual(schedule[0].id, 100);
-assert.strictEqual(schedule[0].dateFrom, '2026-11-01');
-assert.strictEqual(schedule[1].dateFrom, '2026-11-15'); // через 14 дней
-console.log('ok - event presets and schedule generator');
-```
-
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
-
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: FAIL (`generateSeasonSchedule is not defined`).
-
-- [ ] **Step 3: Реализовать `EVENT_PRESETS` и `generateSeasonSchedule` в `logic.js`**
-
-В `logic.js` объявить структуру пресетов с продолжительностью цикла (в днях), названием и призовыми местами.  
-Реализовать `generateSeasonSchedule`, которая использует `dateAdd` для вычисления дат начала и окончания каждого ивента цикла.
-
-- [ ] **Step 4: Запустить тесты и убедиться, что они проходят**
-
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: PASS.
-
-- [ ] **Step 5: Сделать git commit**
-
-```bash
-git add logic.js logic.test.js
-git commit -m "feat: add event presets and season schedule generator"
-```
-
----
-
-### Task 5: Правило кулдауна победителей (Fair Play) в автоподборе `smartAutoPick`
-
-**Files:**
-- Modify: `logic.js`
-- Modify: `logic.test.js`
-
-**Interfaces:**
-- Consumes: `smartAutoPick` из `logic.js`.
-- Produces: обновленный `smartAutoPick({ ..., cooldownConfig })` с поддержкой параметра `cooldownEventsCount` и истории недавних победителей `recentEventWinners`.
-
-- [ ] **Step 1: Написать падающий тест в `logic.test.js`**
-
-```javascript
-const { smartAutoPick } = require('./logic');
-
-const catalog = [{ id: 'cat-rex', name: 'Рекс', generation: 7, couponPerPuzzle: 500 }];
-const places = [{ place: 1, coupons: 12500 }];
-
-// Игрок 1 имеет 100 очков убийств, но победил в прошлом ивенте (кулдаун)
-// Игрок 2 имеет 90 очков убийств и свободен от кулдауна
+const catalog = [{ id: 'rex', name: 'Рекс', generation: 7, couponPerPuzzle: 500 }];
+const event = { places: [{ place: 1, coupons: 12500 }] };
 const players = [
-  { id: 1, name: 'Игрок 1', sector: { killPoints: 100 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o1', catalogId: 'cat-rex', level: 0, coupons: 0 }] },
-  { id: 2, name: 'Игрок 2', sector: { killPoints: 90 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o2', catalogId: 'cat-rex', level: 0, coupons: 0 }] },
+  { id: 1, name: 'Победитель', sector: { killPoints: 100 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o1', catalogId: 'rex', level: 0, coupons: 0 }] },
+  { id: 2, name: 'Претендент', sector: { killPoints: 95 }, stock: { coupons: 0, puzzles: 0 }, officers: [{ id: 'o2', catalogId: 'rex', level: 0, coupons: 0 }] }
 ];
 
-const result = smartAutoPick({
-  places,
+// Без кулдауна место получает Игрок 1
+const resWithoutCooldown = smartAutoPickWithRegistrations({ event, players, officerCatalog: catalog });
+assert.strictEqual(resWithoutCooldown.assignments[0].playerId, 1);
+
+// С кулдауном место получает Игрок 2
+const resWithCooldown = smartAutoPickWithRegistrations({
+  event,
   players,
   officerCatalog: catalog,
-  recentWinners: [1], // Игрок 1 выиграл прошлый ивент
-  cooldownPenalty: true,
+  recentWinners: [1]
 });
-
-assert.strictEqual(result[0].playerId, 2, 'Player 2 should receive Place 1 due to Player 1 cooldown');
-console.log('ok - smartAutoPick enforces fair play cooldown for recent winners');
+assert.strictEqual(resWithCooldown.assignments[0].playerId, 2, 'Candidate in cooldown should yield place to eligible competitor');
+console.log('ok - smartAutoPickWithRegistrations respects fair play cooldown');
 ```
 
 - [ ] **Step 2: Запустить тест и убедиться, что он падает**
 
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: FAIL (на 1-е место по-прежнему выбирается Игрок 1).
+Запуск: `node logic.test.js`  
+Ожидается: FAIL (без кулдауна назначается игрок 1).
 
-- [ ] **Step 3: Модифицировать скоринг в `smartAutoPick` в `logic.js`**
+- [ ] **Step 3: Реализовать кулдаун скоринга в `smartAutoPickWithRegistrations`**
 
-В формуле сортировки кандидатов внутри `smartAutoPick`:
-- Если передан `recentWinners` и кандидат находится в списке победителей последних `N` ивентов, его ранг смещается вниз (пенальти), если есть другие квалифицированные кандидаты с достаточным дефицитом купонов.
+В скоринге кандидатов добавить пенальти к приоритету, если `recentWinners.includes(p.id)`, при наличии других подходящих кандидатов без дефицитного перерасхода.
 
 - [ ] **Step 4: Запустить тесты и убедиться, что они проходят**
 
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
+Запуск: `node logic.test.js`  
 Ожидается: PASS.
 
 - [ ] **Step 5: Сделать git commit**
 
 ```bash
 git add logic.js logic.test.js
-git commit -m "feat: implement fair play cooldown penalty in smartAutoPick"
+git commit -m "feat(logic): support fair play recent winners cooldown in auto-pick"
 ```
 
 ---
 
-### Task 6: Справочник боевых связок офицеров (Officer Pairings & Recommendations)
+### Task 3: Обновление схемы базы данных SQLite и CRUD в `db.js`
 
 **Files:**
-- Modify: `logic.js`
-- Modify: `logic.test.js`
+- Modify: `db.js`
+- Modify: `db.test.js`
 
 **Interfaces:**
 - Produces:
-  - `OFFICER_PAIRINGS`: справочник рекомендованных пар (Primary + Secondary) по типам войск и тактическим ролям.
-  - `getRecommendedPairings(officerId)`: возвращает синергии для переданного офицера.
+  - Миграция таблицы `players` (колонка `vip_points INTEGER DEFAULT 0`).
+  - Миграция таблицы `player_officers` (колонка `skills_json TEXT DEFAULT '[1,1,1,1]'`).
+  - Миграция таблицы `officer_catalog` (колонка `upgrade_type TEXT DEFAULT 'standard'`).
+  - Метод `getRecentWinners(eventTypeId, limit = 2)`: возвращает ID игроков, побеждавших в недавних ивентах этого типа.
+  - Поддержка новых полей в `exportKowJson` / `importKowJson`.
 
-- [ ] **Step 1: Написать падающий тест в `logic.test.js`**
+- [ ] **Step 1: Написать падающий тест в `db.test.js`**
 
+Добавить тесты сохранения и чтения `vip_points`, `skills_json` и выборки недавних победителей:
 ```javascript
-const { OFFICER_PAIRINGS, getRecommendedPairings } = require('./logic');
+// Проверка сохранения vipPoints и навыков офицера
+const player = db.createPlayer({
+  name: 'Командор VIP',
+  sector: { vipLevel: 12, vipPoints: 450000 },
+  officers: [{ id: 'o-vip', catalogId: 'general-rex', level: 10, skills: [5, 5, 1, 1] }]
+});
 
-assert(Array.isArray(OFFICER_PAIRINGS) && OFFICER_PAIRINGS.length >= 5);
-const rexPairings = getRecommendedPairings('general-rex');
-assert(Array.isArray(rexPairings) && rexPairings.length > 0);
-assert(rexPairings.some(p => p.partnerId === 'angel' || p.partnerId === 'jessica'));
-console.log('ok - officer pairings and recommendations');
+const fetched = db.getPlayerById(player.id);
+assert.strictEqual(fetched.sector.vipPoints, 450000);
+assert.deepStrictEqual(fetched.officers[0].skills, [5, 5, 1, 1]);
+
+// Проверка метода getRecentWinners
+assert(typeof db.getRecentWinners === 'function');
+console.log('ok - db stores skills, vip_points and retrieves recent winners');
 ```
 
 - [ ] **Step 2: Запустить тест и убедиться, что он падает**
 
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
-Ожидается: FAIL (`getRecommendedPairings is not defined`).
+Запуск: `node db.test.js`  
+Ожидается: FAIL.
 
-- [ ] **Step 3: Реализовать `OFFICER_PAIRINGS` и `getRecommendedPairings` в `logic.js`**
+- [ ] **Step 3: Реализовать изменения в `db.js`**
 
-Добавить реестр связок для Танков, ПТ, Пехоты и Гарнизонов с кратким описанием синергии.  
-Реализовать `getRecommendedPairings(officerId)`, находящую все пары, где офицер является ведущим или ведомым.
+1. В `initDb()` добавить функции безопасного добавления колонок `ALTER TABLE ... ADD COLUMN ...` через `PRAGMA table_info`.
+2. Обновить маппинг в `getPlayerById`, `updatePlayer`, `addPlayerOfficer`, `updatePlayerOfficer`.
+3. Добавить реализацию `getRecentWinners(eventTypeId, limit)`.
+4. Обновить начальное сидирование каталога реальными командирами `COMMUNITY_OFFICERS`.
+5. Обновить функции `exportKowJson` и `importKowJson`.
 
 - [ ] **Step 4: Запустить тесты и убедиться, что они проходят**
 
-Запуск: `/opt/homebrew/bin/node logic.test.js`  
+Запуск: `node db.test.js`  
 Ожидается: PASS.
 
 - [ ] **Step 5: Сделать git commit**
 
 ```bash
-git add logic.js logic.test.js
-git commit -m "feat: add officer pairings catalog and recommendations query"
+git add db.js db.test.js
+git commit -m "feat(db): add skills_json, vip_points, upgrade_type and getRecentWinners"
 ```
 
 ---
 
-### Task 7: Обновление UI (`app.js`, `index.html`, `style.css`)
+### Task 4: Бэкенд REST API и интеграция в `server.js`
+
+**Files:**
+- Modify: `server.js`
+- Modify: `api.test.js`
+
+**Interfaces:**
+- Produces:
+  - `POST /api/events/schedule-season`: генерация пачки ивентов по пресету (доступно R4/R5).
+  - Обновленный `POST /api/events/:id/autopick`: автоматическая передача `recentWinners` из `db.getRecentWinners`.
+  - Поддержка `skills` и `vipPoints` в `/api/my-profile`.
+
+- [ ] **Step 1: Написать падающий интеграционный тест в `api.test.js`**
+
+```javascript
+// Тест генерации расписания сезона
+const seasonRes = await apiRequest('/api/events/schedule-season', {
+  method: 'POST',
+  headers: { cookie: `token=${r5Token}` },
+  body: { presetId: 'king-of-war', startDate: '2026-12-01', cyclesCount: 2 }
+});
+assert.strictEqual(seasonRes.status, 201);
+assert.strictEqual(seasonRes.data.createdCount, 2);
+
+// Тест сохранения навыков через личный кабинет R3
+const profileRes = await apiRequest('/api/my-profile', {
+  method: 'PUT',
+  headers: { cookie: `token=${r3Token}` },
+  body: {
+    sector: { vipLevel: 11, vipPoints: 220000 },
+    officers: [{ id: r3OfficerId, catalogId: 'general-rex', level: 20, skills: [5, 3, 1, 1] }]
+  }
+});
+assert.strictEqual(profileRes.status, 200);
+assert.deepStrictEqual(profileRes.data.officers[0].skills, [5, 3, 1, 1]);
+console.log('ok - API schedule-season and profile skills endpoints');
+```
+
+- [ ] **Step 2: Запустить интеграционный тест и убедиться, что он падает**
+
+Запуск: `node api.test.js`  
+Ожидается: FAIL (эндпоинт 404).
+
+- [ ] **Step 3: Реализовать обработчики в `server.js`**
+
+1. В роутер `/api/events/schedule-season` добавить проверку прав (R4/R5), вызов `logic.generateSeasonSchedule`, создание ивентов в БД через транзакцию и возврат результата.
+2. В `/api/events/:id/autopick` подключить `db.getRecentWinners(event.type_id)` и передавать в автоподбор.
+3. В обработчиках `/api/my-profile` добавить сохранение `vipPoints` и массива `skills`.
+
+- [ ] **Step 4: Запустить тесты API и убедиться, что они проходят**
+
+Запуск: `node api.test.js` (с правами на сокеты)  
+Ожидается: PASS.
+
+- [ ] **Step 5: Сделать git commit**
+
+```bash
+git add server.js api.test.js
+git commit -m "feat(api): add season schedule endpoint and integrate fair play autopick"
+```
+
+---
+
+### Task 5: Клиентский интерфейс (`app.js`, `index.html`, `style.css`)
 
 **Files:**
 - Modify: `index.html`
@@ -367,48 +306,78 @@ git commit -m "feat: add officer pairings catalog and recommendations query"
 - Modify: `app.js`
 
 **Interfaces:**
-- Внедрение новых элементов в пользовательский интерфейс:
-  - В модальном окне редактирования игрока: ввод 4 уровней навыков офицеров (1–5) и расчет остатка медалей из 690.
-  - В карточке сектора игрока: поле ввода текущих очков VIP и динамическая подсказка «До следующего уровня VIP осталось N очков (+X пазлов/день)».
-  - В детальной странице офицера: блок «Рекомендуемые связки командиров».
-  - В разделе «Календарь»: кнопка «Заполнить по шаблону сезона» (вызов `generateSeasonSchedule`).
+- UI components:
+  - Селекторы 4 навыков офицера `[1..5, 1..5, 1..5, 1..5]` в личном кабинете и формах редактирования.
+  - Поле ввода очков VIP с калькулятором дефицита.
+  - Кнопка «⚡ Создать сезон» в календаре.
+  - Блок рекомендованных связок командиров.
 
-- [ ] **Step 1: Добавить разметку полей навыков, VIP-очков и кнопки генератора расписания в `index.html`**
+- [ ] **Step 1: Добавить разметку модального окна сезона и полей в `index.html`**
 
-1. В модальное окно офицера добавить селекторы для навыков `[S1, S2, S3, S4]`.
-2. В форму сектора игрока добавить `input#fp-vip-points`.
-3. В шапку календаря добавить кнопку `btn-outline` «+ Шаблон сезона».
-4. В модальное окно деталей офицера добавить контейнер `#officer-synergies`.
+1. Добавить модальное окно `#modal-season-scheduler` с селектором пресетов («Король Войны», «Сильнейший Командир»), выбором даты старта и количества циклов.
+2. В форму редактирования офицеров добавить блок кнопок навыков `.skill-level-group`.
+3. В форму сектора игрока добавить поле `#fp-vip-points` и блок подсказки `#vip-progress-hint`.
 
 - [ ] **Step 2: Добавить стили в `style.css`**
 
-Стилизовать бейджи навыков (`.skill-badge`), сетку связок (`.synergy-card`), прогресс-бар VIP-очков.
+Стилизовать элементы: `.skill-selector`, `.skill-btn.active`, `.vip-badge-card`, `.pairings-grid`, `.cooldown-badge`.
 
-- [ ] **Step 3: Связать интерфейс с логикой в `app.js`**
+- [ ] **Step 3: Связать интерфейс с логикой и API в `app.js`**
 
-1. В `renderOfficerRows()` отображать 4 селектора навыков и расчет `calculateSkillMedalsProgress`.
-2. В карточке сектора игрока вызывать `calculateVipDeficit` при изменении очков VIP.
-3. В странице офицера отображать список из `getRecommendedPairings`.
-4. Реализовать модальное окно «Заполнить сезон» с выбором пресета и добавлением сгенерированных ивентов в `state.events`.
+1. Обновить `renderOfficerRows()` для рендеринга интерактивных кнопок навыков и расчета затраченных медалей через `calculateSkillMedalsProgress`.
+2. Добавить обработчик ввода очков VIP с вызовом `calculateVipDeficit` и выводом очков/дней до следующего уровня.
+3. Добавить функцию `openSeasonSchedulerModal()` и отправку запроса на `/api/events/schedule-season`.
+4. В карточке офицера выводить результат `getRecommendedPairings`.
 
-- [ ] **Step 4: Проверить визуальную работу и отсутствие JS-ошибок**
+- [ ] **Step 4: Проверить синтаксис и локальный запуск**
 
-Запустить `node logic.test.js` и проверить целостность всех модулей.  
-Убедиться в отсутствии синтаксических ошибок в `app.js`.
+Запуск: `node -c app.js && node -c server.js`  
+Ожидается: отсутствие синтаксических ошибок.
 
 - [ ] **Step 5: Сделать git commit**
 
 ```bash
-git add index.html style.css app.js
-git commit -m "feat: integrate skills UI, vip progress, pairings and season scheduler"
+git add app.js index.html style.css
+git commit -m "feat(ui): add skills selectors, vip calculator, season generator and pairings"
+```
+
+---
+
+### Task 6: Финальная верификация, подготовка релиза и GitFlow
+
+**Files:**
+- Modify: `package.json` (повышение версии до `3.1.0`)
+- Modify: `CHANGELOG.md`
+
+- [ ] **Step 1: Запустить полный комплекс тестов**
+
+```bash
+npm test
+node -c app.js && node -c server.js
+```
+Ожидается: 0 failures, все тесты зеленые.
+
+- [ ] **Step 2: Оформить релизную ветку по GitFlow**
+
+1. Создать ветку релиза: `git checkout -b release/v3.1.0`.
+2. Обновить версию в `package.json` до `3.1.0`.
+3. Добавить подробное описание изменений в `CHANGELOG.md` по стандарту Keep a Changelog.
+4. Закоммитить: `git commit -am "chore(release): prepare v3.1.0"`.
+
+- [ ] **Step 3: Слить в master и поставить аннотированный тег**
+
+```bash
+git checkout master
+git merge --no-ff release/v3.1.0 -m "Merge branch 'release/v3.1.0' into master"
+git tag -a v3.1.0 -m "Release v3.1.0: Community data, skills 5-5-5-5, VIP calculator and season scheduler"
+git branch -d release/v3.1.0 feature/community-data-integration
 ```
 
 ---
 
 ## Self-Review
 
-1. **Spec coverage:** Все 6 пунктов из спецификации и обсуждения (реестр офицеров, шкала VIP, навыки 5-5-5-5, пресеты ивентов, кулдаун автоподбора, связки командиров) покрыты отдельными задачами с тестами.
-2. **Step scan:** Каждый шаг содержит проверяемое действие, команду запуска и ожидаемый результат.
-3. **Type consistency:** Имена функций (`calculateVipDeficit`, `calculateSkillMedalsProgress`, `generateSeasonSchedule`, `getRecommendedPairings`) согласованы между спецификацией, тестами и кодом.
-4. **Review Focus:** Проверены граничные случаи (миграция старых офицеров без навыков, VIP 30, кулдауны при равных баллах).
-5. **Proportion:** План лаконичен, структурирован по TDD и готов для пошагового выполнения субагентом или разработчиком.
+1. **Spec coverage:** Все пункты скорректированного ТЗ (SQLite-миграции, серверные роуты, UMD-логика, UI, Fair Play) покрыты конкретными шагами.
+2. **Step scan:** Каждый шаг содержит однозначную команду, ожидаемый результат и TDD-цикл.
+3. **Type consistency:** Имена полей (`skills_json`, `vip_points`, `upgrade_type`) строго согласованы между `db.js`, `server.js`, `logic.js` и `app.js`.
+4. **GitFlow:** План полностью соблюдает требования правил проекта (никаких прямых коммитов в `master`, ветки `feature/*` и `release/*`, аннотированные теги).

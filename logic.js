@@ -10,9 +10,123 @@
   const OFFICER_TYPES = ['Танк', 'ПТ', 'Пехота', 'Гарнизон', 'Осада'];
 
   const DEFAULT_OFFICERS = [
-    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 500, medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500, medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ', generation: 7, couponPerPuzzle: 500, medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+  ];
+
+  const COMMUNITY_OFFICERS = [
+    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'aurora', name: 'Аврора', type: 'Гарнизон', generation: 8, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'valkyrie', name: 'Валькирия', type: 'Осада', generation: 9, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'angel', name: 'Ангел', type: 'Танк', generation: 2, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'halina', name: 'Халина', type: 'ПТ', generation: 2, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'betty', name: 'Бетти', type: 'Пехота', generation: 3, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'eva', name: 'Ева', type: 'Танк', generation: 2, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'grace', name: 'Грейс', type: 'Танк', generation: 1, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'jessica', name: 'Джессика', type: 'Танк', generation: 1, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'marjorie', name: 'Марджори', type: 'Пехота', generation: 1, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+  ];
+
+  const VIP_TIERS_DATA = [
+    { level: 1, points: 0, dailyPuzzles: 0 },
+    { level: 2, points: 200, dailyPuzzles: 0 },
+    { level: 3, points: 700, dailyPuzzles: 0 },
+    { level: 4, points: 2500, dailyPuzzles: 0 },
+    { level: 5, points: 6000, dailyPuzzles: 0 },
+    { level: 6, points: 15000, dailyPuzzles: 0 },
+    { level: 7, points: 35000, dailyPuzzles: 0 },
+    { level: 8, points: 75000, dailyPuzzles: 0 },
+    { level: 9, points: 150000, dailyPuzzles: 0 },
+    { level: 10, points: 300000, dailyPuzzles: 0 },
+    { level: 11, points: 500000, dailyPuzzles: 1 },
+    { level: 12, points: 750000, dailyPuzzles: 2 },
+    { level: 13, points: 1000000, dailyPuzzles: 2 },
+    { level: 14, points: 1500000, dailyPuzzles: 3 },
+    { level: 15, points: 2500000, dailyPuzzles: 3 },
+    { level: 16, points: 3500000, dailyPuzzles: 4 },
+    { level: 17, points: 5000000, dailyPuzzles: 4 },
+    { level: 18, points: 7000000, dailyPuzzles: 5 },
+    { level: 19, points: 9500000, dailyPuzzles: 5 },
+    { level: 20, points: 12500000, dailyPuzzles: 6 },
+    { level: 21, points: 16000000, dailyPuzzles: 6 },
+    { level: 22, points: 20000000, dailyPuzzles: 7 },
+    { level: 23, points: 25000000, dailyPuzzles: 7 },
+    { level: 24, points: 31000000, dailyPuzzles: 8 },
+    { level: 25, points: 38000000, dailyPuzzles: 8 },
+    { level: 26, points: 46000000, dailyPuzzles: 9 },
+    { level: 27, points: 55000000, dailyPuzzles: 9 },
+    { level: 28, points: 65000000, dailyPuzzles: 10 },
+    { level: 29, points: 76000000, dailyPuzzles: 10 },
+    { level: 30, points: 88000000, dailyPuzzles: 12 },
+  ];
+
+  const SKILL_UPGRADE_COSTS = [
+    [10, 20, 30, 40], // Навык 1: 100 медалей
+    [20, 40, 60, 80], // Навык 2: 200 медалей
+    [30, 50, 70, 90], // Навык 3: 240 медалей
+    [10, 30, 50, 60], // Навык 4: 150 медалей
+  ];
+
+  const OFFICER_PAIRINGS = {
+    'general-rex': [
+      { partnerId: 'angel', partnerName: 'Ангел', role: 'Открытое поле', synergy: 'Максимальный танковый урон и выживаемость' },
+      { partnerId: 'eva', partnerName: 'Ева', role: 'Ралли', synergy: 'Пробитие брони и высокая контратака' },
+    ],
+    'admiral-nathon': [
+      { partnerId: 'betty', partnerName: 'Бетти', role: 'Открытое поле', synergy: 'Пехотная контратака и щиты' },
+      { partnerId: 'marjorie', partnerName: 'Марджори', role: 'Оборона', synergy: 'Снижение входящего урона в гарнизоне' },
+    ],
+    'captain-black': [
+      { partnerId: 'halina', partnerName: 'Халина', role: 'Открытое поле', synergy: 'Смертоносный залповый урон противотанковых орудий' },
+    ],
+    'aurora': [
+      { partnerId: 'marjorie', partnerName: 'Марджори', role: 'Оборона', synergy: 'Неприступная оборона гарнизона' },
+      { partnerId: 'admiral-nathon', partnerName: 'Адмирал Нейтон', role: 'Гарнизон', synergy: 'Высокое сопротивление урону пехоты' },
+    ],
+    'valkyrie': [
+      { partnerId: 'captain-black', partnerName: 'Капитан Блэк', role: 'Осада', synergy: 'Разрушительный урон по вражеским укреплениям' },
+    ],
+    'angel': [
+      { partnerId: 'general-rex', partnerName: 'Генерал Рекс', role: 'Открытое поле', synergy: 'Танковая мощь и контроль поля боя' },
+    ],
+    'halina': [
+      { partnerId: 'captain-black', partnerName: 'Капитан Блэк', role: 'Открытое поле', synergy: 'ПТ-пробитие и взрывной урон' },
+    ],
+    'betty': [
+      { partnerId: 'admiral-nathon', partnerName: 'Адмирал Нейтон', role: 'Открытое поле', synergy: 'Устойчивость пехоты и непрерывный урон' },
+    ],
+    'eva': [
+      { partnerId: 'general-rex', partnerName: 'Генерал Рекс', role: 'Ралли', synergy: 'Танковое ралли и сокрушительная атака' },
+    ],
+    'grace': [
+      { partnerId: 'general-rex', partnerName: 'Генерал Рекс', role: 'Открытое поле', synergy: 'Быстрый старт и ярость в танковых баталиях' },
+    ],
+    'jessica': [
+      { partnerId: 'angel', partnerName: 'Ангел', role: 'Открытое поле', synergy: 'Высокая живучесть и поддержка союзников' },
+    ],
+    'marjorie': [
+      { partnerId: 'aurora', partnerName: 'Аврора', role: 'Оборона', synergy: 'Усиленный гарнизон и восстановление прочности' },
+    ],
+  };
+
+  const EVENT_PRESETS = [
+    {
+      id: 'king-of-war',
+      name: 'Король Войны',
+      cycleDays: 14,
+      durationDays: 7,
+      description: 'Двухнедельный цикл ивента Король Войны (7 дней активности, 7 дней перерыв)',
+    },
+    {
+      id: 'mightiest-commander',
+      name: 'Сильнейший Командир',
+      cycleDays: 28,
+      durationDays: 7,
+      description: 'Четырехнедельный цикл ивента Сильнейший Командир',
+    },
   ];
 
   function slug(value) {
@@ -124,6 +238,93 @@
 
   function starCostFor(stars) {
     return STAR_COSTS[Math.max(1, Math.min(6, Number(stars) || 1)) - 1];
+  }
+
+  function calculateVipDeficit({ currentLevel = 0, currentPoints = 0, targetLevel, dailyPointsRate = 0 } = {}) {
+    const curLvl = Math.max(0, Math.min(30, Number(currentLevel) || 0));
+    const curPts = Math.max(0, Number(currentPoints) || 0);
+    const tgtLvl = targetLevel !== undefined ? Math.max(0, Math.min(30, Number(targetLevel) || 0)) : Math.min(30, curLvl + 1);
+
+    if (curLvl >= 30 || tgtLvl <= curLvl) {
+      return {
+        pointsNeeded: 0,
+        dailyPuzzlesIncrease: 0,
+        targetLevel: tgtLvl,
+        daysToTargetAtCurrentRate: 0,
+      };
+    }
+
+    const curTier = VIP_TIERS_DATA.find(t => t.level === curLvl) || { level: curLvl, points: 0, dailyPuzzles: 0 };
+    const tgtTier = VIP_TIERS_DATA.find(t => t.level === tgtLvl) || VIP_TIERS_DATA[VIP_TIERS_DATA.length - 1];
+
+    const pointsNeeded = Math.max(0, tgtTier.points - curPts);
+    const dailyPuzzlesIncrease = Math.max(0, tgtTier.dailyPuzzles - curTier.dailyPuzzles);
+    const rate = Number(dailyPointsRate) || 0;
+    const daysToTargetAtCurrentRate = rate > 0 ? Math.ceil(pointsNeeded / rate) : null;
+
+    return {
+      pointsNeeded,
+      dailyPuzzlesIncrease,
+      targetLevel: tgtLvl,
+      daysToTargetAtCurrentRate,
+    };
+  }
+
+  function calculateSkillMedalsProgress(skills = [1, 1, 1, 1]) {
+    const arr = Array.isArray(skills) ? skills : [1, 1, 1, 1];
+    const normalized = [
+      Math.max(1, Math.min(5, Number(arr[0]) || 1)),
+      Math.max(1, Math.min(5, Number(arr[1]) || 1)),
+      Math.max(1, Math.min(5, Number(arr[2]) || 1)),
+      Math.max(1, Math.min(5, Number(arr[3]) || 1)),
+    ];
+
+    let spentMedals = 0;
+    for (let i = 0; i < 4; i++) {
+      const lvl = normalized[i];
+      for (let step = 0; step < lvl - 1; step++) {
+        spentMedals += SKILL_UPGRADE_COSTS[i][step] || 0;
+      }
+    }
+
+    const remainingMedals = Math.max(0, 690 - spentMedals);
+    const isMaxSkills = spentMedals === 690 && normalized.every(lvl => lvl === 5);
+
+    return {
+      spentMedals,
+      remainingMedals,
+      isMaxSkills,
+      skills: normalized,
+    };
+  }
+
+  function getRecommendedPairings(officerId) {
+    if (!officerId) return [];
+    return OFFICER_PAIRINGS[String(officerId)] || [];
+  }
+
+  function generateSeasonSchedule({ startDate, cyclesCount = 1, presetId = 'king-of-war', startId = 1 } = {}) {
+    const preset = EVENT_PRESETS.find(p => p.id === presetId) || EVENT_PRESETS[0];
+    const count = Math.max(1, Number(cyclesCount) || 1);
+    const baseDate = startDate && typeof startDate === 'string' ? startDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const initialId = Number(startId) || 1;
+
+    const schedule = [];
+    for (let i = 0; i < count; i++) {
+      const dateFrom = dateAdd(baseDate, i * preset.cycleDays);
+      const dateTo = dateAdd(dateFrom, preset.durationDays - 1);
+      schedule.push({
+        id: initialId + i,
+        presetId: preset.id,
+        name: preset.name,
+        cycleIndex: i + 1,
+        dateFrom,
+        dateTo,
+        note: `${preset.name} (Сезон #${i + 1})`,
+      });
+    }
+
+    return schedule;
   }
 
   function forecastOfficer({ today, officer, player, officerCatalog, maxDays = 3650 }) {
@@ -407,7 +608,7 @@
     });
   }
 
-  function smartAutoPickWithRegistrations({ event, candidates, registrations, players, officerCatalog, eventDate } = {}) {
+  function smartAutoPickWithRegistrations({ event, candidates, registrations, players, officerCatalog, eventDate, recentWinners = [] } = {}) {
     const rawPlaces = event?.places || [];
     const indexedPlaces = rawPlaces.map((p, idx) => ({
       slotIndex: idx,
@@ -415,6 +616,17 @@
       label: p.label || `Место ${p.place || idx + 1}`,
       coupons: Math.max(0, Number(p.coupons ?? p.actualCoupons) || 0),
     }));
+
+    const recentWinnersSet = new Set((recentWinners || []).map(id => String(id)));
+    function isRecentWinner(playerId) {
+      if (playerId === undefined || playerId === null) return false;
+      return recentWinnersSet.has(String(playerId));
+    }
+
+    function candidateIsCooldown(c) {
+      if (!c) return false;
+      return Boolean(c.isCooldown !== undefined ? c.isCooldown : isRecentWinner(c.playerId));
+    }
 
     function getCandidateDeficit(c) {
       return Math.max(0, Number(c.deficitCoupons ?? c.deficit) || 0);
@@ -426,7 +638,10 @@
 
     let candidateList = [];
     if (Array.isArray(candidates)) {
-      candidateList = candidates.map(c => ({ ...c }));
+      candidateList = candidates.map(c => ({
+        ...c,
+        isCooldown: candidateIsCooldown(c),
+      }));
     } else if (Array.isArray(players)) {
       const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
       const today = eventDate || new Date().toISOString().slice(0, 10);
@@ -450,6 +665,7 @@
             deficitCoupons: def.deficitCoupons,
             deficitPuzzles: def.deficitPuzzles,
             costPerPuzzle: def.costPerPuzzle,
+            isCooldown: isRecentWinner(player.id),
           });
         });
       });
@@ -473,6 +689,9 @@
     const assignmentMap = new Map();
 
     function compareCandidates(a, b) {
+      const coolA = candidateIsCooldown(a) ? 1 : 0;
+      const coolB = candidateIsCooldown(b) ? 1 : 0;
+      if (coolA !== coolB) return coolA - coolB;
       const defA = getCandidateDeficit(a);
       const defB = getCandidateDeficit(b);
       if (defB !== defA) return defB - defA;
@@ -526,7 +745,16 @@
         return !regMap.has(String(c.playerId));
       }).sort(compareCandidates);
 
-      const chosen = group1[0] || group2[0] || group3[0] || group4[0] || null;
+      const g1Clean = group1.find(c => !candidateIsCooldown(c));
+      const g2Clean = group2.find(c => !candidateIsCooldown(c));
+      const g1Cooldown = group1.find(c => candidateIsCooldown(c));
+      const g2Cooldown = group2.find(c => candidateIsCooldown(c));
+      const g3Clean = group3.find(c => !candidateIsCooldown(c));
+      const g3Cooldown = group3.find(c => candidateIsCooldown(c));
+      const g4Clean = group4.find(c => !candidateIsCooldown(c));
+      const g4Cooldown = group4.find(c => candidateIsCooldown(c));
+
+      const chosen = g1Clean || g2Clean || g1Cooldown || g2Cooldown || g3Clean || g3Cooldown || g4Clean || g4Cooldown || null;
 
       if (chosen) {
         assignedPlayers.add(String(chosen.playerId));
@@ -545,6 +773,7 @@
           deficitCoupons: deficit,
           overflowCoupons: 0,
           isEfficient: true,
+          isCooldown: candidateIsCooldown(chosen),
         });
       } else {
         assignmentMap.set(slot.slotIndex, {
@@ -560,6 +789,7 @@
           deficitCoupons: 0,
           overflowCoupons: 0,
           isEfficient: true,
+          isCooldown: false,
         });
       }
     });
@@ -580,9 +810,18 @@
     STOCK_ZERO,
     STAR_COSTS,
     DEFAULT_OFFICERS,
+    COMMUNITY_OFFICERS,
+    VIP_TIERS_DATA,
+    SKILL_UPGRADE_COSTS,
+    OFFICER_PAIRINGS,
+    EVENT_PRESETS,
     OFFICER_TYPES,
     migrateState,
     dailyRewards,
+    calculateVipDeficit,
+    calculateSkillMedalsProgress,
+    getRecommendedPairings,
+    generateSeasonSchedule,
     forecastOfficer,
     forecastOfficerVariants,
     resolveEventPlaces,
