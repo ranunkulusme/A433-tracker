@@ -28,8 +28,214 @@ let myOfficerEditId = null;
 let regModalEventId = null;
 let currentEventRegistrations = [];
 
-// ─── API HELPER ──────────────────────────────────────────────
+// ─── API & OUTBOX QUEUE HELPERS ──────────────────────────────
+let isFlushingOutbox = false;
+
+function getLogic() {
+  if (typeof logic !== 'undefined') return logic;
+  if (typeof window !== 'undefined') return window;
+  return globalThis;
+}
+
+function getOutboxQueue() {
+  try {
+    const raw = localStorage.getItem('kow_outbox_queue');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveOutboxQueue(queue) {
+  try {
+    localStorage.setItem('kow_outbox_queue', JSON.stringify(Array.isArray(queue) ? queue : []));
+  } catch (e) {
+    console.error('Failed to save outbox queue', e);
+  }
+}
+
+function updateNetworkStatusUI() {
+  if (typeof document === 'undefined') return;
+  const badge = document.getElementById('network-status-badge');
+  if (!badge) return;
+
+  const isOnline = typeof navigator === 'undefined' || navigator.onLine;
+  const queue = getOutboxQueue();
+
+  if (isFlushingOutbox) {
+    badge.className = 'network-status syncing';
+    badge.innerHTML = '🔄 <span class="badge-text">Синхронизация...</span>';
+    badge.title = 'Отправка сохраненных оффлайн-изменений на сервер';
+  } else if (!isOnline) {
+    badge.className = 'network-status offline';
+    const queueText = queue.length > 0 ? ` (${queue.length})` : '';
+    badge.innerHTML = `🟡 <span class="badge-text">Оффлайн${queueText}</span>`;
+    badge.title = queue.length > 0
+      ? `Оффлайн-режим. В очереди на синхронизацию: ${queue.length}`
+      : 'Оффлайн-режим';
+  } else if (queue.length > 0) {
+    badge.className = 'network-status pending';
+    badge.innerHTML = `🟡 <span class="badge-text">В очереди: ${queue.length}</span>`;
+    badge.title = `В очереди на синхронизацию: ${queue.length}`;
+  } else {
+    badge.className = 'network-status online';
+    badge.innerHTML = '🟢 <span class="badge-text">Онлайн</span>';
+    badge.title = 'Подключено к серверу, все данные сохранены';
+  }
+}
+
+function applyOptimisticUpdate(url, method, bodyObj) {
+  const m = (method || 'POST').toUpperCase();
+
+  // R3 profile update: PUT /api/my-profile
+  if (url === '/api/my-profile' && m === 'PUT') {
+    if (myCabinetProfile) {
+      if (bodyObj?.sector) {
+        myCabinetProfile.sector = { ...(myCabinetProfile.sector || {}), ...bodyObj.sector };
+      }
+      if (bodyObj?.stock) {
+        myCabinetProfile.stock = { ...(myCabinetProfile.stock || {}), ...bodyObj.stock };
+      }
+    }
+    if (currentUser?.playerId && Array.isArray(state.players)) {
+      const pl = state.players.find(p => p.id === currentUser.playerId);
+      if (pl) {
+        if (bodyObj?.sector) pl.sector = { ...(pl.sector || {}), ...bodyObj.sector };
+        if (bodyObj?.stock) pl.stock = { ...(pl.stock || {}), ...bodyObj.stock };
+      }
+    }
+  }
+
+  // Officer create: POST /api/my-profile/officers
+  if (url === '/api/my-profile/officers' && m === 'POST') {
+    if (myCabinetProfile) {
+      myCabinetProfile.officers = myCabinetProfile.officers || [];
+      myCabinetProfile.officers.push({ ...bodyObj });
+    }
+    if (currentUser?.playerId && Array.isArray(state.players)) {
+      const pl = state.players.find(p => p.id === currentUser.playerId);
+      if (pl) {
+        pl.officers = pl.officers || [];
+        pl.officers.push({ ...bodyObj });
+      }
+    }
+  }
+
+  // Officer update: PUT /api/my-profile/officers/:id
+  const offMatch = url.match(/^\/api\/my-profile\/officers\/([^/]+)$/);
+  if (offMatch && m === 'PUT') {
+    const offId = offMatch[1];
+    if (myCabinetProfile?.officers) {
+      const off = myCabinetProfile.officers.find(o => String(o.id) === String(offId));
+      if (off && bodyObj) {
+        Object.assign(off, bodyObj);
+      }
+    }
+    if (currentUser?.playerId && Array.isArray(state.players)) {
+      const pl = state.players.find(p => p.id === currentUser.playerId);
+      if (pl?.officers) {
+        const off = pl.officers.find(o => String(o.id) === String(offId));
+        if (off && bodyObj) {
+          Object.assign(off, bodyObj);
+        }
+      }
+    }
+  }
+
+  // Officer delete: DELETE /api/my-profile/officers/:id
+  if (offMatch && m === 'DELETE') {
+    const offId = offMatch[1];
+    if (myCabinetProfile?.officers) {
+      myCabinetProfile.officers = myCabinetProfile.officers.filter(o => String(o.id) !== String(offId));
+    }
+    if (currentUser?.playerId && Array.isArray(state.players)) {
+      const pl = state.players.find(p => p.id === currentUser.playerId);
+      if (pl?.officers) {
+        pl.officers = pl.officers.filter(o => String(o.id) !== String(offId));
+      }
+    }
+  }
+
+  // Event registration: POST or DELETE /api/events/:id/register or /registrations
+  const regMatch = url.match(/^\/api\/events\/([^/]+)\/(register|registrations)/);
+  if (regMatch) {
+    const eventId = regMatch[1];
+    const ev = (state.events || []).find(e => String(e.id) === String(eventId));
+    if (ev) {
+      if (m === 'POST') {
+        ev.myRegistration = bodyObj || {};
+      } else if (m === 'DELETE') {
+        delete ev.myRegistration;
+      }
+    }
+  }
+}
+
+function handleOfflineApiRequest(url, method, bodyObj) {
+  const m = (method || 'GET').toUpperCase();
+  const logicApi = getLogic();
+
+  if (m === 'POST' || m === 'PUT' || m === 'DELETE') {
+    const isAllowed = typeof logicApi.isOfflineMutationAllowed === 'function'
+      ? logicApi.isOfflineMutationAllowed({ endpoint: url, method: m })
+      : false;
+
+    if (!isAllowed) {
+      toast('Это действие доступно только при подключении к сети', 'warning');
+      const err = new Error('OFFLINE_ACTION_NOT_ALLOWED');
+      err.status = 0;
+      throw err;
+    }
+
+    if (url === '/api/my-profile/officers' && m === 'POST') {
+      if (!bodyObj) bodyObj = {};
+      if (!bodyObj.id) {
+        bodyObj.id = `po-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      }
+    }
+
+    const item = typeof logicApi.createOutboxItem === 'function'
+      ? logicApi.createOutboxItem({ endpoint: url, method: m, body: bodyObj })
+      : { id: `outbox_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, endpoint: url, method: m, body: bodyObj, timestamp: Date.now(), retryCount: 0 };
+
+    const currentQueue = getOutboxQueue();
+    const updatedQueue = typeof logicApi.addToOutboxQueue === 'function'
+      ? logicApi.addToOutboxQueue(currentQueue, item)
+      : [...currentQueue, item];
+
+    saveOutboxQueue(updatedQueue);
+    updateNetworkStatusUI();
+
+    applyOptimisticUpdate(url, m, bodyObj);
+
+    toast('Изменения сохранены локально и будут отправлены на сервер при появлении сети', 'info');
+    return { success: true, offline: true };
+  }
+
+  // GET requests in offline mode
+  if (m === 'GET') {
+    if (url === '/api/auth/me') {
+      if (currentUser) return { user: currentUser, player: currentUser.player || null };
+      return { offline: true };
+    }
+    if (url === '/api/my-profile') {
+      const pl = myCabinetProfile || (state.players || []).find(p => p.id === currentUser?.playerId);
+      if (pl) return pl;
+      return { offline: true };
+    }
+    if (url === '/api/catalog') return state.officerCatalog || [];
+    if (url === '/api/event-types') return state.eventTypes || [];
+    if (url === '/api/events') return state.events || [];
+    if (url === '/api/players') return state.players || [];
+    return { offline: true };
+  }
+
+  return { offline: true };
+}
+
 async function apiFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
   const token = localStorage.getItem('kow_token');
   const headers = { ...(options.headers || {}) };
 
@@ -37,15 +243,34 @@ async function apiFetch(url, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  let bodyObj = options.body;
+  if (typeof bodyObj === 'string') {
+    try {
+      bodyObj = JSON.parse(bodyObj);
+    } catch (e) {}
+  }
+
   if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(options.body);
   }
 
-  const res = await fetch(url, { ...options, headers });
+  // Intercept if offline
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return handleOfflineApiRequest(url, method, bodyObj);
+  }
+
+  let res;
+  try {
+    res = await fetch(url, { ...options, headers });
+  } catch (netErr) {
+    // Network failure (server unreachable or connection dropped)
+    return handleOfflineApiRequest(url, method, bodyObj);
+  }
 
   if (res.status === 401) {
     localStorage.removeItem('kow_token');
+    localStorage.removeItem('kow_user');
     currentUser = null;
     renderTopbarProfile();
     renderSidebarNav();
@@ -72,6 +297,88 @@ async function apiFetch(url, options = {}) {
   }
 
   return data;
+}
+
+async function flushOutboxQueue() {
+  if (isFlushingOutbox) return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+  const token = localStorage.getItem('kow_token');
+  if (!token) return;
+
+  let queue = getOutboxQueue();
+  if (!queue.length) {
+    updateNetworkStatusUI();
+    return;
+  }
+
+  isFlushingOutbox = true;
+  updateNetworkStatusUI();
+
+  const logicApi = getLogic();
+
+  try {
+    for (const item of [...queue]) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        break;
+      }
+
+      let res;
+      try {
+        const headers = {
+          'Authorization': `Bearer ${token}`
+        };
+        let body = undefined;
+        if (item.body !== undefined && item.body !== null) {
+          headers['Content-Type'] = 'application/json';
+          body = typeof item.body === 'string' ? item.body : JSON.stringify(item.body);
+        }
+
+        res = await fetch(item.endpoint, {
+          method: item.method || 'POST',
+          headers,
+          body
+        });
+      } catch (netErr) {
+        break;
+      }
+
+      if (res.status >= 200 && res.status < 300) {
+        queue = typeof logicApi.filterOutboxQueue === 'function'
+          ? logicApi.filterOutboxQueue(queue, item.id)
+          : queue.filter(q => q.id !== item.id);
+        saveOutboxQueue(queue);
+        updateNetworkStatusUI();
+      } else if (res.status === 401) {
+        toast('Сессия истекла во время синхронизации. Пожалуйста, выполните вход повторно.', 'warning');
+        break;
+      } else if (res.status >= 400 && res.status < 500) {
+        let errMsg = `Ошибка ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData && (errData.message || errData.error)) {
+            errMsg = errData.message || errData.error;
+          }
+        } catch (e) {
+          try { errMsg = await res.text(); } catch (e2) {}
+        }
+        toast(`Не удалось применить оффлайн-изменение (${item.endpoint}): ${errMsg}`, 'error');
+        queue = typeof logicApi.filterOutboxQueue === 'function'
+          ? logicApi.filterOutboxQueue(queue, item.id)
+          : queue.filter(q => q.id !== item.id);
+        saveOutboxQueue(queue);
+        updateNetworkStatusUI();
+      } else {
+        break;
+      }
+    }
+  } finally {
+    isFlushingOutbox = false;
+    updateNetworkStatusUI();
+    if (queue.length === 0) {
+      loadDataFromServer().catch(() => {});
+    }
+  }
 }
 
 function escapeHtml(str) {
@@ -467,6 +774,13 @@ async function handleLoginSubmit(e) {
 
     localStorage.setItem('kow_token', data.token);
     currentUser = data.user;
+    if (data.player) {
+      currentUser.player = data.player;
+      currentUser.playerName = data.player.name;
+    }
+    try {
+      localStorage.setItem('kow_user', JSON.stringify(currentUser));
+    } catch (e) {}
     state.currentRole = currentUser.rank;
     state.currentPlayerId = currentUser.playerId || null;
     toast(`Добро пожаловать, ${currentUser.playerName || currentUser.username}!`);
@@ -570,6 +884,7 @@ async function logout() {
     await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
   } finally {
     localStorage.removeItem('kow_token');
+    localStorage.removeItem('kow_user');
     currentUser = null;
     toast('Вы вышли из системы', 'info');
     renderTopbarProfile();
@@ -587,6 +902,26 @@ async function checkAuth() {
     openAuthModal('login');
     return false;
   }
+
+  // If already offline, restore session immediately from cache without failing
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const cachedUser = localStorage.getItem('kow_user');
+    if (cachedUser) {
+      try {
+        currentUser = JSON.parse(cachedUser);
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+        renderTopbarProfile();
+        renderSidebarNav();
+        closeAllModals();
+        toast('Вход выполнен в оффлайн-режиме', 'info');
+        return true;
+      } catch (e) {}
+    }
+    openAuthModal('login', 'Требуется подключение к сети для входа');
+    return false;
+  }
+
   try {
     const data = await apiFetch('/api/auth/me');
     if (data && data.user) {
@@ -595,20 +930,61 @@ async function checkAuth() {
         currentUser.player = data.player;
         currentUser.playerName = data.player.name;
       }
+      try {
+        localStorage.setItem('kow_user', JSON.stringify(currentUser));
+      } catch (e) {}
       state.currentRole = currentUser.rank;
       state.currentPlayerId = currentUser.playerId || null;
       renderTopbarProfile();
       renderSidebarNav();
-      await loadDataFromServer();
+      await loadDataFromServer().catch(() => {});
       closeAllModals();
       return true;
     }
+
+    // Response arrived without user (or offline fallback)
+    const cachedUser = localStorage.getItem('kow_user');
+    if (cachedUser) {
+      try {
+        currentUser = JSON.parse(cachedUser);
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+        renderTopbarProfile();
+        renderSidebarNav();
+        closeAllModals();
+        toast('Вход выполнен в оффлайн-режиме', 'info');
+        return true;
+      } catch (e) {}
+    }
+    openAuthModal('login', 'Требуется подключение к сети для входа');
+    return false;
   } catch (err) {
-    localStorage.removeItem('kow_token');
-    currentUser = null;
-    renderTopbarProfile();
-    renderSidebarNav();
-    openAuthModal('login');
+    if (err && err.status === 401) {
+      localStorage.removeItem('kow_token');
+      localStorage.removeItem('kow_user');
+      currentUser = null;
+      renderTopbarProfile();
+      renderSidebarNav();
+      openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
+      return false;
+    }
+
+    // Network error or other non-401 failure: do NOT delete token, restore cached user
+    const cachedUser = localStorage.getItem('kow_user');
+    if (cachedUser) {
+      try {
+        currentUser = JSON.parse(cachedUser);
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+        renderTopbarProfile();
+        renderSidebarNav();
+        closeAllModals();
+        toast('Вход выполнен в оффлайн-режиме', 'info');
+        return true;
+      } catch (e) {}
+    }
+
+    openAuthModal('login', 'Ошибка соединения с сервером');
     return false;
   }
 }
@@ -3801,19 +4177,62 @@ function handleImport(e) {
   reader.readAsText(file); e.target.value='';
 }
 
-// ─── INIT ────────────────────────────────────────────────────
-load();
-renderSidebarNav();
-renderTopbarProfile();
-checkAuth().then(isAuth => {
-  if (isAuth) {
-    if (currentUser?.rank === 'r3') {
-      navigate('my_cabinet');
+function initApp() {
+  load();
+  renderSidebarNav();
+  renderTopbarProfile();
+  updateNetworkStatusUI();
+  checkAuth().then(isAuth => {
+    if (isAuth) {
+      if (currentUser?.rank === 'r3') {
+        navigate('my_cabinet');
+      } else {
+        navigate('calendar');
+      }
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        flushOutboxQueue();
+      }
+    }
+  });
+
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    const registerSW = () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => {})
+        .catch(err => {
+          console.warn('ServiceWorker registration failed:', err);
+        });
+    };
+    if (document.readyState === 'complete') {
+      registerSW();
     } else {
-      navigate('calendar');
+      window.addEventListener('load', registerSW);
     }
   }
-});
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    updateNetworkStatusUI();
+    flushOutboxQueue();
+  });
+  window.addEventListener('offline', () => {
+    updateNetworkStatusUI();
+  });
+  window.addEventListener('focus', () => {
+    if (typeof navigator === 'undefined' || navigator.onLine) {
+      flushOutboxQueue();
+    }
+  });
+  setInterval(() => {
+    if (typeof navigator === 'undefined' || navigator.onLine) {
+      flushOutboxQueue();
+    }
+  }, 30000);
+}
+
+// ─── INIT ────────────────────────────────────────────────────
+initApp();
 
 if (typeof window !== 'undefined') {
   window.saveMyCabinetProfile = saveMyCabinetProfile;
@@ -3821,4 +4240,8 @@ if (typeof window !== 'undefined') {
   window.updateVipProgressHint = updateVipProgressHint;
   window.openSeasonSchedulerModal = openSeasonSchedulerModal;
   window.submitSeasonSchedule = submitSeasonSchedule;
+  window.getOutboxQueue = getOutboxQueue;
+  window.saveOutboxQueue = saveOutboxQueue;
+  window.flushOutboxQueue = flushOutboxQueue;
+  window.updateNetworkStatusUI = updateNetworkStatusUI;
 }

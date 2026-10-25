@@ -567,12 +567,17 @@ test('isOfflineMutationAllowed distinguishes R3 profile and registration mutatio
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'POST' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'DELETE' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations/reg-456', method: 'DELETE' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/register', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/register', method: 'DELETE' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/ev-42/register', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/ev-42/register', method: 'DELETE' }), true);
 
   // Forbidden read or non-mutation methods on allowed endpoints
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'GET' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'POST' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'DELETE' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'GET' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/register', method: 'GET' }), false);
 
   // Forbidden administrative actions (R4 / R5)
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/schedule-season', method: 'POST' }), false);

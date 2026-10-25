@@ -823,8 +823,8 @@
       return true;
     }
 
-    // R3 Event registrations (/api/events/:id/registrations and subpaths)
-    if (/^\/api\/events\/\d+\/registrations(\/.*)?$/.test(ep) && (m === 'POST' || m === 'DELETE')) {
+    // R3 Event registrations (/api/events/:id/register or /api/events/:id/registrations and subpaths)
+    if (/^\/api\/events\/[^/]+\/(register|registrations)(\/.*)?$/.test(ep) && (m === 'POST' || m === 'DELETE')) {
       return true;
     }
 
