@@ -16,6 +16,7 @@ const {
   calculateOfficerDeficit,
   simulateEventProgress,
   smartAutoPick,
+  smartAutoPickWithRegistrations,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -336,3 +337,85 @@ test('calculateOfficerDeficit respects includeStock = false for matrix view', ()
   assert.equal(def.deficitPuzzles, 400);
   assert.equal(def.deficitCoupons, 200000);
 });
+
+test('smartAutoPickWithRegistrations assigns applicant to requested place and falls back on tie-break', () => {
+  const event = {
+    places: [
+      { place: 1, label: '1 место', coupons: 12500 },
+      { place: 2, label: '2 место', coupons: 6500 },
+    ]
+  };
+  const candidates = [
+    { playerId: 1, playerName: 'Игрок 1', officerId: 'o1', deficitCoupons: 15000, killPoints: 100 },
+    { playerId: 2, playerName: 'Игрок 2', officerId: 'o2', deficitCoupons: 25000, killPoints: 50 },
+    { playerId: 3, playerName: 'Игрок 3', officerId: 'o3', deficitCoupons: 20000, killPoints: 80 },
+  ];
+  // Игрок 1 и Игрок 2 оба хотят 1 место. У Игрока 2 дефицит 25 000 > 15 000, он должен занять 1 место.
+  // Игрок 1 должен опуститься на 2 место (дефицит 15000 >= 6500).
+  const registrations = [
+    { playerId: 1, officerId: 'o1', desiredPlace: 1 },
+    { playerId: 2, officerId: 'o2', desiredPlace: 1 },
+  ];
+
+  const result = smartAutoPickWithRegistrations({ event, candidates, registrations });
+  assert.equal(result.assignments.length, 2);
+  assert.equal(result.assignments[0].playerId, 2); // 1 место
+  assert.equal(result.assignments[1].playerId, 1); // 2 место fallback
+});
+
+test('smartAutoPickWithRegistrations does not assign applicant if deficit is less than place coupons', () => {
+  const event = {
+    places: [
+      { place: 1, label: '1 место', coupons: 12500 },
+      { place: 2, label: '2 место', coupons: 6500 },
+    ]
+  };
+  // Игрок 1 хочет 1 место, но его дефицит всего 5 000 (< 12 500)
+  // Игрок 2 не подавал заявку, но его дефицит 20 000 (>= 12 500)
+  const candidates = [
+    { playerId: 1, playerName: 'Игрок 1', officerId: 'o1', deficitCoupons: 5000, killPoints: 100 },
+    { playerId: 2, playerName: 'Игрок 2', officerId: 'o2', deficitCoupons: 20000, killPoints: 50 },
+  ];
+  const registrations = [
+    { playerId: 1, officerId: 'o1', desiredPlace: 1 },
+  ];
+
+  const result = smartAutoPickWithRegistrations({ event, candidates, registrations });
+  // Игрок 1 не должен получить 1 место из-за перерасхода купонов. Игрок 2 получает 1 место.
+  assert.equal(result.assignments[0].playerId, 2);
+  // На 2 место (6500) дефицит Игрока 1 (5000) тоже недостаточен, поэтому место 2 остается пустым!
+  assert.equal(result.assignments[1].playerId, null);
+  // Игрок 1 остается в unassignedCandidates
+  assert.equal(result.unassignedCandidates.length, 1);
+  assert.equal(result.unassignedCandidates[0].playerId, 1);
+});
+
+test('smartAutoPickWithRegistrations handles desiredPlace=0 (любое подходящее) and killPoints tie-break', () => {
+  const event = {
+    places: [
+      { place: 1, label: '1 место', coupons: 10000 },
+      { place: 2, label: '2 место', coupons: 5000 },
+    ]
+  };
+  const candidates = [
+    { playerId: 1, playerName: 'Игрок 1', officerId: 'o1', deficitCoupons: 20000, killPoints: 100 },
+    { playerId: 2, playerName: 'Игрок 2', officerId: 'o2', deficitCoupons: 20000, killPoints: 200 }, // равный дефицит, больше КП
+    { playerId: 3, playerName: 'Игрок 3', officerId: 'o3', deficitCoupons: 15000, killPoints: 50 },
+  ];
+  const registrations = [
+    { playerId: 1, officerId: 'o1', desiredPlace: 1 },
+    { playerId: 2, officerId: 'o2', desiredPlace: 1 }, // оба хотят 1 место с равным дефицитом
+    { playerId: 3, officerId: 'o3', desiredPlace: 0 }, // любое подходящее
+  ];
+
+  const result = smartAutoPickWithRegistrations({ event, candidates, registrations });
+  // Игрок 2 побеждает по killPoints (200 > 100) на 1 месте
+  assert.equal(result.assignments[0].playerId, 2);
+  // На 2 место: Игрок 3 (желает любое, группа 2) vs Игрок 1 (fallback с 1 места, группа 3)
+  // Группа 2 имеет более высокий приоритет, чем fallback (Группа 3)
+  assert.equal(result.assignments[1].playerId, 3);
+  assert.equal(result.unassignedCandidates.length, 1);
+  assert.equal(result.unassignedCandidates[0].playerId, 1);
+});
+
+

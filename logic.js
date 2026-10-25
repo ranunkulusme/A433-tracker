@@ -407,6 +407,172 @@
     });
   }
 
+  function smartAutoPickWithRegistrations({ event, candidates, registrations, players, officerCatalog, eventDate } = {}) {
+    const rawPlaces = event?.places || [];
+    const indexedPlaces = rawPlaces.map((p, idx) => ({
+      slotIndex: idx,
+      place: Number(p.place) || idx + 1,
+      label: p.label || `Место ${p.place || idx + 1}`,
+      coupons: Math.max(0, Number(p.coupons ?? p.actualCoupons) || 0),
+    }));
+
+    function getCandidateDeficit(c) {
+      return Math.max(0, Number(c.deficitCoupons ?? c.deficit) || 0);
+    }
+
+    function getCandidateKillPoints(c) {
+      return Number(c.killPoints) || 0;
+    }
+
+    let candidateList = [];
+    if (Array.isArray(candidates)) {
+      candidateList = candidates.map(c => ({ ...c }));
+    } else if (Array.isArray(players)) {
+      const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
+      const today = eventDate || new Date().toISOString().slice(0, 10);
+      players.forEach(player => {
+        (player.officers || []).forEach(officer => {
+          const cat = catalogMap.get(officer.catalogId);
+          if (!cat) return;
+          const costPerPuzzle = Number(cat.couponPerPuzzle);
+          if (costPerPuzzle === 0) return;
+
+          const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: MAX_LEVEL, today });
+          if (def.deficitCoupons <= 0) return;
+
+          candidateList.push({
+            playerId: player.id,
+            playerName: player.name || player.realName || '',
+            officerId: officer.id,
+            generation: Number(cat.generation) || 0,
+            level: Number(officer.level) || 0,
+            killPoints: Number(player.sector?.killPoints) || 0,
+            deficitCoupons: def.deficitCoupons,
+            deficitPuzzles: def.deficitPuzzles,
+            costPerPuzzle: def.costPerPuzzle,
+          });
+        });
+      });
+    }
+
+    const regList = Array.isArray(registrations) ? registrations : [];
+    const regMap = new Map();
+    regList.forEach(r => {
+      if (r && r.playerId !== undefined && r.playerId !== null) {
+        regMap.set(String(r.playerId), r);
+      }
+    });
+
+    const sortedPlaces = [...indexedPlaces].sort((a, b) =>
+      a.place - b.place
+      || b.coupons - a.coupons
+      || a.slotIndex - b.slotIndex
+    );
+
+    const assignedPlayers = new Set();
+    const assignmentMap = new Map();
+
+    function compareCandidates(a, b) {
+      const defA = getCandidateDeficit(a);
+      const defB = getCandidateDeficit(b);
+      if (defB !== defA) return defB - defA;
+      const kpA = getCandidateKillPoints(a);
+      const kpB = getCandidateKillPoints(b);
+      if (kpB !== kpA) return kpB - kpA;
+      const genA = Number(a.generation) || 0;
+      const genB = Number(b.generation) || 0;
+      if (genB !== genA) return genB - genA;
+      const lvlA = Number(a.level) || 0;
+      const lvlB = Number(b.level) || 0;
+      if (lvlB !== lvlA) return lvlB - lvlA;
+      return 0;
+    }
+
+    sortedPlaces.forEach(slot => {
+      const available = candidateList.filter(c => !assignedPlayers.has(String(c.playerId)));
+
+      // Enforce coupon overflow protection across all groups: deficit must be >= slot coupons
+      const eligible = available.filter(c => getCandidateDeficit(c) >= slot.coupons);
+
+      // Group 1: Registered for this exact place
+      const group1 = eligible.filter(c => {
+        const reg = regMap.get(String(c.playerId));
+        if (!reg) return false;
+        if (reg.officerId && c.officerId && String(reg.officerId) !== String(c.officerId)) return false;
+        const desired = reg.desiredPlace !== undefined && reg.desiredPlace !== null ? Number(reg.desiredPlace) : 0;
+        return desired === slot.place;
+      }).sort(compareCandidates);
+
+      // Group 2: Registered for 'Any suitable' (desiredPlace === 0)
+      const group2 = eligible.filter(c => {
+        const reg = regMap.get(String(c.playerId));
+        if (!reg) return false;
+        if (reg.officerId && c.officerId && String(reg.officerId) !== String(c.officerId)) return false;
+        const desired = reg.desiredPlace !== undefined && reg.desiredPlace !== null ? Number(reg.desiredPlace) : 0;
+        return desired === 0;
+      }).sort(compareCandidates);
+
+      // Group 3: Registered for a higher place, didn't get it (fallback)
+      const group3 = eligible.filter(c => {
+        const reg = regMap.get(String(c.playerId));
+        if (!reg) return false;
+        if (reg.officerId && c.officerId && String(reg.officerId) !== String(c.officerId)) return false;
+        const desired = reg.desiredPlace !== undefined && reg.desiredPlace !== null ? Number(reg.desiredPlace) : 0;
+        return desired > 0 && desired < slot.place;
+      }).sort(compareCandidates);
+
+      // Group 4: Candidates without registrations with sufficient deficit
+      const group4 = eligible.filter(c => {
+        return !regMap.has(String(c.playerId));
+      }).sort(compareCandidates);
+
+      const chosen = group1[0] || group2[0] || group3[0] || group4[0] || null;
+
+      if (chosen) {
+        assignedPlayers.add(String(chosen.playerId));
+        const reg = regMap.get(String(chosen.playerId));
+        const deficit = getCandidateDeficit(chosen);
+        assignmentMap.set(slot.slotIndex, {
+          slotIndex: slot.slotIndex,
+          place: slot.place,
+          label: slot.label,
+          playerId: chosen.playerId,
+          playerName: chosen.playerName || '',
+          officerId: chosen.officerId || (reg && reg.officerId) || null,
+          coupons: slot.coupons,
+          actualCoupons: slot.coupons,
+          deficit: deficit,
+          deficitCoupons: deficit,
+          overflowCoupons: 0,
+          isEfficient: true,
+        });
+      } else {
+        assignmentMap.set(slot.slotIndex, {
+          slotIndex: slot.slotIndex,
+          place: slot.place,
+          label: slot.label,
+          playerId: null,
+          playerName: '',
+          officerId: null,
+          coupons: slot.coupons,
+          actualCoupons: slot.coupons,
+          deficit: 0,
+          deficitCoupons: 0,
+          overflowCoupons: 0,
+          isEfficient: true,
+        });
+      }
+    });
+
+    const assignments = indexedPlaces.map(p => assignmentMap.get(p.slotIndex));
+    const unassignedCandidates = candidateList.filter(c => !assignedPlayers.has(String(c.playerId)));
+
+    return {
+      assignments,
+      unassignedCandidates,
+    };
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -429,5 +595,6 @@
     calculateOfficerDeficit,
     simulateEventProgress,
     smartAutoPick,
+    smartAutoPickWithRegistrations,
   };
 });

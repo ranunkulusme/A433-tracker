@@ -16,6 +16,113 @@ let state = {
   nextId: 1,
 };
 
+let currentUser = null;
+let pendingRequestsCount = 0;
+let myCabinetProfile = null;
+let myCabinetSim = {
+  officerId: null,
+  targetLevel: 180,
+  planned: { top1: 0, top2: 0, top3: 0, top4: 0 }
+};
+let myOfficerEditId = null;
+let regModalEventId = null;
+let currentEventRegistrations = [];
+
+// ─── API HELPER ──────────────────────────────────────────────
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('kow_token');
+  const headers = { ...(options.headers || {}) };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(options.body);
+  }
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    localStorage.removeItem('kow_token');
+    currentUser = null;
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
+    const err = new Error('UNAUTHORIZED');
+    err.status = 401;
+    throw err;
+  }
+
+  let data = null;
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    data = await res.json();
+  } else {
+    data = await res.text();
+  }
+
+  if (!res.ok) {
+    const message = (data && data.message) || (data && data.error) || res.statusText || 'API Error';
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+
+  return data;
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatDateTime(s) {
+  if (!s) return '—';
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return s;
+  }
+}
+
+async function loadDataFromServer() {
+  try {
+    const [cat, et, evs] = await Promise.all([
+      apiFetch('/api/catalog').catch(() => null),
+      apiFetch('/api/event-types').catch(() => null),
+      apiFetch('/api/events').catch(() => null)
+    ]);
+    if (Array.isArray(cat)) state.officerCatalog = cat;
+    if (Array.isArray(et)) state.eventTypes = et;
+    if (Array.isArray(evs)) state.events = evs;
+
+    if (canManage()) {
+      const pl = await apiFetch('/api/players').catch(() => null);
+      if (Array.isArray(pl)) state.players = pl;
+      await updatePendingCount();
+    } else if (currentUser?.playerId) {
+      const myPl = await apiFetch('/api/my-profile').catch(() => null);
+      if (myPl) {
+        const existingIdx = state.players.findIndex(p => p.id === myPl.id);
+        if (existingIdx >= 0) state.players[existingIdx] = myPl;
+        else state.players.push(myPl);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync data with server:', err);
+  }
+}
+
 // ─── STORAGE ─────────────────────────────────────────────────
 function save() {
   try { localStorage.setItem('kow_v2', JSON.stringify(state)); } catch(e) {}
@@ -107,7 +214,8 @@ function officerLabel(officer) {
 }
 function playerLink(player) {
   if (!player) return '—';
-  return `<button class="text-link" onclick="event.stopPropagation();navigate('player_detail',{id:${player.id}})">${player.name}</button>`;
+  if (state.currentRole === 'r3') return `<span>${escapeHtml(player.name)}</span>`;
+  return `<button class="text-link" onclick="event.stopPropagation();navigate('player_detail',{id:${player.id}})">${escapeHtml(player.name)}</button>`;
 }
 function officerLink(officer) {
   const catalog = getCatalogOfficer(officer?.catalogId);
@@ -117,8 +225,14 @@ function officerLink(officer) {
 function catalogOfficerLink(officer) {
   return `<button class="text-link" onclick="event.stopPropagation();navigate('officer_detail',{id:'${officer.id}'})">${officer.name}</button>`;
 }
-function canManage() { return state.currentRole === 'r4' || state.currentRole === 'r5'; }
-function canSeeStock(playerId) { return canManage() || state.currentPlayerId === playerId; }
+function canManage() {
+  const role = currentUser?.rank || state.currentRole;
+  return role === 'r4' || role === 'r5';
+}
+function canSeeStock(playerId) {
+  const myId = currentUser?.playerId ?? state.currentPlayerId;
+  return canManage() || myId === playerId;
+}
 function placeInfo(eventType, place, eventDate=null) {
   if (!eventType) return null;
   const places = eventDate ? resolveEventPlaces(eventType, eventDate) : eventType.places;
@@ -174,6 +288,9 @@ function openModal(id) {
   document.getElementById(id).classList.add('open');
 }
 function closeAllModals() {
+  if (!currentUser && document.getElementById('modal-auth')?.classList.contains('open')) {
+    return;
+  }
   document.getElementById('overlay').classList.remove('open');
   document.getElementById('sidebar')?.classList.remove('open');
   document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));
@@ -185,8 +302,1205 @@ function toggleSidebar() {
 }
 function setCurrentRole(role) {
   state.currentRole = role;
+  if (currentUser) currentUser.rank = role;
   save();
+  renderTopbarProfile();
+  renderSidebarNav();
   navigate(currentPage, pageParams);
+}
+
+// ─── AUTH & SESSION ──────────────────────────────────────────
+function openAuthModal(tab = 'login', alertMessage = null) {
+  openModal('modal-auth');
+  switchAuthTab(tab);
+  if (alertMessage) {
+    showAuthAlert(alertMessage, 'info');
+  } else {
+    hideAuthAlert();
+  }
+  const closeBtn = document.getElementById('auth-modal-close');
+  if (closeBtn) {
+    closeBtn.style.display = currentUser ? 'block' : 'none';
+  }
+}
+
+function switchAuthTab(tab) {
+  const loginForm = document.getElementById('auth-form-login');
+  const regForm = document.getElementById('auth-form-register');
+  const loginBtn = document.getElementById('tab-btn-login');
+  const regBtn = document.getElementById('tab-btn-register');
+
+  hideAuthAlert();
+
+  if (tab === 'register') {
+    if (loginForm) loginForm.style.display = 'none';
+    if (regForm) regForm.style.display = 'flex';
+    loginBtn?.classList.remove('active');
+    regBtn?.classList.add('active');
+    loadCandidatePlayers();
+    setTimeout(() => document.getElementById('auth-reg-username')?.focus(), 50);
+  } else {
+    if (loginForm) loginForm.style.display = 'flex';
+    if (regForm) regForm.style.display = 'none';
+    loginBtn?.classList.add('active');
+    regBtn?.classList.remove('active');
+    setTimeout(() => document.getElementById('auth-login-username')?.focus(), 50);
+  }
+}
+
+function showAuthAlert(msg, type = 'error') {
+  const el = document.getElementById('auth-alert');
+  if (!el) return;
+  el.className = `auth-alert ${type}`;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideAuthAlert() {
+  const el = document.getElementById('auth-alert');
+  if (!el) return;
+  el.style.display = 'none';
+  el.textContent = '';
+}
+
+async function loadCandidatePlayers() {
+  const select = document.getElementById('auth-reg-player-select');
+  if (!select) return;
+  select.innerHTML = '<option value="">— Новый персонаж (ввести имя) —</option>';
+  try {
+    let list = await fetch('/api/auth/candidate-players').then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!list || !Array.isArray(list)) {
+      list = await fetch('/api/players').then(r => r.ok ? r.json() : null).catch(() => null);
+    }
+    if (Array.isArray(list) && list.length > 0) {
+      list.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+      });
+    }
+  } catch (e) {}
+}
+
+function onAuthRegPlayerSelectChange(val) {
+  const nameInput = document.getElementById('auth-reg-player-name');
+  if (!nameInput) return;
+  if (val) {
+    nameInput.style.display = 'none';
+  } else {
+    nameInput.style.display = 'block';
+    nameInput.focus();
+  }
+}
+
+async function handleLoginSubmit(e) {
+  if (e) e.preventDefault();
+  const username = document.getElementById('auth-login-username')?.value.trim();
+  const password = document.getElementById('auth-login-password')?.value;
+  const submitBtn = document.getElementById('auth-login-submit');
+
+  if (!username || !password) {
+    showAuthAlert('Введите логин и пароль', 'error');
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Вход...';
+  }
+  hideAuthAlert();
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (res.status === 403 && data.error === 'PENDING_APPROVAL') {
+      showAuthAlert('Заявка отправлена руководству гильдии (Р4/Р5). После одобрения вы сможете войти.', 'warning');
+      return;
+    }
+    if (!res.ok) {
+      showAuthAlert(data.message || data.error || 'Неверный логин или пароль', 'error');
+      return;
+    }
+
+    localStorage.setItem('kow_token', data.token);
+    currentUser = data.user;
+    state.currentRole = currentUser.rank;
+    state.currentPlayerId = currentUser.playerId || null;
+    toast(`Добро пожаловать, ${currentUser.playerName || currentUser.username}!`);
+    closeAllModals();
+    renderTopbarProfile();
+    renderSidebarNav();
+    await loadDataFromServer();
+    if (currentUser.rank === 'r3') {
+      navigate('my_cabinet');
+    } else {
+      navigate('calendar');
+    }
+  } catch (err) {
+    showAuthAlert('Ошибка соединения с сервером', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Войти';
+    }
+  }
+}
+
+async function handleRegisterSubmit(e) {
+  if (e) e.preventDefault();
+  const username = document.getElementById('auth-reg-username')?.value.trim();
+  const password = document.getElementById('auth-reg-password')?.value;
+  const playerSelect = document.getElementById('auth-reg-player-select');
+  const playerNameInput = document.getElementById('auth-reg-player-name');
+  const submitBtn = document.getElementById('auth-reg-submit');
+
+  if (!username || !password) {
+    showAuthAlert('Заполните логин и пароль', 'error');
+    return;
+  }
+  if (password.length < 4) {
+    showAuthAlert('Пароль должен быть не менее 4 символов', 'error');
+    return;
+  }
+
+  const playerId = playerSelect?.value ? Number(playerSelect.value) : null;
+  const playerName = playerNameInput?.value.trim() || '';
+
+  if (!playerId && !playerName) {
+    showAuthAlert('Выберите персонажа из списка или введите имя', 'error');
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Отправка...';
+  }
+  hideAuthAlert();
+
+  try {
+    const body = { username, password };
+    if (playerId) body.playerId = playerId;
+    if (playerName) body.playerName = playerName;
+
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.error === 'USERNAME_TAKEN') {
+        showAuthAlert('Логин уже занят другим пользователем', 'error');
+      } else {
+        showAuthAlert(data.message || data.error || 'Ошибка при регистрации', 'error');
+      }
+      return;
+    }
+
+    if (data.pendingApproval) {
+      switchAuthTab('login');
+      showAuthAlert('Заявка отправлена руководству гильдии (Р4/Р5). После одобрения вы сможете войти.', 'success');
+      const loginUserInput = document.getElementById('auth-login-username');
+      const loginPassInput = document.getElementById('auth-login-password');
+      if (loginUserInput) loginUserInput.value = username;
+      if (loginPassInput) loginPassInput.value = '';
+    } else {
+      toast('Регистрация успешна! Первый пользователь назначен Главой (Р5).');
+      const loginUserInput = document.getElementById('auth-login-username');
+      const loginPassInput = document.getElementById('auth-login-password');
+      if (loginUserInput) loginUserInput.value = username;
+      if (loginPassInput) loginPassInput.value = password;
+      await handleLoginSubmit();
+    }
+  } catch (err) {
+    showAuthAlert('Ошибка соединения с сервером', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Зарегистрироваться';
+    }
+  }
+}
+
+async function logout() {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  } finally {
+    localStorage.removeItem('kow_token');
+    currentUser = null;
+    toast('Вы вышли из системы', 'info');
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login');
+  }
+}
+
+async function checkAuth() {
+  const token = localStorage.getItem('kow_token');
+  if (!token) {
+    currentUser = null;
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login');
+    return false;
+  }
+  try {
+    const data = await apiFetch('/api/auth/me');
+    if (data && data.user) {
+      currentUser = data.user;
+      if (data.player) {
+        currentUser.player = data.player;
+        currentUser.playerName = data.player.name;
+      }
+      state.currentRole = currentUser.rank;
+      state.currentPlayerId = currentUser.playerId || null;
+      renderTopbarProfile();
+      renderSidebarNav();
+      await loadDataFromServer();
+      closeAllModals();
+      return true;
+    }
+  } catch (err) {
+    localStorage.removeItem('kow_token');
+    currentUser = null;
+    renderTopbarProfile();
+    renderSidebarNav();
+    openAuthModal('login');
+    return false;
+  }
+}
+
+// ─── PENDING REQUESTS & BADGES ───────────────────────────────
+async function updatePendingCount() {
+  if (!canManage()) {
+    pendingRequestsCount = 0;
+    renderPendingBadge();
+    return 0;
+  }
+  try {
+    const pendingList = await apiFetch('/api/users/pending');
+    pendingRequestsCount = Array.isArray(pendingList) ? pendingList.length : 0;
+  } catch (e) {
+    pendingRequestsCount = 0;
+  }
+  renderPendingBadge();
+  return pendingRequestsCount;
+}
+
+function pluralizeRequests(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod100 >= 11 && mod100 <= 19) return 'заявок';
+  if (mod10 === 1) return 'заявка';
+  if (mod10 >= 2 && mod10 <= 4) return 'заявки';
+  return 'заявок';
+}
+
+function renderPendingBadge() {
+  const topbarBadge = document.getElementById('topbar-pending-badge');
+  if (topbarBadge) {
+    if (pendingRequestsCount > 0 && canManage()) {
+      topbarBadge.style.display = 'inline-flex';
+      topbarBadge.innerHTML = `<span class="badge-alert">🔔 ${pendingRequestsCount} ${pluralizeRequests(pendingRequestsCount)}</span>`;
+    } else {
+      topbarBadge.style.display = 'none';
+    }
+  }
+
+  const navItem = document.querySelector('.nav-item[data-page="pending_registrations"]');
+  if (navItem) {
+    let pill = navItem.querySelector('.nav-pill');
+    if (pendingRequestsCount > 0 && canManage()) {
+      if (pill) {
+        pill.textContent = pendingRequestsCount;
+      } else {
+        pill = document.createElement('span');
+        pill.className = 'nav-pill badge-alert';
+        pill.textContent = pendingRequestsCount;
+        navItem.appendChild(pill);
+      }
+    } else if (pill) {
+      pill.remove();
+    }
+  }
+}
+
+function renderTopbarProfile() {
+  const container = document.getElementById('topbar-profile');
+  if (!container) return;
+
+  if (!currentUser) {
+    container.innerHTML = `
+      <button class="btn-primary btn-sm" onclick="openAuthModal('login')">Войти</button>
+    `;
+    return;
+  }
+
+  const role = (currentUser.rank || 'r3').toUpperCase();
+  const name = currentUser.playerName || (currentUser.player && currentUser.player.name) || currentUser.username || 'Пользователь';
+  const showPending = canManage() && pendingRequestsCount > 0;
+
+  container.innerHTML = `
+    <button id="topbar-pending-badge" class="badge-alert-btn" style="display:${showPending ? 'inline-flex' : 'none'}" onclick="navigate('pending_registrations')" title="Ожидают одобрения">
+      <span class="badge-alert">🔔 ${pendingRequestsCount} ${pluralizeRequests(pendingRequestsCount)}</span>
+    </button>
+    <div class="user-profile-badge">
+      <span class="badge badge-rank badge-rank-${currentUser.rank || 'r3'}">[${role}]</span>
+      <span class="user-profile-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+    </div>
+    <button class="btn-ghost btn-sm btn-logout" onclick="logout()" title="Выйти из аккаунта">
+      🚪 Выйти
+    </button>
+  `;
+}
+
+function renderSidebarNav() {
+  const nav = document.getElementById('sidebar-nav');
+  if (!nav) return;
+
+  const role = currentUser?.rank || state.currentRole || 'r3';
+  let items = [];
+
+  if (role === 'r3') {
+    items = [
+      { page: 'my_cabinet', label: 'Мой кабинет', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` },
+      { page: 'calendar', label: 'Календарь ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="8" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
+      { page: 'calculator', label: 'Персональный калькулятор', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` }
+    ];
+  } else {
+    // R4 / R5
+    items = [
+      { page: 'my_cabinet', label: 'Мой кабинет', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` },
+      { page: 'calendar', label: 'Календарь', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
+      { page: 'players', label: 'Игроки', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>` },
+      { page: 'officers', label: 'Офицеры', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>` },
+      { page: 'event_types', label: 'Типы ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>` },
+      { page: 'calculator', label: 'Калькулятор и Аналитика', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` },
+      { page: 'pending_registrations', label: 'Заявки на регистрацию', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`, pill: pendingRequestsCount }
+    ];
+    if (role === 'r5') {
+      items.push({
+        page: 'users',
+        label: 'Пользователи',
+        icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
+      });
+    }
+  }
+
+  nav.innerHTML = items.map(item => `
+    <a href="#" class="nav-item ${currentPage === item.page ? 'active' : ''}" data-page="${item.page}">
+      ${item.icon}
+      <span>${item.label}</span>
+      ${item.pill ? `<span class="nav-pill badge-alert">${item.pill}</span>` : ''}
+    </a>
+  `).join('');
+
+  nav.querySelectorAll('.nav-item').forEach(el => {
+    el.addEventListener('click', e => {
+      e.preventDefault();
+      navigate(el.dataset.page);
+    });
+  });
+
+  const footer = document.querySelector('.sidebar-footer');
+  if (footer) {
+    if (role === 'r3') {
+      footer.style.display = 'none';
+    } else {
+      footer.style.display = 'flex';
+      const importBtn = document.getElementById('btn-import-json');
+      if (importBtn) {
+        importBtn.style.display = role === 'r5' ? 'flex' : 'none';
+      }
+    }
+  }
+}
+
+// ─── PAGE: MY CABINET ─────────────────────────────────────────
+async function renderMyCabinet() {
+  const c = document.getElementById('content');
+  if (!currentUser) {
+    c.innerHTML = `
+      <div class="section-header">
+        <div class="section-title">👤 Мой кабинет</div>
+      </div>
+      <div class="sim-box">
+        <div class="auth-alert info" style="display:block;margin-bottom:12px">
+          Для доступа в личный кабинет войдите в свой аккаунт.
+        </div>
+        <button class="btn-primary" onclick="openAuthModal('login')">Войти в систему</button>
+      </div>
+    `;
+    return;
+  }
+
+  c.innerHTML = `<div class="empty-state"><p>Загрузка данных личного кабинета...</p></div>`;
+
+  let profile = null;
+  try {
+    profile = await apiFetch('/api/my-profile');
+  } catch (err) {
+    if (err.status === 404 || err.message === 'NO_LINKED_PLAYER') {
+      c.innerHTML = `
+        <div class="section-header">
+          <div class="section-title">👤 Мой кабинет</div>
+        </div>
+        <div class="sim-box">
+          <div class="auth-alert warning" style="display:block;margin-bottom:14px">
+            ⚠️ К вашему аккаунту не привязан игровой персонаж. Обратитесь к руководству гильдии (Р4/Р5) для привязки персонажа к вашему логину.
+          </div>
+          <p style="color:var(--text2);font-size:13px">Вы вошли как <strong>${escapeHtml(currentUser.username)}</strong> (роль: ${(currentUser.rank || 'r3').toUpperCase()}).</p>
+          <div style="margin-top:16px;display:flex;gap:10px">
+            <button class="btn-primary" onclick="navigate('calendar')">📅 Календарь ивентов</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+    c.innerHTML = `<div class="empty-state"><p>Ошибка загрузки профиля: ${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+
+  myCabinetProfile = profile;
+  const pIdx = state.players.findIndex(p => p.id === profile.id);
+  if (pIdx >= 0) state.players[pIdx] = profile;
+  else state.players.push(profile);
+
+  const rewards = dailyRewards(profile.sector);
+  const today = new Date().toISOString().slice(0, 10);
+  const rankLabel = (profile.rank || currentUser.rank || 'r3').toUpperCase();
+
+  c.innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">
+          👤 Личный кабинет: ${escapeHtml(profile.name)}
+          ${profile.realName ? `<span style="color:var(--text3);font-size:13px"> · ${escapeHtml(profile.realName)}</span>` : ''}
+          <span class="badge badge-rank badge-rank-${profile.rank || 'r3'}">[${rankLabel}]</span>
+        </div>
+        <div style="color:var(--text3);font-size:12px;margin-top:4px">
+          VIP ${profile.sector.vipLevel} · Секретность ${profile.sector.confidentialityLevel} · Сила ${fmtNum(profile.sector.power)} · Киллы ${fmtNum(profile.sector.kills)} · Очки ${fmtOne(profile.sector.killPoints)}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 Обновить</button>
+      </div>
+    </div>
+
+    <!-- SECTOR & STOCK -->
+    <div class="cabinet-grid">
+      <!-- Sector Card -->
+      <div class="cabinet-card">
+        <div class="cabinet-card-title">
+          <span>⚙️ Параметры сектора</span>
+          <span class="badge badge-none">+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день</span>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="my-sector-vip">Уровень VIP (0-30)</label>
+            <input type="number" id="my-sector-vip" min="0" max="30" value="${profile.sector.vipLevel}">
+          </div>
+          <div class="form-group">
+            <label for="my-sector-conf">Конфиденциальность</label>
+            <input type="number" id="my-sector-conf" min="0" value="${profile.sector.confidentialityLevel}">
+          </div>
+        </div>
+        <div class="form-row form-row-3">
+          <div class="form-group">
+            <label for="my-sector-power">Мощь / Сила</label>
+            <input type="number" id="my-sector-power" min="0" value="${profile.sector.power}">
+          </div>
+          <div class="form-group">
+            <label for="my-sector-kills">Убито</label>
+            <input type="number" id="my-sector-kills" min="0" value="${profile.sector.kills}">
+          </div>
+          <div class="form-group">
+            <label for="my-sector-kill-points">Очки за убийство</label>
+            <input type="number" id="my-sector-kill-points" min="0" step="0.1" value="${profile.sector.killPoints}">
+          </div>
+        </div>
+        <div style="font-size:11.5px;color:var(--text3)">
+          💡 Ежедневный доход: <strong>+${fmtNum(rewards.puzzlesPerDay, 2)}</strong> пазлов/день (VIP: ${profile.sector.vipLevel > 10 ? Math.min(20, Math.max(2, profile.sector.vipLevel - 9)) : 0}, Секретность: ${profile.sector.confidentialityLevel >= 25 ? '0.67' : profile.sector.confidentialityLevel > 24 ? '0.5' : '0'}) + 1 сундук/день.
+        </div>
+        <div>
+          <button type="button" class="btn-primary btn-sm" onclick="saveMySector()">💾 Сохранить параметры сектора</button>
+        </div>
+      </div>
+
+      <!-- Stock Card -->
+      <div class="cabinet-card">
+        <div class="cabinet-card-title">
+          <span>📦 Запасы гильдейца</span>
+          <span style="font-size:11px;color:var(--text3)">Быстрое обновление</span>
+        </div>
+        <div class="stock-grid" style="margin-bottom:0">
+          <div class="stock-card" style="padding:10px">
+            <div class="label">🎟️ Купоны</div>
+            <div class="value" style="font-size:17px">${fmtNum(profile.stock.coupons)}</div>
+          </div>
+          <div class="stock-card" style="padding:10px">
+            <div class="label">🧩 Пазлы</div>
+            <div class="value" style="font-size:17px">${fmtNum(profile.stock.puzzles)}</div>
+          </div>
+          <div class="stock-card" style="padding:10px">
+            <div class="label">📦 Сундуки</div>
+            <div class="value" style="font-size:17px">${fmtNum(profile.stock.chests)}</div>
+          </div>
+        </div>
+        <div class="form-row form-row-3">
+          <div class="form-group">
+            <label for="my-stock-coupons">Новые купоны</label>
+            <input type="number" id="my-stock-coupons" min="0" value="${profile.stock.coupons}">
+          </div>
+          <div class="form-group">
+            <label for="my-stock-puzzles">Новые пазлы</label>
+            <input type="number" id="my-stock-puzzles" min="0" value="${profile.stock.puzzles}">
+          </div>
+          <div class="form-group">
+            <label for="my-stock-chests">Новые сундуки</label>
+            <input type="number" id="my-stock-chests" min="0" value="${profile.stock.chests}">
+          </div>
+        </div>
+        <div>
+          <button type="button" class="btn-primary btn-sm" onclick="saveMyStock()">💾 Сохранить запасы</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OFFICERS LIST -->
+    <div class="section-header" style="margin-top:20px">
+      <div class="section-title">🎖️ Мои офицеры (${profile.officers.length})</div>
+      <button class="btn-primary btn-sm" onclick="openAddMyOfficerModal()">+ Добавить офицера</button>
+    </div>
+
+    ${profile.officers.length ? `
+      <div class="cabinet-officers-grid">
+        ${profile.officers.map(o => {
+          const cat = getCatalogOfficer(o.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
+          const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player: profile, targetLevel: 180, today });
+          const targetPuz = 180 * PUZZLES_PER_LEVEL;
+          const currPuz = def.currentPuzzles;
+          const pctVal = Math.min(100, Math.round((currPuz / targetPuz) * 100));
+
+          return `
+            <div class="cabinet-officer-card">
+              <div class="cabinet-officer-header">
+                <div>
+                  <div class="cabinet-officer-name">${escapeHtml(officerLabel(o))}</div>
+                  <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+                    ${troopBadge(cat.type)}
+                    <span class="cabinet-stat-pill">Ген. ${cat.generation}</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:4px">
+                  <button class="action-btn" title="Редактировать уровень и купоны" onclick="openEditMyOfficerModal('${o.id}')">✏️</button>
+                  <button class="action-btn danger" title="Удалить офицера" onclick="deleteMyOfficer('${o.id}', '${escapeHtml(officerLabel(o))}')">🗑️</button>
+                </div>
+              </div>
+
+              <!-- Interactive Stars -->
+              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);padding:6px 10px;border-radius:6px">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:12px;color:var(--text2)">Звёзды:</span>
+                  ${renderInteractiveStars(o)}
+                </div>
+                <div>
+                  ${def.starRequirement.isStarReady
+                    ? `<span class="badge badge-success" style="font-size:10px">6★ Готово</span>`
+                    : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 6★">Нужно 6★</span>`}
+                </div>
+              </div>
+
+              <!-- Level and Progress -->
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+                  <span>Уровень: <strong>${o.level} / 180</strong></span>
+                  <span style="color:var(--text2)">Купоны: <strong>${fmtNum(o.coupons)}</strong></span>
+                </div>
+                <div class="progress-container">
+                  <div class="progress-fill" style="width:${pctVal}%"></div>
+                </div>
+              </div>
+
+              <!-- Deficit & Forecast -->
+              <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
+                <div style="display:flex;justify-content:space-between">
+                  <span style="color:var(--text3)">Дефицит до 180:</span>
+                  <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} пазл. ${def.costPerPuzzle > 0 ? `(${fmtNum(def.deficitCoupons)} куп.)` : '(только пазлы)'}</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between">
+                  <span style="color:var(--text3)">Прогноз без ивентов:</span>
+                  <span style="color:var(--text2)">${def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—'}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : `
+      <div class="empty-state" style="padding:24px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:24px">
+        <p>У вас пока нет офицеров в профиле. Нажмите «+ Добавить офицера», чтобы добавить первого офицера!</p>
+      </div>
+    `}
+
+    <!-- PERSONAL LEVELING SIMULATOR -->
+    <div class="section-header" style="margin-top:28px">
+      <div class="section-title">🚀 Персональный симулятор прокачки до 180 уровня</div>
+    </div>
+    <div id="cabinet-sim-container">
+      ${renderCabinetSimulatorHtml()}
+    </div>
+  `;
+}
+
+function renderCabinetSimulatorHtml() {
+  if (!myCabinetProfile || !myCabinetProfile.officers || !myCabinetProfile.officers.length) {
+    return `<div class="empty-state" style="padding:24px"><p>Добавьте офицера в кабинет, чтобы рассчитать прокачку.</p></div>`;
+  }
+
+  let selectedOfficer = myCabinetProfile.officers.find(o => o.id === myCabinetSim.officerId);
+  if (!selectedOfficer) {
+    selectedOfficer = myCabinetProfile.officers[0];
+    myCabinetSim.officerId = selectedOfficer.id;
+  }
+
+  const cat = getCatalogOfficer(selectedOfficer.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
+  const targetLevel = Math.max(1, Math.min(180, myCabinetSim.targetLevel || 180));
+  const today = new Date().toISOString().slice(0, 10);
+
+  const def = calculateOfficerDeficit({
+    officer: selectedOfficer,
+    catalogItem: cat,
+    player: myCabinetProfile,
+    targetLevel,
+    today
+  });
+
+  const et = state.eventTypes[0];
+  const resolvedPlaces = et ? resolveEventPlaces(et, today) : [];
+  const top1Coupons = resolvedPlaces.find(p => p.place === 1)?.coupons || 12500;
+  const top2Coupons = resolvedPlaces.find(p => p.place === 2)?.coupons || 6500;
+  const top3Coupons = resolvedPlaces.find(p => p.place === 3)?.coupons || 3500;
+  const top4Coupons = resolvedPlaces.find(p => p.place >= 4)?.coupons || 2750;
+
+  const sim = simulateEventProgress({
+    deficitPuzzles: def.deficitPuzzles,
+    costPerPuzzle: def.costPerPuzzle,
+    dailyIncome: def.dailyIncome,
+    plannedEvents: [
+      { coupons: top1Coupons, count: myCabinetSim.planned.top1 },
+      { coupons: top2Coupons, count: myCabinetSim.planned.top2 },
+      { coupons: top3Coupons, count: myCabinetSim.planned.top3 },
+      { coupons: top4Coupons, count: myCabinetSim.planned.top4 },
+    ],
+    today
+  });
+
+  const targetPuz = targetLevel * PUZZLES_PER_LEVEL;
+  const currentPuzTotal = def.currentPuzzles + def.stockPuzzles;
+  const progressPct = Math.min(100, Math.round((currentPuzTotal / Math.max(1, targetPuz)) * 100));
+  const simProgressPct = Math.min(100, Math.round(((currentPuzTotal + sim.puzzlesFromEvents) / Math.max(1, targetPuz)) * 100));
+
+  return `
+    <div class="sim-box">
+      <div class="form-row" style="margin-bottom:16px">
+        <div class="form-group">
+          <label>Офицер для расчета</label>
+          <select onchange="onCabinetSimOfficerChange(this.value)">
+            ${myCabinetProfile.officers.map(o => `<option value="${o.id}" ${o.id===selectedOfficer.id?'selected':''}>${escapeHtml(officerLabel(o))} (ур. ${o.level})</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Целевой уровень прокачки</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="number" min="1" max="180" value="${targetLevel}" onchange="setCabinetSimTargetLevel(this.value)" style="width:80px">
+            <button type="button" class="btn-ghost btn-sm ${targetLevel===60?'btn-primary':''}" onclick="setCabinetSimTargetLevel(60)">60</button>
+            <button type="button" class="btn-ghost btn-sm ${targetLevel===120?'btn-primary':''}" onclick="setCabinetSimTargetLevel(120)">120</button>
+            <button type="button" class="btn-ghost btn-sm ${targetLevel===180?'btn-primary':''}" onclick="setCabinetSimTargetLevel(180)">180</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="stock-grid" style="margin-bottom:16px">
+        <div class="stock-card">
+          <div class="label">Текущий прогресс</div>
+          <div class="value" style="display:flex;align-items:center;gap:8px">
+            <span>Ур. ${fmtNum(selectedOfficer.level)} <span style="font-size:12px;color:var(--text3)">/ ${targetLevel}</span></span>
+            ${troopBadge(cat.type)}
+          </div>
+          <div style="margin-top:4px">${renderStars(selectedOfficer.stars)}</div>
+          <div style="font-size:11px;color:${def.starRequirement.isStarReady?'var(--green)':'var(--amber)'};margin-top:4px">
+            ${def.starRequirement.isStarReady ? '★ Готов к максимальной подготовке' : '☆ Для 180 уровня требуется 6★'}
+          </div>
+        </div>
+        <div class="stock-card">
+          <div class="label">Оставшийся дефицит</div>
+          <div class="value">${fmtNum(sim.remainingDeficitPuzzles)} <span style="font-size:12px;color:var(--text3)">пазлов</span></div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">
+            ${def.costPerPuzzle > 0 ? `${fmtNum(sim.remainingDeficitCoupons)} купонов` : 'Только пазлы'}
+          </div>
+        </div>
+        <div class="stock-card">
+          <div class="label">Ежедневный доход сектора</div>
+          <div class="value">+${fmtNum(def.dailyIncome, 2)} <span style="font-size:12px;color:var(--text3)">пазл/день</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">VIP ${myCabinetProfile.sector.vipLevel} · Конф. ${myCabinetProfile.sector.confidentialityLevel} · 1 сундук/день</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span style="color:var(--text2)">Прогресс до цели (Ур. ${targetLevel}):</span>
+          <strong>${simProgressPct}% (${fmtNum(currentPuzTotal + sim.puzzlesFromEvents)} / ${fmtNum(targetPuz)} пазлов)</strong>
+        </div>
+        <div class="progress-container">
+          <div class="progress-fill green" style="width:${simProgressPct}%"></div>
+        </div>
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">Планируемые призовые места в ивентах:</div>
+      <div class="sim-counter-grid">
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥇 1 место</span>
+            <span class="sim-counter-desc">${fmtNum(top1Coupons)} купонов (+${fmtNum(Math.floor(top1Coupons/COUPON_PER_PUZZLE))} пазл.)</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top1', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned.top1}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top1', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥈 2 место</span>
+            <span class="sim-counter-desc">${fmtNum(top2Coupons)} купонов (+${fmtNum(Math.floor(top2Coupons/COUPON_PER_PUZZLE))} пазл.)</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top2', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned.top2}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top2', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥉 3 место</span>
+            <span class="sim-counter-desc">${fmtNum(top3Coupons)} купонов (+${fmtNum(Math.floor(top3Coupons/COUPON_PER_PUZZLE))} пазл.)</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top3', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned.top3}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top3', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🎖️ 4–10 место</span>
+            <span class="sim-counter-desc">${fmtNum(top4Coupons)} купонов (+${fmtNum(Math.floor(top4Coupons/COUPON_PER_PUZZLE))} пазл.)</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top4', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned.top4}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top4', 1)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-result-banner">
+        <div>
+          <div class="sim-result-title">
+            Прогноз достижения: <strong>${sim.simulatedDate ? formatDate(sim.simulatedDate) : 'Не достижимо'}</strong>
+            ${sim.simulatedDays !== null ? `<span style="font-size:12px;color:var(--text3)"> (${fmtNum(sim.simulatedDays)} дн.)</span>` : ''}
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">
+            Без ивентов: ${def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${fmtNum(def.daysWithoutEvents)} дн.)` : '—'}
+            ${sim.puzzlesFromEvents > 0 ? `· Награды с ивентов: +${fmtNum(sim.puzzlesFromEvents)} пазлов` : ''}
+          </div>
+        </div>
+        ${sim.savedDays > 0 ? `<div class="sim-result-badge">⚡ Экономия: ${fmtNum(sim.savedDays)} дней!</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function saveMySector() {
+  const vipLevel = Math.max(0, parseInt(document.getElementById('my-sector-vip').value) || 0);
+  const confidentialityLevel = Math.max(0, parseInt(document.getElementById('my-sector-conf').value) || 0);
+  const power = Math.max(0, parseInt(document.getElementById('my-sector-power').value) || 0);
+  const kills = Math.max(0, parseInt(document.getElementById('my-sector-kills').value) || 0);
+  const killPoints = Math.max(0, parseFloat(document.getElementById('my-sector-kill-points').value) || 0);
+
+  try {
+    await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: {
+        sector: { vipLevel, confidentialityLevel, power, kills, killPoints }
+      }
+    });
+    toast('Параметры сектора успешно сохранены');
+    await renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка сохранения сектора: ' + err.message, 'error');
+  }
+}
+
+async function saveMyStock() {
+  const coupons = Math.max(0, parseInt(document.getElementById('my-stock-coupons').value) || 0);
+  const puzzles = Math.max(0, parseInt(document.getElementById('my-stock-puzzles').value) || 0);
+  const chests = Math.max(0, parseInt(document.getElementById('my-stock-chests').value) || 0);
+
+  try {
+    await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: {
+        stock: { coupons, puzzles, chests }
+      }
+    });
+    toast('Запасы успешно сохранены');
+    await renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка сохранения запасов: ' + err.message, 'error');
+  }
+}
+
+function renderInteractiveStars(officer) {
+  const count = Number(officer.stars) || 0;
+  return `<span class="stars">${Array.from({length:6},(_,i)=>{
+    const star = i + 1;
+    const cost = starCostFor(star);
+    const title = star < 6
+      ? `${fmtNum(cost)} звезд до ${star}★ (нажмите, чтобы установить)`
+      : `Итого ${fmtNum(cost)} звезд (нажмите, чтобы установить 6★)`;
+    return `<button type="button" class="star-btn ${count>=star?'active':''}" title="${title}" onclick="setMyOfficerStars('${officer.id}', ${star === count ? star - 1 : star})">${count>=star?'★':'☆'}</button>`;
+  }).join('')}</span>`;
+}
+
+function openAddMyOfficerModal() {
+  myOfficerEditId = null;
+  document.getElementById('modal-my-officer-title').textContent = 'Добавить офицера в кабинет';
+  const group = document.getElementById('my-officer-catalog-group');
+  if (group) group.style.display = 'flex';
+
+  const select = document.getElementById('my-officer-catalog-select');
+  if (select) {
+    const existingCatalogIds = new Set((myCabinetProfile?.officers || []).map(o => o.catalogId));
+    select.innerHTML = state.officerCatalog.map(cat => {
+      const already = existingCatalogIds.has(cat.id);
+      return `<option value="${cat.id}" ${already ? 'disabled' : ''}>${escapeHtml(cat.name)} (${cat.type}, Ген. ${cat.generation})${already ? ' — уже добавлен' : ''}</option>`;
+    }).join('');
+  }
+
+  document.getElementById('my-officer-level').value = 0;
+  document.getElementById('my-officer-coupons').value = 0;
+  document.getElementById('my-officer-stars').value = 0;
+
+  openModal('modal-my-officer');
+}
+
+function openEditMyOfficerModal(officerId) {
+  myOfficerEditId = officerId;
+  const off = myCabinetProfile?.officers?.find(o => o.id === officerId);
+  if (!off) return;
+
+  document.getElementById('modal-my-officer-title').textContent = `Редактировать офицера: ${officerLabel(off)}`;
+  const group = document.getElementById('my-officer-catalog-group');
+  if (group) group.style.display = 'none';
+
+  document.getElementById('my-officer-level').value = off.level || 0;
+  document.getElementById('my-officer-coupons').value = off.coupons || 0;
+  document.getElementById('my-officer-stars').value = off.stars || 0;
+
+  openModal('modal-my-officer');
+}
+
+async function saveMyOfficerSubmit() {
+  const level = Math.max(0, Math.min(180, parseInt(document.getElementById('my-officer-level').value) || 0));
+  const coupons = Math.max(0, parseInt(document.getElementById('my-officer-coupons').value) || 0);
+  const stars = Math.max(0, Math.min(6, parseInt(document.getElementById('my-officer-stars').value) || 0));
+
+  try {
+    if (myOfficerEditId) {
+      await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
+        method: 'PUT',
+        body: { level, coupons, stars }
+      });
+      toast('Офицер обновлен');
+    } else {
+      const catalogId = document.getElementById('my-officer-catalog-select').value;
+      if (!catalogId) {
+        toast('Выберите офицера из каталога', 'error');
+        return;
+      }
+      const cat = getCatalogOfficer(catalogId);
+      await apiFetch('/api/my-profile/officers', {
+        method: 'POST',
+        body: { catalogId, name: cat?.name || '', level, coupons, stars }
+      });
+      toast('Офицер добавлен в профиль');
+    }
+    closeAllModals();
+    await renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка сохранения офицера: ' + err.message, 'error');
+  }
+}
+
+async function deleteMyOfficer(officerId, officerName) {
+  if (!confirm(`Удалить офицера «${officerName}» из вашего кабинета?`)) return;
+
+  try {
+    await apiFetch(`/api/my-profile/officers/${officerId}`, { method: 'DELETE' });
+    toast('Офицер удален из кабинета', 'info');
+    await renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка удаления офицера: ' + err.message, 'error');
+  }
+}
+
+async function setMyOfficerStars(officerId, stars) {
+  const count = Math.max(0, Math.min(6, Number(stars) || 0));
+  try {
+    await apiFetch(`/api/my-profile/officers/${officerId}`, {
+      method: 'PUT',
+      body: { stars: count }
+    });
+    toast(`Звёзды обновлены: ${count}★`);
+    await renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка обновления звёзд: ' + err.message, 'error');
+  }
+}
+
+function onCabinetSimOfficerChange(officerId) {
+  myCabinetSim.officerId = officerId;
+  const container = document.getElementById('cabinet-sim-container');
+  if (container) container.innerHTML = renderCabinetSimulatorHtml();
+}
+
+function setCabinetSimTargetLevel(lvl) {
+  myCabinetSim.targetLevel = Math.max(1, Math.min(180, Number(lvl) || 180));
+  const container = document.getElementById('cabinet-sim-container');
+  if (container) container.innerHTML = renderCabinetSimulatorHtml();
+}
+
+function adjustCabinetSimEvent(key, delta) {
+  if (!myCabinetSim.planned) myCabinetSim.planned = { top1: 0, top2: 0, top3: 0, top4: 0 };
+  myCabinetSim.planned[key] = Math.max(0, (myCabinetSim.planned[key] || 0) + delta);
+  const container = document.getElementById('cabinet-sim-container');
+  if (container) container.innerHTML = renderCabinetSimulatorHtml();
+}
+
+// ─── PAGE: PENDING REGISTRATIONS ─────────────────────────────
+async function renderPendingRegistrations() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">Заявки на регистрацию участников</div>
+      <button class="btn-ghost btn-sm" onclick="renderPendingRegistrations()">🔄 Обновить</button>
+    </div>
+    <div id="pending-users-container">
+      <div class="empty-state"><p>Загрузка заявок...</p></div>
+    </div>
+  `;
+
+  try {
+    const pendingUsers = await apiFetch('/api/users/pending');
+    pendingRequestsCount = Array.isArray(pendingUsers) ? pendingUsers.length : 0;
+    renderPendingBadge();
+    const container = document.getElementById('pending-users-container');
+    if (!container) return;
+
+    if (!pendingUsers || pendingUsers.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div style="font-size:32px;margin-bottom:8px">🎉</div>
+          <p style="font-weight:600;font-size:15px;color:var(--text)">Нет активных заявок на регистрацию</p>
+          <p style="color:var(--text3);font-size:13px;margin-top:4px">Все поступившие заявки обработаны руководствами гильдии.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const isR5 = (currentUser?.rank || state.currentRole) === 'r5';
+
+    container.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Логин</th>
+              <th>Персонаж в гильдии</th>
+              <th>Дата заявки</th>
+              <th>Статус</th>
+              <th style="text-align:right">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pendingUsers.map(u => `
+              <tr>
+                <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
+                <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
+                <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">Новый персонаж</span>'}</td>
+                <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
+                <td><span class="badge badge-pending">⏳ Ожидает</span></td>
+                <td style="text-align:right">
+                  <div style="display:inline-flex;gap:6px;justify-content:flex-end">
+                    <button class="btn-primary btn-sm" onclick="handleApproveUser(${u.id}, 'r3')">Одобрить (Р3)</button>
+                    ${isR5 ? `<button class="btn-primary btn-sm" style="background:#8b5cf6" onclick="handleApproveUser(${u.id}, 'r4')">Одобрить (Р4)</button>` : ''}
+                    <button class="btn-danger btn-sm" onclick="handleRejectUser(${u.id}, '${escapeHtml(u.username)}')">Отклонить</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    const container = document.getElementById('pending-users-container');
+    if (container) {
+      container.innerHTML = `<div class="empty-state"><p style="color:var(--red)">Ошибка загрузки заявок: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+}
+
+async function handleApproveUser(userId, rank) {
+  try {
+    await apiFetch(`/api/users/${userId}/approve`, {
+      method: 'POST',
+      body: { rank }
+    });
+    toast(`Пользователь #${userId} одобрен в ранге ${rank.toUpperCase()}`);
+    await updatePendingCount();
+    await renderPendingRegistrations();
+  } catch (err) {
+    toast(`Ошибка одобрения: ${err.message}`, 'error');
+  }
+}
+
+async function handleRejectUser(userId, username) {
+  if (!confirm(`Отклонить заявку пользователя "${username}"?`)) return;
+  try {
+    await apiFetch(`/api/users/${userId}/reject`, {
+      method: 'POST'
+    });
+    toast(`Заявка пользователя "${username}" отклонена`);
+    await updatePendingCount();
+    await renderPendingRegistrations();
+  } catch (err) {
+    toast(`Ошибка отклонения: ${err.message}`, 'error');
+  }
+}
+
+// ─── PAGE: USERS (R5) ────────────────────────────────────────
+async function renderUsers() {
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="section-header">
+      <div class="section-title">🔐 Управление пользователями гильдии</div>
+      <button class="btn-ghost btn-sm" onclick="renderUsers()">🔄 Обновить</button>
+    </div>
+    <div id="users-table-container">
+      <div class="empty-state"><p>Загрузка пользователей...</p></div>
+    </div>
+  `;
+
+  try {
+    const users = await apiFetch('/api/users');
+    const container = document.getElementById('users-table-container');
+    if (!container) return;
+
+    if (!users || users.length === 0) {
+      container.innerHTML = `<div class="empty-state"><p>Пользователей не найдено</p></div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Логин</th>
+              <th>Персонаж</th>
+              <th>Ранг</th>
+              <th>Статус</th>
+              <th>Регистрация</th>
+              <th style="text-align:right">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${users.map(u => `
+              <tr>
+                <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
+                <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
+                <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
+                <td>
+                  <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
+                    <option value="r3" ${u.rank === 'r3' ? 'selected' : ''}>Р3 (Боец)</option>
+                    <option value="r4" ${u.rank === 'r4' ? 'selected' : ''}>Р4 (Чиновник)</option>
+                    <option value="r5" ${u.rank === 'r5' ? 'selected' : ''}>Р5 (Глава)</option>
+                  </select>
+                </td>
+                <td>${u.is_approved ? '<span class="badge badge-success">✓ Активен</span>' : '<span class="badge badge-pending">⏳ Ожидает</span>'}</td>
+                <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
+                <td style="text-align:right">
+                  <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">🔑 Пароль</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    const container = document.getElementById('users-table-container');
+    if (container) {
+      container.innerHTML = `<div class="empty-state"><p style="color:var(--red)">Ошибка: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+}
+
+async function handleChangeUserRank(userId, newRank) {
+  try {
+    await apiFetch(`/api/users/${userId}`, {
+      method: 'PATCH',
+      body: { rank: newRank }
+    });
+    toast(`Ранг пользователя #${userId} изменен на ${newRank.toUpperCase()}`);
+    if (currentUser && currentUser.id === userId) {
+      currentUser.rank = newRank;
+      state.currentRole = newRank;
+      renderTopbarProfile();
+      renderSidebarNav();
+    }
+  } catch (err) {
+    toast(`Ошибка изменения ранга: ${err.message}`, 'error');
+    renderUsers();
+  }
+}
+
+async function handleResetUserPassword(userId, username) {
+  const newPass = prompt(`Введите новый пароль для пользователя "${username}":`);
+  if (!newPass) return;
+  if (newPass.length < 4) {
+    toast('Пароль должен содержать не менее 4 символов', 'error');
+    return;
+  }
+  try {
+    await apiFetch(`/api/users/${userId}`, {
+      method: 'PATCH',
+      body: { password: newPass }
+    });
+    toast(`Пароль для "${username}" успешно обновлен`);
+  } catch (err) {
+    toast(`Ошибка смены пароля: ${err.message}`, 'error');
+  }
 }
 
 function formatDate(s) {
@@ -217,14 +1531,70 @@ let currentPage = 'calendar';
 let pageParams = {};
 
 function navigate(page, params={}) {
-  currentPage = page; pageParams = params;
+  const role = currentUser?.rank || state.currentRole || 'r3';
+
+  // Role permissions check
+  if (role === 'r3') {
+    const allowedR3 = ['my_cabinet', 'calendar', 'calculator', 'officer_detail', 'event_detail'];
+    if (!allowedR3.includes(page)) {
+      page = 'my_cabinet';
+    }
+  } else if (role === 'r4') {
+    if (page === 'users') {
+      page = 'calendar';
+    }
+  }
+
+  currentPage = page;
+  pageParams = params;
+
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
-  const titles = { calendar:'Календарь ивентов', players:'Игроки', officers:'Офицеры', officer_detail:'Офицер', event_types:'Настройка ивентов', event_detail:'Ивент', player_detail:'Игрок', calculator:'Калькулятор и Аналитика' };
-  document.getElementById('page-title').textContent = titles[page] || page;
-  document.getElementById('role-switch').value = state.currentRole;
-  document.getElementById('content').innerHTML = '';
-  ({calendar:renderCalendar, players:renderPlayers, officers:renderOfficers, officer_detail:()=>renderOfficerDetail(params.id), event_types:renderEventTypes, event_detail:()=>renderEventDetail(params.id), player_detail:()=>renderPlayerDetail(params.id), calculator:renderCalculator})[page]?.();
-  document.getElementById('sidebar').classList.remove('open');
+  const titles = {
+    my_cabinet: 'Мой кабинет',
+    calendar: 'Календарь ивентов',
+    players: 'Игроки',
+    officers: 'Офицеры',
+    officer_detail: 'Офицер',
+    event_types: 'Настройка ивентов',
+    event_detail: 'Ивент',
+    player_detail: 'Игрок',
+    calculator: 'Калькулятор и Аналитика',
+    pending_registrations: 'Заявки на регистрацию',
+    users: 'Управление пользователями'
+  };
+  const titleEl = document.getElementById('page-title');
+  if (titleEl) {
+    titleEl.textContent = titles[page] || page;
+  }
+  const roleSwitchEl = document.getElementById('role-switch');
+  if (roleSwitchEl) {
+    roleSwitchEl.value = role;
+  }
+  const contentEl = document.getElementById('content');
+  if (contentEl) {
+    contentEl.innerHTML = '';
+  }
+
+  const pageRenderers = {
+    my_cabinet: renderMyCabinet,
+    calendar: renderCalendar,
+    players: renderPlayers,
+    officers: renderOfficers,
+    officer_detail: () => renderOfficerDetail(params.id),
+    event_types: renderEventTypes,
+    event_detail: () => renderEventDetail(params.id),
+    player_detail: () => renderPlayerDetail(params.id),
+    calculator: renderCalculator,
+    pending_registrations: renderPendingRegistrations,
+    users: renderUsers
+  };
+
+  const renderer = pageRenderers[page];
+  if (renderer) {
+    renderer();
+  }
+
+  document.getElementById('sidebar')?.classList.remove('open');
 }
 
 document.querySelectorAll('.nav-item').forEach(el=>{
@@ -283,6 +1653,32 @@ function calCard(ev, status) {
     </div>`;
   }).join('');
 
+  let regHtml = '';
+  if (status === 'upcoming' && currentUser?.playerId) {
+    if (ev.myRegistration) {
+      const myPlace = Number(ev.myRegistration.desiredPlace) || 0;
+      const placeLabel = myPlace === 0 ? 'Любое подходящее' : (placeInfo(et, myPlace, ev.dateFrom)?.label || `Место ${myPlace}`);
+      const allOffs = state.players.flatMap(p => p.officers || []);
+      const regOff = allOffs.find(o => o.id === ev.myRegistration.officerId)
+        || (myCabinetProfile?.officers || []).find(o => o.id === ev.myRegistration.officerId);
+      const regOfficerName = regOff ? officerLabel(regOff) : (ev.myRegistration.officerId || '—');
+      regHtml = `
+        <div class="cal-reg-badge" onclick="event.stopPropagation()">
+          <div>✓ Заявка: <strong>${escapeHtml(regOfficerName)}</strong> (${escapeHtml(placeLabel)})</div>
+          <button class="action-btn" onclick="event.stopPropagation();openRegisterModal(${ev.id})">✏️ Изменить</button>
+        </div>
+      `;
+    } else {
+      regHtml = `
+        <div style="margin-bottom:10px" onclick="event.stopPropagation()">
+          <button class="btn-primary btn-sm btn-block" onclick="event.stopPropagation();openRegisterModal(${ev.id})">
+            📝 Зарегистрироваться на ивент
+          </button>
+        </div>
+      `;
+    }
+  }
+
   return `<div class="cal-card" onclick="navigate('event_detail',{id:${ev.id}})" style="--ev-color:${color}">
     <div class="cal-card-header">
       <div>
@@ -295,6 +1691,7 @@ function calCard(ev, status) {
       </div>
     </div>
     ${top3 ? `<div class="cal-assigns">${top3}${ev.assignments.length > 3 ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">+ ещё ${fmtNum(ev.assignments.length-3)} назначений</div>` : ''}</div>` : `<div class="slot-empty">Назначений нет</div>`}
+    ${regHtml}
     <div class="cal-card-footer">
       <span style="font-size:12px;color:var(--text3)">${ev.note || ''}</span>
       <div style="display:flex;gap:6px">
@@ -334,9 +1731,18 @@ function renderEventDetail(eventId) {
     const coupons = a?.actualCoupons ?? pi?.coupons ?? 0;
     const isConfirmed = a?.actualCoupons !== undefined;
     const r3Submit = state.currentRole === 'r3' && state.currentPlayerId && canR3SubmitResult({ event: ev, place: pl, nowIso: new Date().toISOString(), players: state.players });
+
+    let regMatchBadge = '';
+    if (a?.playerId && ev.registrations) {
+      const reg = ev.registrations.find(r => Number(r.playerId) === Number(a.playerId));
+      if (reg && (Number(reg.desiredPlace) === pl || Number(reg.desiredPlace) === 0)) {
+        regMatchBadge = ` <span class="badge badge-success" style="font-size:10px" title="Заявка игрока совпала с назначением">Заявка учтена ✓</span>`;
+      }
+    }
+
     rows.push(`<tr>
       <td><strong style="font-size:15px">${pi?.label || `Место ${pl}`}</strong></td>
-      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
+      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
       <td style="color:var(--text2)">${officer ? officerLink(officer) : '—'}</td>
       <td style="color:var(--text2)">Ур. ${officer?.level ?? '—'}</td>
       <td style="font-family:var(--mono);color:${isConfirmed?'var(--green)':'var(--text2)'};font-weight:600">
@@ -349,6 +1755,35 @@ function renderEventDetail(eventId) {
     const pi = placeInfo(et,a.place, ev.dateFrom);
     return s + (a.actualCoupons ?? pi?.coupons ?? 0);
   },0);
+
+  let regBanner = '';
+  if (isEventUpcoming(ev) && currentUser?.playerId) {
+    if (ev.myRegistration) {
+      const myPlace = Number(ev.myRegistration.desiredPlace) || 0;
+      const placeLabel = myPlace === 0 ? 'Любое подходящее' : (placeInfo(et, myPlace, ev.dateFrom)?.label || `Место ${myPlace}`);
+      const allOffs = state.players.flatMap(p => p.officers || []);
+      const regOff = allOffs.find(o => o.id === ev.myRegistration.officerId) || (myCabinetProfile?.officers || []).find(o => o.id === ev.myRegistration.officerId);
+      const regOfficerName = regOff ? officerLabel(regOff) : (ev.myRegistration.officerId || '—');
+      regBanner = `
+        <div class="cal-reg-badge" style="margin-top:14px;padding:12px 16px;font-size:13px">
+          <div>
+            <span>✓ Вы подали заявку: <strong>${escapeHtml(regOfficerName)}</strong></span>
+            <span class="badge badge-none" style="margin-left:6px">${escapeHtml(placeLabel)}</span>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn-ghost btn-sm" onclick="openRegisterModal(${ev.id})">✏️ Изменить</button>
+            <button class="btn-ghost btn-sm btn-danger" onclick="cancelRegistrationFromDetail(${ev.id})">✕ Отменить заявку</button>
+          </div>
+        </div>
+      `;
+    } else {
+      regBanner = `
+        <div style="margin-top:14px">
+          <button class="btn-primary" onclick="openRegisterModal(${ev.id})">📝 Зарегистрироваться на этот ивент</button>
+        </div>
+      `;
+    }
+  }
 
   const c = document.getElementById('content');
   c.innerHTML = `
@@ -368,6 +1803,7 @@ function renderEventDetail(eventId) {
         <div class="edh-stat">Итого купонов: <strong>${fmtNum(totalCoupons)}</strong></div>
       </div>
     </div>
+    ${regBanner}
 
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
@@ -423,6 +1859,180 @@ function renderEventDetail(eventId) {
       </table>
     </div>
   `;
+}
+
+// ─── EVENT REGISTRATIONS (PLAYER) ───────────────────────────
+function openRegisterModal(eventId) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+
+  const player = getPlayer(currentUser?.playerId) || myCabinetProfile;
+  if (!player || !player.officers || !player.officers.length) {
+    toast('У вас нет офицеров в профиле. Сначала добавьте офицера в личном кабинете!', 'warning');
+    return;
+  }
+
+  regModalEventId = eventId;
+  const isEditing = !!ev.myRegistration;
+
+  document.getElementById('modal-event-register-title').textContent = isEditing
+    ? `Изменить заявку на «${et?.name || 'Ивент'}»`
+    : `Регистрация на «${et?.name || 'Ивент'}»`;
+
+  document.getElementById('reg-event-info').innerHTML = `
+    📅 Даты: <strong>${formatDate(ev.dateFrom)} — ${formatDate(ev.dateTo)}</strong> · Ивент: <strong>${escapeHtml(et?.name || '—')}</strong>
+  `;
+
+  // populate officers
+  const offSelect = document.getElementById('reg-officer-select');
+  offSelect.innerHTML = player.officers.map(o => {
+    const c = getCatalogOfficer(o.catalogId);
+    return `<option value="${o.id}" ${ev.myRegistration?.officerId === o.id ? 'selected' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})</option>`;
+  }).join('');
+
+  // populate places
+  const placeSelect = document.getElementById('reg-place-select');
+  const places = resolveEventPlaces(et, ev.dateFrom);
+  let placeOptions = `<option value="0" ${ev.myRegistration?.desiredPlace === 0 ? 'selected' : ''}>Любое подходящее место (автоподбор)</option>`;
+
+  places.forEach(p => {
+    const sel = ev.myRegistration && Number(ev.myRegistration.desiredPlace) === Number(p.place);
+    placeOptions += `<option value="${p.place}" ${sel ? 'selected' : ''}>${escapeHtml(p.label || `Место ${p.place}`)} (${fmtNum(p.coupons)} купонов)</option>`;
+  });
+  placeSelect.innerHTML = placeOptions;
+
+  const cancelBtn = document.getElementById('reg-btn-cancel');
+  if (cancelBtn) {
+    cancelBtn.style.display = isEditing ? 'inline-block' : 'none';
+  }
+
+  const submitBtn = document.getElementById('reg-btn-submit');
+  if (submitBtn) {
+    submitBtn.textContent = isEditing ? 'Обновить заявку' : 'Подать заявку';
+  }
+
+  onRegisterModalChange();
+  openModal('modal-event-register');
+}
+
+function onRegisterModalChange() {
+  const ev = getEvent(regModalEventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+  const player = getPlayer(currentUser?.playerId) || myCabinetProfile;
+  if (!player) return;
+
+  const officerId = document.getElementById('reg-officer-select')?.value;
+  const desiredPlace = Number(document.getElementById('reg-place-select')?.value) || 0;
+  const warningBox = document.getElementById('reg-warning-box');
+  if (!warningBox) return;
+
+  const officer = (player.officers || []).find(o => o.id === officerId) || player.officers?.[0];
+  if (!officer) {
+    warningBox.style.display = 'none';
+    return;
+  }
+
+  const cat = getCatalogOfficer(officer.catalogId);
+  const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: 180, today: ev.dateFrom });
+
+  if (desiredPlace === 0) {
+    warningBox.style.display = 'block';
+    warningBox.className = 'auth-alert info';
+    warningBox.innerHTML = `
+      ℹ️ <strong>Любое подходящее место:</strong> алгоритм автоподбора автоматически назначит офицера на наиболее подходящее место, где награда не превысит дефицит (дефицит: <strong>${fmtNum(def.deficitCoupons)}</strong> купонов).
+    `;
+    return;
+  }
+
+  const pi = placeInfo(et, desiredPlace, ev.dateFrom);
+  const prizeCoupons = pi?.coupons || 0;
+
+  if (cat && Number(cat.couponPerPuzzle) === 0) {
+    warningBox.style.display = 'block';
+    warningBox.className = 'auth-alert warning';
+    warningBox.innerHTML = `
+      ⚠️ <strong>Внимание!</strong> Офицер <em>${escapeHtml(officerLabel(officer))}</em> качается исключительно золотыми пазлами. Купоны за призовое место не пойдут на прокачку уровня!
+    `;
+    return;
+  }
+
+  if (prizeCoupons > def.deficitCoupons) {
+    const overflow = prizeCoupons - def.deficitCoupons;
+    warningBox.style.display = 'block';
+    warningBox.className = 'auth-alert warning';
+    warningBox.innerHTML = `
+      ⚠️ <strong>Внимание: возможен перерасход!</strong><br>
+      Награда за ${escapeHtml(pi?.label || `место ${desiredPlace}`)} (<strong>${fmtNum(prizeCoupons)}</strong> купонов) превышает оставшийся дефицит офицера (<strong>${fmtNum(def.deficitCoupons)}</strong> купонов) на <strong>+${fmtNum(overflow)}</strong> купонов. Рекомендуется выбрать место с меньшей наградой.
+    `;
+  } else {
+    warningBox.style.display = 'block';
+    warningBox.className = 'auth-alert success';
+    warningBox.innerHTML = `
+      ✓ <strong>Отличный выбор!</strong> Награда (${fmtNum(prizeCoupons)} купонов) полностью покроет часть дефицита офицера (${fmtNum(def.deficitCoupons)} купонов). Перерасхода не будет.
+    `;
+  }
+}
+
+async function handleSubmitRegistration() {
+  const eventId = regModalEventId;
+  const officerId = document.getElementById('reg-officer-select').value;
+  const desiredPlace = Number(document.getElementById('reg-place-select').value) || 0;
+
+  if (!officerId) {
+    toast('Выберите офицера для прокачки', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('reg-btn-submit');
+  if (btn) { btn.disabled = true; btn.textContent = 'Отправка...'; }
+
+  try {
+    await apiFetch(`/api/events/${eventId}/register`, {
+      method: 'POST',
+      body: { officerId, desiredPlace }
+    });
+    toast('Заявка на ивент успешно сохранена!');
+    closeAllModals();
+    await loadDataFromServer();
+    if (currentPage === 'calendar') renderCalendar();
+    else if (currentPage === 'event_detail') renderEventDetail(eventId);
+    else if (currentPage === 'my_cabinet') renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка при сохранении заявки: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Подать заявку'; }
+  }
+}
+
+async function handleCancelRegistration() {
+  const eventId = regModalEventId;
+  if (!confirm('Вы уверены, что хотите отменить свою заявку на этот ивент?')) return;
+
+  try {
+    await apiFetch(`/api/events/${eventId}/register`, { method: 'DELETE' });
+    toast('Заявка успешно отменена', 'info');
+    closeAllModals();
+    await loadDataFromServer();
+    if (currentPage === 'calendar') renderCalendar();
+    else if (currentPage === 'event_detail') renderEventDetail(eventId);
+    else if (currentPage === 'my_cabinet') renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка отмены заявки: ' + err.message, 'error');
+  }
+}
+
+async function cancelRegistrationFromDetail(eventId) {
+  if (!confirm('Отменить заявку на этот ивент?')) return;
+  try {
+    await apiFetch(`/api/events/${eventId}/register`, { method: 'DELETE' });
+    toast('Заявка отменена', 'info');
+    await loadDataFromServer();
+    renderEventDetail(eventId);
+  } catch (err) {
+    toast('Ошибка отмены: ' + err.message, 'error');
+  }
 }
 
 // ─── PAGE: PLAYERS ───────────────────────────────────────────
@@ -1161,7 +2771,7 @@ function setOfficerStars(index, stars) {
   renderOfficerRows();
 }
 
-function savePlayer() {
+async function savePlayer() {
   const name = document.getElementById('fp-name').value.trim();
   if (!name) { toast('Введите имя игрока','error'); return; }
   const realName = document.getElementById('fp-real-name').value.trim();
@@ -1186,22 +2796,58 @@ function savePlayer() {
     coupons: Math.max(0,parseInt(o.coupons)||0),
     stars: Math.max(0,Math.min(6,parseInt(o.stars)||0)),
   }));
-  if (editPlayerId) {
-    Object.assign(getPlayer(editPlayerId), { name, realName, rank, sector, stock, officers });
-    toast(`Игрок «${name}» обновлён`);
-  } else {
-    const id = state.nextId++;
-    state.players.push({ id, name, realName, rank, sector, stock, officers });
-    state.currentPlayerId ||= id;
-    toast(`Игрок «${name}» добавлён`);
+
+  const payload = { name, realName, rank, sector, stock, officers };
+
+  try {
+    if (editPlayerId) {
+      const res = await apiFetch(`/api/players/${editPlayerId}`, {
+        method: 'PUT',
+        body: payload
+      });
+      const p = getPlayer(editPlayerId);
+      if (p) Object.assign(p, res || payload);
+      toast(`Игрок «${name}» обновлён`);
+    } else {
+      const res = await apiFetch('/api/players', {
+        method: 'POST',
+        body: payload
+      });
+      if (res && res.id) {
+        state.players.push(res);
+        state.currentPlayerId ||= res.id;
+      } else {
+        const id = state.nextId++;
+        state.players.push({ id, ...payload });
+        state.currentPlayerId ||= id;
+      }
+      toast(`Игрок «${name}» добавлён`);
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('players');
+  } catch (err) {
+    toast('Ошибка сохранения игрока: ' + err.message, 'error');
   }
-  save(); closeAllModals(); navigate('players');
 }
 
 function confirmDeletePlayer(id) {
   const p = getPlayer(id);
-  document.getElementById('confirm-text').textContent = `Удалить игрока «${p.name}»?`;
-  document.getElementById('confirm-btn').onclick = ()=>{ state.players = state.players.filter(x=>x.id!==id); save(); closeAllModals(); toast('Удалено','info'); navigate('players'); };
+  document.getElementById('confirm-text').textContent = `Удалить игрока «${p?.name || ''}»?`;
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/players/${id}`, { method: 'DELETE' });
+      state.players = state.players.filter(x => x.id !== id);
+      save();
+      closeAllModals();
+      await loadDataFromServer();
+      toast('Удалено', 'info');
+      navigate('players');
+    } catch (err) {
+      toast('Ошибка удаления игрока: ' + err.message, 'error');
+    }
+  };
   openModal('modal-confirm');
 }
 
@@ -1219,7 +2865,7 @@ function openOfficerCatalogModal(id=null) {
   openModal('modal-officer');
 }
 
-function saveOfficerCatalog() {
+async function saveOfficerCatalog() {
   const name = document.getElementById('fo-name').value.trim();
   if (!name) { toast('Введите имя офицера','error'); return; }
   const data = {
@@ -1231,9 +2877,31 @@ function saveOfficerCatalog() {
     medalsTraining: 900,
     medalsTotal: 1590,
   };
-  if (editCatalogOfficerId) Object.assign(getCatalogOfficer(editCatalogOfficerId), data);
-  else state.officerCatalog.push({ id:'catalog-'+state.nextId++, ...data });
-  save(); closeAllModals(); toast('Офицер сохранён'); navigate('officers');
+  try {
+    if (editCatalogOfficerId) {
+      const res = await apiFetch(`/api/catalog/${editCatalogOfficerId}`, {
+        method: 'PUT',
+        body: { id: editCatalogOfficerId, ...data }
+      });
+      const off = getCatalogOfficer(editCatalogOfficerId);
+      if (off) Object.assign(off, res || data);
+      toast('Офицер сохранён');
+    } else {
+      const res = await apiFetch('/api/catalog', {
+        method: 'POST',
+        body: data
+      });
+      if (res && res.id) state.officerCatalog.push(res);
+      else state.officerCatalog.push({ id:'catalog-'+state.nextId++, ...data });
+      toast('Офицер сохранён');
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('officers');
+  } catch (err) {
+    toast('Ошибка сохранения офицера: ' + err.message, 'error');
+  }
 }
 
 function confirmDeleteOfficerCatalog(id) {
@@ -1243,10 +2911,19 @@ function confirmDeleteOfficerCatalog(id) {
     toast(`Нельзя удалить: используют ${result.blockers.map(p=>p.name).join(', ')}`,'error');
     return;
   }
-  document.getElementById('confirm-text').textContent = `Удалить офицера «${officer.name}»?`;
-  document.getElementById('confirm-btn').onclick = ()=>{
-    state.officerCatalog = state.officerCatalog.filter(o=>o.id!==id);
-    save(); closeAllModals(); toast('Офицер удалён','info'); navigate('officers');
+  document.getElementById('confirm-text').textContent = `Удалить офицера «${officer?.name || id}»?`;
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/catalog/${id}`, { method: 'DELETE' });
+      state.officerCatalog = state.officerCatalog.filter(o => o.id !== id);
+      save();
+      closeAllModals();
+      await loadDataFromServer();
+      toast('Офицер удалён', 'info');
+      navigate('officers');
+    } catch (err) {
+      toast('Ошибка удаления офицера: ' + err.message, 'error');
+    }
   };
   openModal('modal-confirm');
 }
@@ -1293,28 +2970,63 @@ function addEtPlaceRow() {
   renderEtPlaceRows();
 }
 
-function saveEventType() {
+async function saveEventType() {
   const name = document.getElementById('fet-name').value.trim();
   if (!name) { toast('Введите название','error'); return; }
   const color = document.getElementById('fet-color').value;
   const places = etPlaceRows.filter(p=>p.label.trim()).sort((a,b)=>a.place-b.place);
   if (!places.length) { toast('Добавьте хотя бы одно место','error'); return; }
-  if (editEtId) {
-    const et = getEventType(editEtId);
-    const prizeHistory = [...(et.prizeHistory || []), { date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }];
-    Object.assign(et, { name, color, places, prizeHistory });
-    toast(`Тип «${name}» обновлён`);
-  } else {
-    state.eventTypes.push({ id:state.nextId++, name, color, places, prizeHistory:[{ date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }] });
-    toast(`Тип «${name}» добавлен`);
+
+  try {
+    if (editEtId) {
+      const et = getEventType(editEtId);
+      const prizeHistory = [...(et?.prizeHistory || []), { date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }];
+      const payload = { id: editEtId, name, color, places, prizeHistory };
+      const res = await apiFetch(`/api/event-types/${editEtId}`, {
+        method: 'PUT',
+        body: payload
+      });
+      if (et) Object.assign(et, res || payload);
+      toast(`Тип «${name}» обновлён`);
+    } else {
+      const payload = {
+        name,
+        color,
+        places,
+        prizeHistory: [{ date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }]
+      };
+      const res = await apiFetch('/api/event-types', {
+        method: 'POST',
+        body: payload
+      });
+      state.eventTypes.push(res || { id:state.nextId++, ...payload });
+      toast(`Тип «${name}» добавлен`);
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('event_types');
+  } catch (err) {
+    toast('Ошибка сохранения типа ивента: ' + err.message, 'error');
   }
-  save(); closeAllModals(); navigate('event_types');
 }
 
 function confirmDeleteEventType(id) {
   const et = getEventType(id);
-  document.getElementById('confirm-text').textContent = `Удалить тип ивента «${et.name}»? Все ивенты этого типа потеряют привязку.`;
-  document.getElementById('confirm-btn').onclick = ()=>{ state.eventTypes = state.eventTypes.filter(x=>x.id!==id); save(); closeAllModals(); toast('Удалено','info'); navigate('event_types'); };
+  document.getElementById('confirm-text').textContent = `Удалить тип ивента «${et?.name || '?'}»? Все ивенты этого типа потеряют привязку.`;
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/event-types/${id}`, { method: 'DELETE' });
+      state.eventTypes = state.eventTypes.filter(x => x.id !== id);
+      save();
+      closeAllModals();
+      await loadDataFromServer();
+      toast('Удалено', 'info');
+      navigate('event_types');
+    } catch (err) {
+      toast('Ошибка удаления типа ивента: ' + err.message, 'error');
+    }
+  };
   openModal('modal-confirm');
 }
 
@@ -1330,6 +3042,8 @@ function openEventModal(eventId=null) {
   const sel = document.getElementById('fe-type');
   sel.innerHTML = state.eventTypes.map(et=>`<option value="${et.id}">${et.name}</option>`).join('');
 
+  currentEventRegistrations = [];
+
   if (eventId) {
     const ev = getEvent(eventId);
     sel.value = ev.typeId;
@@ -1337,6 +3051,19 @@ function openEventModal(eventId=null) {
     document.getElementById('fe-to').value = ev.dateTo;
     document.getElementById('fe-note').value = ev.note || '';
     eventAssignments = ev.assignments.map(a=>({...a}));
+    if (ev.registrations) {
+      currentEventRegistrations = ev.registrations;
+    }
+    // refresh registrations from server
+    apiFetch(`/api/events/${eventId}`).then(fresh => {
+      if (fresh && fresh.registrations) {
+        currentEventRegistrations = fresh.registrations;
+        const localEv = getEvent(eventId);
+        if (localEv) localEv.registrations = fresh.registrations;
+        renderEventRegistrationsBlock();
+        renderEventAssignments();
+      }
+    }).catch(() => {});
   } else {
     const today = new Date().toISOString().slice(0,10);
     document.getElementById('fe-from').value = today;
@@ -1349,6 +3076,7 @@ function openEventModal(eventId=null) {
       if (et) eventAssignments = resolveEventPlaces(et, today).map(p=>({ place:p.place, playerId:null, officerId:null, actualCoupons:p.coupons }));
     }
   }
+  renderEventRegistrationsBlock();
   renderEventAssignments();
   openModal('modal-event');
 }
@@ -1367,7 +3095,71 @@ function onEventTypeChange() {
     const dateFrom = document.getElementById('fe-from').value || new Date().toISOString().slice(0,10);
     eventAssignments = resolveEventPlaces(et, dateFrom).map(p=>({ place:p.place, playerId:null, officerId:null, actualCoupons:p.coupons }));
   }
+  renderEventRegistrationsBlock();
   renderEventAssignments();
+}
+
+function renderEventRegistrationsBlock() {
+  const container = document.getElementById('fe-registrations-container');
+  if (!container) return;
+  if (!editEventId) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const etId = parseInt(document.getElementById('fe-type')?.value);
+  const et = getEventType(etId);
+  const dateFrom = document.getElementById('fe-from')?.value;
+  const regs = currentEventRegistrations || [];
+
+  let html = `
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <strong style="font-size:13px">📋 Поданные заявки участников (${regs.length})</strong>
+      </div>
+  `;
+
+  if (!regs.length) {
+    html += `<div style="font-size:12px;color:var(--text3)">Заявок на этот ивент пока нет</div></div>`;
+    container.innerHTML = html;
+    return;
+  }
+
+  html += `<div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto">`;
+  regs.forEach(r => {
+    const player = getPlayer(r.playerId);
+    const off = player?.officers?.find(o => o.id === r.officerId);
+    const cat = off ? getCatalogOfficer(off.catalogId) : null;
+    const desired = Number(r.desiredPlace) || 0;
+    const placeLabel = desired === 0 ? 'Любое подходящее' : (placeInfo(et, desired, dateFrom)?.label || `Место ${desired}`);
+    const isAssignedToDesired = eventAssignments.some(a => Number(a.playerId) === Number(r.playerId) && (Number(a.place) === desired || desired === 0));
+    const isAssignedOther = !isAssignedToDesired && eventAssignments.some(a => Number(a.playerId) === Number(r.playerId));
+
+    let statusBadge = `<span class="badge badge-none" style="font-size:10px">Не назначен</span>`;
+    if (isAssignedToDesired) {
+      statusBadge = `<span class="badge badge-success" style="font-size:10px">Заявка учтена ✓</span>`;
+    } else if (isAssignedOther) {
+      statusBadge = `<span class="badge badge-warning" style="font-size:10px">Назначен иначе</span>`;
+    }
+
+    const def = off && cat ? calculateOfficerDeficit({ officer: off, catalogItem: cat, player, targetLevel: 180, today: dateFrom }) : null;
+
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg2);padding:6px 10px;border-radius:6px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <strong>${escapeHtml(r.playerName || player?.name || `Игрок #${r.playerId}`)}</strong>
+          <span style="color:var(--text3)">→</span>
+          <span style="color:var(--text2)">${escapeHtml(officerLabel(off))} (ур. ${off?.level ?? '?'})</span>
+          <span class="badge badge-none" style="font-size:10px">${escapeHtml(placeLabel)}</span>
+          ${def ? `<span style="font-size:11px;color:var(--text3)">(дефицит: ${fmtNum(def.deficitCoupons)} куп.)</span>` : ''}
+        </div>
+        <div>${statusBadge}</div>
+      </div>
+    `;
+  });
+
+  html += `</div></div>`;
+  container.innerHTML = html;
 }
 
 function renderEventAssignments() {
@@ -1403,6 +3195,19 @@ function renderEventAssignments() {
       }
     }
 
+    let regBadge = '';
+    if (a.playerId && currentEventRegistrations && currentEventRegistrations.length) {
+      const reg = currentEventRegistrations.find(r => Number(r.playerId) === Number(a.playerId));
+      if (reg) {
+        const desired = Number(reg.desiredPlace) || 0;
+        if (desired === Number(a.place) || desired === 0) {
+          regBadge = `<span class="badge badge-success" style="font-size:10px" title="Заявка игрока совпала с назначением">Заявка учтена ✓</span>`;
+        } else {
+          regBadge = `<span class="badge badge-none" style="font-size:10px" title="Желаемое место было: ${desired}">Заявка: место ${desired}</span>`;
+        }
+      }
+    }
+
     return `<div class="assign-card">
       <span class="assign-place">${pi?.label || 'Место ' + a.place}</span>
       <input type="number" value="${a.actualCoupons ?? pi?.coupons ?? 0}" min="0" step="500" title="Фактические купоны" oninput="eventAssignments[${i}].actualCoupons=parseInt(this.value)||0;renderEventAssignments()">
@@ -1414,7 +3219,7 @@ function renderEventAssignments() {
         <option value="">— Офицер —</option>
         ${officerOptions}
       </select>
-      <div style="display:flex;align-items:center">${efficiencyBadge}</div>
+      <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">${efficiencyBadge}${regBadge}</div>
       <button class="action-btn danger" onclick="eventAssignments.splice(${i},1);renderEventAssignments()">✕</button>
     </div>`;
   }).join('');
@@ -1449,9 +3254,47 @@ function autoPickAssignments() {
   });
   toast('Автоподбор выполнен (с защитой от перерасхода)');
   renderEventAssignments();
+  renderEventRegistrationsBlock();
 }
 
-function saveEvent() {
+async function autoPickWithRegistrationsServer() {
+  if (!editEventId) {
+    const etId = parseInt(document.getElementById('fe-type').value);
+    const et = getEventType(etId);
+    const eventDate = document.getElementById('fe-from')?.value || new Date().toISOString().slice(0, 10);
+    const result = typeof smartAutoPickWithRegistrations === 'function'
+      ? smartAutoPickWithRegistrations({
+          event: { places: eventAssignments.length ? eventAssignments : resolveEventPlaces(et, eventDate) },
+          players: state.players,
+          registrations: currentEventRegistrations,
+          officerCatalog: state.officerCatalog,
+          eventDate
+        })
+      : { assignments: [] };
+    eventAssignments = result.assignments;
+    toast('⚡ Автоподбор с учетом заявок выполнен');
+    renderEventAssignments();
+    renderEventRegistrationsBlock();
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/api/events/${editEventId}/autopick`, { method: 'POST' });
+    if (res && res.assignments) {
+      eventAssignments = res.assignments;
+      const ev = getEvent(editEventId);
+      if (ev) ev.assignments = res.assignments;
+      save();
+      toast('⚡ Автоподбор с учетом заявок успешно выполнен!');
+      renderEventAssignments();
+      renderEventRegistrationsBlock();
+    }
+  } catch (err) {
+    toast('Ошибка автоподбора: ' + err.message, 'error');
+  }
+}
+
+async function saveEvent() {
   const typeId = parseInt(document.getElementById('fe-type').value);
   const dateFrom = document.getElementById('fe-from').value;
   const dateTo = document.getElementById('fe-to').value;
@@ -1467,21 +3310,48 @@ function saveEvent() {
     actualCoupons: a.actualCoupons,
   }));
 
-  if (editEventId) {
-    Object.assign(getEvent(editEventId), { typeId, dateFrom, dateTo, note, assignments });
-    toast('Ивент обновлён');
-  } else {
-    state.events.push({ id:state.nextId++, typeId, dateFrom, dateTo, note, assignments });
-    toast('Ивент создан');
+  const payload = {
+    ...(editEventId ? { id: editEventId } : {}),
+    typeId,
+    dateFrom,
+    dateTo,
+    note,
+    assignments
+  };
+
+  try {
+    const saved = await apiFetch('/api/events', { method: 'POST', body: payload });
+    if (editEventId) {
+      Object.assign(getEvent(editEventId), saved || payload);
+      toast('Ивент обновлён');
+    } else {
+      state.events.push(saved || { ...payload, id: state.nextId++ });
+      toast('Ивент создан');
+    }
+    save();
+    closeAllModals();
+    await loadDataFromServer();
+    navigate('calendar');
+  } catch (err) {
+    toast('Ошибка сохранения ивента: ' + err.message, 'error');
   }
-  save(); closeAllModals(); navigate('calendar');
 }
 
 function confirmDeleteEvent(id) {
   const ev = getEvent(id);
   const et = getEventType(ev?.typeId);
   document.getElementById('confirm-text').textContent = `Удалить ивент «${et?.name||'?'}» (${formatDateShort(ev?.dateFrom)})?`;
-  document.getElementById('confirm-btn').onclick = ()=>{ state.events = state.events.filter(x=>x.id!==id); save(); closeAllModals(); toast('Удалено','info'); navigate('calendar'); };
+  document.getElementById('confirm-btn').onclick = async () => {
+    try {
+      await apiFetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {});
+    } finally {
+      state.events = state.events.filter(x=>x.id!==id);
+      save();
+      closeAllModals();
+      toast('Удалено','info');
+      navigate('calendar');
+    }
+  };
   openModal('modal-confirm');
 }
 
@@ -1602,4 +3472,14 @@ function handleImport(e) {
 
 // ─── INIT ────────────────────────────────────────────────────
 load();
-navigate('calendar');
+renderSidebarNav();
+renderTopbarProfile();
+checkAuth().then(isAuth => {
+  if (isAuth) {
+    if (currentUser?.rank === 'r3') {
+      navigate('my_cabinet');
+    } else {
+      navigate('calendar');
+    }
+  }
+});

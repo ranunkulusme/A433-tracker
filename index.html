@@ -21,7 +21,7 @@
       </svg>
       <span class="logo-text">KoW Tracker</span>
     </div>
-    <nav class="sidebar-nav">
+    <nav class="sidebar-nav" id="sidebar-nav">
       <a href="#" class="nav-item active" data-page="calendar">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         Календарь
@@ -48,7 +48,7 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Экспорт Excel
       </button>
-      <button class="btn-icon" onclick="importData()">
+      <button class="btn-icon" id="btn-import-json" onclick="importData()">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Импорт JSON
       </button>
@@ -68,12 +68,7 @@
         </button>
         <h1 class="page-title" id="page-title">Календарь</h1>
       </div>
-      <div class="topbar-right">
-        <select id="role-switch" onchange="setCurrentRole(this.value)" title="Текущая роль">
-          <option value="r3">r3</option>
-          <option value="r4">r4</option>
-          <option value="r5">r5</option>
-        </select>
+      <div class="topbar-right" id="topbar-profile">
       </div>
     </header>
     <div class="content" id="content"></div>
@@ -82,6 +77,64 @@
 
 <!-- Overlay -->
 <div class="overlay" id="overlay" onclick="closeAllModals()"></div>
+
+<!-- Modal: Auth -->
+<div class="modal modal-auth" id="modal-auth">
+  <div class="modal-header">
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-btn-login" onclick="switchAuthTab('login')">Вход</button>
+      <button class="auth-tab" id="tab-btn-register" onclick="switchAuthTab('register')">Регистрация</button>
+    </div>
+    <button class="modal-close" id="auth-modal-close" style="display:none" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div id="auth-alert" class="auth-alert" style="display:none"></div>
+
+    <!-- Login Form -->
+    <form id="auth-form-login" onsubmit="handleLoginSubmit(event)">
+      <div class="form-group">
+        <label for="auth-login-username">Логин *</label>
+        <input type="text" id="auth-login-username" autocomplete="username" placeholder="Логин (например, admin)" required>
+      </div>
+      <div class="form-group">
+        <label for="auth-login-password">Пароль *</label>
+        <input type="password" id="auth-login-password" autocomplete="current-password" placeholder="Пароль" required>
+      </div>
+      <div class="auth-demo-hint">
+        💡 Демо-доступ для главы (Р5): <code>admin</code> / <code>admin123</code>
+      </div>
+      <div class="auth-form-actions">
+        <button type="submit" class="btn-primary btn-block" id="auth-login-submit">Войти</button>
+      </div>
+    </form>
+
+    <!-- Register Form -->
+    <form id="auth-form-register" style="display:none" onsubmit="handleRegisterSubmit(event)">
+      <div class="form-group">
+        <label for="auth-reg-username">Логин для входа *</label>
+        <input type="text" id="auth-reg-username" autocomplete="username" placeholder="Придумайте логин" required>
+      </div>
+      <div class="form-group">
+        <label for="auth-reg-password">Пароль *</label>
+        <input type="password" id="auth-reg-password" autocomplete="new-password" placeholder="Придумайте пароль (мин. 4 симв.)" required>
+      </div>
+      <div class="form-group">
+        <label>Персонаж в гильдии</label>
+        <select id="auth-reg-player-select" onchange="onAuthRegPlayerSelectChange(this.value)">
+          <option value="">— Новый персонаж (ввести имя) —</option>
+        </select>
+        <input type="text" id="auth-reg-player-name" placeholder="Ник персонажа в игре" style="margin-top:6px">
+        <span class="form-hint">Выберите персонажа из списка гильдии или введите свой никнейм</span>
+      </div>
+      <div class="auth-pending-info">
+        ℹ️ Заявка будет отправлена руководству гильдии (Р4/Р5). После одобрения вы сможете войти.
+      </div>
+      <div class="auth-form-actions">
+        <button type="submit" class="btn-primary btn-block" id="auth-reg-submit">Зарегистрироваться</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <!-- Modal: Player -->
 <div class="modal" id="modal-player">
@@ -261,8 +314,12 @@
       </div>
     </div>
     <div class="form-group">
+      <div id="fe-registrations-container"></div>
       <label>Назначения по местам</label>
-      <button class="btn-outline btn-sm" onclick="autoPickAssignments()" style="margin-bottom:8px">Автоподбор</button>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <button type="button" class="btn-primary btn-sm" onclick="autoPickWithRegistrationsServer()">⚡ Автоподбор с учетом заявок</button>
+        <button type="button" class="btn-ghost btn-sm" onclick="autoPickAssignments()">Простой автоподбор</button>
+      </div>
       <div id="fe-assignments"></div>
       <button class="btn-outline btn-sm" onclick="addAssignmentRow()" style="margin-top:8px">+ Добавить место</button>
     </div>
@@ -270,6 +327,71 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
     <button class="btn-primary" onclick="saveEvent()">Сохранить</button>
+  </div>
+</div>
+
+<!-- Modal: Event Registration -->
+<div class="modal" id="modal-event-register">
+  <div class="modal-header">
+    <h3 id="modal-event-register-title">Запись на ивент</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div id="reg-event-info" class="auth-demo-hint" style="margin-bottom:6px"></div>
+    <div class="form-group">
+      <label for="reg-officer-select">Офицер для прокачки *</label>
+      <select id="reg-officer-select" onchange="onRegisterModalChange()"></select>
+    </div>
+    <div class="form-group">
+      <label for="reg-place-select">Желаемое призовое место *</label>
+      <select id="reg-place-select" onchange="onRegisterModalChange()"></select>
+    </div>
+    <div id="reg-warning-box" style="display:none;padding:10px 14px;border-radius:var(--radius);font-size:12.5px;line-height:1.4"></div>
+  </div>
+  <div class="modal-footer" id="reg-modal-footer">
+    <button class="btn-ghost" onclick="closeAllModals()">Закрыть</button>
+    <button class="btn-danger" id="reg-btn-cancel" style="display:none" onclick="handleCancelRegistration()">Отменить заявку</button>
+    <button class="btn-primary" id="reg-btn-submit" onclick="handleSubmitRegistration()">Подать заявку</button>
+  </div>
+</div>
+
+<!-- Modal: My Officer -->
+<div class="modal" id="modal-my-officer">
+  <div class="modal-header">
+    <h3 id="modal-my-officer-title">Офицер</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group" id="my-officer-catalog-group">
+      <label for="my-officer-catalog-select">Офицер из каталога *</label>
+      <select id="my-officer-catalog-select"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="my-officer-level">Уровень подготовки (0-180)</label>
+        <input type="number" id="my-officer-level" min="0" max="180" value="0">
+      </div>
+      <div class="form-group">
+        <label for="my-officer-coupons">Купоны на уровне</label>
+        <input type="number" id="my-officer-coupons" min="0" value="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="my-officer-stars">Количество звёзд (0-6★)</label>
+      <select id="my-officer-stars">
+        <option value="0">0★ (Без звёзд)</option>
+        <option value="1">1★ (500 звёзд)</option>
+        <option value="2">2★ (1 000 звёзд)</option>
+        <option value="3">3★ (6 500 звёзд)</option>
+        <option value="4">4★ (25 000 звёзд)</option>
+        <option value="5">5★ (65 000 звёзд)</option>
+        <option value="6">6★ (98 000 звёзд - Максимум)</option>
+      </select>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button class="btn-primary" id="my-officer-save-btn" onclick="saveMyOfficerSubmit()">Сохранить</button>
   </div>
 </div>
 
