@@ -815,6 +815,180 @@ test('API Catalog and Event-Types CRUD with RBAC', async () => {
   }
 });
 
+test('API schedule-season, fair play autopick, profile skills and vip points', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Login as Admin (R5)
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const adminLogin = await adminLoginRes.json();
+    const adminToken = adminLogin.token;
+
+    // 2. Register and approve R3 user
+    const regRes = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_tester', password: 'password123', playerName: 'Тестер Р3' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${regRes.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_tester', password: 'password123' })
+    })).json();
+    const r3Token = r3Login.token;
+
+    // 3. Test POST /api/events/schedule-season RBAC: R3 gets 403
+    const r3SeasonRes = await fetch(`${baseUrl}/api/events/schedule-season`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ presetId: 'king-of-war', startDate: '2026-12-01', cyclesCount: 2 })
+    });
+    assert.equal(r3SeasonRes.status, 403);
+
+    // 4. Test POST /api/events/schedule-season as R5 (with cookie header)
+    const seasonRes = await fetch(`${baseUrl}/api/events/schedule-season`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        cookie: `token=${adminToken}`
+      },
+      body: JSON.stringify({ presetId: 'king-of-war', startDate: '2026-12-01', cyclesCount: 2 })
+    });
+    assert.equal(seasonRes.status, 201);
+    const seasonData = await seasonRes.json();
+    assert.equal(seasonData.createdCount, 2);
+    assert.equal(seasonData.events.length, 2);
+    assert.equal(seasonData.events[0].dateFrom, '2026-12-01');
+
+    // 5. Test R3 profile: PUT /api/my-profile with sector.vipPoints and officer skills
+    // First, add an officer for R3 via POST /api/my-profile/officers with skills
+    const addOffRes = await fetch(`${baseUrl}/api/my-profile/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogId: 'general-rex',
+        name: 'Генерал Рекс',
+        level: 20,
+        skills: [5, 4, 3, 2]
+      })
+    });
+    assert.equal(addOffRes.status, 200);
+    const addedOff = await addOffRes.json();
+    assert.deepEqual(addedOff.skills, [5, 4, 3, 2]);
+
+    // Update via PUT /api/my-profile
+    const updateProfRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        cookie: `token=${r3Token}`
+      },
+      body: JSON.stringify({
+        sector: { vipLevel: 11, vipPoints: 220000 },
+        officers: [{ id: addedOff.id, catalogId: 'general-rex', level: 25, skills: [5, 3, 1, 1] }]
+      })
+    });
+    assert.equal(updateProfRes.status, 200);
+    const updatedProf = await updateProfRes.json();
+    assert.equal(updatedProf.sector.vipPoints, 220000);
+    assert.equal(updatedProf.officers.length, 1);
+    assert.deepEqual(updatedProf.officers[0].skills, [5, 3, 1, 1]);
+
+    // Update officer directly via PUT /api/my-profile/officers/:id
+    const putOffRes = await fetch(`${baseUrl}/api/my-profile/officers/${addedOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${r3Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        skills: [5, 5, 5, 5]
+      })
+    });
+    assert.equal(putOffRes.status, 200);
+    const putOffData = await putOffRes.json();
+    assert.deepEqual(putOffData.skills, [5, 5, 5, 5]);
+
+    // 6. Test /api/players (POST and PUT) with vipPoints and skills
+    const newPlayerRes = await fetch(`${baseUrl}/api/players`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'VIP Воин',
+        sector: { vipLevel: 12, vipPoints: 350000 },
+        officers: [{ catalogId: 'aurora', name: 'Аврора', level: 10, skills: [4, 4, 3, 2] }]
+      })
+    });
+    assert.equal(newPlayerRes.status, 200);
+    const newPlayer = await newPlayerRes.json();
+    assert.equal(newPlayer.sector.vipPoints, 350000);
+    assert.equal(newPlayer.officers[0].skills[0], 4);
+
+    const updatePlayerRes = await fetch(`${baseUrl}/api/players/${newPlayer.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sector: { vipPoints: 400000 },
+        officers: [{ id: newPlayer.officers[0].id, catalogId: 'aurora', level: 15, skills: [5, 5, 4, 3] }]
+      })
+    });
+    assert.equal(updatePlayerRes.status, 200);
+    const updatedPlayer = await updatePlayerRes.json();
+    assert.equal(updatedPlayer.sector.vipPoints, 400000);
+    assert.deepEqual(updatedPlayer.officers[0].skills, [5, 5, 4, 3]);
+
+    // 7. Test /api/catalog (POST and PUT) with upgradeType
+    const addCatRes = await fetch(`${baseUrl}/api/catalog`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'special-commander',
+        name: 'Спец Командир',
+        type: 'Танк',
+        upgradeType: 'special'
+      })
+    });
+    assert.equal(addCatRes.status, 200);
+    const addedCat = await addCatRes.json();
+    assert.equal(addedCat.upgradeType, 'special');
+
+    const putCatRes = await fetch(`${baseUrl}/api/catalog/special-commander`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Спец Командир (Колесо)',
+        upgradeType: 'special'
+      })
+    });
+    assert.equal(putCatRes.status, 200);
+    const putCat = await putCatRes.json();
+    assert.equal(putCat.upgradeType, 'special');
+
+    // 8. Test fair play cooldown in autopick
+    const autopickRes = await fetch(`${baseUrl}/api/events/3/autopick`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(autopickRes.status, 200);
+    const autopickData = await autopickRes.json();
+    assert(autopickData.success);
+    const p3Assignment = autopickData.assignments.find(a => a.playerId === 3);
+    if (p3Assignment) {
+      assert.equal(p3Assignment.isCooldown, true);
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

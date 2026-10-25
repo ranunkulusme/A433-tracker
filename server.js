@@ -56,16 +56,36 @@ function readJsonBody(req) {
 }
 
 function authenticate(req) {
+  let token = null;
   const authHeader = req.headers.authorization || req.headers.Authorization || '';
-  if (!authHeader.startsWith('Bearer ')) {
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:^|;\s*)token=([^;]+)/);
+    if (match) {
+      token = decodeURIComponent(match[1]);
+    }
+  }
+
+  if (!token) {
     req.user = null;
     return null;
   }
-  const token = authHeader.slice(7).trim();
   const user = db.verifySession(token);
   req.user = user || null;
   req.token = token;
   return req.user;
+}
+
+function sanitizeSkills(skills) {
+  if (!Array.isArray(skills)) return [1, 1, 1, 1];
+  const arr = skills.slice(0, 4);
+  while (arr.length < 4) arr.push(1);
+  return arr.map(n => Math.max(1, Math.min(5, Math.floor(Number(n) || 1))));
+}
+
+function sanitizeVipPoints(pts) {
+  return Math.max(0, Math.floor(Number(pts) || 0));
 }
 
 function requireAuth(req, res) {
@@ -333,6 +353,30 @@ function createRequestHandler(staticDir) {
       }
       delete body.rank;
       delete body.id;
+
+      if (body.sector && body.sector.vipPoints !== undefined) {
+        body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
+      }
+      if (body.vipPoints !== undefined) {
+        body.vipPoints = sanitizeVipPoints(body.vipPoints);
+      }
+
+      if (Array.isArray(body.officers)) {
+        for (const o of body.officers) {
+          if (o.skills !== undefined) {
+            o.skills = sanitizeSkills(o.skills);
+          }
+          if (o.id) {
+            const updatedOff = db.updatePlayerOfficer(req.user.playerId, o.id, o);
+            if (!updatedOff) {
+              db.addPlayerOfficer(req.user.playerId, o);
+            }
+          } else {
+            db.addPlayerOfficer(req.user.playerId, o);
+          }
+        }
+      }
+
       const updated = db.updatePlayer(req.user.playerId, body);
       if (body.stock) {
         db.recordStockHistory(req.user.playerId, body.stock);
@@ -345,6 +389,9 @@ function createRequestHandler(staticDir) {
       if (!req.user.playerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
+      if (body.skills !== undefined) {
+        body.skills = sanitizeSkills(body.skills);
+      }
       const off = db.addPlayerOfficer(req.user.playerId, body);
       return sendJson(res, 200, off);
     }
@@ -356,6 +403,9 @@ function createRequestHandler(staticDir) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
+      if (body.skills !== undefined) {
+        body.skills = sanitizeSkills(body.skills);
+      }
       const off = db.updatePlayerOfficer(req.user.playerId, officerId, body);
       if (!off) {
         return sendError(res, 404, 'OFFICER_NOT_FOUND', 'Офицер не найден');
@@ -383,6 +433,19 @@ function createRequestHandler(staticDir) {
 
     if (pathname === '/api/players' && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (body.sector && body.sector.vipPoints !== undefined) {
+        body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
+      }
+      if (body.vipPoints !== undefined) {
+        body.vipPoints = sanitizeVipPoints(body.vipPoints);
+      }
+      if (Array.isArray(body.officers)) {
+        for (const o of body.officers) {
+          if (o.skills !== undefined) {
+            o.skills = sanitizeSkills(o.skills);
+          }
+        }
+      }
       const created = db.createPlayer(body);
       return sendJson(res, 200, created);
     }
@@ -397,7 +460,29 @@ function createRequestHandler(staticDir) {
 
     if (playerMatch && req.method === 'PUT') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
-      const updated = db.updatePlayer(Number(playerMatch[1]), body);
+      const targetPlayerId = Number(playerMatch[1]);
+      if (body.sector && body.sector.vipPoints !== undefined) {
+        body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
+      }
+      if (body.vipPoints !== undefined) {
+        body.vipPoints = sanitizeVipPoints(body.vipPoints);
+      }
+      if (Array.isArray(body.officers)) {
+        for (const o of body.officers) {
+          if (o.skills !== undefined) {
+            o.skills = sanitizeSkills(o.skills);
+          }
+          if (o.id) {
+            const updatedOff = db.updatePlayerOfficer(targetPlayerId, o.id, o);
+            if (!updatedOff) {
+              db.addPlayerOfficer(targetPlayerId, o);
+            }
+          } else {
+            db.addPlayerOfficer(targetPlayerId, o);
+          }
+        }
+      }
+      const updated = db.updatePlayer(targetPlayerId, body);
       return sendJson(res, 200, updated);
     }
 
@@ -416,14 +501,16 @@ function createRequestHandler(staticDir) {
 
     if (pathname === '/api/catalog' && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
-      const saved = db.saveCatalogItem(body);
+      const upgradeType = body.upgradeType === 'special' ? 'special' : 'standard';
+      const saved = db.saveCatalogItem({ ...body, upgradeType });
       return sendJson(res, 200, saved);
     }
 
     const catMatch = pathname.match(/^\/api\/catalog\/([^/]+)$/);
     if (catMatch && req.method === 'PUT') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
-      const saved = db.saveCatalogItem({ ...body, id: catMatch[1] });
+      const upgradeType = body.upgradeType === 'special' ? 'special' : (body.upgradeType || 'standard');
+      const saved = db.saveCatalogItem({ ...body, id: catMatch[1], upgradeType });
       return sendJson(res, 200, saved);
     }
 
@@ -491,6 +578,58 @@ function createRequestHandler(staticDir) {
       return sendJson(res, 200, saved);
     }
 
+    if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
+      if (!requireRole(['r4', 'r5'])(req, res)) return;
+
+      const { presetId = 'king-of-war', startDate, cyclesCount = 1 } = body || {};
+      const preset = (logic.EVENT_PRESETS || []).find(p => p.id === presetId) || (logic.EVENT_PRESETS && logic.EVENT_PRESETS[0]) || {
+        id: 'king-of-war',
+        name: 'Король Войны',
+        cycleDays: 14,
+        durationDays: 7
+      };
+
+      const eventTypes = db.getEventTypes();
+      let eventType = eventTypes.find(t => t.name && t.name.trim().toLowerCase() === preset.name.trim().toLowerCase());
+      if (!eventType) {
+        eventType = db.saveEventType({
+          name: preset.name,
+          color: preset.id === 'king-of-war' ? '#8b5cf6' : '#f59e0b',
+          places: [
+            { place: 1, label: '🥇 1 место', coupons: 12500 },
+            { place: 2, label: '🥈 2 место', coupons: 6500 },
+            { place: 3, label: '🥉 3 место', coupons: 3500 },
+            { place: 4, label: '4–10 место', coupons: 2750 },
+          ]
+        });
+      }
+
+      const count = Math.max(1, Number(cyclesCount) || 1);
+      const scheduleItems = logic.generateSeasonSchedule({
+        startDate: startDate || new Date().toISOString().slice(0, 10),
+        cyclesCount: count,
+        presetId: preset.id
+      });
+
+      const createdEvents = [];
+      for (const item of scheduleItems) {
+        const saved = db.saveEvent({
+          typeId: eventType.id,
+          dateFrom: item.dateFrom,
+          dateTo: item.dateTo,
+          note: item.note || '',
+          assignments: []
+        });
+        createdEvents.push(saved);
+      }
+
+      return sendJson(res, 201, {
+        success: true,
+        createdCount: createdEvents.length,
+        events: createdEvents
+      });
+    }
+
     const eventRegMatch = pathname.match(/^\/api\/events\/(\d+)\/register$/);
     if (eventRegMatch && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
@@ -533,13 +672,17 @@ function createRequestHandler(staticDir) {
       const players = db.getPlayers();
       const officerCatalog = db.getCatalog();
       const registrations = db.getRegistrationsByEventId(eventId);
+      const recentWinners = typeof db.getRecentWinners === 'function'
+        ? db.getRecentWinners(ev.typeId || ev.type_id, 2, ev.id)
+        : [];
 
       const result = logic.smartAutoPickWithRegistrations({
         event: { ...ev, places },
         players,
         registrations,
         officerCatalog,
-        eventDate: ev.dateFrom
+        eventDate: ev.dateFrom,
+        recentWinners
       });
 
       ev.assignments = result.assignments;
