@@ -5,8 +5,21 @@
   const COUPON_PER_PUZZLE = 500;
   const PUZZLES_PER_LEVEL = 5;
   const MAX_LEVEL = 180;
-  const STOCK_ZERO = { coupons: 0, puzzles: 0, chests: 0 };
   const STAR_COSTS = [500, 1000, 6500, 25000, 65000, 98000];
+  const STAR_ITEM_VALUES = {
+    legendaryStars1: 110,
+    legendaryStars2: 420,
+    legendaryStars3: 960,
+  };
+  const STOCK_ZERO = {
+    coupons: 0,
+    puzzles: 0,
+    starCoupons: 0,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 0,
+    chests: 0,
+  };
   const OFFICER_TYPES = ['Танк', 'ПТ', 'Пехота', 'Гарнизон', 'Осада'];
 
   const DEFAULT_OFFICERS = [
@@ -170,7 +183,240 @@
     return {
       coupons: Math.max(0, Number(stock?.coupons) || 0),
       puzzles: Math.max(0, Number(stock?.puzzles) || 0),
+      starCoupons: Math.max(0, Number(stock?.starCoupons ?? stock?.stock_star_coupons) || 0),
+      legendaryStars1: Math.max(0, Number(stock?.legendaryStars1 ?? stock?.stock_legendary_stars_1) || 0),
+      legendaryStars2: Math.max(0, Number(stock?.legendaryStars2 ?? stock?.stock_legendary_stars_2) || 0),
+      legendaryStars3: Math.max(0, Number(stock?.legendaryStars3 ?? stock?.stock_legendary_stars_3) || 0),
       chests: Math.max(0, Number(stock?.chests) || 0),
+    };
+  }
+
+  function calculateTotalStarPoints(stock = {}) {
+    const s1 = Math.max(0, Number(stock?.legendaryStars1 ?? stock?.stock_legendary_stars_1) || 0);
+    const s2 = Math.max(0, Number(stock?.legendaryStars2 ?? stock?.stock_legendary_stars_2) || 0);
+    const s3 = Math.max(0, Number(stock?.legendaryStars3 ?? stock?.stock_legendary_stars_3) || 0);
+    return (s1 * 110) + (s2 * 420) + (s3 * 960);
+  }
+
+  function cleanOcrNumber(raw) {
+    if (typeof raw === 'number') {
+      return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 0;
+    }
+    if (!raw || typeof raw !== 'string') return 0;
+
+    let s = raw.trim();
+    if (!s) return 0;
+
+    if (!/\d/.test(s)) {
+      return 0;
+    }
+
+    const suffixMatch = s.match(/([0-9.,\s']+)\s*([KkMmBb])(?:\b|$)/);
+    if (suffixMatch) {
+      let numPart = suffixMatch[1].replace(/[\s']/g, '');
+      const multChar = suffixMatch[2].toUpperCase();
+      const mult = multChar === 'B' ? 1e9 : multChar === 'M' ? 1e6 : multChar === 'K' ? 1e3 : 1;
+      const commaCount = (numPart.match(/,/g) || []).length;
+      const dotCount = (numPart.match(/\./g) || []).length;
+      if (commaCount + dotCount === 1) {
+        numPart = numPart.replace(',', '.');
+      } else {
+        numPart = numPart.replace(/[,.](?=\d{3}(?:\D|$))/g, '').replace(',', '.');
+      }
+      const val = parseFloat(numPart);
+      if (!Number.isNaN(val) && Number.isFinite(val)) {
+        return Math.max(0, Math.round(val * mult));
+      }
+    }
+
+    s = s
+      .replace(/(\d)[Oo]/g, '$10')
+      .replace(/[Oo](\d)/g, '0$1')
+      .replace(/(\d)[LlI]/g, '$11')
+      .replace(/[LlI](\d)/g, '1$1')
+      .replace(/^([LlI])(?=[,.'\s]?\d)/g, '1')
+      .replace(/(\d[,.'\s]?)[Oo]$/g, '$10');
+
+    const digits = s.replace(/[^0-9]/g, '');
+    if (!digits) return 0;
+    const parsed = parseInt(digits, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  function parseProfileScreenshotText(text) {
+    if (!text || typeof text !== 'string') {
+      return { isProfile: false, sector: {} };
+    }
+
+    const sector = {};
+
+    const tagMatch = text.match(/\[([A-Za-zА-Яа-яЁё0-9_#]{2,12})\]\s*([^\r\n,;:()]{1,35})/);
+    if (tagMatch) {
+      sector.allianceTag = tagMatch[1].trim();
+      sector.name = tagMatch[2].trim();
+    } else {
+      const nameMatch = text.match(/(?:Ник(?:нейм)?|Имя|Командир)\s*[:：]?\s*([^\r\n,;:()]{1,35})/i);
+      if (nameMatch) {
+        const rawName = nameMatch[1].trim();
+        const innerTag = rawName.match(/^\[([A-Za-zА-Яа-яЁё0-9_#]+)\]\s*(.*)$/);
+        if (innerTag) {
+          sector.allianceTag = innerTag[1].trim();
+          sector.name = innerTag[2].trim();
+        } else {
+          sector.name = rawName;
+        }
+      }
+    }
+
+    const powerMatch = text.match(/(?:Сила|Мощь|Power)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+    if (powerMatch) {
+      const powerVal = cleanOcrNumber(powerMatch[1]);
+      if (powerVal > 0) sector.power = powerVal;
+    }
+
+    const killsMatch = text.match(/(?:Уничтожено(?:\s+юнитов|\s+войск)?|Убито|Kills)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+    if (killsMatch) {
+      const killsVal = cleanOcrNumber(killsMatch[1]);
+      if (killsVal > 0) sector.kills = killsVal;
+    }
+
+    const kpRegex = /(?:Очки\s+(?:за\s+)?убийств[ао]?|Kill\s*Points?)\s*[:：]?\s*([0-9OoLlI.,\s']+(?:[KkMmBb])?)/gi;
+    let exactKp = 0;
+    let roundedKp = 0;
+    let match;
+    while ((match = kpRegex.exec(text)) !== null) {
+      const rawVal = match[1].trim();
+      const isSuffix = /[KkMmBb]$/i.test(rawVal);
+      const cleaned = cleanOcrNumber(rawVal);
+      if (cleaned > 0) {
+        if (!isSuffix && cleaned > 1000) {
+          exactKp = cleaned;
+        } else if (!roundedKp) {
+          roundedKp = cleaned;
+        }
+      }
+    }
+    const finalKp = exactKp || roundedKp;
+    if (finalKp > 0) {
+      sector.killPoints = finalKp;
+    }
+
+    const isProfile = Boolean(sector.power || sector.kills || sector.killPoints || sector.name || sector.allianceTag);
+    return { isProfile, sector };
+  }
+
+  const WAREHOUSE_ITEM_DEFINITIONS = [
+    {
+      key: 'coupons',
+      pattern: /Купон\s+готовности\s+офицера/i,
+    },
+    {
+      key: 'puzzles',
+      pattern: /Медаль\s+легендарного\s+офицера/i,
+    },
+    {
+      key: 'starCoupons',
+      pattern: /Купон\s+готовности\s+звезд[ыае]?/i,
+    },
+    {
+      key: 'legendaryStars3',
+      pattern: /Легендарная\s+звезда\s*(?:III|iii|3|Ⅲ|ІІІ)\b/i,
+    },
+    {
+      key: 'legendaryStars2',
+      pattern: /Легендарная\s+звезда\s*(?:II|ii|2|Ⅱ|ІІ)\b/i,
+    },
+    {
+      key: 'legendaryStars1',
+      pattern: /Легендарная\s+звезда\s*(?:I|i|1|Ⅰ|І)\b/i,
+    },
+  ];
+
+  function parseWarehouseScreenshotText(text) {
+    if (!text || typeof text !== 'string') {
+      return { isWarehouse: false, stock: {} };
+    }
+
+    const stock = {};
+
+    for (const def of WAREHOUSE_ITEM_DEFINITIONS) {
+      const match = text.match(def.pattern);
+      if (!match) continue;
+
+      const startIndex = match.index + match[0].length;
+      const windowText = text.slice(startIndex, startIndex + 250);
+
+      const countMatch = windowText.match(/(?:В\s*на[лп]ичи[ие]?|На[лп]ичи[ие]?)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+      if (countMatch) {
+        const val = cleanOcrNumber(countMatch[1]);
+        stock[def.key] = val;
+      } else {
+        const numMatches = windowText.matchAll(/(?:^|[^\d])([0-9OoLlI.,\s']{2,})/g);
+        for (const nm of numMatches) {
+          const candidate = cleanOcrNumber(nm[1]);
+          if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
+            stock[def.key] = candidate;
+            break;
+          }
+        }
+      }
+    }
+
+    const isWarehouse = Object.keys(stock).length > 0;
+    return { isWarehouse, stock };
+  }
+
+  function mergeScanResults(accumulated = {}, nextScan = {}) {
+    const accSector = (accumulated && accumulated.sector) || {};
+    const nextSector = (nextScan && nextScan.sector) || {};
+    const accStock = (accumulated && accumulated.stock) || {};
+    const nextStock = (nextScan && nextScan.stock) || {};
+
+    const mergedSector = { ...accSector };
+    for (const [key, val] of Object.entries(nextSector)) {
+      if (val === undefined || val === null || val === '') continue;
+      if (typeof val === 'number') {
+        if (val === 0 && mergedSector[key]) {
+          continue;
+        }
+        if (key === 'killPoints') {
+          const currentKp = mergedSector.killPoints || 0;
+          if (!currentKp) {
+            mergedSector.killPoints = val;
+          } else {
+            const isCurrentRounded = currentKp % 100000 === 0;
+            const isNewRounded = val > 0 && val % 100000 === 0;
+            if (isCurrentRounded && !isNewRounded) {
+              mergedSector.killPoints = val;
+            } else if (!isCurrentRounded && isNewRounded) {
+              // keep current exact
+            } else {
+              mergedSector.killPoints = val;
+            }
+          }
+        } else {
+          mergedSector[key] = val;
+        }
+      } else {
+        mergedSector[key] = val;
+      }
+    }
+
+    const mergedStock = { ...accStock };
+    for (const [key, val] of Object.entries(nextStock)) {
+      if (val === undefined || val === null) continue;
+      if (typeof val === 'number') {
+        if (val > 0 || mergedStock[key] === undefined) {
+          mergedStock[key] = val;
+        }
+      } else {
+        mergedStock[key] = val;
+      }
+    }
+
+    return {
+      sector: mergedSector,
+      stock: mergedStock,
     };
   }
 
@@ -913,5 +1159,12 @@
     createOutboxItem,
     addToOutboxQueue,
     filterOutboxQueue,
+    STAR_ITEM_VALUES,
+    calculateTotalStarPoints,
+    cleanOcrNumber,
+    parseProfileScreenshotText,
+    parseWarehouseScreenshotText,
+    mergeScanResults,
+    normalizeStock,
   };
 });

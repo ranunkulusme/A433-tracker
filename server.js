@@ -16,7 +16,8 @@ const MIME_TYPES = {
   '.jpeg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8'
+  '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm'
 };
 
 function sendJson(res, statusCode, data) {
@@ -87,6 +88,32 @@ function sanitizeSkills(skills) {
 
 function sanitizeVipPoints(pts) {
   return Math.max(0, Math.floor(Number(pts) || 0));
+}
+
+function sanitizeStock(stock) {
+  if (!stock || typeof stock !== 'object') return stock;
+  if (stock.starCoupons !== undefined) {
+    stock.starCoupons = Math.max(0, parseInt(stock.starCoupons, 10) || 0);
+  }
+  if (stock.legendaryStars1 !== undefined) {
+    stock.legendaryStars1 = Math.max(0, parseInt(stock.legendaryStars1, 10) || 0);
+  }
+  if (stock.legendaryStars2 !== undefined) {
+    stock.legendaryStars2 = Math.max(0, parseInt(stock.legendaryStars2, 10) || 0);
+  }
+  if (stock.legendaryStars3 !== undefined) {
+    stock.legendaryStars3 = Math.max(0, parseInt(stock.legendaryStars3, 10) || 0);
+  }
+  if (stock.coupons !== undefined) {
+    stock.coupons = Math.max(0, parseInt(stock.coupons, 10) || 0);
+  }
+  if (stock.puzzles !== undefined) {
+    stock.puzzles = Math.max(0, parseInt(stock.puzzles, 10) || 0);
+  }
+  if (stock.chests !== undefined) {
+    stock.chests = Math.max(0, parseInt(stock.chests, 10) || 0);
+  }
+  return stock;
 }
 
 function requireAuth(req, res) {
@@ -375,6 +402,9 @@ function createRequestHandler(staticDir) {
       if (body.vipPoints !== undefined) {
         body.vipPoints = sanitizeVipPoints(body.vipPoints);
       }
+      if (body.stock) {
+        sanitizeStock(body.stock);
+      }
 
       if (Array.isArray(body.officers)) {
         for (const o of body.officers) {
@@ -454,6 +484,9 @@ function createRequestHandler(staticDir) {
       if (body.vipPoints !== undefined) {
         body.vipPoints = sanitizeVipPoints(body.vipPoints);
       }
+      if (body.stock) {
+        sanitizeStock(body.stock);
+      }
       if (Array.isArray(body.officers)) {
         for (const o of body.officers) {
           if (o.skills !== undefined) {
@@ -481,6 +514,9 @@ function createRequestHandler(staticDir) {
       }
       if (body.vipPoints !== undefined) {
         body.vipPoints = sanitizeVipPoints(body.vipPoints);
+      }
+      if (body.stock) {
+        sanitizeStock(body.stock);
       }
       if (Array.isArray(body.officers)) {
         const existingPlayer = db.getPlayerById(targetPlayerId);
@@ -810,5 +846,6 @@ if (require.main === module) {
 
 module.exports = {
   startServer,
-  createRequestHandler
+  createRequestHandler,
+  MIME_TYPES
 };

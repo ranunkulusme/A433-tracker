@@ -1259,6 +1259,9 @@ async function renderMyCabinet() {
   const rewards = dailyRewards(profile.sector);
   const today = new Date().toISOString().slice(0, 10);
   const rankLabel = (profile.rank || currentUser.rank || 'r3').toUpperCase();
+  const totalStarPoints = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints)
+    ? logic.calculateTotalStarPoints(profile.stock)
+    : (((profile.stock?.legendaryStars1 || 0) * 110) + ((profile.stock?.legendaryStars2 || 0) * 420) + ((profile.stock?.legendaryStars3 || 0) * 960));
 
   c.innerHTML = `
     <div class="section-header">
@@ -1272,7 +1275,8 @@ async function renderMyCabinet() {
           VIP ${profile.sector.vipLevel} · Секретность ${profile.sector.confidentialityLevel} · Сила ${fmtNum(profile.sector.power)} · Киллы ${fmtNum(profile.sector.kills)} · Очки ${fmtOne(profile.sector.killPoints)}
         </div>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <button type="button" class="btn btn-secondary btn-scanner" onclick="openSmartScannerModal('my_cabinet')">📷 Smart Scanner</button>
         <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 Обновить</button>
       </div>
     </div>
@@ -1330,33 +1334,70 @@ async function renderMyCabinet() {
         </div>
         <div class="stock-grid" style="margin-bottom:0">
           <div class="stock-card" style="padding:10px">
-            <div class="label">🎟️ Купоны</div>
+            <div class="label">🎟️ Купон офицера</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.coupons)}</div>
           </div>
           <div class="stock-card" style="padding:10px">
-            <div class="label">🧩 Пазлы</div>
+            <div class="label">🧩 Медаль офицера</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.puzzles)}</div>
           </div>
           <div class="stock-card" style="padding:10px">
-            <div class="label">📦 Сундуки</div>
+            <div class="label">⭐ Купон звезды</div>
+            <div class="value" style="font-size:17px">${fmtNum(profile.stock.starCoupons || 0)}</div>
+          </div>
+          <div class="stock-card" style="padding:10px">
+            <div class="label">🌟 Звезды I / II / III</div>
+            <div class="value" style="font-size:14px;font-family:var(--mono)">
+              ${fmtNum(profile.stock.legendaryStars1 || 0)} / ${fmtNum(profile.stock.legendaryStars2 || 0)} / ${fmtNum(profile.stock.legendaryStars3 || 0)}
+            </div>
+          </div>
+          <div class="stock-card" style="padding:10px">
+            <div class="label">📦 Сундук выбора</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.chests)}</div>
+          </div>
+          <div class="stock-card" style="padding:10px">
+            <div class="label">✨ Очки звезд</div>
+            <div class="value" style="font-size:17px;color:#f1e05a">${fmtNum(totalStarPoints)}</div>
+          </div>
+        </div>
+        <div class="form-row form-row-3" style="margin-top:12px">
+          <div class="form-group">
+            <label for="my-stock-coupons">Купон готовности офицера</label>
+            <input type="number" id="my-stock-coupons" min="0" value="${profile.stock.coupons || 0}">
+          </div>
+          <div class="form-group">
+            <label for="my-stock-puzzles">Медаль легендарного офицера</label>
+            <input type="number" id="my-stock-puzzles" min="0" value="${profile.stock.puzzles || 0}">
+          </div>
+          <div class="form-group">
+            <label for="my-stock-star-coupons">Купон готовности звезды</label>
+            <input type="number" id="my-stock-star-coupons" min="0" value="${profile.stock.starCoupons || 0}">
           </div>
         </div>
         <div class="form-row form-row-3">
           <div class="form-group">
-            <label for="my-stock-coupons">Новые купоны</label>
-            <input type="number" id="my-stock-coupons" min="0" value="${profile.stock.coupons}">
+            <label for="my-stock-legendary-stars-1">Легендарная звезда I (110)</label>
+            <input type="number" id="my-stock-legendary-stars-1" min="0" value="${profile.stock.legendaryStars1 || 0}" oninput="updateCabinetTotalStarPoints()">
           </div>
           <div class="form-group">
-            <label for="my-stock-puzzles">Новые пазлы</label>
-            <input type="number" id="my-stock-puzzles" min="0" value="${profile.stock.puzzles}">
+            <label for="my-stock-legendary-stars-2">Легендарная звезда II (420)</label>
+            <input type="number" id="my-stock-legendary-stars-2" min="0" value="${profile.stock.legendaryStars2 || 0}" oninput="updateCabinetTotalStarPoints()">
           </div>
           <div class="form-group">
-            <label for="my-stock-chests">Новые сундуки</label>
-            <input type="number" id="my-stock-chests" min="0" value="${profile.stock.chests}">
+            <label for="my-stock-legendary-stars-3">Легендарная звезда III (960)</label>
+            <input type="number" id="my-stock-legendary-stars-3" min="0" value="${profile.stock.legendaryStars3 || 0}" oninput="updateCabinetTotalStarPoints()">
           </div>
         </div>
-        <div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="my-stock-chests">Сундук выбора</label>
+            <input type="number" id="my-stock-chests" min="0" value="${profile.stock.chests || 0}">
+          </div>
+          <div class="form-group" style="display:flex;align-items:flex-end">
+            <div id="total-star-points-badge" class="total-star-badge">✨ Итого очков звезд: ${fmtNum(totalStarPoints)}</div>
+          </div>
+        </div>
+        <div style="margin-top:8px">
           <button type="button" class="btn-primary btn-sm" onclick="saveMyStock()">💾 Сохранить запасы</button>
         </div>
       </div>
@@ -1695,6 +1736,17 @@ async function saveMySector() {
   }
 }
 
+function updateCabinetTotalStarPoints() {
+  const el = document.getElementById('total-star-points-badge');
+  if (!el) return;
+  const s1 = parseInt(document.getElementById('my-stock-legendary-stars-1')?.value) || 0;
+  const s2 = parseInt(document.getElementById('my-stock-legendary-stars-2')?.value) || 0;
+  const s3 = parseInt(document.getElementById('my-stock-legendary-stars-3')?.value) || 0;
+  const calcFn = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints : null;
+  const total = calcFn ? calcFn({ legendaryStars1: s1, legendaryStars2: s2, legendaryStars3: s3 }) : ((s1 * 110) + (s2 * 420) + (s3 * 960));
+  el.textContent = `✨ Итого очков звезд: ${fmtNum(total)}`;
+}
+
 async function saveMyCabinetProfile() {
   if (!myCabinetProfile) return;
   const vipLevel = Math.max(0, parseInt(document.getElementById('my-sector-vip')?.value) || myCabinetProfile.sector?.vipLevel || 0);
@@ -1706,6 +1758,10 @@ async function saveMyCabinetProfile() {
 
   const coupons = Math.max(0, parseInt(document.getElementById('my-stock-coupons')?.value) || myCabinetProfile.stock?.coupons || 0);
   const puzzles = Math.max(0, parseInt(document.getElementById('my-stock-puzzles')?.value) || myCabinetProfile.stock?.puzzles || 0);
+  const starCoupons = Math.max(0, parseInt(document.getElementById('my-stock-star-coupons')?.value) || myCabinetProfile.stock?.starCoupons || 0);
+  const legendaryStars1 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-1')?.value) || myCabinetProfile.stock?.legendaryStars1 || 0);
+  const legendaryStars2 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-2')?.value) || myCabinetProfile.stock?.legendaryStars2 || 0);
+  const legendaryStars3 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-3')?.value) || myCabinetProfile.stock?.legendaryStars3 || 0);
   const chests = Math.max(0, parseInt(document.getElementById('my-stock-chests')?.value) || myCabinetProfile.stock?.chests || 0);
 
   try {
@@ -1713,7 +1769,7 @@ async function saveMyCabinetProfile() {
       method: 'PUT',
       body: {
         sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
-        stock: { coupons, puzzles, chests }
+        stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
       }
     });
     toast('Профиль успешно сохранен');
@@ -1726,15 +1782,19 @@ async function saveMyCabinetProfile() {
 }
 
 async function saveMyStock() {
-  const coupons = Math.max(0, parseInt(document.getElementById('my-stock-coupons').value) || 0);
-  const puzzles = Math.max(0, parseInt(document.getElementById('my-stock-puzzles').value) || 0);
-  const chests = Math.max(0, parseInt(document.getElementById('my-stock-chests').value) || 0);
+  const coupons = Math.max(0, parseInt(document.getElementById('my-stock-coupons')?.value) || 0);
+  const puzzles = Math.max(0, parseInt(document.getElementById('my-stock-puzzles')?.value) || 0);
+  const starCoupons = Math.max(0, parseInt(document.getElementById('my-stock-star-coupons')?.value) || 0);
+  const legendaryStars1 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-1')?.value) || 0);
+  const legendaryStars2 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-2')?.value) || 0);
+  const legendaryStars3 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-3')?.value) || 0);
+  const chests = Math.max(0, parseInt(document.getElementById('my-stock-chests')?.value) || 0);
 
   try {
     await apiFetch('/api/my-profile', {
       method: 'PUT',
       body: {
-        stock: { coupons, puzzles, chests }
+        stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
       }
     });
     toast('Запасы успешно сохранены');
@@ -2740,16 +2800,27 @@ function renderPlayerDetail(playerId) {
     </div>
     ${stockVisible ? `
       <div class="stock-grid">
-        <div class="stock-card"><div class="label">Купоны</div><div class="value">${fmtNum(p.stock.coupons)}</div></div>
-        <div class="stock-card"><div class="label">Пазлы</div><div class="value">${fmtNum(p.stock.puzzles)}</div></div>
-        <div class="stock-card"><div class="label">Сундуки</div><div class="value">${fmtNum(p.stock.chests)}</div></div>
+        <div class="stock-card"><div class="label">🎟️ Купон офицера</div><div class="value">${fmtNum(p.stock.coupons)}</div></div>
+        <div class="stock-card"><div class="label">🧩 Медаль офицера</div><div class="value">${fmtNum(p.stock.puzzles)}</div></div>
+        <div class="stock-card"><div class="label">⭐ Купон звезды</div><div class="value">${fmtNum(p.stock.starCoupons || 0)}</div></div>
+        <div class="stock-card"><div class="label">🌟 Звезды I / II / III</div><div class="value" style="font-size:14px;font-family:var(--mono)">${fmtNum(p.stock.legendaryStars1 || 0)} / ${fmtNum(p.stock.legendaryStars2 || 0)} / ${fmtNum(p.stock.legendaryStars3 || 0)}</div></div>
+        <div class="stock-card"><div class="label">📦 Сундук выбора</div><div class="value">${fmtNum(p.stock.chests)}</div></div>
+        <div class="stock-card"><div class="label">✨ Очки звезд</div><div class="value" style="color:#f1e05a">${fmtNum((typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints(p.stock) : 0)}</div></div>
         <div class="stock-card"><div class="label">Ежедневно</div><div class="value">+${fmtNum(rewards.puzzlesPerDay, 2)}</div></div>
       </div>
       <div class="section-header"><div class="section-title">Корректировка запасов</div></div>
-      <div class="form-row form-row-3" style="margin-bottom:12px">
-        <input type="number" id="stock-coupons" placeholder="Купоны" value="${p.stock.coupons}">
-        <input type="number" id="stock-puzzles" placeholder="Пазлы" value="${p.stock.puzzles}">
-        <input type="number" id="stock-chests" placeholder="Сундуки" value="${p.stock.chests}">
+      <div class="form-row form-row-3" style="margin-bottom:8px">
+        <input type="number" id="stock-coupons" placeholder="Купон готовности офицера" value="${p.stock.coupons}">
+        <input type="number" id="stock-puzzles" placeholder="Медаль легендарного офицера" value="${p.stock.puzzles}">
+        <input type="number" id="stock-star-coupons" placeholder="Купон готовности звезды" value="${p.stock.starCoupons || 0}">
+      </div>
+      <div class="form-row form-row-3" style="margin-bottom:8px">
+        <input type="number" id="stock-legendary-stars-1" placeholder="Легендарная звезда I (110)" value="${p.stock.legendaryStars1 || 0}">
+        <input type="number" id="stock-legendary-stars-2" placeholder="Легендарная звезда II (420)" value="${p.stock.legendaryStars2 || 0}">
+        <input type="number" id="stock-legendary-stars-3" placeholder="Легендарная звезда III (960)" value="${p.stock.legendaryStars3 || 0}">
+      </div>
+      <div class="form-row" style="margin-bottom:12px">
+        <input type="number" id="stock-chests" placeholder="Сундук выбора" value="${p.stock.chests}">
       </div>
       <div style="display:flex;gap:8px;margin-bottom:20px">
         <button class="btn-primary btn-sm" onclick="saveStockCorrection(${p.id})">Сохранить запасы</button>
@@ -2780,9 +2851,13 @@ function saveStockCorrection(playerId) {
   const p = getPlayer(playerId);
   const before = {...p.stock};
   const after = {
-    coupons: Math.max(0,parseInt(document.getElementById('stock-coupons').value)||0),
-    puzzles: Math.max(0,parseInt(document.getElementById('stock-puzzles').value)||0),
-    chests: Math.max(0,parseInt(document.getElementById('stock-chests').value)||0),
+    coupons: Math.max(0,parseInt(document.getElementById('stock-coupons')?.value)||0),
+    puzzles: Math.max(0,parseInt(document.getElementById('stock-puzzles')?.value)||0),
+    starCoupons: Math.max(0,parseInt(document.getElementById('stock-star-coupons')?.value)||0),
+    legendaryStars1: Math.max(0,parseInt(document.getElementById('stock-legendary-stars-1')?.value)||0),
+    legendaryStars2: Math.max(0,parseInt(document.getElementById('stock-legendary-stars-2')?.value)||0),
+    legendaryStars3: Math.max(0,parseInt(document.getElementById('stock-legendary-stars-3')?.value)||0),
+    chests: Math.max(0,parseInt(document.getElementById('stock-chests')?.value)||0),
   };
   p.stock = after;
   state.stockHistory.push({ id:state.nextId++, playerId, date:new Date().toISOString(), before, after });
@@ -3389,6 +3464,17 @@ function renderEventTypeCard(et) {
 let editPlayerId = null;
 let officerRows = [];
 
+function updatePlayerModalStarPoints() {
+  const el = document.getElementById('fp-total-star-points-badge');
+  if (!el) return;
+  const s1 = parseInt(document.getElementById('fp-stock-legendary-stars-1')?.value) || 0;
+  const s2 = parseInt(document.getElementById('fp-stock-legendary-stars-2')?.value) || 0;
+  const s3 = parseInt(document.getElementById('fp-stock-legendary-stars-3')?.value) || 0;
+  const calcFn = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints : null;
+  const total = calcFn ? calcFn({ legendaryStars1: s1, legendaryStars2: s2, legendaryStars3: s3 }) : ((s1 * 110) + (s2 * 420) + (s3 * 960));
+  el.textContent = `✨ Итого очков звезд: ${fmtNum(total)}`;
+}
+
 function openPlayerModal(playerId=null) {
   editPlayerId = playerId;
   document.getElementById('modal-player-title').textContent = playerId ? 'Редактировать игрока' : 'Новый игрок';
@@ -3401,6 +3487,10 @@ function openPlayerModal(playerId=null) {
   document.getElementById('fp-conf').value = p?.sector?.confidentialityLevel || 0;
   document.getElementById('fp-stock-coupons').value = p?.stock?.coupons || 0;
   document.getElementById('fp-stock-puzzles').value = p?.stock?.puzzles || 0;
+  document.getElementById('fp-stock-star-coupons').value = p?.stock?.starCoupons || 0;
+  document.getElementById('fp-stock-legendary-stars-1').value = p?.stock?.legendaryStars1 || 0;
+  document.getElementById('fp-stock-legendary-stars-2').value = p?.stock?.legendaryStars2 || 0;
+  document.getElementById('fp-stock-legendary-stars-3').value = p?.stock?.legendaryStars3 || 0;
   document.getElementById('fp-stock-chests').value = p?.stock?.chests || 0;
   document.getElementById('fp-power').value = p?.sector?.power || 0;
   document.getElementById('fp-kills').value = p?.sector?.kills || 0;
@@ -3410,6 +3500,7 @@ function openPlayerModal(playerId=null) {
     : [{ id:'new_'+Date.now(), catalogId:state.officerCatalog[0]?.id, level:0, coupons:0, stars:0, skills: [1, 1, 1, 1] }];
   renderOfficerRows();
   updateVipProgressHint();
+  updatePlayerModalStarPoints();
   openModal('modal-player');
 }
 
@@ -3506,9 +3597,13 @@ async function savePlayer() {
     killPoints: Math.round(Math.max(0,parseFloat(document.getElementById('fp-kill-points').value)||0) * 10) / 10,
   };
   const stock = {
-    coupons: Math.max(0,parseInt(document.getElementById('fp-stock-coupons').value)||0),
-    puzzles: Math.max(0,parseInt(document.getElementById('fp-stock-puzzles').value)||0),
-    chests: Math.max(0,parseInt(document.getElementById('fp-stock-chests').value)||0),
+    coupons: Math.max(0,parseInt(document.getElementById('fp-stock-coupons')?.value)||0),
+    puzzles: Math.max(0,parseInt(document.getElementById('fp-stock-puzzles')?.value)||0),
+    starCoupons: Math.max(0,parseInt(document.getElementById('fp-stock-star-coupons')?.value)||0),
+    legendaryStars1: Math.max(0,parseInt(document.getElementById('fp-stock-legendary-stars-1')?.value)||0),
+    legendaryStars2: Math.max(0,parseInt(document.getElementById('fp-stock-legendary-stars-2')?.value)||0),
+    legendaryStars3: Math.max(0,parseInt(document.getElementById('fp-stock-legendary-stars-3')?.value)||0),
+    chests: Math.max(0,parseInt(document.getElementById('fp-stock-chests')?.value)||0),
   };
   const officers = officerRows.filter(o=>o.catalogId).map(o=>({
     id: o.id.startsWith('new_') ? 'o'+state.nextId++ : o.id,
@@ -4248,12 +4343,386 @@ function handleImport(e) {
   reader.readAsText(file); e.target.value='';
 }
 
+// ─── SMART SCANNER (OCR) ─────────────────────────────────────
+let activeScannerContext = 'my_cabinet'; // 'my_cabinet' | 'player'
+let lastScanResults = null;
+let isScannerRunning = false;
+
+function openSmartScannerModal(targetContext = 'my_cabinet') {
+  activeScannerContext = targetContext || 'my_cabinet';
+  lastScanResults = null;
+  isScannerRunning = false;
+
+  const btnApply = document.getElementById('scanner-btn-apply');
+  if (btnApply) btnApply.disabled = true;
+
+  const fileInput = document.getElementById('scanner-file-input');
+  if (fileInput) fileInput.value = '';
+
+  const dropzone = document.getElementById('scanner-dropzone');
+  if (dropzone) {
+    dropzone.style.display = 'block';
+    dropzone.classList.remove('dragover');
+  }
+
+  const progressCont = document.getElementById('scanner-progress-container');
+  if (progressCont) progressCont.style.display = 'none';
+
+  const resultsCont = document.getElementById('scanner-results-container');
+  if (resultsCont) resultsCont.style.display = 'none';
+
+  const barEl = document.getElementById('scanner-progress-bar');
+  if (barEl) barEl.style.width = '0%';
+  const percentEl = document.getElementById('scanner-progress-percent');
+  if (percentEl) percentEl.textContent = '0%';
+  const statusEl = document.getElementById('scanner-progress-status');
+  if (statusEl) statusEl.textContent = 'Подготовка OCR...';
+  const detailsEl = document.getElementById('scanner-progress-details');
+  if (detailsEl) detailsEl.textContent = '';
+
+  openModal('modal-smart-scanner');
+}
+
+function closeSmartScannerModal() {
+  const modal = document.getElementById('modal-smart-scanner');
+  if (modal) modal.classList.remove('open');
+
+  const otherOpenModal = document.querySelector('.modal.open:not(#modal-smart-scanner)');
+  if (!otherOpenModal) {
+    document.getElementById('overlay')?.classList.remove('open');
+  }
+}
+
+function updateScannerPreviewStarPoints() {
+  const s1 = Math.max(0, parseInt(document.getElementById('scanner-preview-stars-1')?.value) || 0);
+  const s2 = Math.max(0, parseInt(document.getElementById('scanner-preview-stars-2')?.value) || 0);
+  const s3 = Math.max(0, parseInt(document.getElementById('scanner-preview-stars-3')?.value) || 0);
+  const calcFn = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints : null;
+  const total = calcFn ? calcFn({ legendaryStars1: s1, legendaryStars2: s2, legendaryStars3: s3 }) : ((s1 * 110) + (s2 * 420) + (s3 * 960));
+  const badge = document.getElementById('scanner-preview-star-points-badge');
+  if (badge) {
+    badge.textContent = `✨ Итого очков звезд: ${fmtNum(total)}`;
+  }
+}
+
+async function handleScannerFiles(fileList) {
+  if (isScannerRunning) return;
+  const files = Array.from(fileList || []).filter(f => {
+    return f && (f.type?.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name || ''));
+  });
+
+  if (!files.length) {
+    toast('Пожалуйста, выберите файлы изображений (PNG, JPG, WebP)', 'error');
+    return;
+  }
+
+  const progressCont = document.getElementById('scanner-progress-container');
+  const resultsCont = document.getElementById('scanner-results-container');
+  const statusEl = document.getElementById('scanner-progress-status');
+  const percentEl = document.getElementById('scanner-progress-percent');
+  const barEl = document.getElementById('scanner-progress-bar');
+  const detailsEl = document.getElementById('scanner-progress-details');
+  const btnApply = document.getElementById('scanner-btn-apply');
+
+  if (progressCont) progressCont.style.display = 'flex';
+  if (resultsCont) resultsCont.style.display = 'none';
+  if (btnApply) btnApply.disabled = true;
+
+  isScannerRunning = true;
+
+  try {
+    const scanner = (typeof window !== 'undefined' && window.smartScanner) || (typeof smartScanner !== 'undefined' ? smartScanner : null);
+    if (!scanner || typeof scanner.runSmartOcr !== 'function') {
+      throw new Error('Модуль Smart Scanner (ocr.js) не загружен. Проверьте подключение скрипта.');
+    }
+
+    const onProgress = (info) => {
+      const pct = Math.min(100, Math.max(0, Number(info.percent) || 0));
+      if (barEl) barEl.style.width = `${pct}%`;
+      if (percentEl) percentEl.textContent = `${pct}%`;
+      if (statusEl) statusEl.textContent = info.stage === 'done' ? '✓ Готово!' : (info.details || 'Распознавание...');
+      if (detailsEl) {
+        if (info.total && info.total > 1) {
+          detailsEl.textContent = `Обработка скриншота ${info.current || 1} из ${info.total}`;
+        } else {
+          detailsEl.textContent = info.stage === 'done' ? 'Данные успешно извлечены' : '';
+        }
+      }
+    };
+
+    const result = await scanner.runSmartOcr(files, onProgress);
+    lastScanResults = result;
+    displayScannerResults(result);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = 'Ошибка распознавания';
+    toast('Ошибка сканера: ' + (err.message || 'не удалось распознать скриншоты'), 'error');
+  } finally {
+    isScannerRunning = false;
+  }
+}
+
+function displayScannerResults(result) {
+  const resultsCont = document.getElementById('scanner-results-container');
+  if (!resultsCont) return;
+
+  resultsCont.style.display = 'flex';
+
+  const summaryEl = document.getElementById('scanner-results-summary');
+  if (summaryEl) {
+    const count = result.imagesProcessed || 1;
+    summaryEl.className = 'scanner-results-summary';
+    summaryEl.textContent = `✓ Успешно обработано скриншотов: ${count}. Проверьте значения перед применением:`;
+  }
+
+  let currentSector = {};
+  let currentStock = {};
+  let currentName = '';
+
+  if (activeScannerContext === 'my_cabinet') {
+    currentSector = myCabinetProfile?.sector || {};
+    currentStock = myCabinetProfile?.stock || {};
+    currentName = myCabinetProfile?.name || '';
+  } else if (activeScannerContext === 'player') {
+    currentSector = {
+      power: parseInt(document.getElementById('fp-power')?.value) || 0,
+      kills: parseInt(document.getElementById('fp-kills')?.value) || 0,
+      killPoints: parseFloat(document.getElementById('fp-kill-points')?.value) || 0,
+    };
+    currentStock = {
+      coupons: parseInt(document.getElementById('fp-stock-coupons')?.value) || 0,
+      puzzles: parseInt(document.getElementById('fp-stock-puzzles')?.value) || 0,
+      starCoupons: parseInt(document.getElementById('fp-stock-star-coupons')?.value) || 0,
+      legendaryStars1: parseInt(document.getElementById('fp-stock-legendary-stars-1')?.value) || 0,
+      legendaryStars2: parseInt(document.getElementById('fp-stock-legendary-stars-2')?.value) || 0,
+      legendaryStars3: parseInt(document.getElementById('fp-stock-legendary-stars-3')?.value) || 0,
+      chests: parseInt(document.getElementById('fp-stock-chests')?.value) || 0,
+    };
+    currentName = document.getElementById('fp-name')?.value || '';
+  }
+
+  const s = result.sector || {};
+  const st = result.stock || {};
+
+  const nickInput = document.getElementById('scanner-preview-nickname');
+  const updateNickCheck = document.getElementById('scanner-preview-update-nickname');
+  const detectedName = s.name || s.nickname || '';
+  if (nickInput) {
+    nickInput.value = detectedName || currentName || '';
+  }
+  if (updateNickCheck) {
+    updateNickCheck.checked = Boolean(detectedName);
+  }
+
+  const powerInput = document.getElementById('scanner-preview-power');
+  if (powerInput) {
+    powerInput.value = s.power !== undefined ? s.power : (currentSector.power || 0);
+  }
+  const killsInput = document.getElementById('scanner-preview-kills');
+  if (killsInput) {
+    killsInput.value = s.kills !== undefined ? s.kills : (currentSector.kills || 0);
+  }
+  const kpInput = document.getElementById('scanner-preview-kill-points');
+  if (kpInput) {
+    kpInput.value = s.killPoints !== undefined ? s.killPoints : (currentSector.killPoints || 0);
+  }
+
+  const couponsInput = document.getElementById('scanner-preview-coupons');
+  if (couponsInput) {
+    couponsInput.value = st.coupons !== undefined ? st.coupons : (currentStock.coupons || 0);
+  }
+  const puzzlesInput = document.getElementById('scanner-preview-puzzles');
+  if (puzzlesInput) {
+    puzzlesInput.value = st.puzzles !== undefined ? st.puzzles : (currentStock.puzzles || 0);
+  }
+  const starCouponsInput = document.getElementById('scanner-preview-star-coupons');
+  if (starCouponsInput) {
+    starCouponsInput.value = st.starCoupons !== undefined ? st.starCoupons : (currentStock.starCoupons || 0);
+  }
+  const stars1Input = document.getElementById('scanner-preview-stars-1');
+  if (stars1Input) {
+    stars1Input.value = st.legendaryStars1 !== undefined ? st.legendaryStars1 : (currentStock.legendaryStars1 || 0);
+  }
+  const stars2Input = document.getElementById('scanner-preview-stars-2');
+  if (stars2Input) {
+    stars2Input.value = st.legendaryStars2 !== undefined ? st.legendaryStars2 : (currentStock.legendaryStars2 || 0);
+  }
+  const stars3Input = document.getElementById('scanner-preview-stars-3');
+  if (stars3Input) {
+    stars3Input.value = st.legendaryStars3 !== undefined ? st.legendaryStars3 : (currentStock.legendaryStars3 || 0);
+  }
+
+  updateScannerPreviewStarPoints();
+
+  const btnApply = document.getElementById('scanner-btn-apply');
+  if (btnApply) btnApply.disabled = false;
+}
+
+async function applyScanResultsToProfile() {
+  const btnApply = document.getElementById('scanner-btn-apply');
+  const updateNick = document.getElementById('scanner-preview-update-nickname')?.checked;
+  const nick = document.getElementById('scanner-preview-nickname')?.value?.trim();
+  const power = Math.max(0, parseInt(document.getElementById('scanner-preview-power')?.value) || 0);
+  const kills = Math.max(0, parseInt(document.getElementById('scanner-preview-kills')?.value) || 0);
+  const killPoints = Math.max(0, parseFloat(document.getElementById('scanner-preview-kill-points')?.value) || 0);
+
+  const coupons = Math.max(0, parseInt(document.getElementById('scanner-preview-coupons')?.value) || 0);
+  const puzzles = Math.max(0, parseInt(document.getElementById('scanner-preview-puzzles')?.value) || 0);
+  const starCoupons = Math.max(0, parseInt(document.getElementById('scanner-preview-star-coupons')?.value) || 0);
+  const legendaryStars1 = Math.max(0, parseInt(document.getElementById('scanner-preview-stars-1')?.value) || 0);
+  const legendaryStars2 = Math.max(0, parseInt(document.getElementById('scanner-preview-stars-2')?.value) || 0);
+  const legendaryStars3 = Math.max(0, parseInt(document.getElementById('scanner-preview-stars-3')?.value) || 0);
+
+  if (activeScannerContext === 'my_cabinet') {
+    if (document.getElementById('my-sector-power')) document.getElementById('my-sector-power').value = power;
+    if (document.getElementById('my-sector-kills')) document.getElementById('my-sector-kills').value = kills;
+    if (document.getElementById('my-sector-kill-points')) document.getElementById('my-sector-kill-points').value = killPoints;
+
+    if (document.getElementById('my-stock-coupons')) document.getElementById('my-stock-coupons').value = coupons;
+    if (document.getElementById('my-stock-puzzles')) document.getElementById('my-stock-puzzles').value = puzzles;
+    if (document.getElementById('my-stock-star-coupons')) document.getElementById('my-stock-star-coupons').value = starCoupons;
+    if (document.getElementById('my-stock-legendary-stars-1')) document.getElementById('my-stock-legendary-stars-1').value = legendaryStars1;
+    if (document.getElementById('my-stock-legendary-stars-2')) document.getElementById('my-stock-legendary-stars-2').value = legendaryStars2;
+    if (document.getElementById('my-stock-legendary-stars-3')) document.getElementById('my-stock-legendary-stars-3').value = legendaryStars3;
+    updateCabinetTotalStarPoints();
+
+    const vipLevel = myCabinetProfile?.sector?.vipLevel || 0;
+    const vipPoints = myCabinetProfile?.sector?.vipPoints || 0;
+    const confidentialityLevel = myCabinetProfile?.sector?.confidentialityLevel || 0;
+    const chests = myCabinetProfile?.stock?.chests || 0;
+
+    const payload = {
+      sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
+      stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
+    };
+    if (updateNick && nick) {
+      payload.name = nick;
+    }
+
+    try {
+      if (btnApply) {
+        btnApply.disabled = true;
+        btnApply.textContent = 'Применение...';
+      }
+      await apiFetch('/api/my-profile', {
+        method: 'PUT',
+        body: payload
+      });
+      toast('Данные Smart Scanner успешно применены в профиль!');
+      closeSmartScannerModal();
+      await renderMyCabinet();
+    } catch (err) {
+      toast('Ошибка сохранения профиля: ' + err.message, 'error');
+    } finally {
+      if (btnApply) {
+        btnApply.disabled = false;
+        btnApply.textContent = '✓ Применить в профиль';
+      }
+    }
+  } else if (activeScannerContext === 'player') {
+    if (updateNick && nick && document.getElementById('fp-name')) {
+      document.getElementById('fp-name').value = nick;
+    }
+    if (document.getElementById('fp-power')) document.getElementById('fp-power').value = power;
+    if (document.getElementById('fp-kills')) document.getElementById('fp-kills').value = kills;
+    if (document.getElementById('fp-kill-points')) document.getElementById('fp-kill-points').value = killPoints;
+
+    if (document.getElementById('fp-stock-coupons')) document.getElementById('fp-stock-coupons').value = coupons;
+    if (document.getElementById('fp-stock-puzzles')) document.getElementById('fp-stock-puzzles').value = puzzles;
+    if (document.getElementById('fp-stock-star-coupons')) document.getElementById('fp-stock-star-coupons').value = starCoupons;
+    if (document.getElementById('fp-stock-legendary-stars-1')) document.getElementById('fp-stock-legendary-stars-1').value = legendaryStars1;
+    if (document.getElementById('fp-stock-legendary-stars-2')) document.getElementById('fp-stock-legendary-stars-2').value = legendaryStars2;
+    if (document.getElementById('fp-stock-legendary-stars-3')) document.getElementById('fp-stock-legendary-stars-3').value = legendaryStars3;
+    updatePlayerModalStarPoints();
+    toast('Данные Smart Scanner перенесены в карточку игрока!');
+    closeSmartScannerModal();
+  }
+}
+
+function handleScannerGlobalPaste(e) {
+  const modal = document.getElementById('modal-smart-scanner');
+  if (!modal || !modal.classList.contains('open')) return;
+  if (isScannerRunning) return;
+
+  const clipboardData = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
+  if (!clipboardData || !clipboardData.items) return;
+
+  const imageFiles = [];
+  for (let i = 0; i < clipboardData.items.length; i++) {
+    const item = clipboardData.items[i];
+    if (item.type && item.type.startsWith('image/')) {
+      const blob = item.getAsFile();
+      if (blob) {
+        imageFiles.push(blob);
+      }
+    }
+  }
+
+  if (imageFiles.length > 0) {
+    e.preventDefault();
+    handleScannerFiles(imageFiles);
+  }
+}
+
+function initSmartScanner() {
+  const dropzone = document.getElementById('scanner-dropzone');
+  const fileInput = document.getElementById('scanner-file-input');
+
+  if (dropzone && !dropzone.dataset.initialized) {
+    dropzone.dataset.initialized = 'true';
+
+    dropzone.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+      const files = e.dataTransfer ? e.dataTransfer.files : null;
+      if (files && files.length > 0) {
+        handleScannerFiles(files);
+      }
+    });
+  }
+
+  if (fileInput && !fileInput.dataset.initialized) {
+    fileInput.dataset.initialized = 'true';
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (files.length > 0) {
+        handleScannerFiles(files);
+      }
+    });
+  }
+
+  if (typeof window !== 'undefined' && !window.__scannerPasteInitialized) {
+    window.__scannerPasteInitialized = true;
+    window.addEventListener('paste', handleScannerGlobalPaste);
+  }
+}
+
 function initApp() {
   load();
   renderSidebarNav();
   renderTopbarProfile();
   updateNetworkStatusUI();
   checkPwaInstallable();
+  initSmartScanner();
   checkAuth().then(isAuth => {
     if (isAuth) {
       if (currentUser?.rank === 'r3') {
@@ -4333,4 +4802,12 @@ if (typeof window !== 'undefined') {
   window.handleNetworkBadgeClick = handleNetworkBadgeClick;
   window.handleInstallPwaClick = handleInstallPwaClick;
   window.checkPwaInstallable = checkPwaInstallable;
+  window.openSmartScannerModal = openSmartScannerModal;
+  window.closeSmartScannerModal = closeSmartScannerModal;
+  window.handleScannerFiles = handleScannerFiles;
+  window.applyScanResultsToProfile = applyScanResultsToProfile;
+  window.updateCabinetTotalStarPoints = updateCabinetTotalStarPoints;
+  window.updatePlayerModalStarPoints = updatePlayerModalStarPoints;
+  window.updateScannerPreviewStarPoints = updateScannerPreviewStarPoints;
+  window.initSmartScanner = initSmartScanner;
 }
