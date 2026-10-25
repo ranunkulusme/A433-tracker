@@ -10,6 +10,7 @@ const MIME_TYPES = {
   '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -158,10 +159,24 @@ function serveStaticFile(req, res, staticDir, pathname) {
 
     const ext = path.extname(targetPath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': contentType,
       'Content-Length': stats.size
-    });
+    };
+
+    if (pathname === '/sw.js') {
+      headers['Content-Type'] = 'application/javascript; charset=UTF-8';
+      headers['Service-Worker-Allowed'] = '/';
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    } else if (pathname === '/manifest.json') {
+      headers['Content-Type'] = 'application/manifest+json; charset=UTF-8';
+    }
+
+    res.writeHead(200, headers);
+
+    if (req.method === 'HEAD') {
+      return res.end();
+    }
 
     const stream = fs.createReadStream(targetPath);
     stream.pipe(res);

@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KoW Tracker">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <title>KoW Officer Tracker</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -68,7 +74,10 @@
         </button>
         <h1 class="page-title" id="page-title">Календарь</h1>
       </div>
-      <div class="topbar-right" id="topbar-profile">
+      <div class="topbar-right">
+        <button id="network-status-badge" class="network-badge online" onclick="handleNetworkBadgeClick()" title="Статус подключения" type="button">🟢 <span class="badge-text">Онлайн</span></button>
+        <button id="pwa-install-btn" class="btn-pwa-install" onclick="handleInstallPwaClick()" title="Установить приложение на устройство" type="button" style="display:none">📲 <span class="pwa-btn-text">Установить</span></button>
+        <div class="topbar-profile" id="topbar-profile"></div>
       </div>
     </header>
     <div class="content" id="content"></div>
@@ -457,6 +466,42 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
     <button class="btn-danger" id="confirm-btn">Удалить</button>
+  </div>
+</div>
+
+<!-- Modal: iOS PWA Install Guide -->
+<div class="modal modal-sm" id="modal-ios-install">
+  <div class="modal-header">
+    <h3>Установка на iPhone / iPad</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <p style="color:var(--text2);margin-bottom:16px;font-size:13.5px">
+      Установите KoW Tracker на домашний экран вашего устройства Apple для быстрого запуска и работы в оффлайн-режиме:
+    </p>
+    <div class="ios-install-steps">
+      <div class="ios-step-item">
+        <div class="ios-step-num">1</div>
+        <div class="ios-step-content">
+          В нижней панели Safari нажмите кнопку <strong>«Поделиться»</strong> <span class="ios-icon">⎋</span> (квадрат со стрелкой вверх).
+        </div>
+      </div>
+      <div class="ios-step-item">
+        <div class="ios-step-num">2</div>
+        <div class="ios-step-content">
+          Прокрутите открывшееся меню вниз и выберите пункт <strong>«На экран „Домой“»</strong> <span class="ios-icon">⊞</span>.
+        </div>
+      </div>
+      <div class="ios-step-item">
+        <div class="ios-step-num">3</div>
+        <div class="ios-step-content">
+          В правом верхнем углу нажмите <strong>«Добавить»</strong>. Иконка KoW Tracker появится на вашем экране.
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-primary" onclick="closeAllModals()">Понятно</button>
   </div>
 </div>
 

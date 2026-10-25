@@ -47,6 +47,58 @@ test('API serves static assets (index.html, logic.js) and 404s missing files / p
   }
 });
 
+test('PWA endpoints serve manifest.json, sw.js with Service-Worker-Allowed header, and app icons', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. GET /manifest.json -> 200, Content-Type application/manifest+json
+    const resManifest = await fetch(`${baseUrl}/manifest.json`);
+    assert.equal(resManifest.status, 200);
+    const manifestContentType = resManifest.headers.get('content-type') || '';
+    assert(
+      manifestContentType.includes('manifest+json'),
+      `Expected manifest content-type to include manifest+json, got: ${manifestContentType}`
+    );
+    const manifestJson = await resManifest.json();
+    assert.equal(manifestJson.name, 'KoW Tracker - Kingdom of Winners');
+    assert.equal(manifestJson.start_url, '/');
+
+    // 2. GET /sw.js -> 200, Service-Worker-Allowed: /, Cache-Control no-cache, Content-Type javascript
+    const resSw = await fetch(`${baseUrl}/sw.js`);
+    assert.equal(resSw.status, 200);
+    const swContentType = resSw.headers.get('content-type') || '';
+    assert(swContentType.includes('javascript'), `Expected javascript content-type, got: ${swContentType}`);
+    assert.equal(resSw.headers.get('service-worker-allowed'), '/');
+    const swCacheControl = resSw.headers.get('cache-control') || '';
+    assert(swCacheControl.includes('no-cache'), `Expected no-cache in Cache-Control, got: ${swCacheControl}`);
+    const swText = await resSw.text();
+    assert(swText.includes('CACHE_NAME'), 'Expected CACHE_NAME in sw.js');
+    assert(swText.includes('STATIC_ASSETS'), 'Expected STATIC_ASSETS in sw.js');
+
+    // 3. GET /icons/icon-192.png -> 200, image/png
+    const resIcon192 = await fetch(`${baseUrl}/icons/icon-192.png`);
+    assert.equal(resIcon192.status, 200);
+    const icon192Type = resIcon192.headers.get('content-type') || '';
+    assert(icon192Type.includes('image/png'), `Expected image/png, got: ${icon192Type}`);
+    const icon192Buf = await resIcon192.arrayBuffer();
+    assert(icon192Buf.byteLength > 0);
+
+    // 4. GET /icons/icon-512.png -> 200, image/png
+    const resIcon512 = await fetch(`${baseUrl}/icons/icon-512.png`);
+    assert.equal(resIcon512.status, 200);
+    const icon512Type = resIcon512.headers.get('content-type') || '';
+    assert(icon512Type.includes('image/png'), `Expected image/png, got: ${icon512Type}`);
+
+    // 5. Safe icons path traversal check -> 403 or 404
+    const resBadIcon = await fetch(`${baseUrl}/icons/../server.js`);
+    assert(resBadIcon.status === 403 || resBadIcon.status === 404);
+  } finally {
+    await server.close();
+  }
+});
+
 test('API enforces registration flow, pending approval, and login RBAC', async () => {
   const { startServer } = require('./server.js');
   const server = await startServer({ port: 0, dbPath: ':memory:' });

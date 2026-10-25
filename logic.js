@@ -803,6 +803,80 @@
     };
   }
 
+  function isOfflineMutationAllowed(options = {}) {
+    if (!options || typeof options !== 'object') return false;
+    const { endpoint, method } = options;
+    if (!endpoint || !method) return false;
+    const m = String(method).trim().toUpperCase();
+    const ep = String(endpoint).trim();
+
+    // R3 Profile update
+    if (ep === '/api/my-profile' && m === 'PUT') {
+      return true;
+    }
+
+    // R3 Officer mutations (/api/my-profile/officers and /api/my-profile/officers/:id)
+    if (ep === '/api/my-profile/officers' && (m === 'POST' || m === 'PUT')) {
+      return true;
+    }
+    if (/^\/api\/my-profile\/officers(\/.*)?$/.test(ep) && (m === 'POST' || m === 'PUT' || m === 'DELETE')) {
+      return true;
+    }
+
+    // R3 Event registrations (/api/events/:id/register or /api/events/:id/registrations and subpaths)
+    if (/^\/api\/events\/[^/]+\/(register|registrations)(\/.*)?$/.test(ep) && (m === 'POST' || m === 'DELETE')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function createOutboxItem({ endpoint = '', method = 'POST', body = null, id, timestamp } = {}) {
+    return {
+      id: id || `outbox_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      endpoint,
+      method: (method || 'POST').toUpperCase(),
+      body: body !== undefined && body !== null ? JSON.parse(JSON.stringify(body)) : null,
+      timestamp: timestamp || Date.now(),
+      retryCount: 0,
+    };
+  }
+
+  function addToOutboxQueue(queue = [], item) {
+    if (!item) return Array.isArray(queue) ? [...queue] : [];
+    const qList = Array.isArray(queue) ? queue : [];
+    const itemMethod = (item.method || '').toUpperCase();
+
+    if (itemMethod === 'PUT') {
+      const existingIndex = qList.findIndex(
+        q => q && q.endpoint === item.endpoint && (q.method || '').toUpperCase() === 'PUT'
+      );
+      if (existingIndex !== -1) {
+        const isObj = o => o && typeof o === 'object' && !Array.isArray(o);
+        return qList.map((q, idx) => {
+          if (idx === existingIndex) {
+            const mergedBody = (isObj(q.body) && isObj(item.body))
+              ? { ...q.body, ...item.body }
+              : item.body;
+            return {
+              ...q,
+              body: mergedBody,
+              timestamp: item.timestamp || Date.now(),
+            };
+          }
+          return q;
+        });
+      }
+    }
+
+    return [...qList, item];
+  }
+
+  function filterOutboxQueue(queue = [], completedId) {
+    if (!Array.isArray(queue)) return [];
+    return queue.filter(item => item && item.id !== completedId);
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -835,5 +909,9 @@
     simulateEventProgress,
     smartAutoPick,
     smartAutoPickWithRegistrations,
+    isOfflineMutationAllowed,
+    createOutboxItem,
+    addToOutboxQueue,
+    filterOutboxQueue,
   };
 });
