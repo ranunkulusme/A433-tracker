@@ -863,14 +863,14 @@ function createRequestHandler(staticDir) {
     if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
 
+      let cachedEventTypes = db.getEventTypes();
       function ensureEventType(identifier, defaultColor) {
-        const eventTypes = db.getEventTypes();
         const search = String(identifier || '').trim().toLowerCase();
-        let found = eventTypes.find(t => t.name && t.name.trim().toLowerCase() === search);
+        let found = cachedEventTypes.find(t => t.name && t.name.trim().toLowerCase() === search);
 
         const preset = (logic.EVENT_PRESETS || []).find(p => p.id === search || p.name.trim().toLowerCase() === search);
         if (!found && preset) {
-          found = eventTypes.find(t => t.name && t.name.trim().toLowerCase() === preset.name.trim().toLowerCase());
+          found = cachedEventTypes.find(t => t.name && t.name.trim().toLowerCase() === preset.name.trim().toLowerCase());
         }
 
         if (!found) {
@@ -890,6 +890,7 @@ function createRequestHandler(staticDir) {
               { place: 4, label: '4–10 место', coupons: 2750 },
             ]
           });
+          cachedEventTypes.push(found);
         }
         return found;
       }

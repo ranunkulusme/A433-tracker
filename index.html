@@ -561,7 +561,10 @@
             <button type="button" class="btn-primary btn-sm season-week-btn active" data-weeks="8" onclick="setSeasonDurationWeeks(8)">8 недель</button>
             <button type="button" class="btn-outline btn-sm season-week-btn" data-weeks="12" onclick="setSeasonDurationWeeks(12)">12 недель</button>
           </div>
-          <input type="hidden" id="season-total-weeks" value="8">
+          <div style="display:flex;align-items:center;gap:4px">
+            <input type="number" id="season-total-weeks" min="1" max="52" value="8" style="width:54px;padding:5px 6px;font-size:12px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:#0f172a;color:#fff;text-align:center" onchange="onSeasonTotalWeeksInputChange(this.value)">
+            <span style="font-size:12px;color:var(--text3)">нед.</span>
+          </div>
         </div>
       </div>
     </div>

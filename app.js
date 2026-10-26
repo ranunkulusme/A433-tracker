@@ -5091,6 +5091,11 @@ function confirmDeleteEventType(id) {
 }
 
 // ─── SEASON SCHEDULER & CADENCE CONSTRUCTOR ──────────────────
+function onSeasonTotalWeeksInputChange(val) {
+  const weeks = Math.max(1, Math.min(52, parseInt(val, 10) || 8));
+  setSeasonDurationWeeks(weeks);
+}
+
 function setSeasonDurationWeeks(weeks) {
   const hiddenInput = document.getElementById('season-total-weeks');
   if (hiddenInput) hiddenInput.value = weeks;
@@ -6215,6 +6220,7 @@ if (typeof window !== 'undefined') {
   window.openSeasonSchedulerModal = openSeasonSchedulerModal;
   window.submitSeasonSchedule = submitSeasonSchedule;
   window.setSeasonDurationWeeks = setSeasonDurationWeeks;
+  window.onSeasonTotalWeeksInputChange = onSeasonTotalWeeksInputChange;
   window.updateSeasonSchedulePreview = updateSeasonSchedulePreview;
   window.removeSeasonPreviewEvent = removeSeasonPreviewEvent;
   window.getOutboxQueue = getOutboxQueue;

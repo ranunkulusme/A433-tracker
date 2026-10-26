@@ -723,7 +723,8 @@
 
     const baseInputDate = startDate && typeof startDate === 'string' ? startDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
     // Find base Monday of the week containing baseInputDate
-    const d = new Date(`${baseInputDate}T00:00:00Z`);
+    const rawD = new Date(`${baseInputDate}T00:00:00Z`);
+    const d = isNaN(rawD.getTime()) ? new Date() : rawD;
     const day = d.getUTCDay(); // 0 is Sunday, 1 is Monday ... 6 is Saturday
     const diffToMonday = (day === 0 ? -6 : 1 - day);
     const baseMonday = new Date(d);
