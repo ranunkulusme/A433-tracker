@@ -355,7 +355,7 @@ function createRequestHandler(staticDir) {
     }
 
     if (pathname === '/api/users' && req.method === 'GET') {
-      if (!requireRole(['r5'])(req, res)) return;
+      if (!requireRole(['r4', 'r5'])(req, res)) return;
       return sendJson(res, 200, db.getUsers());
     }
 
@@ -374,18 +374,76 @@ function createRequestHandler(staticDir) {
     }
 
     // ─────────────────────────────────────────────────────────
-    // PLAYER CABINET (/api/my-profile)
+    // PLAYER CABINET & SECTORS (/api/my-profile, /api/my-sectors)
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/my-profile' && req.method === 'GET') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
-        return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
+      const sectors = db.getPlayersByUserId(req.user.id);
+      let activeSector = null;
+      const requestedSectorId = parsedUrl.searchParams.get('sectorId')
+        ? Number(parsedUrl.searchParams.get('sectorId'))
+        : null;
+
+      if (requestedSectorId && sectors.some(s => s.id === requestedSectorId)) {
+        activeSector = sectors.find(s => s.id === requestedSectorId);
+      } else if (req.user.playerId && sectors.some(s => s.id === req.user.playerId)) {
+        activeSector = sectors.find(s => s.id === req.user.playerId);
+      } else if (sectors.length > 0) {
+        activeSector = sectors[0];
       }
-      const player = db.getPlayerById(req.user.playerId);
-      if (!player) {
-        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Профиль игрока не найден');
+
+      return sendJson(res, 200, {
+        ...(activeSector ? activeSector : {}),
+        user: { id: req.user.id, username: req.user.username, rank: req.user.rank },
+        sectors,
+        activeSectorId: activeSector ? activeSector.id : null,
+        sector: activeSector ? activeSector.sector : null,
+        stock: activeSector ? activeSector.stock : null,
+        officers: activeSector ? (activeSector.officers || []) : []
+      });
+    }
+
+    if (pathname === '/api/my-profile/active-sector' && req.method === 'POST') {
+      if (!requireAuth(req, res)) return;
+      const sectorId = Number(body.sectorId);
+      if (!sectorId) {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Укажите ID сектора');
       }
-      return sendJson(res, 200, player);
+      const result = db.setUserActiveSector(req.user.id, sectorId);
+      if (!result.ok) {
+        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
+      }
+      req.user.playerId = sectorId;
+      return sendJson(res, 200, { success: true, activeSectorId: sectorId });
+    }
+
+    if (pathname === '/api/my-sectors' && req.method === 'POST') {
+      if (!requireAuth(req, res)) return;
+      if (!body.name || !body.name.trim()) {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Укажите название сектора');
+      }
+      if (body.sector && body.sector.vipPoints !== undefined) {
+        body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
+      }
+      if (body.vipPoints !== undefined) {
+        body.vipPoints = sanitizeVipPoints(body.vipPoints);
+      }
+      if (body.stock) {
+        sanitizeStock(body.stock);
+      }
+      const created = db.createPlayer({
+        ...body,
+        name: body.name.trim(),
+        userId: req.user.id,
+        rank: req.user.rank === 'r4' || req.user.rank === 'r5' ? (body.rank || 'r3') : 'r3'
+      });
+
+      const currentUser = db.findUserById(req.user.id);
+      if (!currentUser || !currentUser.player_id) {
+        db.setUserActiveSector(req.user.id, created.id);
+        req.user.playerId = created.id;
+      }
+      return sendJson(res, 201, created);
     }
 
     if (pathname === '/api/my-profile' && req.method === 'PUT') {
@@ -498,17 +556,41 @@ function createRequestHandler(staticDir) {
       return sendJson(res, 200, created);
     }
 
+    function checkSectorAccess(targetPlayerId) {
+      if (!req.user) {
+        return { ok: false, status: 401, error: 'UNAUTHORIZED', message: 'Требуется авторизация' };
+      }
+      const player = db.getPlayerById(targetPlayerId);
+      if (!player) {
+        return { ok: false, status: 404, error: 'PLAYER_NOT_FOUND', message: 'Сектор не найден' };
+      }
+      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
+      const isOwner = player.userId === req.user.id;
+      if (!isLeader && !isOwner) {
+        return { ok: false, status: 403, error: 'FORBIDDEN', message: 'Вы не являетесь владельцем этого сектора' };
+      }
+      return { ok: true, player, isLeader, isOwner };
+    }
+
     const playerMatch = pathname.match(/^\/api\/players\/(\d+)$/);
     if (playerMatch && req.method === 'GET') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
-      const player = db.getPlayerById(Number(playerMatch[1]));
-      if (!player) return sendError(res, 404, 'PLAYER_NOT_FOUND');
-      return sendJson(res, 200, player);
+      const targetPlayerId = Number(playerMatch[1]);
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+      return sendJson(res, 200, check.player);
     }
 
     if (playerMatch && req.method === 'PUT') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
       const targetPlayerId = Number(playerMatch[1]);
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+
+      if (!check.isLeader) {
+        delete body.rank;
+        delete body.id;
+        delete body.userId;
+        delete body.user_id;
+      }
       if (body.sector && body.sector.vipPoints !== undefined) {
         body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
       }
@@ -519,7 +601,7 @@ function createRequestHandler(staticDir) {
         sanitizeStock(body.stock);
       }
       if (Array.isArray(body.officers)) {
-        const existingPlayer = db.getPlayerById(targetPlayerId);
+        const existingPlayer = check.player;
         if (existingPlayer && Array.isArray(existingPlayer.officers)) {
           const keepIds = new Set(body.officers.map(o => o && o.id).filter(Boolean));
           for (const oldOff of existingPlayer.officers) {
@@ -543,12 +625,55 @@ function createRequestHandler(staticDir) {
         }
       }
       const updated = db.updatePlayer(targetPlayerId, body);
+      if (body.stock) {
+        db.recordStockHistory(targetPlayerId, body.stock);
+      }
       return sendJson(res, 200, updated);
     }
 
     if (playerMatch && req.method === 'DELETE') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
       db.deletePlayer(Number(playerMatch[1]));
+      return sendJson(res, 200, { success: true });
+    }
+
+    const playerOfficersMatch = pathname.match(/^\/api\/players\/(\d+)\/officers$/);
+    if (playerOfficersMatch && req.method === 'POST') {
+      const targetPlayerId = Number(playerOfficersMatch[1]);
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+
+      if (body.skills !== undefined) {
+        body.skills = sanitizeSkills(body.skills);
+      }
+      const off = db.addPlayerOfficer(targetPlayerId, body);
+      return sendJson(res, 201, off);
+    }
+
+    const playerOfficerDetailMatch = pathname.match(/^\/api\/players\/(\d+)\/officers\/([^/]+)$/);
+    if (playerOfficerDetailMatch && req.method === 'PUT') {
+      const targetPlayerId = Number(playerOfficerDetailMatch[1]);
+      const offId = playerOfficerDetailMatch[2];
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+
+      if (body.skills !== undefined) {
+        body.skills = sanitizeSkills(body.skills);
+      }
+      const off = db.updatePlayerOfficer(targetPlayerId, offId, body);
+      if (!off) {
+        return sendError(res, 404, 'OFFICER_NOT_FOUND', 'Офицер не найден');
+      }
+      return sendJson(res, 200, off);
+    }
+
+    if (playerOfficerDetailMatch && req.method === 'DELETE') {
+      const targetPlayerId = Number(playerOfficerDetailMatch[1]);
+      const offId = playerOfficerDetailMatch[2];
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+
+      db.deletePlayerOfficer(targetPlayerId, offId);
       return sendJson(res, 200, { success: true });
     }
 
@@ -616,15 +741,19 @@ function createRequestHandler(staticDir) {
     if (pathname === '/api/events' && req.method === 'GET') {
       const events = db.getEvents();
       const isLeader = req.user && (req.user.rank === 'r4' || req.user.rank === 'r5');
-      const playerId = req.user?.playerId;
+      const userSectors = req.user ? db.getPlayersByUserId(req.user.id) : [];
+      const userSectorIds = new Set(userSectors.map(s => s.id));
+      const activeSectorId = req.user?.playerId;
 
       const enriched = events.map(ev => {
         const item = { ...ev };
+        const eventRegs = (isLeader || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
         if (isLeader) {
-          item.registrations = db.getRegistrationsByEventId(ev.id);
+          item.registrations = eventRegs;
         }
-        if (playerId) {
-          item.myRegistration = db.getUserRegistration(ev.id, playerId);
+        if (req.user) {
+          item.myRegistrations = eventRegs.filter(r => userSectorIds.has(r.playerId));
+          item.myRegistration = item.myRegistrations.find(r => r.playerId === activeSectorId) || item.myRegistrations[0] || null;
         }
         return item;
       });
@@ -693,14 +822,27 @@ function createRequestHandler(staticDir) {
     const eventRegMatch = pathname.match(/^\/api\/events\/(\d+)\/register$/);
     if (eventRegMatch && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const eventId = Number(eventRegMatch[1]);
+      const targetSectorId = body.sectorId
+        ? Number(body.sectorId)
+        : (req.user.playerId ? Number(req.user.playerId) : null);
+
+      if (!targetSectorId) {
         return sendError(res, 400, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
-      const eventId = Number(eventRegMatch[1]);
+      const player = db.getPlayerById(targetSectorId);
+      if (!player) {
+        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
+      }
+      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
+      if (!isLeader && player.userId !== req.user.id) {
+        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
+      }
+
       const { officerId, desiredPlace } = body;
       const reg = db.registerForEvent({
         eventId,
-        playerId: req.user.playerId,
+        playerId: targetSectorId,
         officerId: officerId || '',
         desiredPlace: desiredPlace !== undefined ? Number(desiredPlace) : 0
       });
@@ -709,11 +851,25 @@ function createRequestHandler(staticDir) {
 
     if (eventRegMatch && req.method === 'DELETE') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const eventId = Number(eventRegMatch[1]);
+      const sectorIdParam = parsedUrl.searchParams.get('sectorId');
+      const targetSectorId = sectorIdParam
+        ? Number(sectorIdParam)
+        : (body && body.sectorId ? Number(body.sectorId) : (req.user.playerId ? Number(req.user.playerId) : null));
+
+      if (!targetSectorId) {
         return sendError(res, 400, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
-      const eventId = Number(eventRegMatch[1]);
-      db.unregisterFromEvent(eventId, req.user.playerId);
+      const player = db.getPlayerById(targetSectorId);
+      if (!player) {
+        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
+      }
+      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
+      if (!isLeader && player.userId !== req.user.id) {
+        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
+      }
+
+      db.unregisterFromEvent(eventId, targetSectorId);
       return sendJson(res, 200, { success: true });
     }
 
@@ -760,11 +916,15 @@ function createRequestHandler(staticDir) {
       const ev = db.getEventById(Number(eventMatch[1]));
       if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND');
       const isLeader = req.user && (req.user.rank === 'r4' || req.user.rank === 'r5');
+      const userSectors = req.user ? db.getPlayersByUserId(req.user.id) : [];
+      const userSectorIds = new Set(userSectors.map(s => s.id));
+      const eventRegs = (isLeader || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
       if (isLeader) {
-        ev.registrations = db.getRegistrationsByEventId(ev.id);
+        ev.registrations = eventRegs;
       }
-      if (req.user?.playerId) {
-        ev.myRegistration = db.getUserRegistration(ev.id, req.user.playerId);
+      if (req.user) {
+        ev.myRegistrations = eventRegs.filter(r => userSectorIds.has(r.playerId));
+        ev.myRegistration = ev.myRegistrations.find(r => r.playerId === req.user.playerId) || ev.myRegistrations[0] || null;
       }
       return sendJson(res, 200, ev);
     }
