@@ -2456,6 +2456,7 @@ function navigate(page, params={}) {
   }
 
   document.getElementById('sidebar')?.classList.remove('open');
+  document.getElementById('overlay')?.classList.remove('open');
 }
 
 document.querySelectorAll('.nav-item').forEach(el=>{
