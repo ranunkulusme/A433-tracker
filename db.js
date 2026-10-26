@@ -257,7 +257,7 @@ function getCandidatePlayers() {
   return db.prepare(`
     SELECT id, name, real_name as realName
     FROM players
-    WHERE id NOT IN (SELECT player_id FROM users WHERE player_id IS NOT NULL)
+    WHERE user_id IS NULL AND id NOT IN (SELECT player_id FROM users WHERE player_id IS NOT NULL)
     ORDER BY name COLLATE NOCASE ASC
   `).all();
 }
