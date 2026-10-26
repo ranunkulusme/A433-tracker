@@ -542,14 +542,16 @@ function formatDateTime(s) {
 
 async function loadDataFromServer() {
   try {
-    const [cat, et, evs] = await Promise.all([
+    const [cat, et, evs, vTiers] = await Promise.all([
       apiFetch('/api/catalog').catch(() => null),
       apiFetch('/api/event-types').catch(() => null),
-      apiFetch('/api/events').catch(() => null)
+      apiFetch('/api/events').catch(() => null),
+      apiFetch('/api/vip-tiers').catch(() => null)
     ]);
     if (Array.isArray(cat)) state.officerCatalog = cat;
     if (Array.isArray(et)) state.eventTypes = et;
     if (Array.isArray(evs)) state.events = evs;
+    if (Array.isArray(vTiers)) state.vipTiers = vTiers;
 
     if (canManage()) {
       const pl = await apiFetch('/api/players').catch(() => null);
@@ -718,7 +720,9 @@ function troopBadge(type) {
     'Пехота': { cls: 'badge-troop-infantry', icon: '🪖' },
     'Танк': { cls: 'badge-troop-tank', icon: TANK_ICON },
     'ПТ': { cls: 'badge-troop-td', icon: '🎯' },
+    'ПТ-Сау': { cls: 'badge-troop-td', icon: '🎯' },
     'Гарнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
+    'Горнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
     'Осада': { cls: 'badge-troop-siege', icon: '💥' },
   };
   const info = map[type];
@@ -794,7 +798,7 @@ function updateVipProgressHint(isCabinet = false) {
 
   if (!defFn) return;
 
-  const def = defFn({ currentLevel: vip, currentPoints: pts, targetLevel: vip + 1 });
+  const def = defFn({ currentLevel: vip, currentPoints: pts, targetLevel: vip + 1, vipTiers: state.vipTiers });
   hintEl.style.display = 'block';
   hintEl.innerHTML = `⭐ <strong>До VIP ${def.targetLevel}</strong> осталось <strong>${fmtNum(def.pointsNeeded)}</strong> очков (+${def.dailyPuzzlesIncrease} пазлов/день)`;
 }
@@ -3583,34 +3587,73 @@ async function submitChangeSectorOwner() {
 // ─── PAGE: OFFICERS ──────────────────────────────────────────
 function renderOfficers() {
   const c = document.getElementById('content');
+  const isEmpty = !state.officerCatalog || state.officerCatalog.length === 0;
+
   c.innerHTML = `
-    <div class="section-header">
-      <div class="section-title">Базовые офицеры (${state.officerCatalog.length})</div>
-      ${canManage() ? `<button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>` : ''}
+    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <div class="section-title">🎖️ Каталог офицеров (${state.officerCatalog.length})</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">Реестр командиров альянса, параметры доподготовки, подготовки и курсы обмена</div>
+      </div>
+      ${canManage() ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
+          <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
+          <button class="btn-secondary" onclick="openVipTiersModal()">⭐ Настройка шкалы VIP</button>
+        </div>
+      ` : ''}
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Имя</th><th>Тип</th><th>Поколение</th><th>Прокачка</th><th>Купонов за пазл</th><th>Медали</th><th></th></tr></thead>
-        <tbody>${state.officerCatalog.map(o => {
-          const upgradeBadge = (o.upgradeType === 'special' || o.couponPerPuzzle === 0)
-            ? `<span class="badge badge-warning" title="Прокачка только пазлами">Только пазлы</span>`
-            : `<span class="badge badge-info" title="Купонная прокачка 500/1">Купонный 500/1</span>`;
-          return `<tr>
-          <td><strong>${catalogOfficerLink(o)}</strong></td>
-          <td>${troopBadge(o.type)}</td>
-          <td style="font-family:var(--mono)">${fmtNum(o.generation)}</td>
-          <td>${upgradeBadge}</td>
-          <td style="font-family:var(--mono)">${fmtNum(o.couponPerPuzzle)}</td>
-          <td style="font-family:var(--mono)">${fmtNum(o.medalsBeforeTraining)}+${fmtNum(o.medalsTraining)}=${fmtNum(o.medalsTotal)}</td>
-          <td>
-            <div style="display:flex;gap:4px">
-              ${canManage()?`<button class="action-btn" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑</button>`:''}
-            </div>
-          </td>
-        </tr>`;
-        }).join('')}</tbody>
-      </table>
-    </div>
+    ${isEmpty ? `
+      <div class="empty-state" style="padding:48px 20px;text-align:center;background:var(--bg2);border-radius:12px;border:1px dashed var(--border);margin-top:16px">
+        <div style="font-size:42px;margin-bottom:12px">🎖️</div>
+        <h3 style="margin:0 0 8px;font-size:18px">Каталог офицеров пуст</h3>
+        <p style="color:var(--text2);margin:0 0 16px;max-width:440px;margin-inline:auto">Добавьте офицеров вручную или загрузите скриншот из игрового магазина обмена медалей.</p>
+        ${canManage() ? `
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
+            <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
+          </div>
+        ` : ''}
+      </div>
+    ` : `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Офицер</th>
+              <th>Тип войск</th>
+              <th>Сезон</th>
+              <th>Купонов на медаль</th>
+              <th>Купонов за 110★</th>
+              <th>До подготовки</th>
+              <th>Подготовка</th>
+              <th>Всего медалей</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${state.officerCatalog.map(o => {
+            const b = o.medalsBeforeTraining ?? 480;
+            const t = o.medalsTraining ?? 900;
+            const total = o.medalsTotal ?? (b + t);
+            return `<tr>
+              <td><strong>${catalogOfficerLink(o)}</strong></td>
+              <td>${troopBadge(o.type)}</td>
+              <td><span class="badge badge-none" style="font-weight:700">S${fmtNum(o.generation || 8)}</span></td>
+              <td style="font-family:var(--mono)">${fmtNum(o.couponPerPuzzle ?? 720)}</td>
+              <td style="font-family:var(--mono)">${fmtNum(o.starCouponCost ?? 360)}</td>
+              <td style="font-family:var(--mono)">${fmtNum(b)}</td>
+              <td style="font-family:var(--mono)">${fmtNum(t)}</td>
+              <td style="font-family:var(--mono);font-weight:700;color:var(--primary)">${fmtNum(total)}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  ${canManage() ? `<button class="action-btn" title="Редактировать" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" title="Удалить" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑️</button>` : '—'}
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    `}
   `;
 }
 
@@ -4385,15 +4428,39 @@ let editCatalogOfficerId = null;
 function openOfficerCatalogModal(id=null) {
   editCatalogOfficerId = id;
   const officer = id ? getCatalogOfficer(id) : null;
-  document.getElementById('modal-officer-title').textContent = id ? 'Редактировать офицера' : 'Новый офицер';
-  document.getElementById('fo-name').value = officer?.name || '';
-  document.getElementById('fo-type').value = officer?.type || 'Танк';
-  document.getElementById('fo-generation').value = officer?.generation || 7;
+  const titleEl = document.getElementById('modal-officer-title');
+  if (titleEl) titleEl.textContent = id ? 'Редактировать офицера каталога' : 'Добавить офицера в каталог';
+
+  const nameInput = document.getElementById('fo-name');
+  if (nameInput) nameInput.value = officer?.name || '';
+  const typeInput = document.getElementById('fo-type');
+  if (typeInput) typeInput.value = officer?.type || 'Танк';
+  const genInput = document.getElementById('fo-generation');
+  if (genInput) genInput.value = officer?.generation || 8;
   const upType = officer?.upgradeType || (officer?.couponPerPuzzle === 0 ? 'special' : 'standard');
   const upTypeSelect = document.getElementById('fo-upgrade-type');
   if (upTypeSelect) upTypeSelect.value = upType;
-  document.getElementById('fo-coupon-per-puzzle').value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 500);
+  const coupInput = document.getElementById('fo-coupon-per-puzzle');
+  if (coupInput) coupInput.value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 720);
+  const starCoupInput = document.getElementById('fo-star-coupon-cost');
+  if (starCoupInput) starCoupInput.value = officer?.starCouponCost ?? 360;
+  const bInput = document.getElementById('fo-medals-before');
+  if (bInput) bInput.value = officer?.medalsBeforeTraining ?? 480;
+  const tInput = document.getElementById('fo-medals-training');
+  if (tInput) tInput.value = officer?.medalsTraining ?? 900;
+  updateOfficerCatalogTotalMedals();
   openModal('modal-officer');
+}
+
+function updateOfficerCatalogTotalMedals() {
+  const b = parseInt(document.getElementById('fo-medals-before')?.value) || 0;
+  const t = parseInt(document.getElementById('fo-medals-training')?.value) || 0;
+  const totalEl = document.getElementById('fo-medals-total');
+  if (totalEl) {
+    totalEl.value = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+      ? logic.calculateTotalMedals(b, t)
+      : (b + t);
+  }
 }
 
 function onFoUpgradeTypeChange(val) {
@@ -4402,24 +4469,34 @@ function onFoUpgradeTypeChange(val) {
   if (val === 'special') {
     couponInput.value = 0;
   } else if (parseInt(couponInput.value) === 0) {
-    couponInput.value = 500;
+    couponInput.value = 720;
   }
 }
 
 async function saveOfficerCatalog() {
   const name = document.getElementById('fo-name').value.trim();
-  if (!name) { toast('Введите имя офицера','error'); return; }
-  const couponPerPuzzle = Math.max(0,parseInt(document.getElementById('fo-coupon-per-puzzle').value)||0);
+  if (!name) { toast('Введите имя офицера', 'error'); return; }
+  const type = document.getElementById('fo-type').value;
+  const generation = Math.max(1, parseInt(document.getElementById('fo-generation').value) || 8);
+  const couponPerPuzzle = Math.max(0, parseInt(document.getElementById('fo-coupon-per-puzzle').value) || 0);
+  const starCouponCost = Math.max(0, parseInt(document.getElementById('fo-star-coupon-cost')?.value) || 360);
+  const medalsBeforeTraining = Math.max(0, parseInt(document.getElementById('fo-medals-before')?.value) || 480);
+  const medalsTraining = Math.max(0, parseInt(document.getElementById('fo-medals-training')?.value) || 900);
+  const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+    ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining)
+    : (medalsBeforeTraining + medalsTraining);
   const upgradeType = document.getElementById('fo-upgrade-type')?.value || (couponPerPuzzle === 0 ? 'special' : 'standard');
+
   const data = {
     name,
-    type: document.getElementById('fo-type').value,
-    generation: Math.max(1,parseInt(document.getElementById('fo-generation').value)||7),
+    type,
+    generation,
     couponPerPuzzle,
+    starCouponCost,
+    medalsBeforeTraining,
+    medalsTraining,
+    medalsTotal,
     upgradeType,
-    medalsBeforeTraining: 690,
-    medalsTraining: 900,
-    medalsTotal: 1590,
   };
   try {
     if (editCatalogOfficerId) {
@@ -4436,8 +4513,8 @@ async function saveOfficerCatalog() {
         body: data
       });
       if (res && res.id) state.officerCatalog.push(res);
-      else state.officerCatalog.push({ id:'catalog-'+state.nextId++, ...data });
-      toast('Офицер сохранён');
+      else state.officerCatalog.push({ id: 'catalog-' + state.nextId++, ...data });
+      toast('Офицер добавлен в каталог');
     }
     save();
     closeAllModals();
@@ -4470,6 +4547,445 @@ function confirmDeleteOfficerCatalog(id) {
     }
   };
   openModal('modal-confirm');
+}
+
+// ─── VIP TIERS MODAL ─────────────────────────────────────────
+async function openVipTiersModal() {
+  if (!state.vipTiers || !state.vipTiers.length) {
+    try {
+      const res = await apiFetch('/api/vip-tiers');
+      if (Array.isArray(res)) state.vipTiers = res;
+    } catch (_) {}
+  }
+  renderVipTiersEditor();
+  openModal('modal-vip-tiers');
+}
+
+function renderVipTiersEditor() {
+  const tbody = document.getElementById('vip-tiers-editor-body');
+  if (!tbody) return;
+
+  const tiers = (state.vipTiers && state.vipTiers.length === 30)
+    ? state.vipTiers
+    : Array.from({ length: 30 }, (_, i) => ({
+        level: i + 1,
+        points: (i + 1 === 14) ? 750000 : ((i + 1) * 50000),
+        dailyPuzzles: (i + 1 > 10 ? Math.min(20, Math.max(2, i + 1 - 9)) : 0),
+        dailyChests: 1
+      }));
+
+  tbody.innerHTML = tiers.map(t => {
+    const isVip14 = Number(t.level) === 14;
+    return `
+      <tr style="${isVip14 ? 'background:rgba(26,110,245,0.12);font-weight:600' : ''}">
+        <td style="text-align:center;font-weight:700">
+          ${isVip14 ? '<span title="VIP 14 (Ключевой)">⭐ 14</span>' : t.level}
+        </td>
+        <td>
+          <input type="number" id="vip-tier-pts-${t.level}" value="${t.points ?? 0}" min="0" step="5000" style="width:100%;font-family:var(--mono);${isVip14 ? 'border-color:var(--primary);font-weight:700' : ''}">
+        </td>
+        <td>
+          <input type="number" id="vip-tier-puz-${t.level}" value="${t.dailyPuzzles ?? t.daily_puzzles ?? 0}" min="0" step="0.5" style="width:100%;text-align:center;font-family:var(--mono)">
+        </td>
+        <td>
+          <input type="number" id="vip-tier-chst-${t.level}" value="${t.dailyChests ?? t.daily_chests ?? 1}" min="0" step="1" style="width:100%;text-align:center;font-family:var(--mono)">
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function submitVipTiers() {
+  const tiers = [];
+  for (let lvl = 1; lvl <= 30; lvl++) {
+    const pts = Math.max(0, parseInt(document.getElementById(`vip-tier-pts-${lvl}`)?.value) || 0);
+    const puz = Math.max(0, parseFloat(document.getElementById(`vip-tier-puz-${lvl}`)?.value) || 0);
+    const chst = Math.max(0, parseFloat(document.getElementById(`vip-tier-chst-${lvl}`)?.value) || 1);
+    tiers.push({
+      level: lvl,
+      points: pts,
+      dailyPuzzles: puz,
+      dailyChests: chst
+    });
+  }
+
+  try {
+    const updated = await apiFetch('/api/vip-tiers', {
+      method: 'PUT',
+      body: { tiers }
+    });
+    if (Array.isArray(updated)) {
+      state.vipTiers = updated;
+    } else {
+      state.vipTiers = tiers;
+    }
+    save();
+    closeAllModals();
+    toast('Шкала уровней VIP сохранена');
+    updateVipProgressHint(false);
+    updateCabinetVipProgressHint();
+    if (currentPage === 'players' && editPlayerId) renderPlayerDetail(editPlayerId);
+    else if (currentPage === 'my_cabinet') renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка сохранения шкалы VIP: ' + (err.message || err), 'error');
+  }
+}
+
+function resetVipTiersToDefault() {
+  const DEFAULT_POINTS = [
+    0, 200, 700, 2500, 6000, 15000, 35000, 75000, 130000, 220000,
+    340000, 480000, 600000, 750000, 1000000, 1300000, 1700000, 2200000, 2800000, 3500000,
+    4300000, 5200000, 6200000, 7300000, 8500000, 10000000, 12000000, 15000000, 19000000, 24000000
+  ];
+  for (let lvl = 1; lvl <= 30; lvl++) {
+    const ptsEl = document.getElementById(`vip-tier-pts-${lvl}`);
+    if (ptsEl) ptsEl.value = DEFAULT_POINTS[lvl - 1] ?? (lvl * 100000);
+    const puzEl = document.getElementById(`vip-tier-puz-${lvl}`);
+    if (puzEl) puzEl.value = lvl > 10 ? Math.min(20, Math.max(2, lvl - 9)) : 0;
+    const chstEl = document.getElementById(`vip-tier-chst-${lvl}`);
+    if (chstEl) chstEl.value = 1;
+  }
+}
+
+// ─── EXCHANGE SHOP OCR SCANNER ─────────────────────────────────
+let isExchangeOcrRunning = false;
+let exchangeOcrOfficers = [];
+
+function openExchangeOcrModal() {
+  if (!canManage()) {
+    toast('Недостаточно прав для управления каталогом', 'error');
+    return;
+  }
+  isExchangeOcrRunning = false;
+  exchangeOcrOfficers = [];
+
+  const fileInput = document.getElementById('exchange-file-input');
+  if (fileInput) fileInput.value = '';
+
+  const dropzone = document.getElementById('exchange-dropzone');
+  if (dropzone) {
+    dropzone.style.display = 'block';
+    dropzone.classList.remove('dragover');
+  }
+
+  const progressCont = document.getElementById('exchange-progress-container');
+  if (progressCont) progressCont.style.display = 'none';
+
+  const resultsCont = document.getElementById('exchange-results-container');
+  if (resultsCont) resultsCont.style.display = 'none';
+
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  if (tbody) tbody.innerHTML = '';
+
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (submitBtn) submitBtn.disabled = true;
+
+  initExchangeOcr();
+  openModal('modal-exchange-ocr');
+}
+
+function closeExchangeOcrModal() {
+  isExchangeOcrRunning = false;
+  closeModal('modal-exchange-ocr');
+}
+
+function initExchangeOcr() {
+  const dropzone = document.getElementById('exchange-dropzone');
+  const fileInput = document.getElementById('exchange-file-input');
+
+  if (dropzone && !dropzone.dataset.initialized) {
+    dropzone.dataset.initialized = 'true';
+
+    dropzone.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+      const files = e.dataTransfer ? e.dataTransfer.files : null;
+      if (files && files.length > 0) {
+        handleExchangeFiles(files);
+      }
+    });
+  }
+
+  if (fileInput && !fileInput.dataset.initialized) {
+    fileInput.dataset.initialized = 'true';
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (files.length > 0) {
+        handleExchangeFiles(files);
+      }
+    });
+  }
+}
+
+async function handleExchangeFiles(filesList) {
+  if (isExchangeOcrRunning) return;
+  const files = Array.from(filesList || []).filter(f => f && (f.type ? f.type.startsWith('image/') : true));
+  if (files.length === 0) {
+    toast('Выберите файлы изображений для сканирования', 'warning');
+    return;
+  }
+
+  const ocrEngine = (typeof smartScanner !== 'undefined' && smartScanner) || (typeof window !== 'undefined' && window.smartScanner);
+  if (!ocrEngine || typeof ocrEngine.runExchangeShopOcr !== 'function') {
+    toast('OCR-модуль не загружен', 'error');
+    return;
+  }
+
+  isExchangeOcrRunning = true;
+
+  const progressCont = document.getElementById('exchange-progress-container');
+  const progressBar = document.getElementById('exchange-progress-bar');
+  const progressPercent = document.getElementById('exchange-progress-percent');
+  const progressStatus = document.getElementById('exchange-progress-status');
+  const progressDetails = document.getElementById('exchange-progress-details');
+
+  if (progressCont) progressCont.style.display = 'block';
+  if (progressBar) progressBar.style.width = '5%';
+  if (progressPercent) progressPercent.textContent = '5%';
+  if (progressStatus) progressStatus.textContent = 'Подключение Tesseract OCR...';
+  if (progressDetails) progressDetails.textContent = 'Загрузка словарей rus + eng';
+
+  try {
+    const result = await ocrEngine.runExchangeShopOcr(files, {
+      logic: typeof logic !== 'undefined' ? logic : (window.logic || null),
+      onProgress: (p) => {
+        const pct = Math.min(100, Math.max(0, p.percent || 0));
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (progressPercent) progressPercent.textContent = `${pct}%`;
+        if (progressStatus && p.details) progressStatus.textContent = p.details;
+        if (progressDetails) progressDetails.textContent = `Изображение ${p.current || 1} из ${p.total || 1}`;
+      }
+    });
+
+    isExchangeOcrRunning = false;
+
+    if (result && result.success && Array.isArray(result.officers) && result.officers.length > 0) {
+      renderExchangeOcrTable(result.officers);
+      toast(`Распознано командиров: ${result.officers.length}`);
+    } else {
+      toast('Командиры не найдены на скриншоте. Вы можете добавить строку вручную.', 'warning');
+      renderExchangeOcrTable([{
+        name: '',
+        type: 'Пехота',
+        generation: 8,
+        couponPerPuzzle: 720,
+        starCouponCost: 360,
+        medalsBeforeTraining: 480,
+        medalsTraining: 900,
+        medalsTotal: 1380
+      }]);
+    }
+  } catch (err) {
+    isExchangeOcrRunning = false;
+    toast('Ошибка распознавания: ' + (err.message || err), 'error');
+    if (progressStatus) progressStatus.textContent = 'Сбой распознавания';
+  }
+}
+
+function renderExchangeOcrTable(officersList) {
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const resultsCont = document.getElementById('exchange-results-container');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (!tbody) return;
+
+  const types = (typeof logic !== 'undefined' && logic.OFFICER_TYPES)
+    ? logic.OFFICER_TYPES
+    : ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
+
+  tbody.innerHTML = (officersList || []).map((off, idx) => {
+    const before = Math.max(0, parseInt(off.medalsBeforeTraining, 10) || 480);
+    const training = Math.max(0, parseInt(off.medalsTraining, 10) || 900);
+    const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+      ? logic.calculateTotalMedals(before, training)
+      : (before + training);
+    const offType = types.includes(off.type) ? off.type : 'Пехота';
+
+    return `
+      <tr class="exchange-ocr-row" data-idx="${idx}">
+        <td>
+          <input type="text" class="input-sm exchange-row-name" value="${escapeHtml(off.name || '')}" placeholder="Имя командира" style="width:100%" required>
+        </td>
+        <td>
+          <select class="input-sm exchange-row-type" style="width:100%">
+            ${types.map(t => `<option value="${t}" ${t === offType ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-gen" value="${off.generation || 8}" min="1" max="25" style="width:60px">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-coupon" value="${off.couponPerPuzzle ?? 720}" min="0" step="10" style="width:75px">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-star-coupon" value="${off.starCouponCost ?? 360}" min="0" step="10" style="width:75px">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-medals-before" value="${before}" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-medals-training" value="${training}" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+        </td>
+        <td>
+          <strong class="exchange-row-medals-total" style="color:var(--text1)">${total}</strong>
+        </td>
+        <td style="text-align:center">
+          <button type="button" class="btn-sm btn-ghost" onclick="removeExchangeRow(this)" title="Удалить строку" style="color:var(--red);padding:2px 6px">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  if (resultsCont) resultsCont.style.display = 'block';
+  if (submitBtn) submitBtn.disabled = tbody.children.length === 0;
+}
+
+function recalcExchangeRowTotal(input) {
+  const row = input.closest('tr');
+  if (!row) return;
+  const beforeInput = row.querySelector('.exchange-row-medals-before');
+  const trainingInput = row.querySelector('.exchange-row-medals-training');
+  const totalElem = row.querySelector('.exchange-row-medals-total');
+  const before = Math.max(0, parseInt(beforeInput?.value, 10) || 0);
+  const training = Math.max(0, parseInt(trainingInput?.value, 10) || 0);
+  const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+    ? logic.calculateTotalMedals(before, training)
+    : (before + training);
+  if (totalElem) totalElem.textContent = String(total);
+}
+
+function removeExchangeRow(btn) {
+  const row = btn.closest('tr');
+  if (row) row.remove();
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (submitBtn) {
+    submitBtn.disabled = !tbody || tbody.children.length === 0;
+  }
+}
+
+function addManualExchangeRow() {
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const resultsCont = document.getElementById('exchange-results-container');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (!tbody) return;
+
+  const types = (typeof logic !== 'undefined' && logic.OFFICER_TYPES)
+    ? logic.OFFICER_TYPES
+    : ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
+
+  const tr = document.createElement('tr');
+  tr.className = 'exchange-ocr-row';
+  tr.innerHTML = `
+    <td>
+      <input type="text" class="input-sm exchange-row-name" value="" placeholder="Имя командира" style="width:100%" required>
+    </td>
+    <td>
+      <select class="input-sm exchange-row-type" style="width:100%">
+        ${types.map(t => `<option value="${t}">${t}</option>`).join('')}
+      </select>
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-gen" value="8" min="1" max="25" style="width:60px">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-coupon" value="720" min="0" step="10" style="width:75px">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-star-coupon" value="360" min="0" step="10" style="width:75px">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-medals-before" value="480" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-medals-training" value="900" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+    </td>
+    <td>
+      <strong class="exchange-row-medals-total" style="color:var(--text1)">1380</strong>
+    </td>
+    <td style="text-align:center">
+      <button type="button" class="btn-sm btn-ghost" onclick="removeExchangeRow(this)" title="Удалить строку" style="color:var(--red);padding:2px 6px">✕</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+
+  if (resultsCont) resultsCont.style.display = 'block';
+  if (submitBtn) submitBtn.disabled = false;
+  tr.querySelector('.exchange-row-name')?.focus();
+}
+
+async function submitBatchExchangeOfficers() {
+  const rows = document.querySelectorAll('#exchange-ocr-table-body tr');
+  if (!rows || rows.length === 0) {
+    toast('Нет офицеров для добавления', 'warning');
+    return;
+  }
+
+  const officers = [];
+  for (const row of rows) {
+    const nameInput = row.querySelector('.exchange-row-name');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) {
+      toast('Заполните имена всех офицеров в таблице', 'warning');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    const type = row.querySelector('.exchange-row-type')?.value || 'Пехота';
+    const generation = Math.max(1, parseInt(row.querySelector('.exchange-row-gen')?.value, 10) || 8);
+    const couponPerPuzzle = Math.max(0, parseInt(row.querySelector('.exchange-row-coupon')?.value, 10) || 720);
+    const starCouponCost = Math.max(0, parseInt(row.querySelector('.exchange-row-star-coupon')?.value, 10) || 360);
+    const medalsBeforeTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-before')?.value, 10) || 480);
+    const medalsTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-training')?.value, 10) || 900);
+    const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+      ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining)
+      : (medalsBeforeTraining + medalsTraining);
+
+    officers.push({
+      name,
+      type,
+      generation,
+      couponPerPuzzle,
+      starCouponCost,
+      medalsBeforeTraining,
+      medalsTraining,
+      medalsTotal,
+      upgradeType: 'standard'
+    });
+  }
+
+  try {
+    const res = await apiFetch('/api/catalog/batch', {
+      method: 'POST',
+      body: { officers }
+    });
+
+    closeExchangeOcrModal();
+    toast(`Добавлено/обновлено офицеров: ${res?.count || officers.length}`);
+    await loadDataFromServer();
+    renderOfficers();
+  } catch (err) {
+    toast('Ошибка сохранения офицеров: ' + (err.message || err), 'error');
+  }
 }
 
 // ─── EVENT TYPE MODAL ─────────────────────────────────────────
@@ -5349,9 +5865,15 @@ async function applyScanResultsToProfile() {
 }
 
 function handleScannerGlobalPaste(e) {
-  const modal = document.getElementById('modal-smart-scanner');
-  if (!modal || !modal.classList.contains('open')) return;
-  if (isScannerRunning) return;
+  const smartModal = document.getElementById('modal-smart-scanner');
+  const exchangeModal = document.getElementById('modal-exchange-ocr');
+
+  const isSmartOpen = smartModal && smartModal.classList.contains('open');
+  const isExchangeOpen = exchangeModal && exchangeModal.classList.contains('open');
+
+  if (!isSmartOpen && !isExchangeOpen) return;
+  if (isSmartOpen && isScannerRunning) return;
+  if (isExchangeOpen && isExchangeOcrRunning) return;
 
   const clipboardData = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
   if (!clipboardData || !clipboardData.items) return;
@@ -5369,7 +5891,11 @@ function handleScannerGlobalPaste(e) {
 
   if (imageFiles.length > 0) {
     e.preventDefault();
-    handleScannerFiles(imageFiles);
+    if (isSmartOpen) {
+      handleScannerFiles(imageFiles);
+    } else if (isExchangeOpen) {
+      handleExchangeFiles(imageFiles);
+    }
   }
 }
 
@@ -5433,6 +5959,7 @@ function initApp() {
   updateNetworkStatusUI();
   checkPwaInstallable();
   initSmartScanner();
+  initExchangeOcr();
   checkAuth().then(isAuth => {
     if (isAuth) {
       if (currentUser?.rank === 'r3') {

@@ -217,7 +217,7 @@ test('returns officer star tooltip costs including total sixth marker', () => {
 });
 
 test('exports full list of 5 officer types', () => {
-  assert.deepEqual(OFFICER_TYPES, ['Танк', 'ПТ', 'Пехота', 'Гарнизон', 'Осада']);
+  assert.deepEqual(OFFICER_TYPES, ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада']);
 });
 
 test('calculates officer deficit and star requirement for standard and puzzle-only officers', () => {
@@ -456,10 +456,10 @@ test('community officers roster, vip deficit, skills and pairings', () => {
   const rex = COMMUNITY_OFFICERS.find(o => o.id === 'general-rex');
   assert.strictEqual(rex.type, 'Танк');
 
-  // Тест VIP дефицита
-  const vipRes = calculateVipDeficit({ currentLevel: 10, currentPoints: 350000, targetLevel: 12 });
-  assert.strictEqual(vipRes.pointsNeeded, 400000);
-  assert.strictEqual(vipRes.dailyPuzzlesIncrease, 2);
+  // Тест VIP дефицита (VIP 14 = 750000)
+  const vipRes = calculateVipDeficit({ currentLevel: 10, currentPoints: 350000, targetLevel: 14 });
+  assert.strictEqual(vipRes.pointsNeeded, 400000); // 750000 - 350000
+  assert.strictEqual(vipRes.dailyPuzzlesIncrease, 3);
 
   // Граничные условия VIP: уровень 30
   const vipMax = calculateVipDeficit({ currentLevel: 30, currentPoints: 99999999, targetLevel: 30 });
@@ -1107,6 +1107,94 @@ test('mergeScanResults combines multiple screenshots without losing or overwriti
   assert.strictEqual(withChests.stock.chests, 42);
   assert.strictEqual(withChests.stock.coupons, 419202);
 });
+
+test('calculateTotalMedals calculates sum of before and training medals with defaults', () => {
+  const { calculateTotalMedals } = require('./logic.js');
+  assert.strictEqual(calculateTotalMedals(480, 900), 1380);
+  assert.strictEqual(calculateTotalMedals(0, 0), 0);
+  assert.strictEqual(calculateTotalMedals(500, 1000), 1500);
+  assert.strictEqual(calculateTotalMedals('480', '900'), 1380);
+  assert.strictEqual(calculateTotalMedals(-50, 900), 900);
+});
+
+test('OFFICER_TYPES contains exactly the 5 shop troop types', () => {
+  const { OFFICER_TYPES } = require('./logic.js');
+  assert.deepStrictEqual(OFFICER_TYPES, ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада']);
+});
+
+test('parseExchangeShopScreenshotText extracts officers, seasons, puzzle coupons, and star coupons', () => {
+  const { parseExchangeShopScreenshotText } = require('./logic.js');
+
+  const sampleOcrText = `
+До обновления: 05:16:28
+Обмен на медали офицера, сезон 8
+S8
+По
+x1 720 ОБМЕН
+110 x1 360 ОБМЕН
+S8
+Sara
+x1 720 ОБМЕН
+110 x1 360 ОБМЕН
+Обмен на медали офицера, сезон 7
+S7
+Ройшин
+x1 600 ОБМЕН
+110 x1 300 ОБМЕН
+`;
+
+  const results = parseExchangeShopScreenshotText(sampleOcrText);
+  assert.ok(Array.isArray(results));
+  assert.strictEqual(results.length, 3);
+
+  const po = results.find(o => o.name === 'По');
+  assert.ok(po, 'Officer По must be parsed');
+  assert.strictEqual(po.generation, 8);
+  assert.strictEqual(po.couponPerPuzzle, 720);
+  assert.strictEqual(po.starCouponCost, 360);
+  assert.strictEqual(po.medalsBeforeTraining, 480);
+  assert.strictEqual(po.medalsTraining, 900);
+  assert.strictEqual(po.medalsTotal, 1380);
+
+  const sara = results.find(o => o.name === 'Sara');
+  assert.ok(sara, 'Officer Sara must be parsed');
+  assert.strictEqual(sara.generation, 8);
+  assert.strictEqual(sara.couponPerPuzzle, 720);
+  assert.strictEqual(sara.starCouponCost, 360);
+
+  const royshin = results.find(o => o.name === 'Ройшин');
+  assert.ok(royshin, 'Officer Ройшин must be parsed');
+  assert.strictEqual(royshin.generation, 7);
+  assert.strictEqual(royshin.couponPerPuzzle, 600);
+  assert.strictEqual(royshin.starCouponCost, 300);
+});
+
+test('calculateVipDeficit and dailyRewards support dynamic vipTiers and default VIP 14 is 750000', () => {
+  const { calculateVipDeficit, VIP_TIERS_DATA, dailyRewards } = require('./logic.js');
+
+  // Default VIP 14 points check
+  const def14 = VIP_TIERS_DATA.find(t => t.level === 14);
+  assert.ok(def14);
+  assert.strictEqual(def14.points, 750000);
+
+  // calculateVipDeficit with default tiers: deficit to 14 from 500,000 points
+  const defDefault = calculateVipDeficit({ currentLevel: 13, currentPoints: 500000, targetLevel: 14 });
+  assert.strictEqual(defDefault.pointsNeeded, 250000); // 750000 - 500000
+
+  // calculateVipDeficit with custom dynamic tiers
+  const customTiers = [
+    { level: 13, points: 600000, dailyPuzzles: 2 },
+    { level: 14, points: 800000, dailyPuzzles: 4 },
+  ];
+  const defCustom = calculateVipDeficit({ currentLevel: 13, currentPoints: 500000, targetLevel: 14, vipTiers: customTiers });
+  assert.strictEqual(defCustom.pointsNeeded, 300000); // 800000 - 500000
+  assert.strictEqual(defCustom.dailyPuzzlesIncrease, 2); // 4 - 2
+
+  // dailyRewards with dynamic tiers
+  const rewCustom = dailyRewards({ vipLevel: 14, confidentialityLevel: 0 }, customTiers);
+  assert.strictEqual(rewCustom.puzzlesPerDay, 4);
+});
+
 
 
 

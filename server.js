@@ -678,6 +678,24 @@ function createRequestHandler(staticDir) {
     }
 
     // ─────────────────────────────────────────────────────────
+    // VIP TIERS
+    // ─────────────────────────────────────────────────────────
+    if (pathname === '/api/vip-tiers' && req.method === 'GET') {
+      if (!authenticate(req, res)) return;
+      return sendJson(res, 200, db.getVipTiers());
+    }
+
+    if (pathname === '/api/vip-tiers' && req.method === 'PUT') {
+      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      const tiersInput = Array.isArray(body) ? body : (Array.isArray(body?.tiers) ? body.tiers : null);
+      if (!tiersInput) {
+        return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается массив уровней VIP');
+      }
+      const updated = db.setVipTiers(tiersInput);
+      return sendJson(res, 200, updated);
+    }
+
+    // ─────────────────────────────────────────────────────────
     // CATALOG
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/catalog' && req.method === 'GET') {
@@ -687,15 +705,90 @@ function createRequestHandler(staticDir) {
     if (pathname === '/api/catalog' && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
       const upgradeType = body.upgradeType === 'special' ? 'special' : 'standard';
-      const saved = db.saveCatalogItem({ ...body, upgradeType });
+      const medalsBeforeTraining = Math.max(0, parseInt(body.medalsBeforeTraining ?? body.medals_before_training) || 480);
+      const medalsTraining = Math.max(0, parseInt(body.medalsTraining ?? body.medals_training) || 900);
+      const medalsTotal = Math.max(0, parseInt(body.medalsTotal ?? body.medals_total) || (medalsBeforeTraining + medalsTraining));
+      const starCouponCost = Math.max(0, parseInt(body.starCouponCost ?? body.star_coupon_cost) || 360);
+      const couponPerPuzzle = Math.max(0, parseInt(body.couponPerPuzzle ?? body.coupon_per_puzzle) || 720);
+      const generation = Math.max(1, parseInt(body.generation) || 8);
+      const type = ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'].includes(body.type) ? body.type : (body.type || 'Пехота');
+
+      const saved = db.saveCatalogItem({
+        ...body,
+        id: body.id || ('off_' + Date.now()),
+        name: String(body.name || '').trim(),
+        type,
+        generation,
+        couponPerPuzzle,
+        starCouponCost,
+        medalsBeforeTraining,
+        medalsTraining,
+        medalsTotal,
+        upgradeType
+      });
       return sendJson(res, 200, saved);
+    }
+
+    if (pathname === '/api/catalog/batch' && req.method === 'POST') {
+      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      const officers = Array.isArray(body) ? body : (Array.isArray(body?.officers) ? body.officers : null);
+      if (!officers) {
+        return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается массив офицеров');
+      }
+      const savedList = [];
+      for (const off of officers) {
+        if (!off || !off.name) continue;
+        const upgradeType = off.upgradeType === 'special' ? 'special' : 'standard';
+        const medalsBeforeTraining = Math.max(0, parseInt(off.medalsBeforeTraining ?? off.medals_before_training) || 480);
+        const medalsTraining = Math.max(0, parseInt(off.medalsTraining ?? off.medals_training) || 900);
+        const medalsTotal = Math.max(0, parseInt(off.medalsTotal ?? off.medals_total) || (medalsBeforeTraining + medalsTraining));
+        const starCouponCost = Math.max(0, parseInt(off.starCouponCost ?? off.star_coupon_cost) || 360);
+        const couponPerPuzzle = Math.max(0, parseInt(off.couponPerPuzzle ?? off.coupon_per_puzzle) || 720);
+        const generation = Math.max(1, parseInt(off.generation) || 8);
+        const type = ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'].includes(off.type) ? off.type : (off.type || 'Пехота');
+
+        const saved = db.saveCatalogItem({
+          ...off,
+          id: off.id || ('off_' + Math.random().toString(36).slice(2, 9)),
+          name: String(off.name).trim(),
+          type,
+          generation,
+          couponPerPuzzle,
+          starCouponCost,
+          medalsBeforeTraining,
+          medalsTraining,
+          medalsTotal,
+          upgradeType
+        });
+        savedList.push(saved);
+      }
+      return sendJson(res, 200, { success: true, count: savedList.length, officers: savedList });
     }
 
     const catMatch = pathname.match(/^\/api\/catalog\/([^/]+)$/);
     if (catMatch && req.method === 'PUT') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
       const upgradeType = body.upgradeType === 'special' ? 'special' : (body.upgradeType || 'standard');
-      const saved = db.saveCatalogItem({ ...body, id: catMatch[1], upgradeType });
+      const medalsBeforeTraining = Math.max(0, parseInt(body.medalsBeforeTraining ?? body.medals_before_training) || 480);
+      const medalsTraining = Math.max(0, parseInt(body.medalsTraining ?? body.medals_training) || 900);
+      const medalsTotal = Math.max(0, parseInt(body.medalsTotal ?? body.medals_total) || (medalsBeforeTraining + medalsTraining));
+      const starCouponCost = Math.max(0, parseInt(body.starCouponCost ?? body.star_coupon_cost) || 360);
+      const couponPerPuzzle = Math.max(0, parseInt(body.couponPerPuzzle ?? body.coupon_per_puzzle) || 720);
+      const generation = Math.max(1, parseInt(body.generation) || 8);
+      const type = ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'].includes(body.type) ? body.type : (body.type || 'Пехота');
+
+      const saved = db.saveCatalogItem({
+        ...body,
+        id: catMatch[1],
+        type,
+        generation,
+        couponPerPuzzle,
+        starCouponCost,
+        medalsBeforeTraining,
+        medalsTraining,
+        medalsTotal,
+        upgradeType
+      });
       return sendJson(res, 200, saved);
     }
 
