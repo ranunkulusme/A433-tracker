@@ -20,27 +20,27 @@
     legendaryStars3: 0,
     chests: 0,
   };
-  const OFFICER_TYPES = ['Танк', 'ПТ', 'Пехота', 'Гарнизон', 'Осада'];
+  const OFFICER_TYPES = ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
 
   const DEFAULT_OFFICERS = [
-    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ-Сау', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
   ];
 
   const COMMUNITY_OFFICERS = [
-    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ', generation: 7, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'aurora', name: 'Аврора', type: 'Гарнизон', generation: 8, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'valkyrie', name: 'Валькирия', type: 'Осада', generation: 9, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'angel', name: 'Ангел', type: 'Танк', generation: 2, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'halina', name: 'Халина', type: 'ПТ', generation: 2, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'betty', name: 'Бетти', type: 'Пехота', generation: 3, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'eva', name: 'Ева', type: 'Танк', generation: 2, couponPerPuzzle: 500, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'grace', name: 'Грейс', type: 'Танк', generation: 1, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'jessica', name: 'Джессика', type: 'Танк', generation: 1, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
-    { id: 'marjorie', name: 'Марджори', type: 'Пехота', generation: 1, couponPerPuzzle: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ-Сау', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'aurora', name: 'Аврора', type: 'Горнизон', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'valkyrie', name: 'Валькирия', type: 'Осада', generation: 9, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'angel', name: 'Ангел', type: 'Танк', generation: 2, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'halina', name: 'Халина', type: 'ПТ-Сау', generation: 2, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'betty', name: 'Бетти', type: 'Пехота', generation: 3, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'eva', name: 'Ева', type: 'Танк', generation: 2, couponPerPuzzle: 500, starCouponCost: 250, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'grace', name: 'Грейс', type: 'Танк', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'jessica', name: 'Джессика', type: 'Танк', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'marjorie', name: 'Марджори', type: 'Пехота', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
   ];
 
   const VIP_TIERS_DATA = [
@@ -52,28 +52,28 @@
     { level: 6, points: 15000, dailyPuzzles: 0 },
     { level: 7, points: 35000, dailyPuzzles: 0 },
     { level: 8, points: 75000, dailyPuzzles: 0 },
-    { level: 9, points: 150000, dailyPuzzles: 0 },
-    { level: 10, points: 300000, dailyPuzzles: 0 },
-    { level: 11, points: 500000, dailyPuzzles: 1 },
-    { level: 12, points: 750000, dailyPuzzles: 2 },
-    { level: 13, points: 1000000, dailyPuzzles: 2 },
-    { level: 14, points: 1500000, dailyPuzzles: 3 },
-    { level: 15, points: 2500000, dailyPuzzles: 3 },
-    { level: 16, points: 3500000, dailyPuzzles: 4 },
-    { level: 17, points: 5000000, dailyPuzzles: 4 },
-    { level: 18, points: 7000000, dailyPuzzles: 5 },
-    { level: 19, points: 9500000, dailyPuzzles: 5 },
-    { level: 20, points: 12500000, dailyPuzzles: 6 },
-    { level: 21, points: 16000000, dailyPuzzles: 6 },
-    { level: 22, points: 20000000, dailyPuzzles: 7 },
-    { level: 23, points: 25000000, dailyPuzzles: 7 },
-    { level: 24, points: 31000000, dailyPuzzles: 8 },
-    { level: 25, points: 38000000, dailyPuzzles: 8 },
-    { level: 26, points: 46000000, dailyPuzzles: 9 },
-    { level: 27, points: 55000000, dailyPuzzles: 9 },
-    { level: 28, points: 65000000, dailyPuzzles: 10 },
-    { level: 29, points: 76000000, dailyPuzzles: 10 },
-    { level: 30, points: 88000000, dailyPuzzles: 12 },
+    { level: 9, points: 130000, dailyPuzzles: 0 },
+    { level: 10, points: 220000, dailyPuzzles: 0 },
+    { level: 11, points: 340000, dailyPuzzles: 1 },
+    { level: 12, points: 480000, dailyPuzzles: 2 },
+    { level: 13, points: 600000, dailyPuzzles: 2 },
+    { level: 14, points: 750000, dailyPuzzles: 3 },
+    { level: 15, points: 1000000, dailyPuzzles: 3 },
+    { level: 16, points: 1300000, dailyPuzzles: 4 },
+    { level: 17, points: 1700000, dailyPuzzles: 4 },
+    { level: 18, points: 2200000, dailyPuzzles: 5 },
+    { level: 19, points: 2800000, dailyPuzzles: 5 },
+    { level: 20, points: 3500000, dailyPuzzles: 6 },
+    { level: 21, points: 4300000, dailyPuzzles: 6 },
+    { level: 22, points: 5200000, dailyPuzzles: 7 },
+    { level: 23, points: 6200000, dailyPuzzles: 7 },
+    { level: 24, points: 7300000, dailyPuzzles: 8 },
+    { level: 25, points: 8500000, dailyPuzzles: 8 },
+    { level: 26, points: 10000000, dailyPuzzles: 9 },
+    { level: 27, points: 12000000, dailyPuzzles: 9 },
+    { level: 28, points: 15000000, dailyPuzzles: 10 },
+    { level: 29, points: 19000000, dailyPuzzles: 10 },
+    { level: 30, points: 24000000, dailyPuzzles: 12 },
   ];
 
   const SKILL_UPGRADE_COSTS = [
@@ -420,6 +420,104 @@
     };
   }
 
+  function parseExchangeShopScreenshotText(text) {
+    if (!text || typeof text !== 'string') return [];
+    const lines = text
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    const results = [];
+    let currentGeneration = 8;
+
+    const topSeasonMatch = text.match(/(?:сезон|season)\s*(\d+)/i) || text.match(/\bS(\d+)\b/i);
+    if (topSeasonMatch) {
+      currentGeneration = parseInt(topSeasonMatch[1], 10) || 8;
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      const seasonLineMatch = line.match(/(?:сезон|season)\s*(\d+)/i) || line.match(/\bS(\d+)\b/i);
+      if (seasonLineMatch) {
+        currentGeneration = parseInt(seasonLineMatch[1], 10) || currentGeneration;
+      }
+
+      let nameCandidate = '';
+      let genCandidate = currentGeneration;
+
+      const sBadgeMatch = line.match(/^[Ss](\d+)\s*(.*)$/);
+      if (sBadgeMatch) {
+        genCandidate = parseInt(sBadgeMatch[1], 10) || currentGeneration;
+        nameCandidate = sBadgeMatch[2].trim();
+        if (!nameCandidate && i + 1 < lines.length) {
+          nameCandidate = lines[i + 1].trim();
+        }
+      } else if (
+        !line.includes('Обмен') &&
+        !line.includes('обновления') &&
+        !line.includes('ОБМЕН') &&
+        !line.match(/^\d+/) &&
+        !line.match(/^(?:x\d+|110\s*x\d+)/i) &&
+        line.length >= 2 &&
+        line.length <= 30
+      ) {
+        const nextFew = lines.slice(i + 1, i + 5).join(' ');
+        if (/ОБМЕН/i.test(nextFew) || /x1/i.test(nextFew)) {
+          nameCandidate = line;
+        }
+      }
+
+      if (nameCandidate) {
+        nameCandidate = nameCandidate
+          .replace(/^[Ss]\d+\s*/, '')
+          .replace(/^(?:ОБМЕН|x\d+|110)/i, '')
+          .trim();
+      }
+
+      if (nameCandidate && nameCandidate.length >= 2 && !/^(?:ОБМЕН|сезон|обновления|до)$/i.test(nameCandidate)) {
+        const windowText = lines.slice(i, i + 7).join('\n');
+
+        let couponPerPuzzle = genCandidate === 7 ? 600 : 720;
+        let starCouponCost = genCandidate === 7 ? 300 : 360;
+
+        const puzzleMatch = windowText.match(/[xX]1\s+(\d{3,4})/);
+        if (puzzleMatch) {
+          couponPerPuzzle = parseInt(puzzleMatch[1], 10);
+        } else {
+          const exchangeMatches = [...windowText.matchAll(/(\d{3,4})\s*ОБМЕН/gi)];
+          if (exchangeMatches.length > 0) {
+            couponPerPuzzle = parseInt(exchangeMatches[0][1], 10);
+            if (exchangeMatches.length > 1) {
+              starCouponCost = parseInt(exchangeMatches[1][1], 10);
+            }
+          }
+        }
+
+        const starMatch = windowText.match(/110\s*[xX]1\s+(\d{3,4})/);
+        if (starMatch) {
+          starCouponCost = parseInt(starMatch[1], 10);
+        }
+
+        if (!results.some(r => r.name.toLowerCase() === nameCandidate.toLowerCase())) {
+          results.push({
+            name: nameCandidate,
+            generation: genCandidate,
+            type: 'Пехота',
+            couponPerPuzzle,
+            starCouponCost,
+            medalsBeforeTraining: 480,
+            medalsTraining: 900,
+            medalsTotal: 1380,
+            upgradeType: 'standard'
+          });
+        }
+      }
+    }
+
+    return results;
+  }
+
   function migrateState(raw) {
     const input = raw && typeof raw === 'object' ? raw : {};
     const oldPlayers = Array.isArray(input.players) ? input.players : [];
@@ -461,10 +559,22 @@
     };
   }
 
-  function dailyRewards(sector) {
+  function calculateTotalMedals(beforeTraining = 480, training = 900) {
+    const b = Math.max(0, parseInt(beforeTraining, 10) || 0);
+    const t = Math.max(0, parseInt(training, 10) || 0);
+    return b + t;
+  }
+
+  function dailyRewards(sector, vipTiers) {
     const vip = Number(sector?.vipLevel) || 0;
     const confidentiality = Number(sector?.confidentialityLevel) || 0;
-    const vipPuzzles = vip > 10 ? Math.min(20, Math.max(2, vip - 9)) : 0;
+    let vipPuzzles = 0;
+    if (Array.isArray(vipTiers) && vipTiers.length > 0) {
+      const tier = vipTiers.find(t => t.level === vip);
+      vipPuzzles = tier ? Number(tier.dailyPuzzles ?? tier.daily_puzzles ?? 0) : 0;
+    } else {
+      vipPuzzles = vip > 10 ? Math.min(20, Math.max(2, vip - 9)) : 0;
+    }
     const confidentialityPuzzles = confidentiality >= 25 ? 2 / 3 : confidentiality > 24 ? 1 / 2 : 0;
     return { puzzlesPerDay: vipPuzzles + confidentialityPuzzles, chestsPerDay: 1 };
   }
@@ -486,7 +596,8 @@
     return STAR_COSTS[Math.max(1, Math.min(6, Number(stars) || 1)) - 1];
   }
 
-  function calculateVipDeficit({ currentLevel = 0, currentPoints = 0, targetLevel, dailyPointsRate = 0 } = {}) {
+  function calculateVipDeficit({ currentLevel = 0, currentPoints = 0, targetLevel, dailyPointsRate = 0, vipTiers } = {}) {
+    const tiers = Array.isArray(vipTiers) && vipTiers.length > 0 ? vipTiers : VIP_TIERS_DATA;
     const curLvl = Math.max(0, Math.min(30, Number(currentLevel) || 0));
     const curPts = Math.max(0, Number(currentPoints) || 0);
     const tgtLvl = targetLevel !== undefined ? Math.max(0, Math.min(30, Number(targetLevel) || 0)) : Math.min(30, curLvl + 1);
@@ -500,11 +611,11 @@
       };
     }
 
-    const curTier = VIP_TIERS_DATA.find(t => t.level === curLvl) || { level: curLvl, points: 0, dailyPuzzles: 0 };
-    const tgtTier = VIP_TIERS_DATA.find(t => t.level === tgtLvl) || VIP_TIERS_DATA[VIP_TIERS_DATA.length - 1];
+    const curTier = tiers.find(t => t.level === curLvl) || { level: curLvl, points: 0, dailyPuzzles: 0 };
+    const tgtTier = tiers.find(t => t.level === tgtLvl) || tiers[tiers.length - 1];
 
     const pointsNeeded = Math.max(0, tgtTier.points - curPts);
-    const dailyPuzzlesIncrease = Math.max(0, tgtTier.dailyPuzzles - curTier.dailyPuzzles);
+    const dailyPuzzlesIncrease = Math.max(0, (tgtTier.dailyPuzzles ?? tgtTier.daily_puzzles ?? 0) - (curTier.dailyPuzzles ?? curTier.daily_puzzles ?? 0));
     const rate = Number(dailyPointsRate) || 0;
     const daysToTargetAtCurrentRate = rate > 0 ? Math.ceil(pointsNeeded / rate) : null;
 
@@ -1222,5 +1333,8 @@
     parseWarehouseScreenshotText,
     mergeScanResults,
     normalizeStock,
+    OFFICER_TYPES,
+    calculateTotalMedals,
+    parseExchangeShopScreenshotText,
   };
 });
