@@ -203,9 +203,14 @@ test('player and player officer CRUD operations', () => {
   const playerNoOfficer = dbModule.getPlayerById(newPlayer.id);
   assert.equal(playerNoOfficer.officers.length, 0);
 
-  // Delete player
+  // Delete player and ensure linked user's player_id is cleared
+  const regUser = dbModule.registerUser({ username: 'del_player_user_' + Date.now(), password: 'password123', playerId: newPlayer.id });
+  assert.equal(regUser.playerId, newPlayer.id);
+
   dbModule.deletePlayer(newPlayer.id);
   assert.equal(dbModule.getPlayerById(newPlayer.id), null);
+  const userAfterDelete = dbModule.findUserById(regUser.userId || regUser.id);
+  assert.equal(userAfterDelete.player_id, null);
 });
 
 test('event registrations CRUD and queries', () => {

@@ -1900,6 +1900,7 @@ async function switchCabinetSector(sectorId) {
       currentUser.playerId = sId;
     }
     state.currentPlayerId = sId;
+    if (typeof save === 'function') save();
     toast('Активный сектор изменен', 'success');
     await renderMyCabinet();
   } catch (err) {
@@ -3180,7 +3181,7 @@ function renderPlayerDetail(playerId) {
             const actionsHtml = canEditSector ? `
               <div style="display:flex;gap:4px">
                 <button class="action-btn" title="Редактировать" onclick="openEditSectorOfficerModal(${p.id}, '${o.id}')">✏️</button>
-                <button class="action-btn danger" title="Удалить" onclick="confirmDeleteSectorOfficer(${p.id}, '${o.id}', '${escapeHtml(o.name || cat?.name || '')}')">🗑️</button>
+                <button class="action-btn danger" title="Удалить" onclick="confirmDeleteSectorOfficer(${p.id}, '${o.id}')">🗑️</button>
               </div>
             ` : '—';
             return `<tr>
@@ -3270,6 +3271,7 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
         else off.stars = s;
       }
     }
+    if (typeof save === 'function') save();
     toast(`Звёзды офицера обновлены (${s}★)`);
     renderPlayerDetail(playerId);
   } catch (err) {
@@ -3277,18 +3279,22 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
   }
 }
 
-async function confirmDeleteSectorOfficer(playerId, officerId, officerName) {
-  const confirmed = confirm(`Удалить офицера «${officerName || 'Офицер'}» из этого сектора?`);
+async function confirmDeleteSectorOfficer(playerId, officerId) {
+  const p = getPlayer(playerId);
+  const off = p?.officers?.find(o => String(o.id) === String(officerId));
+  const cat = off ? getCatalogOfficer(off.catalogId) : null;
+  const officerName = off ? (off.name || cat?.name || 'Офицер') : 'Офицер';
+  const confirmed = confirm(`Удалить офицера «${officerName}» из этого сектора?`);
   if (!confirmed) return;
   try {
     await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
       method: 'DELETE'
     });
-    const p = getPlayer(playerId);
     if (p && Array.isArray(p.officers)) {
       p.officers = p.officers.filter(o => String(o.id) !== String(officerId));
     }
-    toast(`Офицер «${officerName || ''}» удалён из сектора`);
+    if (typeof save === 'function') save();
+    toast(`Офицер «${officerName}» удалён из сектора`);
     renderPlayerDetail(playerId);
   } catch (err) {
     toast('Ошибка удаления офицера: ' + (err.message || err), 'error');
@@ -3405,6 +3411,7 @@ async function submitAddSectorOfficer() {
       p.officers = p.officers || [];
       p.officers.push(res || { id: 'o' + state.nextId++, ...payload });
     }
+    if (typeof save === 'function') save();
     closeAllModals();
     toast(`Офицер «${cat?.name || ''}» добавлен в сектор`);
     renderPlayerDetail(addSectorOfficerPlayerId);
@@ -3503,6 +3510,7 @@ async function submitEditSectorOfficer() {
         else Object.assign(off, payload);
       }
     }
+    if (typeof save === 'function') save();
     closeAllModals();
     toast('Офицер сохранён');
     renderPlayerDetail(editSectorOfficerPlayerId);
@@ -4339,7 +4347,11 @@ async function savePlayer() {
       } catch (_) {}
     }
     if (editPlayerId) {
-      renderPlayerDetail(editPlayerId);
+      if (currentPage === 'players') {
+        renderPlayers();
+      } else {
+        renderPlayerDetail(editPlayerId);
+      }
     } else {
       navigate('players');
     }

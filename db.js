@@ -562,6 +562,7 @@ function updatePlayer(id, updates = {}) {
 
 function deletePlayer(id) {
   const db = getDb();
+  db.prepare('UPDATE users SET player_id = NULL WHERE player_id = ?').run(id);
   db.prepare('DELETE FROM players WHERE id = ?').run(id);
   return true;
 }
