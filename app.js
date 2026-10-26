@@ -5090,36 +5090,218 @@ function confirmDeleteEventType(id) {
   openModal('modal-confirm');
 }
 
-// ─── SEASON SCHEDULER MODAL ──────────────────────────────────
+// ─── SEASON SCHEDULER & CADENCE CONSTRUCTOR ──────────────────
+function setSeasonDurationWeeks(weeks) {
+  const hiddenInput = document.getElementById('season-total-weeks');
+  if (hiddenInput) hiddenInput.value = weeks;
+
+  const btnGroup = document.getElementById('season-weeks-group');
+  if (btnGroup) {
+    btnGroup.querySelectorAll('.season-week-btn').forEach(btn => {
+      const w = parseInt(btn.getAttribute('data-weeks'), 10);
+      if (w === weeks) {
+        btn.classList.add('active', 'btn-primary');
+        btn.classList.remove('btn-outline');
+      } else {
+        btn.classList.remove('active', 'btn-primary');
+        btn.classList.add('btn-outline');
+      }
+    });
+  }
+
+  updateSeasonSchedulePreview();
+}
+
 function openSeasonSchedulerModal() {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const defDate = tomorrow.toISOString().slice(0, 10);
-  const dateInput = document.getElementById('sched-start-date');
-  if (dateInput) dateInput.value = defDate;
-  const cyclesInput = document.getElementById('sched-cycles');
-  if (cyclesInput) cyclesInput.value = 3;
-  const presetSelect = document.getElementById('sched-preset');
-  if (presetSelect) presetSelect.value = 'king-of-war';
+  // Find next Monday (or today if today is Monday)
+  const now = new Date();
+  const day = now.getDay(); // 0: Sun, 1: Mon
+  const diff = (day === 1 ? 0 : (day === 0 ? 1 : 8 - day));
+  const monday = new Date(now);
+  monday.setDate(monday.getDate() + diff);
+  const defaultStart = monday.toISOString().slice(0, 10);
+
+  const dateInput = document.getElementById('season-start-date');
+  if (dateInput) dateInput.value = defaultStart;
+
+  setSeasonDurationWeeks(8);
+
+  // Set default checkbox and select values
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = Boolean(val);
+    else el.value = val;
+  };
+
+  setVal('season-enable-kow', true);
+  setVal('season-startday-kow', '2');
+  setVal('season-duration-kow', '2');
+  setVal('season-active-kow', '1');
+  setVal('season-break-kow', '1');
+  setVal('season-offset-kow', '0');
+
+  setVal('season-enable-mf', true);
+  setVal('season-startday-mf', '6');
+  setVal('season-duration-mf', '3');
+  setVal('season-active-mf', '1');
+  setVal('season-break-mf', '1');
+  setVal('season-offset-mf', '0');
+
+  setVal('season-enable-pot', true);
+  setVal('season-startday-pot', '2');
+  setVal('season-duration-pot', '3');
+  setVal('season-active-pot', '1');
+  setVal('season-break-pot', '1');
+  setVal('season-offset-pot', '1');
+
+  updateSeasonSchedulePreview();
   openModal('modal-season-scheduler');
 }
 
+function updateSeasonSchedulePreview() {
+  const startDate = document.getElementById('season-start-date')?.value || new Date().toISOString().slice(0, 10);
+  const totalWeeks = Math.max(1, parseInt(document.getElementById('season-total-weeks')?.value, 10) || 8);
+
+  const getNum = (id, fallback) => {
+    const el = document.getElementById(id);
+    return el ? (parseInt(el.value, 10) || fallback) : fallback;
+  };
+  const isChecked = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.checked : false;
+  };
+
+  const rules = [];
+
+  if (isChecked('season-enable-kow')) {
+    rules.push({
+      id: 'king-of-war',
+      name: 'Король Войны',
+      color: '#8b5cf6',
+      startDayOfWeek: getNum('season-startday-kow', 2),
+      durationDays: getNum('season-duration-kow', 2),
+      activeWeeks: getNum('season-active-kow', 1),
+      breakWeeks: getNum('season-break-kow', 1),
+      weekOffset: getNum('season-offset-kow', 0),
+    });
+  }
+
+  if (isChecked('season-enable-mf')) {
+    rules.push({
+      id: 'mighty-forces',
+      name: 'Мощные Силы',
+      color: '#10b981',
+      startDayOfWeek: getNum('season-startday-mf', 6),
+      durationDays: getNum('season-duration-mf', 3),
+      activeWeeks: getNum('season-active-mf', 1),
+      breakWeeks: getNum('season-break-mf', 1),
+      weekOffset: getNum('season-offset-mf', 0),
+    });
+  }
+
+  if (isChecked('season-enable-pot')) {
+    rules.push({
+      id: 'power-of-time',
+      name: 'Сила Времени',
+      color: '#f59e0b',
+      startDayOfWeek: getNum('season-startday-pot', 2),
+      durationDays: getNum('season-duration-pot', 3),
+      activeWeeks: getNum('season-active-pot', 1),
+      breakWeeks: getNum('season-break-pot', 1),
+      weekOffset: getNum('season-offset-pot', 1),
+    });
+  }
+
+  const scheduleGenerator = (typeof logic !== 'undefined' && typeof logic.generateSeasonSchedule === 'function')
+    ? logic.generateSeasonSchedule
+    : (typeof generateSeasonSchedule === 'function' ? generateSeasonSchedule : null);
+
+  if (scheduleGenerator) {
+    state.seasonPreviewEvents = scheduleGenerator({ startDate, totalWeeks, rules });
+  } else {
+    state.seasonPreviewEvents = [];
+  }
+
+  renderSeasonSchedulePreviewTable();
+}
+
+function renderSeasonSchedulePreviewTable() {
+  const events = state.seasonPreviewEvents || [];
+  const countEl = document.getElementById('season-preview-count');
+  const submitCountEl = document.getElementById('season-submit-count');
+  const submitBtn = document.getElementById('btn-submit-season');
+
+  if (countEl) countEl.textContent = events.length;
+  if (submitCountEl) submitCountEl.textContent = events.length;
+  if (submitBtn) submitBtn.disabled = events.length === 0;
+
+  const tbody = document.getElementById('season-preview-tbody');
+  if (!tbody) return;
+
+  if (events.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:18px;color:var(--text3)">Нет активных событий. Включите хотя бы одно событие выше.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = events.map((ev, idx) => {
+    let badgeClass = 'badge-event-kow';
+    if (ev.typeId === 'mighty-forces' || ev.name.includes('Мощные')) badgeClass = 'badge-event-mf';
+    else if (ev.typeId === 'power-of-time' || ev.name.includes('Времени')) badgeClass = 'badge-event-pot';
+
+    return `
+      <tr>
+        <td style="color:var(--text3)">${idx + 1}</td>
+        <td><strong>${escapeHtml(ev.dateFrom)}</strong> – ${escapeHtml(ev.dateTo)}</td>
+        <td>${escapeHtml(ev.dayFromStr || '')} – ${escapeHtml(ev.dayToStr || '')}</td>
+        <td><span class="badge-event-tag ${badgeClass}">${escapeHtml(ev.name)}</span></td>
+        <td>${ev.durationDays} дн.</td>
+        <td style="text-align:center">
+          <button type="button" class="btn-remove-event-row" onclick="removeSeasonPreviewEvent(${idx})" title="Удалить это событие">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function removeSeasonPreviewEvent(index) {
+  if (Array.isArray(state.seasonPreviewEvents) && state.seasonPreviewEvents[index]) {
+    state.seasonPreviewEvents.splice(index, 1);
+    renderSeasonSchedulePreviewTable();
+  }
+}
+
 async function submitSeasonSchedule() {
-  const presetId = document.getElementById('sched-preset')?.value || 'king-of-war';
-  const startDate = document.getElementById('sched-start-date')?.value || new Date().toISOString().slice(0, 10);
-  const cyclesCount = Math.max(1, Math.min(6, parseInt(document.getElementById('sched-cycles')?.value) || 1));
+  const events = state.seasonPreviewEvents || [];
+  if (events.length === 0) {
+    toast('Нет событий для создания в сезоне', 'error');
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-submit-season');
+  const oldText = submitBtn ? submitBtn.innerHTML : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '⏳ Создание...';
+  }
 
   try {
     const res = await apiFetch('/api/events/schedule-season', {
       method: 'POST',
-      body: { presetId, startDate, cyclesCount }
+      body: { events }
     });
-    toast(`Сезон успешно создан: ${res?.createdCount || cyclesCount} ивент(ов)`);
+    const createdCount = res?.createdCount ?? res?.count ?? events.length;
+    toast(`Сезон успешно создан: ${createdCount} ивент(ов)`);
     closeAllModals();
     await loadDataFromServer();
     if (currentPage === 'calendar') renderCalendar();
   } catch (err) {
     toast('Ошибка создания сезона: ' + err.message, 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = oldText;
+    }
   }
 }
 
@@ -6032,6 +6214,9 @@ if (typeof window !== 'undefined') {
   window.updateVipProgressHint = updateVipProgressHint;
   window.openSeasonSchedulerModal = openSeasonSchedulerModal;
   window.submitSeasonSchedule = submitSeasonSchedule;
+  window.setSeasonDurationWeeks = setSeasonDurationWeeks;
+  window.updateSeasonSchedulePreview = updateSeasonSchedulePreview;
+  window.removeSeasonPreviewEvent = removeSeasonPreviewEvent;
   window.getOutboxQueue = getOutboxQueue;
   window.saveOutboxQueue = saveOutboxQueue;
   window.flushOutboxQueue = flushOutboxQueue;

@@ -539,36 +539,226 @@
 </div>
 
 <!-- Modal: Season Scheduler -->
-<div class="modal" id="modal-season-scheduler">
+<div class="modal modal-lg" id="modal-season-scheduler" style="max-width:960px;width:95%">
   <div class="modal-header">
-    <h3 id="modal-season-scheduler-title">⚡ Создать сезон по шаблону</h3>
+    <h3 id="modal-season-scheduler-title">📅 Конструктор сезонов альянса</h3>
     <button class="modal-close" onclick="closeAllModals()">✕</button>
   </div>
-  <div class="modal-body">
-    <div class="form-group">
-      <label for="sched-preset">Шаблон ивента *</label>
-      <select id="sched-preset">
-        <option value="king-of-war">«Король Войны» (цикл 14 дней, 7 дней активности)</option>
-        <option value="mightiest-commander">«Сильнейший Командир» (цикл 28 дней, 7 дней активности)</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label for="sched-start-date">Дата старта первого ивента *</label>
-        <input type="date" id="sched-start-date">
+  <div class="modal-body" style="max-height:calc(85vh - 120px);overflow-y:auto">
+    <!-- Блок общих параметров сезона -->
+    <div class="season-params-bar" style="background:#1e293b;padding:12px 16px;border-radius:10px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.08)">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label for="season-start-date" style="font-weight:600;font-size:13px;color:var(--text1);margin:0">
+            📅 Дата старта сезона:
+          </label>
+          <input type="date" id="season-start-date" style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:#0f172a;color:#fff;font-size:13px" onchange="updateSeasonSchedulePreview()">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600;color:var(--text2)">Длительность:</span>
+          <div class="btn-group season-weeks-btn-group" id="season-weeks-group">
+            <button type="button" class="btn-outline btn-sm season-week-btn" data-weeks="4" onclick="setSeasonDurationWeeks(4)">4 недели</button>
+            <button type="button" class="btn-primary btn-sm season-week-btn active" data-weeks="8" onclick="setSeasonDurationWeeks(8)">8 недель</button>
+            <button type="button" class="btn-outline btn-sm season-week-btn" data-weeks="12" onclick="setSeasonDurationWeeks(12)">12 недель</button>
+          </div>
+          <input type="hidden" id="season-total-weeks" value="8">
+        </div>
       </div>
-      <div class="form-group">
-        <label for="sched-cycles">Количество циклов (1–6)</label>
-        <input type="number" id="sched-cycles" min="1" max="6" value="3">
+    </div>
+
+    <!-- Карточки правил событий (Король Войны, Мощные Силы, Сила Времени) -->
+    <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:var(--text2)">
+      Настройка событий и ритма активности:
+    </div>
+    <div class="season-config-grid" id="season-event-cards">
+      <!-- Card 1: Король Войны -->
+      <div class="season-event-card card-kow">
+        <div class="season-card-header">
+          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#c084fc">
+            <input type="checkbox" id="season-enable-kow" checked onchange="updateSeasonSchedulePreview()">
+            ⚔️ Король Войны
+          </label>
+          <span class="badge" style="background:rgba(139,92,246,0.15);color:#c084fc;font-size:11px">Сила сектора</span>
+        </div>
+        <div class="season-card-body">
+          <div class="season-input-row">
+            <label>День старта:</label>
+            <select id="season-startday-kow" onchange="updateSeasonSchedulePreview()">
+              <option value="1">Понедельник</option>
+              <option value="2" selected>Вторник</option>
+              <option value="3">Среда</option>
+              <option value="4">Четверг</option>
+              <option value="5">Пятница</option>
+              <option value="6">Суббота</option>
+              <option value="7">Воскресенье</option>
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Длительность:</label>
+            <select id="season-duration-kow" onchange="updateSeasonSchedulePreview()">
+              <option value="1">1 день</option>
+              <option value="2" selected>2 дня (Вт–Ср)</option>
+              <option value="3">3 дня</option>
+              <option value="4">4 дня</option>
+              <option value="7">7 дней</option>
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Ритм активности:</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input type="number" id="season-active-kow" min="1" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
+              <input type="number" id="season-break-kow" min="0" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">перерыв</span>
+            </div>
+          </div>
+          <div class="season-input-row">
+            <label>Смещение нед.:</label>
+            <select id="season-offset-kow" onchange="updateSeasonSchedulePreview()">
+              <option value="0" selected>Неделя 1 (без смещения)</option>
+              <option value="1">Неделя 2 (со 2-й недели)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Мощные Силы -->
+      <div class="season-event-card card-mf">
+        <div class="season-card-header">
+          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#34d399">
+            <input type="checkbox" id="season-enable-mf" checked onchange="updateSeasonSchedulePreview()">
+            🛡️ Мощные Силы
+          </label>
+          <span class="badge" style="background:rgba(16,185,129,0.15);color:#34d399;font-size:11px">Войска</span>
+        </div>
+        <div class="season-card-body">
+          <div class="season-input-row">
+            <label>День старта:</label>
+            <select id="season-startday-mf" onchange="updateSeasonSchedulePreview()">
+              <option value="1">Понедельник</option>
+              <option value="2">Вторник</option>
+              <option value="3">Среда</option>
+              <option value="4">Четверг</option>
+              <option value="5">Пятница</option>
+              <option value="6" selected>Суббота</option>
+              <option value="7">Воскресенье</option>
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Длительность:</label>
+            <select id="season-duration-mf" onchange="updateSeasonSchedulePreview()">
+              <option value="1">1 день</option>
+              <option value="2">2 дня</option>
+              <option value="3" selected>3 дня (Сб–Пн)</option>
+              <option value="4">4 дня</option>
+              <option value="7">7 дней</option>
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Ритм активности:</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input type="number" id="season-active-mf" min="1" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
+              <input type="number" id="season-break-mf" min="0" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">перерыв</span>
+            </div>
+          </div>
+          <div class="season-input-row">
+            <label>Смещение нед.:</label>
+            <select id="season-offset-mf" onchange="updateSeasonSchedulePreview()">
+              <option value="0" selected>Неделя 1 (без смещения)</option>
+              <option value="1">Неделя 2 (со 2-й недели)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Сила Времени -->
+      <div class="season-event-card card-pot">
+        <div class="season-card-header">
+          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#fbbf24">
+            <input type="checkbox" id="season-enable-pot" checked onchange="updateSeasonSchedulePreview()">
+            ⏳ Сила Времени
+          </label>
+          <span class="badge" style="background:rgba(245,158,11,0.15);color:#fbbf24;font-size:11px">Ускорители</span>
+        </div>
+        <div class="season-card-body">
+          <div class="season-input-row">
+            <label>День старта:</label>
+            <select id="season-startday-pot" onchange="updateSeasonSchedulePreview()">
+              <option value="1">Понедельник</option>
+              <option value="2" selected>Вторник</option>
+              <option value="3">Среда</option>
+              <option value="4">Четверг</option>
+              <option value="5">Пятница</option>
+              <option value="6">Суббота</option>
+              <option value="7">Воскресенье</option>
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Длительность:</label>
+            <select id="season-duration-pot" onchange="updateSeasonSchedulePreview()">
+              <option value="1">1 день</option>
+              <option value="2">2 дня</option>
+              <option value="3" selected>3 дня (Вт–Чт)</option>
+              <option value="4">4 дня</option>
+              <option value="7">7 дней</option>
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Ритм активности:</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input type="number" id="season-active-pot" min="1" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
+              <input type="number" id="season-break-pot" min="0" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">перерыв</span>
+            </div>
+          </div>
+          <div class="season-input-row">
+            <label>Смещение нед.:</label>
+            <select id="season-offset-pot" onchange="updateSeasonSchedulePreview()">
+              <option value="0">Неделя 1 (без смещения)</option>
+              <option value="1" selected>Неделя 2 (чередование)</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="form-hint" style="color:var(--text3);font-size:12px;margin-top:4px">
-      ℹ️ Будут автоматически созданы события с интервалами согласно выбранному шаблону.
+
+    <!-- Интерактивный предпросмотр -->
+    <div class="season-preview-section" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:var(--text1)">
+          Предпросмотр расписания (<span id="season-preview-count">0</span> событий):
+        </div>
+        <div style="font-size:11px;color:var(--text3)">
+          💡 Вы можете удалить ненужные даты кнопкой ✕ перед сохранением
+        </div>
+      </div>
+      <div class="season-preview-table-wrap">
+        <table class="season-preview-table" id="season-preview-table">
+          <thead>
+            <tr>
+              <th style="width:40px">№</th>
+              <th>Период</th>
+              <th>Дни недели</th>
+              <th>Событие</th>
+              <th>Длительность</th>
+              <th style="width:50px;text-align:center">Удалить</th>
+            </tr>
+          </thead>
+          <tbody id="season-preview-tbody">
+            <!-- Dynamic rows -->
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
-  <div class="modal-footer">
+  <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
-    <button class="btn-primary" id="sched-btn-submit" onclick="submitSeasonSchedule()">Создать сезон</button>
+    <button class="btn-primary" id="btn-submit-season" onclick="submitSeasonSchedule()">
+      ⚡ Создать сезон в календаре (<span id="season-submit-count">0</span> событий)
+    </button>
   </div>
 </div>
 
