@@ -1607,6 +1607,184 @@ test('API event multi-registration and multi-sector registrations listing', asyn
   }
 });
 
+test('API VIP tiers GET /api/vip-tiers and PUT /api/vip-tiers with RBAC', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // Register R3 user
+    const r3RegRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'vip_r3_user', password: 'password123' })
+    });
+    const r3Reg = await r3RegRes.json();
+    await fetch(`${baseUrl}/api/users/${r3Reg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const r3LoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'vip_r3_user', password: 'password123' })
+    });
+    const { token: r3Token } = await r3LoginRes.json();
+
+    // 1. GET /api/vip-tiers is accessible to R3
+    const getRes = await fetch(`${baseUrl}/api/vip-tiers`, {
+      headers: { Authorization: `Bearer ${r3Token}` }
+    });
+    assert.equal(getRes.status, 200);
+    const tiers = await getRes.json();
+    assert.equal(Array.isArray(tiers), true);
+    assert.equal(tiers.length, 30);
+    const v14 = tiers.find(t => t.level === 14);
+    assert.equal(v14.points, 750000);
+
+    // 2. PUT /api/vip-tiers forbidden for R3 -> 403
+    const putR3Res = await fetch(`${baseUrl}/api/vip-tiers`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${r3Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tiers: [{ level: 14, points: 800000, dailyPuzzles: 4, dailyChests: 1 }]
+      })
+    });
+    assert.equal(putR3Res.status, 403);
+
+    // 3. PUT /api/vip-tiers allowed for R5 -> 200
+    const putR5Res = await fetch(`${baseUrl}/api/vip-tiers`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tiers: [{ level: 14, points: 760000, dailyPuzzles: 4, dailyChests: 1 }]
+      })
+    });
+    assert.equal(putR5Res.status, 200);
+    const updatedTiers = await putR5Res.json();
+    const updatedV14 = updatedTiers.find(t => t.level === 14);
+    assert.equal(updatedV14.points, 760000);
+    assert.equal(updatedV14.dailyPuzzles, 4);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API catalog CRUD and POST /api/catalog/batch for exchange shop import with RBAC', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // Register R3 user
+    const r3RegRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'cat_r3_user', password: 'password123' })
+    });
+    const r3Reg = await r3RegRes.json();
+    await fetch(`${baseUrl}/api/users/${r3Reg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const r3LoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'cat_r3_user', password: 'password123' })
+    });
+    const { token: r3Token } = await r3LoginRes.json();
+
+    // 1. R3 cannot create catalog item -> 403
+    const r3PostRes = await fetch(`${baseUrl}/api/catalog`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'po', name: 'По' })
+    });
+    assert.equal(r3PostRes.status, 403);
+
+    // 2. R5 creates catalog item with medals and starCouponCost
+    const r5PostRes = await fetch(`${baseUrl}/api/catalog`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'officer-po',
+        name: 'По',
+        type: 'Танк',
+        generation: 8,
+        couponPerPuzzle: 720,
+        starCouponCost: 360,
+        medalsBeforeTraining: 480,
+        medalsTraining: 900
+      })
+    });
+    assert.equal(r5PostRes.status, 200);
+    const createdOff = await r5PostRes.json();
+    assert.equal(createdOff.name, 'По');
+    assert.equal(createdOff.type, 'Танк');
+    assert.equal(createdOff.couponPerPuzzle, 720);
+    assert.equal(createdOff.starCouponCost, 360);
+    assert.equal(createdOff.medalsBeforeTraining, 480);
+    assert.equal(createdOff.medalsTraining, 900);
+    assert.equal(createdOff.medalsTotal, 1380);
+
+    // 3. Batch import via POST /api/catalog/batch
+    const batchRes = await fetch(`${baseUrl}/api/catalog/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        officers: [
+          {
+            id: 'officer-sara',
+            name: 'Sara',
+            type: 'Пехота',
+            generation: 8,
+            couponPerPuzzle: 720,
+            starCouponCost: 360
+          },
+          {
+            id: 'officer-royshin',
+            name: 'Ройшин',
+            type: 'ПТ-Сау',
+            generation: 7,
+            couponPerPuzzle: 600,
+            starCouponCost: 300
+          }
+        ]
+      })
+    });
+    assert.equal(batchRes.status, 200);
+    const batchResult = await batchRes.json();
+    assert.equal(batchResult.success, true);
+    assert.equal(batchResult.count, 2);
+
+    // Verify GET /api/catalog contains all officers
+    const catList = await (await fetch(`${baseUrl}/api/catalog`, {
+      headers: { Authorization: `Bearer ${r3Token}` }
+    })).json();
+    assert(catList.some(o => o.name === 'По'));
+    assert(catList.some(o => o.name === 'Sara' && o.starCouponCost === 360));
+    assert(catList.some(o => o.name === 'Ройшин' && o.starCouponCost === 300 && o.couponPerPuzzle === 600));
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;
