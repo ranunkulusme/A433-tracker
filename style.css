@@ -863,6 +863,60 @@ select option { background: var(--bg3); }
   border-bottom: 1px solid var(--border);
 }
 
+.cabinet-sectors-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.cabinet-sectors-bar .csb-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cabinet-sectors-bar .csb-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.cabinet-sectors-bar .csb-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 200px;
+  max-width: 360px;
+}
+.cabinet-empty-card {
+  text-align: center;
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.cal-reg-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(46, 160, 67, 0.12);
+  border: 1px solid rgba(46, 160, 67, 0.35);
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 @media (max-width: 600px) {
   .modal.modal-lg {
     width: calc(100vw - 16px);
@@ -872,5 +926,18 @@ select option { background: var(--bg3); }
   }
   .form-row-3 {
     grid-template-columns: 1fr;
+  }
+  .cabinet-sectors-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cabinet-sectors-bar .csb-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cabinet-sectors-bar .csb-select {
+    min-width: unset;
+    max-width: 100%;
+    width: 100%;
   }
 }

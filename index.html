@@ -416,6 +416,10 @@
   </div>
   <div class="modal-body">
     <div id="reg-event-info" class="auth-demo-hint" style="margin-bottom:6px"></div>
+    <div class="form-group" id="reg-sector-group" style="display:none">
+      <label for="reg-sector-select">Сектор для участия</label>
+      <select id="reg-sector-select" onchange="onRegSectorChange(this.value)"></select>
+    </div>
     <div class="form-group">
       <label for="reg-officer-select">Офицер для прокачки *</label>
       <select id="reg-officer-select" onchange="onRegisterModalChange()"></select>
@@ -430,6 +434,42 @@
     <button class="btn-ghost" onclick="closeAllModals()">Закрыть</button>
     <button class="btn-danger" id="reg-btn-cancel" style="display:none" onclick="handleCancelRegistration()">Отменить заявку</button>
     <button class="btn-primary" id="reg-btn-submit" onclick="handleSubmitRegistration()">Подать заявку</button>
+  </div>
+</div>
+
+<!-- Modal: Add Sector -->
+<div class="modal" id="modal-add-sector">
+  <div class="modal-header">
+    <h3 id="modal-add-sector-title">Новый сектор (база)</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group">
+      <label for="as-name">Название сектора (базы) *</label>
+      <input type="text" id="as-name" placeholder="Например: [A433]ranu или ranu_farm" required>
+    </div>
+    <div class="form-group">
+      <label for="as-real-name">Реальное имя игрока</label>
+      <input type="text" id="as-real-name" placeholder="Имя владельца (опционально)">
+    </div>
+    <div class="form-row form-row-3">
+      <div class="form-group">
+        <label for="as-vip">Уровень VIP</label>
+        <input type="number" id="as-vip" min="0" max="30" value="0">
+      </div>
+      <div class="form-group">
+        <label for="as-power">Мощь / Сила</label>
+        <input type="number" id="as-power" min="0" value="0">
+      </div>
+      <div class="form-group">
+        <label for="as-kills">Убито</label>
+        <input type="number" id="as-kills" min="0" value="0">
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button type="button" class="btn-primary" onclick="submitAddSector()">Создать сектор</button>
   </div>
 </div>
 
