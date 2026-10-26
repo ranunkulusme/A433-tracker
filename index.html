@@ -38,7 +38,7 @@
       </a>
       <a href="#" class="nav-item" data-page="officers">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>
-        Офицеры
+        Каталог офицеров
       </a>
       <a href="#" class="nav-item" data-page="event_types">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
@@ -298,41 +298,61 @@
 <!-- Modal: Officer -->
 <div class="modal" id="modal-officer">
   <div class="modal-header">
-    <h3 id="modal-officer-title">Офицер</h3>
+    <h3 id="modal-officer-title">Офицер каталога</h3>
     <button class="modal-close" onclick="closeAllModals()">✕</button>
   </div>
   <div class="modal-body">
     <div class="form-row">
       <div class="form-group">
         <label>Имя *</label>
-        <input type="text" id="fo-name" placeholder="Адмирал Нейтон">
+        <input type="text" id="fo-name" placeholder="По">
       </div>
       <div class="form-group">
-        <label>Тип</label>
+        <label>Тип войск</label>
         <select id="fo-type">
           <option>Танк</option>
-          <option>ПТ</option>
           <option>Пехота</option>
-          <option>Гарнизон</option>
+          <option>ПТ-Сау</option>
+          <option>Горнизон</option>
           <option>Осада</option>
         </select>
       </div>
     </div>
     <div class="form-row form-row-3">
       <div class="form-group">
-        <label>Поколение</label>
-        <input type="number" id="fo-generation" min="1" value="7">
+        <label>Сезон / Поколение</label>
+        <input type="number" id="fo-generation" min="1" value="8">
       </div>
+      <div class="form-group">
+        <label>Купонов на 1 медаль</label>
+        <input type="number" id="fo-coupon-per-puzzle" min="0" value="720">
+      </div>
+      <div class="form-group">
+        <label>Купонов за 110 звёзд</label>
+        <input type="number" id="fo-star-coupon-cost" min="0" value="360">
+      </div>
+    </div>
+    <div class="form-row form-row-3">
+      <div class="form-group">
+        <label>До подготовки (медалей)</label>
+        <input type="number" id="fo-medals-before" min="0" value="480" oninput="updateOfficerCatalogTotalMedals()">
+      </div>
+      <div class="form-group">
+        <label>Подготовка (медалей)</label>
+        <input type="number" id="fo-medals-training" min="0" value="900" oninput="updateOfficerCatalogTotalMedals()">
+      </div>
+      <div class="form-group">
+        <label>Всего медалей (сумма)</label>
+        <input type="number" id="fo-medals-total" value="1380" readonly style="background:var(--bg2);color:var(--text1);font-weight:700">
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label>Тип прокачки</label>
         <select id="fo-upgrade-type" onchange="onFoUpgradeTypeChange(this.value)">
-          <option value="standard">Купонный 500/1 (standard)</option>
-          <option value="special">Только пазлы (special)</option>
+          <option value="standard">Стандартный (купоны + пазлы)</option>
+          <option value="special">Специальный (только пазлы)</option>
         </select>
-      </div>
-      <div class="form-group">
-        <label>Купонов за пазл</label>
-        <input type="number" id="fo-coupon-per-puzzle" min="0" value="500">
       </div>
     </div>
   </div>

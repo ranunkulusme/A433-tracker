@@ -718,7 +718,9 @@ function troopBadge(type) {
     'Пехота': { cls: 'badge-troop-infantry', icon: '🪖' },
     'Танк': { cls: 'badge-troop-tank', icon: TANK_ICON },
     'ПТ': { cls: 'badge-troop-td', icon: '🎯' },
+    'ПТ-Сау': { cls: 'badge-troop-td', icon: '🎯' },
     'Гарнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
+    'Горнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
     'Осада': { cls: 'badge-troop-siege', icon: '💥' },
   };
   const info = map[type];
@@ -3583,34 +3585,73 @@ async function submitChangeSectorOwner() {
 // ─── PAGE: OFFICERS ──────────────────────────────────────────
 function renderOfficers() {
   const c = document.getElementById('content');
+  const isEmpty = !state.officerCatalog || state.officerCatalog.length === 0;
+
   c.innerHTML = `
-    <div class="section-header">
-      <div class="section-title">Базовые офицеры (${state.officerCatalog.length})</div>
-      ${canManage() ? `<button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>` : ''}
+    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <div class="section-title">🎖️ Каталог офицеров (${state.officerCatalog.length})</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">Реестр командиров альянса, параметры доподготовки, подготовки и курсы обмена</div>
+      </div>
+      ${canManage() ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
+          <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
+          <button class="btn-secondary" onclick="openVipTiersModal()">⭐ Настройка шкалы VIP</button>
+        </div>
+      ` : ''}
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Имя</th><th>Тип</th><th>Поколение</th><th>Прокачка</th><th>Купонов за пазл</th><th>Медали</th><th></th></tr></thead>
-        <tbody>${state.officerCatalog.map(o => {
-          const upgradeBadge = (o.upgradeType === 'special' || o.couponPerPuzzle === 0)
-            ? `<span class="badge badge-warning" title="Прокачка только пазлами">Только пазлы</span>`
-            : `<span class="badge badge-info" title="Купонная прокачка 500/1">Купонный 500/1</span>`;
-          return `<tr>
-          <td><strong>${catalogOfficerLink(o)}</strong></td>
-          <td>${troopBadge(o.type)}</td>
-          <td style="font-family:var(--mono)">${fmtNum(o.generation)}</td>
-          <td>${upgradeBadge}</td>
-          <td style="font-family:var(--mono)">${fmtNum(o.couponPerPuzzle)}</td>
-          <td style="font-family:var(--mono)">${fmtNum(o.medalsBeforeTraining)}+${fmtNum(o.medalsTraining)}=${fmtNum(o.medalsTotal)}</td>
-          <td>
-            <div style="display:flex;gap:4px">
-              ${canManage()?`<button class="action-btn" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑</button>`:''}
-            </div>
-          </td>
-        </tr>`;
-        }).join('')}</tbody>
-      </table>
-    </div>
+    ${isEmpty ? `
+      <div class="empty-state" style="padding:48px 20px;text-align:center;background:var(--bg2);border-radius:12px;border:1px dashed var(--border);margin-top:16px">
+        <div style="font-size:42px;margin-bottom:12px">🎖️</div>
+        <h3 style="margin:0 0 8px;font-size:18px">Каталог офицеров пуст</h3>
+        <p style="color:var(--text2);margin:0 0 16px;max-width:440px;margin-inline:auto">Добавьте офицеров вручную или загрузите скриншот из игрового магазина обмена медалей.</p>
+        ${canManage() ? `
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
+            <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
+          </div>
+        ` : ''}
+      </div>
+    ` : `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Офицер</th>
+              <th>Тип войск</th>
+              <th>Сезон</th>
+              <th>Купонов на медаль</th>
+              <th>Купонов за 110★</th>
+              <th>До подготовки</th>
+              <th>Подготовка</th>
+              <th>Всего медалей</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${state.officerCatalog.map(o => {
+            const b = o.medalsBeforeTraining ?? 480;
+            const t = o.medalsTraining ?? 900;
+            const total = o.medalsTotal ?? (b + t);
+            return `<tr>
+              <td><strong>${catalogOfficerLink(o)}</strong></td>
+              <td>${troopBadge(o.type)}</td>
+              <td><span class="badge badge-none" style="font-weight:700">S${fmtNum(o.generation || 8)}</span></td>
+              <td style="font-family:var(--mono)">${fmtNum(o.couponPerPuzzle ?? 720)}</td>
+              <td style="font-family:var(--mono)">${fmtNum(o.starCouponCost ?? 360)}</td>
+              <td style="font-family:var(--mono)">${fmtNum(b)}</td>
+              <td style="font-family:var(--mono)">${fmtNum(t)}</td>
+              <td style="font-family:var(--mono);font-weight:700;color:var(--primary)">${fmtNum(total)}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  ${canManage() ? `<button class="action-btn" title="Редактировать" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" title="Удалить" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑️</button>` : '—'}
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    `}
   `;
 }
 
@@ -4385,15 +4426,39 @@ let editCatalogOfficerId = null;
 function openOfficerCatalogModal(id=null) {
   editCatalogOfficerId = id;
   const officer = id ? getCatalogOfficer(id) : null;
-  document.getElementById('modal-officer-title').textContent = id ? 'Редактировать офицера' : 'Новый офицер';
-  document.getElementById('fo-name').value = officer?.name || '';
-  document.getElementById('fo-type').value = officer?.type || 'Танк';
-  document.getElementById('fo-generation').value = officer?.generation || 7;
+  const titleEl = document.getElementById('modal-officer-title');
+  if (titleEl) titleEl.textContent = id ? 'Редактировать офицера каталога' : 'Добавить офицера в каталог';
+
+  const nameInput = document.getElementById('fo-name');
+  if (nameInput) nameInput.value = officer?.name || '';
+  const typeInput = document.getElementById('fo-type');
+  if (typeInput) typeInput.value = officer?.type || 'Танк';
+  const genInput = document.getElementById('fo-generation');
+  if (genInput) genInput.value = officer?.generation || 8;
   const upType = officer?.upgradeType || (officer?.couponPerPuzzle === 0 ? 'special' : 'standard');
   const upTypeSelect = document.getElementById('fo-upgrade-type');
   if (upTypeSelect) upTypeSelect.value = upType;
-  document.getElementById('fo-coupon-per-puzzle').value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 500);
+  const coupInput = document.getElementById('fo-coupon-per-puzzle');
+  if (coupInput) coupInput.value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 720);
+  const starCoupInput = document.getElementById('fo-star-coupon-cost');
+  if (starCoupInput) starCoupInput.value = officer?.starCouponCost ?? 360;
+  const bInput = document.getElementById('fo-medals-before');
+  if (bInput) bInput.value = officer?.medalsBeforeTraining ?? 480;
+  const tInput = document.getElementById('fo-medals-training');
+  if (tInput) tInput.value = officer?.medalsTraining ?? 900;
+  updateOfficerCatalogTotalMedals();
   openModal('modal-officer');
+}
+
+function updateOfficerCatalogTotalMedals() {
+  const b = parseInt(document.getElementById('fo-medals-before')?.value) || 0;
+  const t = parseInt(document.getElementById('fo-medals-training')?.value) || 0;
+  const totalEl = document.getElementById('fo-medals-total');
+  if (totalEl) {
+    totalEl.value = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+      ? logic.calculateTotalMedals(b, t)
+      : (b + t);
+  }
 }
 
 function onFoUpgradeTypeChange(val) {
@@ -4402,24 +4467,34 @@ function onFoUpgradeTypeChange(val) {
   if (val === 'special') {
     couponInput.value = 0;
   } else if (parseInt(couponInput.value) === 0) {
-    couponInput.value = 500;
+    couponInput.value = 720;
   }
 }
 
 async function saveOfficerCatalog() {
   const name = document.getElementById('fo-name').value.trim();
-  if (!name) { toast('Введите имя офицера','error'); return; }
-  const couponPerPuzzle = Math.max(0,parseInt(document.getElementById('fo-coupon-per-puzzle').value)||0);
+  if (!name) { toast('Введите имя офицера', 'error'); return; }
+  const type = document.getElementById('fo-type').value;
+  const generation = Math.max(1, parseInt(document.getElementById('fo-generation').value) || 8);
+  const couponPerPuzzle = Math.max(0, parseInt(document.getElementById('fo-coupon-per-puzzle').value) || 0);
+  const starCouponCost = Math.max(0, parseInt(document.getElementById('fo-star-coupon-cost')?.value) || 360);
+  const medalsBeforeTraining = Math.max(0, parseInt(document.getElementById('fo-medals-before')?.value) || 480);
+  const medalsTraining = Math.max(0, parseInt(document.getElementById('fo-medals-training')?.value) || 900);
+  const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+    ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining)
+    : (medalsBeforeTraining + medalsTraining);
   const upgradeType = document.getElementById('fo-upgrade-type')?.value || (couponPerPuzzle === 0 ? 'special' : 'standard');
+
   const data = {
     name,
-    type: document.getElementById('fo-type').value,
-    generation: Math.max(1,parseInt(document.getElementById('fo-generation').value)||7),
+    type,
+    generation,
     couponPerPuzzle,
+    starCouponCost,
+    medalsBeforeTraining,
+    medalsTraining,
+    medalsTotal,
     upgradeType,
-    medalsBeforeTraining: 690,
-    medalsTraining: 900,
-    medalsTotal: 1590,
   };
   try {
     if (editCatalogOfficerId) {
@@ -4436,8 +4511,8 @@ async function saveOfficerCatalog() {
         body: data
       });
       if (res && res.id) state.officerCatalog.push(res);
-      else state.officerCatalog.push({ id:'catalog-'+state.nextId++, ...data });
-      toast('Офицер сохранён');
+      else state.officerCatalog.push({ id: 'catalog-' + state.nextId++, ...data });
+      toast('Офицер добавлен в каталог');
     }
     save();
     closeAllModals();
