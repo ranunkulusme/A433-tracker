@@ -941,3 +941,42 @@ select option { background: var(--bg3); }
     width: 100%;
   }
 }
+
+/* ── SECTOR OFFICER MANAGEMENT & PICKERS ── */
+.stars-picker, .skills-picker {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+.star-btn {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text3);
+  padding: 0 2px;
+  transition: color 0.15s, transform 0.15s;
+}
+.star-btn.active {
+  color: #f1e05a;
+}
+.star-btn:hover {
+  transform: scale(1.2);
+}
+.skill-chip-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.skill-chip-btn.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  font-weight: 600;
+}

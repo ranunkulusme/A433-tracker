@@ -3109,6 +3109,15 @@ function renderPlayerDetail(playerId) {
   const rewards = dailyRewards(p.sector);
   const history = state.stockHistory.filter(h=>h.playerId===p.id).slice(-8).reverse();
   const stockVisible = canSeeStock(p.id);
+  const isOwner = currentUser && p.userId !== undefined && p.userId !== null && Number(p.userId) === Number(currentUser.id);
+  const canEditSector = canManage() || isOwner || state.currentPlayerId === p.id;
+  const ownerBadge = p.username
+    ? `<span class="badge badge-owner" title="Владелец: @${escapeHtml(p.username)}">👤 Владелец: @${escapeHtml(p.username)}</span>`
+    : `<span class="badge badge-no-owner">Без владельца</span>`;
+  const changeOwnerBtn = canManage()
+    ? `<button class="btn btn-secondary btn-sm" onclick="openChangeSectorOwnerModal(${p.id})">Изменить владельца</button>`
+    : '';
+
   const c = document.getElementById('content');
   c.innerHTML = `
     <div style="margin-bottom:20px">
@@ -3116,10 +3125,14 @@ function renderPlayerDetail(playerId) {
     </div>
     <div class="section-header">
       <div>
-        <div class="section-title">${p.name} ${p.realName ? `<span style="color:var(--text3)">· ${p.realName}</span>` : ''} <span class="player-meta-pill">VIP ${fmtNum(p.sector.vipLevel)}</span> <span class="player-meta-pill">Конф. ${fmtNum(p.sector.confidentialityLevel)}</span> <span class="player-meta-pill">Сила ${fmtNum(p.sector.power)}</span></div>
+        <div class="section-title">${escapeHtml(p.name)} ${p.realName ? `<span style="color:var(--text3)">· ${escapeHtml(p.realName)}</span>` : ''} <span class="player-meta-pill">VIP ${fmtNum(p.sector.vipLevel)}</span> <span class="player-meta-pill">Конф. ${fmtNum(p.sector.confidentialityLevel)}</span> <span class="player-meta-pill">Сила ${fmtNum(p.sector.power)}</span></div>
         <div style="color:var(--text3);font-size:12px;margin-top:4px">Ранг ${p.rank} · убито ${fmtNum(p.sector.kills)} · очки за убийство ${fmtOne(p.sector.killPoints)}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+          ${ownerBadge}
+          ${changeOwnerBtn}
+        </div>
       </div>
-      ${canManage() || state.currentPlayerId === p.id ? `<button class="btn-primary btn-sm" onclick="openPlayerModal(${p.id})">Редактировать</button>` : ''}
+      ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openPlayerModal(${p.id})">Редактировать</button>` : ''}
     </div>
     ${stockVisible ? `
       <div class="stock-grid">
@@ -3149,16 +3162,39 @@ function renderPlayerDetail(playerId) {
         <button class="btn-primary btn-sm" onclick="saveStockCorrection(${p.id})">Сохранить запасы</button>
         <button class="btn-ghost btn-sm" onclick="rollbackLastStock(${p.id})">Откатить последнюю</button>
       </div>` : `<div class="empty-state"><p>Запасы скрыты для роли ${state.currentRole}</p></div>`}
-    <div class="section-header"><div class="section-title">Офицеры и прогноз</div></div>
+    <div class="section-header">
+      <div class="section-title">Офицеры сектора (${(p.officers || []).length})</div>
+      ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openAddSectorOfficerModal(${p.id})">+ Добавить офицера</button>` : ''}
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Офицер</th><th>Тип</th><th>Поколение</th><th>Уровень</th><th>Звезды</th><th>До максимума</th><th>Сценарии</th></tr></thead>
-        <tbody>${p.officers.map(o=>{
-          const cat = getCatalogOfficer(o.catalogId);
-          const forecast = forecastOfficer({ today:new Date().toISOString().slice(0,10), officer:o, player:p, officerCatalog:state.officerCatalog, events:state.events, eventTypes:state.eventTypes });
-          const variants = forecastOfficerVariants({ today:new Date().toISOString().slice(0,10), officer:o, player:p, officerCatalog:state.officerCatalog, eventType:state.eventTypes[0]||{} });
-          return `<tr><td><strong>${officerLink(o)}</strong></td><td>${cat ? troopBadge(cat.type) : '—'}</td><td>${cat ? fmtNum(cat.generation) : '—'}</td><td>${fmtNum(o.level)}</td><td>${renderStars(o.stars)}</td><td>${forecast.date || 'за пределами прогноза'}</td><td style="font-size:12px;color:var(--text2)">1: ${variants.top1.date||'—'} · 2: ${variants.top2.date||'—'} · 3: ${variants.top3.date||'—'} · 4-10: ${variants.top4to10.date||'—'}</td></tr>`;
-        }).join('')}</tbody>
+        <thead><tr><th>Офицер</th><th>Тип</th><th>Поколение</th><th>Уровень</th><th>Звёзды</th><th>Навыки</th><th>До максимума</th><th>Действия</th></tr></thead>
+        <tbody>
+          ${!(p.officers || []).length ? `<tr><td colspan="8" class="empty-state">Нет офицеров в этом секторе</td></tr>` : ''}
+          ${(p.officers || []).map(o => {
+            const cat = getCatalogOfficer(o.catalogId);
+            const forecast = forecastOfficer({ today: new Date().toISOString().slice(0, 10), officer: o, player: p, officerCatalog: state.officerCatalog, events: state.events, eventTypes: state.eventTypes });
+            const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
+            const skillsBadge = `<span class="badge badge-info" style="font-family:var(--mono);font-size:11px">[${skills.join('-')}]</span>`;
+            const starsHtml = canEditSector ? renderSectorOfficerStars(p.id, o.id, o.stars) : renderStars(o.stars);
+            const actionsHtml = canEditSector ? `
+              <div style="display:flex;gap:4px">
+                <button class="action-btn" title="Редактировать" onclick="openEditSectorOfficerModal(${p.id}, '${o.id}')">✏️</button>
+                <button class="action-btn danger" title="Удалить" onclick="confirmDeleteSectorOfficer(${p.id}, '${o.id}', '${escapeHtml(o.name || cat?.name || '')}')">🗑️</button>
+              </div>
+            ` : '—';
+            return `<tr>
+              <td><strong>${officerLink(o)}</strong></td>
+              <td>${cat ? troopBadge(cat.type) : '—'}</td>
+              <td style="font-family:var(--mono)">${cat ? fmtNum(cat.generation) : '—'}</td>
+              <td style="font-family:var(--mono)">${fmtNum(o.level)}</td>
+              <td>${starsHtml}</td>
+              <td>${skillsBadge}</td>
+              <td>${forecast.date || 'за пределами прогноза'}</td>
+              <td>${actionsHtml}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
       </table>
     </div>
     <div class="section-header"><div class="section-title">История корректировок</div></div>
@@ -3194,6 +3230,346 @@ function rollbackLastStock(playerId) {
   getPlayer(playerId).stock = h.before;
   state.stockHistory.splice(idx,1);
   save(); toast('Откат выполнен','info'); renderPlayerDetail(playerId);
+}
+
+// ─── SECTOR OFFICERS & OWNER MANAGEMENT ────────────────────────
+let addSectorOfficerPlayerId = null;
+let asoSelectedStars = 0;
+let asoSelectedSkills = [1, 1, 1, 1];
+
+let editSectorOfficerPlayerId = null;
+let editSectorOfficerId = null;
+let soSelectedStars = 0;
+let soSelectedSkills = [1, 1, 1, 1];
+
+let changeOwnerSectorId = null;
+
+function renderSectorOfficerStars(playerId, officerId, count = 0) {
+  const currentStars = Number(count) || 0;
+  return `<span class="stars">${Array.from({length: 6}, (_, i) => {
+    const star = i + 1;
+    const cost = starCostFor(star);
+    const label = star < 6 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд`;
+    const newStars = currentStars === star ? star - 1 : star;
+    return `<button type="button" class="star-btn ${currentStars >= star ? 'active' : ''}" title="${label}" aria-label="${label}" onclick="handleQuickChangeStars(${playerId}, '${officerId}', ${newStars})">${currentStars >= star ? '★' : '☆'}</button>`;
+  }).join('')}</span>`;
+}
+
+async function handleQuickChangeStars(playerId, officerId, stars) {
+  try {
+    const s = Math.max(0, Math.min(6, parseInt(stars) || 0));
+    const res = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+      method: 'PUT',
+      body: { stars: s }
+    });
+    const p = getPlayer(playerId);
+    if (p && Array.isArray(p.officers)) {
+      const off = p.officers.find(o => String(o.id) === String(officerId));
+      if (off) {
+        if (res && res.id) Object.assign(off, res);
+        else off.stars = s;
+      }
+    }
+    toast(`Звёзды офицера обновлены (${s}★)`);
+    renderPlayerDetail(playerId);
+  } catch (err) {
+    toast('Ошибка обновления звёзд: ' + (err.message || err), 'error');
+  }
+}
+
+async function confirmDeleteSectorOfficer(playerId, officerId, officerName) {
+  const confirmed = confirm(`Удалить офицера «${officerName || 'Офицер'}» из этого сектора?`);
+  if (!confirmed) return;
+  try {
+    await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+      method: 'DELETE'
+    });
+    const p = getPlayer(playerId);
+    if (p && Array.isArray(p.officers)) {
+      p.officers = p.officers.filter(o => String(o.id) !== String(officerId));
+    }
+    toast(`Офицер «${officerName || ''}» удалён из сектора`);
+    renderPlayerDetail(playerId);
+  } catch (err) {
+    toast('Ошибка удаления офицера: ' + (err.message || err), 'error');
+  }
+}
+
+function onAsoCatalogChange(catalogId) {
+  // Callback for catalog change in add modal if needed
+}
+
+function openAddSectorOfficerModal(playerId) {
+  addSectorOfficerPlayerId = playerId;
+  asoSelectedStars = 0;
+  asoSelectedSkills = [1, 1, 1, 1];
+  const p = getPlayer(playerId);
+  if (!p) return;
+
+  const existingCatalogIds = new Set((p.officers || []).map(o => o.catalogId).filter(Boolean));
+  const availableOfficers = (state.officerCatalog || []).filter(co => !existingCatalogIds.has(co.id));
+
+  if (!availableOfficers.length) {
+    toast('Все офицеры из каталога уже добавлены в этот сектор', 'info');
+    return;
+  }
+
+  const select = document.getElementById('aso-catalog-select');
+  if (select) {
+    select.innerHTML = availableOfficers.map(co => `<option value="${co.id}">${escapeHtml(co.name)} (${co.type}, Gen ${co.generation})</option>`).join('');
+  }
+
+  const lvlEl = document.getElementById('aso-level');
+  if (lvlEl) lvlEl.value = 0;
+  const coupEl = document.getElementById('aso-coupons');
+  if (coupEl) coupEl.value = 0;
+
+  renderAsoStarsPicker(asoSelectedStars);
+  renderAsoSkillsPicker(asoSelectedSkills);
+  openModal('modal-add-sector-officer');
+}
+
+function renderAsoStarsPicker(stars) {
+  const container = document.getElementById('aso-stars-picker');
+  if (!container) return;
+  asoSelectedStars = Math.max(0, Math.min(6, parseInt(stars) || 0));
+  container.innerHTML = Array.from({length: 6}, (_, i) => {
+    const s = i + 1;
+    const cost = starCostFor(s);
+    const label = s < 6 ? `${fmtNum(cost)} звезд до ${s}★` : `Итого ${fmtNum(cost)} звезд`;
+    const newStars = asoSelectedStars === s ? s - 1 : s;
+    return `<button type="button" class="star-btn ${asoSelectedStars >= s ? 'active' : ''}" title="${label}" aria-label="${label}" onclick="renderAsoStarsPicker(${newStars})">${asoSelectedStars >= s ? '★' : '☆'}</button>`;
+  }).join('');
+}
+
+function renderAsoSkillsPicker(skills) {
+  const container = document.getElementById('aso-skills-picker');
+  if (!container) return;
+  asoSelectedSkills = Array.isArray(skills) && skills.length === 4 ? [...skills] : [1, 1, 1, 1];
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;width:100%">
+      ${[0, 1, 2, 3].map(idx => `
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:var(--text2);min-width:28px;font-weight:600">Н${idx + 1}:</span>
+          <div style="display:flex;gap:4px">
+            ${[1, 2, 3, 4, 5].map(lvl => `
+              <button type="button" class="skill-chip-btn ${asoSelectedSkills[idx] === lvl ? 'active' : ''}" onclick="setAsoSkill(${idx}, ${lvl})">${lvl}</button>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function setAsoSkill(idx, lvl) {
+  if (!Array.isArray(asoSelectedSkills) || asoSelectedSkills.length !== 4) {
+    asoSelectedSkills = [1, 1, 1, 1];
+  }
+  asoSelectedSkills[idx] = Math.max(1, Math.min(5, Number(lvl) || 1));
+  renderAsoSkillsPicker(asoSelectedSkills);
+}
+
+async function submitAddSectorOfficer() {
+  if (!addSectorOfficerPlayerId) return;
+  const select = document.getElementById('aso-catalog-select');
+  const catalogId = select ? select.value : '';
+  if (!catalogId) {
+    toast('Выберите офицера из каталога', 'error');
+    return;
+  }
+  const cat = getCatalogOfficer(catalogId);
+  const level = Math.max(0, Math.min(179, parseInt(document.getElementById('aso-level')?.value) || 0));
+  const coupons = Math.max(0, parseInt(document.getElementById('aso-coupons')?.value) || 0);
+  const stars = Math.max(0, Math.min(6, parseInt(asoSelectedStars) || 0));
+  const skills = Array.isArray(asoSelectedSkills) && asoSelectedSkills.length === 4
+    ? asoSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
+    : [1, 1, 1, 1];
+
+  const payload = {
+    catalogId,
+    name: cat?.name || '',
+    level,
+    coupons,
+    stars,
+    skills
+  };
+
+  try {
+    const res = await apiFetch(`/api/players/${addSectorOfficerPlayerId}/officers`, {
+      method: 'POST',
+      body: payload
+    });
+    const p = getPlayer(addSectorOfficerPlayerId);
+    if (p) {
+      p.officers = p.officers || [];
+      p.officers.push(res || { id: 'o' + state.nextId++, ...payload });
+    }
+    closeAllModals();
+    toast(`Офицер «${cat?.name || ''}» добавлен в сектор`);
+    renderPlayerDetail(addSectorOfficerPlayerId);
+  } catch (err) {
+    toast('Ошибка добавления офицера: ' + (err.message || err), 'error');
+  }
+}
+
+function openEditSectorOfficerModal(playerId, officerId) {
+  editSectorOfficerPlayerId = playerId;
+  editSectorOfficerId = officerId;
+  const p = getPlayer(playerId);
+  const off = p?.officers?.find(o => String(o.id) === String(officerId));
+  if (!off) {
+    toast('Офицер не найден', 'error');
+    return;
+  }
+  const cat = getCatalogOfficer(off.catalogId);
+  const titleEl = document.getElementById('mso-title');
+  if (titleEl) {
+    titleEl.textContent = `Редактировать офицера: ${off.name || cat?.name || ''}`;
+  }
+  const lvlEl = document.getElementById('so-level');
+  if (lvlEl) lvlEl.value = off.level || 0;
+  const coupEl = document.getElementById('so-coupons');
+  if (coupEl) coupEl.value = off.coupons || 0;
+  soSelectedStars = off.stars || 0;
+  soSelectedSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
+
+  renderSoStarsPicker(soSelectedStars);
+  renderSoSkillsPicker(soSelectedSkills);
+  openModal('modal-sector-officer');
+}
+
+function renderSoStarsPicker(stars) {
+  const container = document.getElementById('so-stars-picker');
+  if (!container) return;
+  soSelectedStars = Math.max(0, Math.min(6, parseInt(stars) || 0));
+  container.innerHTML = Array.from({length: 6}, (_, i) => {
+    const s = i + 1;
+    const cost = starCostFor(s);
+    const label = s < 6 ? `${fmtNum(cost)} звезд до ${s}★` : `Итого ${fmtNum(cost)} звезд`;
+    const newStars = soSelectedStars === s ? s - 1 : s;
+    return `<button type="button" class="star-btn ${soSelectedStars >= s ? 'active' : ''}" title="${label}" aria-label="${label}" onclick="renderSoStarsPicker(${newStars})">${soSelectedStars >= s ? '★' : '☆'}</button>`;
+  }).join('');
+}
+
+function renderSoSkillsPicker(skills) {
+  const container = document.getElementById('so-skills-picker');
+  if (!container) return;
+  soSelectedSkills = Array.isArray(skills) && skills.length === 4 ? [...skills] : [1, 1, 1, 1];
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;width:100%">
+      ${[0, 1, 2, 3].map(idx => `
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:var(--text2);min-width:28px;font-weight:600">Н${idx + 1}:</span>
+          <div style="display:flex;gap:4px">
+            ${[1, 2, 3, 4, 5].map(lvl => `
+              <button type="button" class="skill-chip-btn ${soSelectedSkills[idx] === lvl ? 'active' : ''}" onclick="setSoSkill(${idx}, ${lvl})">${lvl}</button>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function setSoSkill(idx, lvl) {
+  if (!Array.isArray(soSelectedSkills) || soSelectedSkills.length !== 4) {
+    soSelectedSkills = [1, 1, 1, 1];
+  }
+  soSelectedSkills[idx] = Math.max(1, Math.min(5, Number(lvl) || 1));
+  renderSoSkillsPicker(soSelectedSkills);
+}
+
+async function submitEditSectorOfficer() {
+  if (!editSectorOfficerPlayerId || !editSectorOfficerId) return;
+  const level = Math.max(0, Math.min(179, parseInt(document.getElementById('so-level')?.value) || 0));
+  const coupons = Math.max(0, parseInt(document.getElementById('so-coupons')?.value) || 0);
+  const stars = Math.max(0, Math.min(6, parseInt(soSelectedStars) || 0));
+  const skills = Array.isArray(soSelectedSkills) && soSelectedSkills.length === 4
+    ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
+    : [1, 1, 1, 1];
+
+  const payload = { level, coupons, stars, skills };
+  try {
+    const res = await apiFetch(`/api/players/${editSectorOfficerPlayerId}/officers/${editSectorOfficerId}`, {
+      method: 'PUT',
+      body: payload
+    });
+    const p = getPlayer(editSectorOfficerPlayerId);
+    if (p && Array.isArray(p.officers)) {
+      const off = p.officers.find(o => String(o.id) === String(editSectorOfficerId));
+      if (off) {
+        if (res && res.id) Object.assign(off, res);
+        else Object.assign(off, payload);
+      }
+    }
+    closeAllModals();
+    toast('Офицер сохранён');
+    renderPlayerDetail(editSectorOfficerPlayerId);
+  } catch (err) {
+    toast('Ошибка сохранения офицера: ' + (err.message || err), 'error');
+  }
+}
+
+async function openChangeSectorOwnerModal(playerId) {
+  changeOwnerSectorId = playerId;
+  const p = getPlayer(playerId);
+  if (!p) return;
+  const select = document.getElementById('cso-user-select');
+  if (!select) return;
+
+  select.innerHTML = '<option value="">— Без владельца (свободная база) —</option>';
+  try {
+    const users = await apiFetch('/api/users');
+    if (Array.isArray(users)) {
+      users.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.id;
+        opt.textContent = `@${u.username} (${u.rank || 'r3'}${u.playerName ? ' · ' + u.playerName : ''})`;
+        if (p.userId !== undefined && p.userId !== null && Number(u.id) === Number(p.userId)) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    console.error('Failed to load users for owner selector:', err);
+    toast('Не удалось загрузить пользователей', 'error');
+  }
+
+  openModal('modal-change-sector-owner');
+}
+
+async function submitChangeSectorOwner() {
+  if (!changeOwnerSectorId) return;
+  const select = document.getElementById('cso-user-select');
+  const val = select ? select.value : '';
+  const userId = val ? Number(val) : null;
+
+  try {
+    const res = await apiFetch(`/api/players/${changeOwnerSectorId}`, {
+      method: 'PUT',
+      body: { userId }
+    });
+    const p = getPlayer(changeOwnerSectorId);
+    if (p) {
+      if (res) {
+        Object.assign(p, res);
+      } else {
+        p.userId = userId;
+      }
+    }
+    if (typeof loadDataFromServer === 'function') {
+      try {
+        await loadDataFromServer();
+      } catch (_) {}
+    }
+    closeAllModals();
+    toast('Владелец сектора сохранён');
+    renderPlayerDetail(changeOwnerSectorId);
+  } catch (err) {
+    toast('Ошибка смены владельца: ' + (err.message || err), 'error');
+  }
 }
 
 // ─── PAGE: OFFICERS ──────────────────────────────────────────
@@ -3800,30 +4176,31 @@ function updatePlayerModalStarPoints() {
 
 function openPlayerModal(playerId=null) {
   editPlayerId = playerId;
-  document.getElementById('modal-player-title').textContent = playerId ? 'Редактировать игрока' : 'Новый игрок';
+  const titleEl = document.getElementById('modal-player-title');
+  if (titleEl) {
+    titleEl.textContent = playerId ? 'Параметры сектора' : 'Новый сектор';
+  }
   const p = playerId ? getPlayer(playerId) : null;
-  document.getElementById('fp-name').value = p?.name || '';
-  document.getElementById('fp-real-name').value = p?.realName || '';
-  document.getElementById('fp-rank').value = p?.rank || 'r3';
-  document.getElementById('fp-vip').value = p?.sector?.vipLevel || 0;
-  document.getElementById('fp-vip-points').value = p?.sector?.vipPoints || 0;
-  document.getElementById('fp-conf').value = p?.sector?.confidentialityLevel || 0;
-  document.getElementById('fp-stock-coupons').value = p?.stock?.coupons || 0;
-  document.getElementById('fp-stock-puzzles').value = p?.stock?.puzzles || 0;
-  document.getElementById('fp-stock-star-coupons').value = p?.stock?.starCoupons || 0;
-  document.getElementById('fp-stock-legendary-stars-1').value = p?.stock?.legendaryStars1 || 0;
-  document.getElementById('fp-stock-legendary-stars-2').value = p?.stock?.legendaryStars2 || 0;
-  document.getElementById('fp-stock-legendary-stars-3').value = p?.stock?.legendaryStars3 || 0;
-  document.getElementById('fp-stock-chests').value = p?.stock?.chests || 0;
-  document.getElementById('fp-power').value = p?.sector?.power || 0;
-  document.getElementById('fp-kills').value = p?.sector?.kills || 0;
-  document.getElementById('fp-kill-points').value = p?.sector?.killPoints || 0;
-  officerRows = p
-    ? p.officers.map(o=>({...o, skills: Array.isArray(o.skills) && o.skills.length === 4 ? [...o.skills] : [1, 1, 1, 1]}))
-    : [{ id:'new_'+Date.now(), catalogId:state.officerCatalog[0]?.id, level:0, coupons:0, stars:0, skills: [1, 1, 1, 1] }];
-  renderOfficerRows();
-  updateVipProgressHint();
-  updatePlayerModalStarPoints();
+  const nameEl = document.getElementById('fp-name');
+  if (nameEl) nameEl.value = p?.name || '';
+  const realNameEl = document.getElementById('fp-real-name');
+  if (realNameEl) realNameEl.value = p?.realName || '';
+  const rankEl = document.getElementById('fp-rank');
+  if (rankEl) rankEl.value = p?.rank || 'r3';
+  const vipEl = document.getElementById('fp-vip');
+  if (vipEl) vipEl.value = p?.sector?.vipLevel || 0;
+  const vipPointsEl = document.getElementById('fp-vip-points');
+  if (vipPointsEl) vipPointsEl.value = p?.sector?.vipPoints || 0;
+  const confEl = document.getElementById('fp-conf');
+  if (confEl) confEl.value = p?.sector?.confidentialityLevel || 0;
+  const powerEl = document.getElementById('fp-power');
+  if (powerEl) powerEl.value = p?.sector?.power || 0;
+  const killsEl = document.getElementById('fp-kills');
+  if (killsEl) killsEl.value = p?.sector?.kills || 0;
+  const killPointsEl = document.getElementById('fp-kill-points');
+  if (killPointsEl) killPointsEl.value = p?.sector?.killPoints || 0;
+
+  if (typeof updateVipProgressHint === 'function') updateVipProgressHint();
   openModal('modal-player');
 }
 
@@ -3908,37 +4285,19 @@ function setOfficerStars(index, stars) {
 
 async function savePlayer() {
   const name = document.getElementById('fp-name').value.trim();
-  if (!name) { toast('Введите имя игрока','error'); return; }
+  if (!name) { toast('Введите название сектора', 'error'); return; }
   const realName = document.getElementById('fp-real-name').value.trim();
   const rank = document.getElementById('fp-rank').value;
   const sector = {
-    vipLevel: Math.max(0,parseInt(document.getElementById('fp-vip').value)||0),
-    vipPoints: Math.max(0,parseInt(document.getElementById('fp-vip-points')?.value)||0),
-    confidentialityLevel: Math.max(0,parseInt(document.getElementById('fp-conf').value)||0),
-    power: Math.max(0,parseInt(document.getElementById('fp-power').value)||0),
-    kills: Math.max(0,parseInt(document.getElementById('fp-kills').value)||0),
-    killPoints: Math.round(Math.max(0,parseFloat(document.getElementById('fp-kill-points').value)||0) * 10) / 10,
+    vipLevel: Math.max(0, parseInt(document.getElementById('fp-vip').value) || 0),
+    vipPoints: Math.max(0, parseInt(document.getElementById('fp-vip-points')?.value) || 0),
+    confidentialityLevel: Math.max(0, parseInt(document.getElementById('fp-conf').value) || 0),
+    power: Math.max(0, parseInt(document.getElementById('fp-power').value) || 0),
+    kills: Math.max(0, parseInt(document.getElementById('fp-kills').value) || 0),
+    killPoints: Math.round(Math.max(0, parseFloat(document.getElementById('fp-kill-points').value) || 0) * 10) / 10,
   };
-  const stock = {
-    coupons: Math.max(0,parseInt(document.getElementById('fp-stock-coupons')?.value)||0),
-    puzzles: Math.max(0,parseInt(document.getElementById('fp-stock-puzzles')?.value)||0),
-    starCoupons: Math.max(0,parseInt(document.getElementById('fp-stock-star-coupons')?.value)||0),
-    legendaryStars1: Math.max(0,parseInt(document.getElementById('fp-stock-legendary-stars-1')?.value)||0),
-    legendaryStars2: Math.max(0,parseInt(document.getElementById('fp-stock-legendary-stars-2')?.value)||0),
-    legendaryStars3: Math.max(0,parseInt(document.getElementById('fp-stock-legendary-stars-3')?.value)||0),
-    chests: Math.max(0,parseInt(document.getElementById('fp-stock-chests')?.value)||0),
-  };
-  const officers = officerRows.filter(o=>o.catalogId).map(o=>({
-    id: o.id.startsWith('new_') ? 'o'+state.nextId++ : o.id,
-    catalogId: o.catalogId,
-    name: getCatalogOfficer(o.catalogId)?.name || '',
-    level: Math.max(0,Math.min(MAX_LEVEL-1,parseInt(o.level)||0)),
-    coupons: Math.max(0,parseInt(o.coupons)||0),
-    stars: Math.max(0,Math.min(6,parseInt(o.stars)||0)),
-    skills: Array.isArray(o.skills) && o.skills.length === 4 ? o.skills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1))) : [1, 1, 1, 1],
-  }));
 
-  const payload = { name, realName, rank, sector, stock, officers };
+  const payload = { name, realName, rank, sector };
 
   try {
     if (editPlayerId) {
@@ -3948,7 +4307,7 @@ async function savePlayer() {
       });
       const p = getPlayer(editPlayerId);
       if (p) Object.assign(p, res || payload);
-      toast(`Игрок «${name}» обновлён`);
+      toast(`Сектор «${name}» обновлён`);
     } else {
       const res = await apiFetch('/api/players', {
         method: 'POST',
@@ -3959,17 +4318,33 @@ async function savePlayer() {
         state.currentPlayerId ||= res.id;
       } else {
         const id = state.nextId++;
-        state.players.push({ id, ...payload });
+        state.players.push({
+          id,
+          name,
+          realName,
+          rank,
+          sector,
+          stock: { coupons: 0, puzzles: 0, starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0, chests: 0 },
+          officers: []
+        });
         state.currentPlayerId ||= id;
       }
-      toast(`Игрок «${name}» добавлён`);
+      toast(`Сектор «${name}» добавлен`);
     }
     save();
     closeAllModals();
-    await loadDataFromServer();
-    navigate('players');
+    if (typeof loadDataFromServer === 'function') {
+      try {
+        await loadDataFromServer();
+      } catch (_) {}
+    }
+    if (editPlayerId) {
+      renderPlayerDetail(editPlayerId);
+    } else {
+      navigate('players');
+    }
   } catch (err) {
-    toast('Ошибка сохранения игрока: ' + err.message, 'error');
+    toast('Ошибка сохранения сектора: ' + (err.message || err), 'error');
   }
 }
 
@@ -5133,4 +5508,22 @@ if (typeof window !== 'undefined') {
   window.updatePlayerModalStarPoints = updatePlayerModalStarPoints;
   window.updateScannerPreviewStarPoints = updateScannerPreviewStarPoints;
   window.initSmartScanner = initSmartScanner;
+
+  window.openPlayerModal = openPlayerModal;
+  window.savePlayer = savePlayer;
+  window.openAddSectorOfficerModal = openAddSectorOfficerModal;
+  window.onAsoCatalogChange = onAsoCatalogChange;
+  window.renderAsoStarsPicker = renderAsoStarsPicker;
+  window.renderAsoSkillsPicker = renderAsoSkillsPicker;
+  window.setAsoSkill = setAsoSkill;
+  window.submitAddSectorOfficer = submitAddSectorOfficer;
+  window.openEditSectorOfficerModal = openEditSectorOfficerModal;
+  window.renderSoStarsPicker = renderSoStarsPicker;
+  window.renderSoSkillsPicker = renderSoSkillsPicker;
+  window.setSoSkill = setSoSkill;
+  window.submitEditSectorOfficer = submitEditSectorOfficer;
+  window.confirmDeleteSectorOfficer = confirmDeleteSectorOfficer;
+  window.handleQuickChangeStars = handleQuickChangeStars;
+  window.openChangeSectorOwnerModal = openChangeSectorOwnerModal;
+  window.submitChangeSectorOwner = submitChangeSectorOwner;
 }
