@@ -129,16 +129,35 @@
     {
       id: 'king-of-war',
       name: 'Король Войны',
-      cycleDays: 14,
-      durationDays: 7,
-      description: 'Двухнедельный цикл ивента Король Войны (7 дней активности, 7 дней перерыв)',
+      color: '#8b5cf6',
+      startDayOfWeek: 2, // Вторник
+      durationDays: 2,   // Вт - Ср
+      activeWeeks: 1,
+      breakWeeks: 1,
+      weekOffset: 0,
+      description: 'Король Войны (набрать силу сектора): 2 дня (Вт–Ср), через неделю',
     },
     {
-      id: 'mightiest-commander',
-      name: 'Сильнейший Командир',
-      cycleDays: 28,
-      durationDays: 7,
-      description: 'Четырехнедельный цикл ивента Сильнейший Командир',
+      id: 'mighty-forces',
+      name: 'Мощные Силы',
+      color: '#10b981',
+      startDayOfWeek: 6, // Суббота
+      durationDays: 3,   // Сб - Пн
+      activeWeeks: 1,
+      breakWeeks: 1,
+      weekOffset: 0,
+      description: 'Мощные Силы (производство войск): 3 дня (Сб–Пн), через неделю',
+    },
+    {
+      id: 'power-of-time',
+      name: 'Сила Времени',
+      color: '#f59e0b',
+      startDayOfWeek: 2, // Вторник
+      durationDays: 3,   // Вт - Чт
+      activeWeeks: 1,
+      breakWeeks: 1,
+      weekOffset: 1,     // Чередуется с Королем Войны
+      description: 'Сила Времени (трата ускорителей): 3 дня (Вт–Чт), чередуется с Королем Войны',
     },
   ];
 
@@ -660,28 +679,116 @@
     return OFFICER_PAIRINGS[String(officerId)] || [];
   }
 
-  function generateSeasonSchedule({ startDate, cyclesCount = 1, presetId = 'king-of-war', startId = 1 } = {}) {
-    const preset = EVENT_PRESETS.find(p => p.id === presetId) || EVENT_PRESETS[0];
-    const count = Math.max(1, Number(cyclesCount) || 1);
-    const baseDate = startDate && typeof startDate === 'string' ? startDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
-    const initialId = Number(startId) || 1;
+  function generateSeasonSchedule(options = {}) {
+    const {
+      startDate,
+      totalWeeks,
+      rules,
+      cyclesCount,
+      presetId,
+      startId = 1,
+    } = options;
 
-    const schedule = [];
-    for (let i = 0; i < count; i++) {
-      const dateFrom = dateAdd(baseDate, i * preset.cycleDays);
-      const dateTo = dateAdd(dateFrom, preset.durationDays - 1);
-      schedule.push({
-        id: initialId + i,
-        presetId: preset.id,
-        name: preset.name,
-        cycleIndex: i + 1,
-        dateFrom,
-        dateTo,
-        note: `${preset.name} (Сезон #${i + 1})`,
-      });
+    // Check if legacy call: totalWeeks is undefined AND rules are empty
+    if (totalWeeks === undefined && (!rules || !Array.isArray(rules) || rules.length === 0)) {
+      const preset = EVENT_PRESETS.find(p => p.id === presetId) || EVENT_PRESETS[0];
+      const count = Math.max(1, Number(cyclesCount) || 1);
+      const baseDate = startDate && typeof startDate === 'string' ? startDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const initialId = Number(startId) || 1;
+      const cycleDays = preset.cycleDays || 14;
+      const durationDays = preset.durationDays || 2;
+
+      const schedule = [];
+      for (let i = 0; i < count; i++) {
+        const dateFrom = dateAdd(baseDate, i * cycleDays);
+        const dateTo = dateAdd(dateFrom, durationDays - 1);
+        schedule.push({
+          id: initialId + i,
+          typeId: preset.id,
+          presetId: preset.id,
+          name: preset.name,
+          cycleIndex: i + 1,
+          dateFrom,
+          dateTo,
+          note: `${preset.name} (Сезон #${i + 1})`,
+        });
+      }
+      return schedule;
     }
 
-    return schedule;
+    const weeksCount = Math.max(1, Number(totalWeeks) || 8);
+    const activeRules = (Array.isArray(rules) && rules.length > 0)
+      ? rules
+      : EVENT_PRESETS;
+
+    const baseInputDate = startDate && typeof startDate === 'string' ? startDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    // Find base Monday of the week containing baseInputDate
+    const rawD = new Date(`${baseInputDate}T00:00:00Z`);
+    const d = isNaN(rawD.getTime()) ? new Date() : rawD;
+    const day = d.getUTCDay(); // 0 is Sunday, 1 is Monday ... 6 is Saturday
+    const diffToMonday = (day === 0 ? -6 : 1 - day);
+    const baseMonday = new Date(d);
+    baseMonday.setUTCDate(baseMonday.getUTCDate() + diffToMonday);
+    const baseMondayIso = baseMonday.toISOString().slice(0, 10);
+
+    const DAY_NAMES = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+    const items = [];
+    let eventSeq = 1;
+
+    for (let w = 0; w < weeksCount; w++) {
+      for (const rule of activeRules) {
+        if (!rule) continue;
+        const activeWeeks = Math.max(1, Number(rule.activeWeeks) || 1);
+        const breakWeeks = Math.max(0, Number(rule.breakWeeks) || 0);
+        const weekOffset = Math.max(0, Number(rule.weekOffset) || 0);
+        const cycleLen = activeWeeks + breakWeeks;
+
+        if (w < weekOffset) continue;
+        const relWeek = (w - weekOffset) % cycleLen;
+        if (relWeek >= activeWeeks) continue;
+
+        const startDayOfWeek = Math.max(1, Math.min(7, Number(rule.startDayOfWeek) || 1));
+        const durationDays = Math.max(1, Number(rule.durationDays) || 1);
+
+        // Date of startDayOfWeek in week w:
+        // Week w starts at baseMondayIso + w * 7 days (Monday = offset 0).
+        // startDayOfWeek: 1 (Mon) -> offset 0, 2 (Tue) -> offset 1, ... 7 (Sun) -> offset 6.
+        const dayOffsetInWeek = startDayOfWeek - 1;
+        const totalStartOffset = (w * 7) + dayOffsetInWeek;
+        const dateFrom = dateAdd(baseMondayIso, totalStartOffset);
+        const dateTo = dateAdd(dateFrom, durationDays - 1);
+
+        const endD = new Date(`${dateTo}T00:00:00Z`);
+        const endDayIso = endD.getUTCDay() === 0 ? 7 : endD.getUTCDay();
+
+        const ruleId = rule.id || rule.typeId || slug(rule.name);
+
+        items.push({
+          id: `ev-${w}-${ruleId}-${eventSeq++}`,
+          typeId: ruleId,
+          typeName: rule.name,
+          name: rule.name,
+          color: rule.color || '#8b5cf6',
+          dateFrom,
+          dateTo,
+          note: `Неделя ${w + 1}`,
+          weekIndex: w,
+          dayFromStr: DAY_NAMES[startDayOfWeek] || '',
+          dayToStr: DAY_NAMES[endDayIso] || '',
+          durationDays,
+        });
+      }
+    }
+
+    // Sort chronologically by dateFrom ASC, then name ASC
+    items.sort((a, b) => {
+      const cmp = a.dateFrom.localeCompare(b.dateFrom);
+      if (cmp !== 0) return cmp;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    return items;
   }
 
   function forecastOfficer({ today, officer, player, officerCatalog, maxDays = 3650 }) {

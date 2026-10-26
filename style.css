@@ -981,3 +981,154 @@ select option { background: var(--bg3); }
   color: #fff;
   font-weight: 600;
 }
+
+/* ── SEASON SCHEDULER & CADENCE CONSTRUCTOR ── */
+#modal-season-scheduler {
+  z-index: 105;
+}
+
+.season-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.season-event-card {
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.season-event-card.card-kow {
+  border-left: 4px solid #8b5cf6;
+}
+
+.season-event-card.card-mf {
+  border-left: 4px solid #10b981;
+}
+
+.season-event-card.card-pot {
+  border-left: 4px solid #f59e0b;
+}
+
+.season-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.season-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.season-input-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.season-input-row label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.season-input-row select,
+.season-input-row input {
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 12px;
+}
+
+.season-preview-table-wrap {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.season-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.season-preview-table th {
+  background: #1e293b;
+  color: var(--text2);
+  font-weight: 600;
+  padding: 8px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.season-preview-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text1);
+}
+
+.season-preview-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.badge-event-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge-event-kow {
+  background: rgba(139, 92, 246, 0.18);
+  color: #c084fc;
+}
+
+.badge-event-mf {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.badge-event-pot {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+.btn-remove-event-row {
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-remove-event-row:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+

@@ -1785,6 +1785,68 @@ test('API catalog CRUD and POST /api/catalog/batch for exchange shop import with
   }
 });
 
+test('API schedule-season supports complex multi-event season and batch events array with RBAC', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // 1. Пакетная отправка готового списка событий из UI предпросмотра
+    const batchRes = await fetch(`${baseUrl}/api/events/schedule-season`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        events: [
+          { typeName: 'Король Войны', dateFrom: '2026-11-03', dateTo: '2026-11-04', note: 'Неделя 1' },
+          { typeName: 'Мощные Силы', dateFrom: '2026-11-07', dateTo: '2026-11-09', note: 'Неделя 1' },
+          { typeName: 'Сила Времени', dateFrom: '2026-11-10', dateTo: '2026-11-12', note: 'Неделя 2' }
+        ]
+      })
+    });
+    assert.equal(batchRes.status, 201);
+    const batchData = await batchRes.json();
+    assert.equal(batchData.success, true);
+    assert.equal(batchData.createdCount, 3);
+    assert.equal(batchData.count, 3);
+    assert.equal(batchData.events.length, 3);
+
+    // 2. Проверка, что типы событий созданы с правильными цветами и наградами
+    const etRes = await fetch(`${baseUrl}/api/event-types`);
+    const eventTypes = await etRes.json();
+    const mfType = eventTypes.find(t => t.name === 'Мощные Силы');
+    const potType = eventTypes.find(t => t.name === 'Сила Времени');
+    assert(mfType && potType);
+    assert.equal(mfType.color, '#10b981');
+    assert.equal(potType.color, '#f59e0b');
+    assert.equal(mfType.places[0].coupons, 12500);
+
+    // 3. Отправка правил расписания (startDate, totalWeeks, rules)
+    const genRes = await fetch(`${baseUrl}/api/events/schedule-season`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        startDate: '2026-11-16',
+        totalWeeks: 4,
+        rules: [
+          { id: 'king-of-war', name: 'Король Войны', startDayOfWeek: 2, durationDays: 2, activeWeeks: 1, breakWeeks: 1, weekOffset: 0 }
+        ]
+      })
+    });
+    assert.equal(genRes.status, 201);
+    const genData = await genRes.json();
+    assert.equal(genData.createdCount, 2);
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

@@ -1195,6 +1195,96 @@ test('calculateVipDeficit and dailyRewards support dynamic vipTiers and default 
   assert.strictEqual(rewCustom.puzzlesPerDay, 4);
 });
 
+test('EVENT_PRESETS contains king-of-war, mighty-forces, power-of-time and no mightiest-commander', () => {
+  const logic = require('./logic.js');
+  const presets = logic.EVENT_PRESETS;
+  assert.equal(presets.some(p => p.id === 'mightiest-commander'), false);
+  const kow = presets.find(p => p.id === 'king-of-war');
+  const mf = presets.find(p => p.id === 'mighty-forces');
+  const pot = presets.find(p => p.id === 'power-of-time');
+  assert(kow && mf && pot);
+  assert.equal(kow.startDayOfWeek, 2); // Вт
+  assert.equal(kow.durationDays, 2);   // 2 дня
+  assert.equal(kow.weekOffset, 0);
+  assert.equal(mf.startDayOfWeek, 6);  // Сб
+  assert.equal(mf.durationDays, 3);    // 3 дня
+  assert.equal(mf.weekOffset, 0);
+  assert.equal(pot.startDayOfWeek, 2); // Вт
+  assert.equal(pot.durationDays, 3);   // 3 дня
+  assert.equal(pot.weekOffset, 1);     // Чередуется с King of War
+});
+
+test('generateSeasonSchedule generates alternating schedule for 8 weeks from Monday', () => {
+  const logic = require('./logic.js');
+  const items = logic.generateSeasonSchedule({
+    startDate: '2026-11-02', // Понедельник
+    totalWeeks: 8,
+    rules: logic.EVENT_PRESETS
+  });
+
+  // 8 недель:
+  // king-of-war (нед 0, 2, 4, 6) -> 4 события (Вт-Ср)
+  // mighty-forces (нед 0, 2, 4, 6) -> 4 события (Сб-Пн)
+  // power-of-time (нед 1, 3, 5, 7) -> 4 события (Вт-Чт)
+  // Итого 12 событий
+  assert.equal(items.length, 12);
+
+  const kowEvents = items.filter(e => e.typeId === 'king-of-war');
+  assert.equal(kowEvents.length, 4);
+  assert.equal(kowEvents[0].dateFrom, '2026-11-03'); // Вт
+  assert.equal(kowEvents[0].dateTo, '2026-11-04');   // Ср
+
+  const mfEvents = items.filter(e => e.typeId === 'mighty-forces');
+  assert.equal(mfEvents.length, 4);
+  assert.equal(mfEvents[0].dateFrom, '2026-11-07'); // Сб
+  assert.equal(mfEvents[0].dateTo, '2026-11-09');   // Пн
+
+  const potEvents = items.filter(e => e.typeId === 'power-of-time');
+  assert.equal(potEvents.length, 4);
+  assert.equal(potEvents[0].dateFrom, '2026-11-10'); // Вт на неделе 1
+  assert.equal(potEvents[0].dateTo, '2026-11-12');   // Чт
+});
+
+test('generateSeasonSchedule correctly computes base Monday if startDate is mid-week', () => {
+  const logic = require('./logic.js');
+  const items = logic.generateSeasonSchedule({
+    startDate: '2026-11-05', // Четверг
+    totalWeeks: 2,
+    rules: [{ id: 'king-of-war', name: 'Король Войны', startDayOfWeek: 2, durationDays: 2, activeWeeks: 1, breakWeeks: 1, weekOffset: 0 }]
+  });
+  // Базовый понедельник недели 0 — 2026-11-02, событие во Вт 2026-11-03
+  assert.equal(items.length, 1);
+  assert.equal(items[0].dateFrom, '2026-11-03');
+  assert.equal(items[0].dateTo, '2026-11-04');
+});
+
+test('generateSeasonSchedule supports custom cadence (2 active weeks, 1 break week)', () => {
+  const logic = require('./logic.js');
+  const items = logic.generateSeasonSchedule({
+    startDate: '2026-11-02',
+    totalWeeks: 6,
+    rules: [{ id: 'custom', name: 'Тест', startDayOfWeek: 1, durationDays: 1, activeWeeks: 2, breakWeeks: 1, weekOffset: 0 }]
+  });
+  // Недели активности: 0, 1 (активны), 2 (перерыв), 3, 4 (активны), 5 (перерыв) -> 4 события
+  assert.equal(items.length, 4);
+  assert.equal(items[0].dateFrom, '2026-11-02');
+  assert.equal(items[1].dateFrom, '2026-11-09');
+  assert.equal(items[2].dateFrom, '2026-11-23');
+  assert.equal(items[3].dateFrom, '2026-11-30');
+});
+
+test('generateSeasonSchedule preserves backward compatibility with legacy presetId and cyclesCount', () => {
+  const logic = require('./logic.js');
+  const items = logic.generateSeasonSchedule({
+    startDate: '2026-12-01',
+    presetId: 'king-of-war',
+    cyclesCount: 2
+  });
+  assert(items.length >= 2);
+  assert.equal(items[0].dateFrom, '2026-12-01');
+});
+
+
 
 
 
