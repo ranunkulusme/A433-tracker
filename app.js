@@ -542,14 +542,16 @@ function formatDateTime(s) {
 
 async function loadDataFromServer() {
   try {
-    const [cat, et, evs] = await Promise.all([
+    const [cat, et, evs, vTiers] = await Promise.all([
       apiFetch('/api/catalog').catch(() => null),
       apiFetch('/api/event-types').catch(() => null),
-      apiFetch('/api/events').catch(() => null)
+      apiFetch('/api/events').catch(() => null),
+      apiFetch('/api/vip-tiers').catch(() => null)
     ]);
     if (Array.isArray(cat)) state.officerCatalog = cat;
     if (Array.isArray(et)) state.eventTypes = et;
     if (Array.isArray(evs)) state.events = evs;
+    if (Array.isArray(vTiers)) state.vipTiers = vTiers;
 
     if (canManage()) {
       const pl = await apiFetch('/api/players').catch(() => null);
@@ -796,7 +798,7 @@ function updateVipProgressHint(isCabinet = false) {
 
   if (!defFn) return;
 
-  const def = defFn({ currentLevel: vip, currentPoints: pts, targetLevel: vip + 1 });
+  const def = defFn({ currentLevel: vip, currentPoints: pts, targetLevel: vip + 1, vipTiers: state.vipTiers });
   hintEl.style.display = 'block';
   hintEl.innerHTML = `⭐ <strong>До VIP ${def.targetLevel}</strong> осталось <strong>${fmtNum(def.pointsNeeded)}</strong> очков (+${def.dailyPuzzlesIncrease} пазлов/день)`;
 }
@@ -4545,6 +4547,104 @@ function confirmDeleteOfficerCatalog(id) {
     }
   };
   openModal('modal-confirm');
+}
+
+// ─── VIP TIERS MODAL ─────────────────────────────────────────
+async function openVipTiersModal() {
+  if (!state.vipTiers || !state.vipTiers.length) {
+    try {
+      const res = await apiFetch('/api/vip-tiers');
+      if (Array.isArray(res)) state.vipTiers = res;
+    } catch (_) {}
+  }
+  renderVipTiersEditor();
+  openModal('modal-vip-tiers');
+}
+
+function renderVipTiersEditor() {
+  const tbody = document.getElementById('vip-tiers-editor-body');
+  if (!tbody) return;
+
+  const tiers = (state.vipTiers && state.vipTiers.length === 30)
+    ? state.vipTiers
+    : Array.from({ length: 30 }, (_, i) => ({
+        level: i + 1,
+        points: (i + 1 === 14) ? 750000 : ((i + 1) * 50000),
+        dailyPuzzles: (i + 1 > 10 ? Math.min(20, Math.max(2, i + 1 - 9)) : 0),
+        dailyChests: 1
+      }));
+
+  tbody.innerHTML = tiers.map(t => {
+    const isVip14 = Number(t.level) === 14;
+    return `
+      <tr style="${isVip14 ? 'background:rgba(26,110,245,0.12);font-weight:600' : ''}">
+        <td style="text-align:center;font-weight:700">
+          ${isVip14 ? '<span title="VIP 14 (Ключевой)">⭐ 14</span>' : t.level}
+        </td>
+        <td>
+          <input type="number" id="vip-tier-pts-${t.level}" value="${t.points ?? 0}" min="0" step="5000" style="width:100%;font-family:var(--mono);${isVip14 ? 'border-color:var(--primary);font-weight:700' : ''}">
+        </td>
+        <td>
+          <input type="number" id="vip-tier-puz-${t.level}" value="${t.dailyPuzzles ?? t.daily_puzzles ?? 0}" min="0" step="0.5" style="width:100%;text-align:center;font-family:var(--mono)">
+        </td>
+        <td>
+          <input type="number" id="vip-tier-chst-${t.level}" value="${t.dailyChests ?? t.daily_chests ?? 1}" min="0" step="1" style="width:100%;text-align:center;font-family:var(--mono)">
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function submitVipTiers() {
+  const tiers = [];
+  for (let lvl = 1; lvl <= 30; lvl++) {
+    const pts = Math.max(0, parseInt(document.getElementById(`vip-tier-pts-${lvl}`)?.value) || 0);
+    const puz = Math.max(0, parseFloat(document.getElementById(`vip-tier-puz-${lvl}`)?.value) || 0);
+    const chst = Math.max(0, parseFloat(document.getElementById(`vip-tier-chst-${lvl}`)?.value) || 1);
+    tiers.push({
+      level: lvl,
+      points: pts,
+      dailyPuzzles: puz,
+      dailyChests: chst
+    });
+  }
+
+  try {
+    const updated = await apiFetch('/api/vip-tiers', {
+      method: 'PUT',
+      body: { tiers }
+    });
+    if (Array.isArray(updated)) {
+      state.vipTiers = updated;
+    } else {
+      state.vipTiers = tiers;
+    }
+    save();
+    closeAllModals();
+    toast('Шкала уровней VIP сохранена');
+    updateVipProgressHint(false);
+    updateCabinetVipProgressHint();
+    if (currentPage === 'players' && editPlayerId) renderPlayerDetail(editPlayerId);
+    else if (currentPage === 'my_cabinet') renderMyCabinet();
+  } catch (err) {
+    toast('Ошибка сохранения шкалы VIP: ' + (err.message || err), 'error');
+  }
+}
+
+function resetVipTiersToDefault() {
+  const DEFAULT_POINTS = [
+    0, 200, 700, 2500, 6000, 15000, 35000, 75000, 130000, 220000,
+    340000, 480000, 600000, 750000, 1000000, 1300000, 1700000, 2200000, 2800000, 3500000,
+    4300000, 5200000, 6200000, 7300000, 8500000, 10000000, 12000000, 15000000, 19000000, 24000000
+  ];
+  for (let lvl = 1; lvl <= 30; lvl++) {
+    const ptsEl = document.getElementById(`vip-tier-pts-${lvl}`);
+    if (ptsEl) ptsEl.value = DEFAULT_POINTS[lvl - 1] ?? (lvl * 100000);
+    const puzEl = document.getElementById(`vip-tier-puz-${lvl}`);
+    if (puzEl) puzEl.value = lvl > 10 ? Math.min(20, Math.max(2, lvl - 9)) : 0;
+    const chstEl = document.getElementById(`vip-tier-chst-${lvl}`);
+    if (chstEl) chstEl.value = 1;
+  }
 }
 
 // ─── EVENT TYPE MODAL ─────────────────────────────────────────

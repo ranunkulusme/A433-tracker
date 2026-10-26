@@ -362,6 +362,39 @@
   </div>
 </div>
 
+<!-- Modal: VIP Tiers Settings -->
+<div class="modal modal-lg" id="modal-vip-tiers" style="max-width:760px">
+  <div class="modal-header">
+    <h3 id="modal-vip-tiers-title">⭐ Настройка шкалы уровней VIP</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+    <div style="font-size:13px;color:var(--text2);margin-bottom:14px;background:rgba(26,110,245,0.1);padding:10px 14px;border-radius:8px;border:1px solid rgba(26,110,245,0.2)">
+      💡 Задайте требуемые очки и ежедневные награды для каждого уровня VIP. Для <strong>VIP 14</strong> по умолчанию установлено <strong>750 000</strong> очков.
+    </div>
+    <div class="table-wrap">
+      <table id="table-vip-tiers-editor">
+        <thead>
+          <tr>
+            <th style="width:75px;text-align:center">Уровень</th>
+            <th>Требуется очков</th>
+            <th style="width:130px;text-align:center">Пазлов/день</th>
+            <th style="width:130px;text-align:center">Сундуков/день</th>
+          </tr>
+        </thead>
+        <tbody id="vip-tiers-editor-body"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
+    <button class="btn-ghost" onclick="resetVipTiersToDefault()">Сбросить к базовым</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+      <button class="btn-primary" onclick="submitVipTiers()">Сохранить шкалу VIP</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Event Type -->
 <div class="modal" id="modal-et">
   <div class="modal-header">
