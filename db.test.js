@@ -488,7 +488,7 @@ test('db migrates legacy database schema safely adding missing columns', () => {
   }
 });
 
-test('initDb upserts all community officers into existing database with 3 legacy officers', () => {
+test('initDb preserves existing catalog officers and migrates missing columns without force-re-seeding', () => {
   const { DatabaseSync } = require('node:sqlite');
   const dbModule = require('./db.js');
   const testDbDir = path.join(__dirname, 'data-test-community');
@@ -546,16 +546,13 @@ test('initDb upserts all community officers into existing database with 3 legacy
     // Запускаем initDb на существующей БД с 3 офицерами
     dbModule.initDb(testDbPath);
 
-    // Должно стать 12 офицеров (все community officers добавлены/обновлены)
+    // Должно остаться ровно 3 офицера (без принудительного перезаписывания) с миграцией колонок
     const catalog = dbModule.getCatalog();
-    assert.strictEqual(catalog.length, 12);
-    const aurora = catalog.find(o => o.id === 'aurora');
-    assert(aurora);
-    assert.strictEqual(aurora.generation, 8);
-    assert.strictEqual(aurora.upgradeType, 'standard');
-    const angel = catalog.find(o => o.id === 'angel');
-    assert(angel);
-    assert.strictEqual(angel.upgradeType, 'special');
+    assert.strictEqual(catalog.length, 3);
+    const nathon = catalog.find(o => o.id === 'admiral-nathon');
+    assert(nathon);
+    assert.strictEqual(nathon.starCouponCost, 360);
+    assert.strictEqual(nathon.upgradeType, 'standard');
   } finally {
     try {
       dbModule.getDb().close();
@@ -986,5 +983,126 @@ test('importKowJson safely handles sector with non-existent userId without crash
   assert(imported);
   assert.equal(imported.userId, null);
 });
+
+test('vip tiers initialized by default with 30 levels and VIP 14 is 750000 points', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const tiers = dbModule.getVipTiers();
+  assert.equal(Array.isArray(tiers), true);
+  assert.equal(tiers.length, 30);
+
+  const vip14 = tiers.find(t => t.level === 14);
+  assert(vip14);
+  assert.equal(vip14.points, 750000);
+  assert.equal(vip14.dailyPuzzles, 3);
+  assert.equal(vip14.dailyChests, 1);
+
+  const vip1 = tiers.find(t => t.level === 1);
+  assert.equal(vip1.points, 0);
+
+  const vip30 = tiers.find(t => t.level === 30);
+  assert(vip30);
+  assert(vip30.points > 750000);
+});
+
+test('setVipTiers validates and updates VIP tiers points and daily rewards', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const updatedTiers = [
+    { level: 1, points: 0, dailyPuzzles: 0, dailyChests: 1 },
+    { level: 14, points: 760000, dailyPuzzles: 4, dailyChests: 1 },
+    { level: 30, points: 50000000, dailyPuzzles: 15, dailyChests: 2 }
+  ];
+
+  dbModule.setVipTiers(updatedTiers);
+  const tiers = dbModule.getVipTiers();
+  const v14 = tiers.find(t => t.level === 14);
+  assert.equal(v14.points, 760000);
+  assert.equal(v14.dailyPuzzles, 4);
+});
+
+test('catalog officer supports star_coupon_cost, medals before/training, total sum and default values (480, 900, 1380)', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // Сохраняем офицера с дефолтными значениями
+  const saved = dbModule.saveCatalogItem({
+    id: 'officer-po',
+    name: 'По',
+    type: 'Танк',
+    generation: 8,
+    couponPerPuzzle: 720,
+    starCouponCost: 360
+  });
+
+  assert.equal(saved.medalsBeforeTraining, 480);
+  assert.equal(saved.medalsTraining, 900);
+  assert.equal(saved.medalsTotal, 1380);
+  assert.equal(saved.starCouponCost, 360);
+  assert.equal(saved.couponPerPuzzle, 720);
+
+  const catalog = dbModule.getCatalog();
+  const po = catalog.find(o => o.id === 'officer-po');
+  assert(po);
+  assert.equal(po.name, 'По');
+  assert.equal(po.medalsBeforeTraining, 480);
+  assert.equal(po.medalsTraining, 900);
+  assert.equal(po.medalsTotal, 1380);
+  assert.equal(po.starCouponCost, 360);
+
+  // Редактируем с кастомными медалями
+  dbModule.saveCatalogItem({
+    id: 'officer-po',
+    name: 'По (кастомный)',
+    type: 'Танк',
+    generation: 8,
+    couponPerPuzzle: 720,
+    starCouponCost: 360,
+    medalsBeforeTraining: 500,
+    medalsTraining: 1000
+  });
+
+  const updatedPo = dbModule.getCatalog().find(o => o.id === 'officer-po');
+  assert.equal(updatedPo.medalsBeforeTraining, 500);
+  assert.equal(updatedPo.medalsTraining, 1000);
+  assert.equal(updatedPo.medalsTotal, 1500);
+});
+
+test('catalog does not re-seed deleted officers on db reload and clearCatalog clears all', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  dbModule.saveCatalogItem({
+    id: 'temp-officer',
+    name: 'Временный',
+    type: 'Пехота'
+  });
+  assert(dbModule.getCatalog().length >= 1);
+
+  dbModule.clearCatalog();
+  assert.equal(dbModule.getCatalog().length, 0);
+
+  // При повторном initDb на той же базе удаленные офицеры не должны воскресать
+  const testDbDir = path.join(__dirname, 'test-db-catalog-' + Date.now());
+  const testDbPath = path.join(testDbDir, 'kow.db');
+  fs.mkdirSync(testDbDir, { recursive: true });
+  try {
+    const db1 = dbModule.initDb(testDbPath);
+    dbModule.clearCatalog();
+    assert.equal(dbModule.getCatalog().length, 0);
+    db1.close();
+
+    const db2 = dbModule.initDb(testDbPath);
+    assert.equal(dbModule.getCatalog().length, 0);
+    db2.close();
+  } finally {
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
+});
+
 
 

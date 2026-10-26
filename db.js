@@ -634,6 +634,80 @@ function deletePlayerOfficer(playerId, officerId) {
   return true;
 }
 
+// ─── VIP TIERS ────────────────────────────────────────────────
+const DEFAULT_VIP_TIERS = [
+  { level: 1, points: 0, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 2, points: 200, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 3, points: 700, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 4, points: 2500, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 5, points: 6000, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 6, points: 15000, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 7, points: 35000, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 8, points: 75000, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 9, points: 130000, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 10, points: 220000, dailyPuzzles: 0, dailyChests: 1 },
+  { level: 11, points: 340000, dailyPuzzles: 1, dailyChests: 1 },
+  { level: 12, points: 480000, dailyPuzzles: 2, dailyChests: 1 },
+  { level: 13, points: 600000, dailyPuzzles: 2, dailyChests: 1 },
+  { level: 14, points: 750000, dailyPuzzles: 3, dailyChests: 1 },
+  { level: 15, points: 1000000, dailyPuzzles: 3, dailyChests: 1 },
+  { level: 16, points: 1300000, dailyPuzzles: 4, dailyChests: 1 },
+  { level: 17, points: 1700000, dailyPuzzles: 4, dailyChests: 1 },
+  { level: 18, points: 2200000, dailyPuzzles: 5, dailyChests: 1 },
+  { level: 19, points: 2800000, dailyPuzzles: 5, dailyChests: 1 },
+  { level: 20, points: 3500000, dailyPuzzles: 6, dailyChests: 1 },
+  { level: 21, points: 4300000, dailyPuzzles: 6, dailyChests: 1 },
+  { level: 22, points: 5200000, dailyPuzzles: 7, dailyChests: 1 },
+  { level: 23, points: 6200000, dailyPuzzles: 7, dailyChests: 1 },
+  { level: 24, points: 7300000, dailyPuzzles: 8, dailyChests: 1 },
+  { level: 25, points: 8500000, dailyPuzzles: 8, dailyChests: 1 },
+  { level: 26, points: 10000000, dailyPuzzles: 9, dailyChests: 1 },
+  { level: 27, points: 12000000, dailyPuzzles: 9, dailyChests: 1 },
+  { level: 28, points: 15000000, dailyPuzzles: 10, dailyChests: 1 },
+  { level: 29, points: 19000000, dailyPuzzles: 10, dailyChests: 1 },
+  { level: 30, points: 24000000, dailyPuzzles: 12, dailyChests: 1 },
+];
+
+function getVipTiers() {
+  const db = getDb();
+  const rows = db.prepare('SELECT level, points, daily_puzzles as dailyPuzzles, daily_chests as dailyChests FROM vip_tiers ORDER BY level ASC').all();
+  return rows;
+}
+
+function setVipTiers(tiers) {
+  if (!Array.isArray(tiers) || tiers.length === 0) return getVipTiers();
+  const db = getDb();
+  const insertStmt = db.prepare(`
+    INSERT INTO vip_tiers (level, points, daily_puzzles, daily_chests)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(level) DO UPDATE SET
+      points = excluded.points,
+      daily_puzzles = excluded.daily_puzzles,
+      daily_chests = excluded.daily_chests
+  `);
+  db.exec('BEGIN TRANSACTION');
+  try {
+    for (const t of tiers) {
+      const level = Math.max(1, Math.min(30, parseInt(t.level) || 1));
+      const points = Math.max(0, parseInt(t.points) || 0);
+      const dailyPuzzles = Math.max(0, parseFloat(t.dailyPuzzles ?? t.daily_puzzles) || 0);
+      const dailyChests = Math.max(0, parseFloat(t.dailyChests ?? t.daily_chests) || 1);
+      insertStmt.run(level, points, dailyPuzzles, dailyChests);
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return getVipTiers();
+}
+
+function clearCatalog() {
+  const db = getDb();
+  db.prepare('DELETE FROM officer_catalog').run();
+  return true;
+}
+
 // ─── CATALOG ─────────────────────────────────────────────────
 function getCatalog() {
   const db = getDb();
@@ -644,10 +718,11 @@ function getCatalog() {
     type: r.type,
     generation: r.generation,
     couponPerPuzzle: r.coupon_per_puzzle,
+    starCouponCost: r.star_coupon_cost ?? 360,
     upgradeType: r.upgrade_type || 'standard',
-    medalsBeforeTraining: r.medals_before_training,
-    medalsTraining: r.medals_training,
-    medalsTotal: r.medals_total
+    medalsBeforeTraining: r.medals_before_training ?? 480,
+    medalsTraining: r.medals_training ?? 900,
+    medalsTotal: r.medals_total ?? ((r.medals_before_training ?? 480) + (r.medals_training ?? 900))
   }));
 }
 
@@ -661,14 +736,22 @@ function saveCatalogItem(itemOrDb, maybeItem) {
     item = itemOrDb;
   }
   const upgradeType = item.upgradeType || item.upgrade_type || 'standard';
+  const medalsBeforeTraining = item.medalsBeforeTraining ?? item.medals_before_training ?? 480;
+  const medalsTraining = item.medalsTraining ?? item.medals_training ?? 900;
+  const medalsTotal = item.medalsTotal ?? item.medals_total ?? (Number(medalsBeforeTraining) + Number(medalsTraining));
+  const starCouponCost = item.starCouponCost ?? item.star_coupon_cost ?? 360;
+  const couponPerPuzzle = item.couponPerPuzzle ?? item.coupon_per_puzzle ?? 720;
+  const generation = item.generation ?? 8;
+
   db.prepare(`
-    INSERT INTO officer_catalog (id, name, type, generation, coupon_per_puzzle, upgrade_type, medals_before_training, medals_training, medals_total)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO officer_catalog (id, name, type, generation, coupon_per_puzzle, star_coupon_cost, upgrade_type, medals_before_training, medals_training, medals_total)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       type = excluded.type,
       generation = excluded.generation,
       coupon_per_puzzle = excluded.coupon_per_puzzle,
+      star_coupon_cost = excluded.star_coupon_cost,
       upgrade_type = excluded.upgrade_type,
       medals_before_training = excluded.medals_before_training,
       medals_training = excluded.medals_training,
@@ -677,16 +760,23 @@ function saveCatalogItem(itemOrDb, maybeItem) {
     item.id,
     item.name,
     item.type || 'Пехота',
-    item.generation || 7,
-    item.couponPerPuzzle ?? item.coupon_per_puzzle ?? 500,
+    generation,
+    couponPerPuzzle,
+    starCouponCost,
     upgradeType,
-    item.medalsBeforeTraining ?? item.medals_before_training ?? 690,
-    item.medalsTraining ?? item.medals_training ?? 900,
-    item.medalsTotal ?? item.medals_total ?? 1590
+    medalsBeforeTraining,
+    medalsTraining,
+    medalsTotal
   );
   return {
     ...item,
-    upgradeType
+    generation,
+    couponPerPuzzle,
+    starCouponCost,
+    upgradeType,
+    medalsBeforeTraining,
+    medalsTraining,
+    medalsTotal
   };
 }
 
@@ -1181,9 +1271,33 @@ function migrateSchema(db) {
   }
 
   const catalogCols = getColumns('officer_catalog');
-  if (catalogCols.length > 0 && !catalogCols.includes('upgrade_type')) {
-    db.exec("ALTER TABLE officer_catalog ADD COLUMN upgrade_type TEXT NOT NULL DEFAULT 'standard';");
+  if (catalogCols.length > 0) {
+    if (!catalogCols.includes('upgrade_type')) {
+      db.exec("ALTER TABLE officer_catalog ADD COLUMN upgrade_type TEXT NOT NULL DEFAULT 'standard';");
+    }
+    if (!catalogCols.includes('star_coupon_cost')) {
+      db.exec("ALTER TABLE officer_catalog ADD COLUMN star_coupon_cost INTEGER NOT NULL DEFAULT 360;");
+    }
   }
+
+  // Ensure vip_tiers exists and is seeded
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vip_tiers (
+        level INTEGER PRIMARY KEY,
+        points INTEGER NOT NULL DEFAULT 0,
+        daily_puzzles REAL NOT NULL DEFAULT 0,
+        daily_chests REAL NOT NULL DEFAULT 1
+      );
+    `);
+    const countVip = db.prepare('SELECT count(*) as count FROM vip_tiers').get().count;
+    if (countVip === 0) {
+      const insertVip = db.prepare('INSERT INTO vip_tiers (level, points, daily_puzzles, daily_chests) VALUES (?, ?, ?, ?)');
+      for (const t of DEFAULT_VIP_TIERS) {
+        insertVip.run(t.level, t.points, t.dailyPuzzles, t.dailyChests);
+      }
+    }
+  } catch (e) {}
 }
 
 // ─── INIT DB ─────────────────────────────────────────────────
@@ -1255,12 +1369,20 @@ function initDb(filePath) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
-      generation INTEGER NOT NULL DEFAULT 7,
-      coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+      generation INTEGER NOT NULL DEFAULT 8,
+      coupon_per_puzzle INTEGER NOT NULL DEFAULT 720,
+      star_coupon_cost INTEGER NOT NULL DEFAULT 360,
       upgrade_type TEXT NOT NULL DEFAULT 'standard',
-      medals_before_training INTEGER DEFAULT 690,
+      medals_before_training INTEGER DEFAULT 480,
       medals_training INTEGER DEFAULT 900,
-      medals_total INTEGER DEFAULT 1590
+      medals_total INTEGER DEFAULT 1380
+    );
+
+    CREATE TABLE IF NOT EXISTS vip_tiers (
+      level INTEGER PRIMARY KEY,
+      points INTEGER NOT NULL DEFAULT 0,
+      daily_puzzles REAL NOT NULL DEFAULT 0,
+      daily_chests REAL NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS event_types (
@@ -1323,14 +1445,6 @@ function initDb(filePath) {
     `);
   } catch (e) {}
 
-  // Ensure all community officers are present/upserted in officer_catalog on startup
-  // (both for newly seeded databases and existing v3.0.0 databases with partial catalog)
-  if (COMMUNITY_OFFICERS && COMMUNITY_OFFICERS.length) {
-    for (const item of COMMUNITY_OFFICERS) {
-      saveCatalogItem(db, item);
-    }
-  }
-
   return db;
 }
 
@@ -1367,6 +1481,9 @@ module.exports = {
   getCatalog,
   saveCatalogItem,
   deleteCatalogItem,
+  clearCatalog,
+  getVipTiers,
+  setVipTiers,
   getEventTypes,
   saveEventType,
   deleteEventType,
