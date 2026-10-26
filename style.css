@@ -588,6 +588,21 @@ select option { background: var(--bg3); }
   .btn-pwa-install { padding: 5px 8px; }
   .network-badge .badge-text, .network-status .badge-text { display: none; }
   .network-badge, .network-status { padding: 4px 6px; }
+  .season-params-bar > div {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  .season-weeks-btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .season-week-btn {
+    flex: 1 1 auto;
+    font-size: 11px;
+    padding: 4px 6px;
+    text-align: center;
+  }
 }
 
 /* ── NETWORK STATUS BADGE ── */
@@ -941,6 +956,9 @@ select option { background: var(--bg3); }
     max-width: 100%;
     width: 100%;
   }
+  .season-config-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── SECTOR OFFICER MANAGEMENT & PICKERS ── */
@@ -1055,9 +1073,20 @@ select option { background: var(--bg3); }
   font-size: 12px;
 }
 
+.season-weeks-btn-group {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.season-week-btn {
+  white-space: nowrap;
+}
+
 .season-preview-table-wrap {
   max-height: 260px;
   overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: #0f172a;
@@ -1065,6 +1094,7 @@ select option { background: var(--bg3); }
 
 .season-preview-table {
   width: 100%;
+  min-width: 500px;
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;
