@@ -4647,6 +4647,347 @@ function resetVipTiersToDefault() {
   }
 }
 
+// ─── EXCHANGE SHOP OCR SCANNER ─────────────────────────────────
+let isExchangeOcrRunning = false;
+let exchangeOcrOfficers = [];
+
+function openExchangeOcrModal() {
+  if (!canManage()) {
+    toast('Недостаточно прав для управления каталогом', 'error');
+    return;
+  }
+  isExchangeOcrRunning = false;
+  exchangeOcrOfficers = [];
+
+  const fileInput = document.getElementById('exchange-file-input');
+  if (fileInput) fileInput.value = '';
+
+  const dropzone = document.getElementById('exchange-dropzone');
+  if (dropzone) {
+    dropzone.style.display = 'block';
+    dropzone.classList.remove('dragover');
+  }
+
+  const progressCont = document.getElementById('exchange-progress-container');
+  if (progressCont) progressCont.style.display = 'none';
+
+  const resultsCont = document.getElementById('exchange-results-container');
+  if (resultsCont) resultsCont.style.display = 'none';
+
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  if (tbody) tbody.innerHTML = '';
+
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (submitBtn) submitBtn.disabled = true;
+
+  initExchangeOcr();
+  openModal('modal-exchange-ocr');
+}
+
+function closeExchangeOcrModal() {
+  isExchangeOcrRunning = false;
+  closeModal('modal-exchange-ocr');
+}
+
+function initExchangeOcr() {
+  const dropzone = document.getElementById('exchange-dropzone');
+  const fileInput = document.getElementById('exchange-file-input');
+
+  if (dropzone && !dropzone.dataset.initialized) {
+    dropzone.dataset.initialized = 'true';
+
+    dropzone.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+      const files = e.dataTransfer ? e.dataTransfer.files : null;
+      if (files && files.length > 0) {
+        handleExchangeFiles(files);
+      }
+    });
+  }
+
+  if (fileInput && !fileInput.dataset.initialized) {
+    fileInput.dataset.initialized = 'true';
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (files.length > 0) {
+        handleExchangeFiles(files);
+      }
+    });
+  }
+}
+
+async function handleExchangeFiles(filesList) {
+  if (isExchangeOcrRunning) return;
+  const files = Array.from(filesList || []).filter(f => f && (f.type ? f.type.startsWith('image/') : true));
+  if (files.length === 0) {
+    toast('Выберите файлы изображений для сканирования', 'warning');
+    return;
+  }
+
+  const ocrEngine = (typeof smartScanner !== 'undefined' && smartScanner) || (typeof window !== 'undefined' && window.smartScanner);
+  if (!ocrEngine || typeof ocrEngine.runExchangeShopOcr !== 'function') {
+    toast('OCR-модуль не загружен', 'error');
+    return;
+  }
+
+  isExchangeOcrRunning = true;
+
+  const progressCont = document.getElementById('exchange-progress-container');
+  const progressBar = document.getElementById('exchange-progress-bar');
+  const progressPercent = document.getElementById('exchange-progress-percent');
+  const progressStatus = document.getElementById('exchange-progress-status');
+  const progressDetails = document.getElementById('exchange-progress-details');
+
+  if (progressCont) progressCont.style.display = 'block';
+  if (progressBar) progressBar.style.width = '5%';
+  if (progressPercent) progressPercent.textContent = '5%';
+  if (progressStatus) progressStatus.textContent = 'Подключение Tesseract OCR...';
+  if (progressDetails) progressDetails.textContent = 'Загрузка словарей rus + eng';
+
+  try {
+    const result = await ocrEngine.runExchangeShopOcr(files, {
+      logic: typeof logic !== 'undefined' ? logic : (window.logic || null),
+      onProgress: (p) => {
+        const pct = Math.min(100, Math.max(0, p.percent || 0));
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (progressPercent) progressPercent.textContent = `${pct}%`;
+        if (progressStatus && p.details) progressStatus.textContent = p.details;
+        if (progressDetails) progressDetails.textContent = `Изображение ${p.current || 1} из ${p.total || 1}`;
+      }
+    });
+
+    isExchangeOcrRunning = false;
+
+    if (result && result.success && Array.isArray(result.officers) && result.officers.length > 0) {
+      renderExchangeOcrTable(result.officers);
+      toast(`Распознано командиров: ${result.officers.length}`);
+    } else {
+      toast('Командиры не найдены на скриншоте. Вы можете добавить строку вручную.', 'warning');
+      renderExchangeOcrTable([{
+        name: '',
+        type: 'Пехота',
+        generation: 8,
+        couponPerPuzzle: 720,
+        starCouponCost: 360,
+        medalsBeforeTraining: 480,
+        medalsTraining: 900,
+        medalsTotal: 1380
+      }]);
+    }
+  } catch (err) {
+    isExchangeOcrRunning = false;
+    toast('Ошибка распознавания: ' + (err.message || err), 'error');
+    if (progressStatus) progressStatus.textContent = 'Сбой распознавания';
+  }
+}
+
+function renderExchangeOcrTable(officersList) {
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const resultsCont = document.getElementById('exchange-results-container');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (!tbody) return;
+
+  const types = (typeof logic !== 'undefined' && logic.OFFICER_TYPES)
+    ? logic.OFFICER_TYPES
+    : ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
+
+  tbody.innerHTML = (officersList || []).map((off, idx) => {
+    const before = Math.max(0, parseInt(off.medalsBeforeTraining, 10) || 480);
+    const training = Math.max(0, parseInt(off.medalsTraining, 10) || 900);
+    const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+      ? logic.calculateTotalMedals(before, training)
+      : (before + training);
+    const offType = types.includes(off.type) ? off.type : 'Пехота';
+
+    return `
+      <tr class="exchange-ocr-row" data-idx="${idx}">
+        <td>
+          <input type="text" class="input-sm exchange-row-name" value="${escapeHtml(off.name || '')}" placeholder="Имя командира" style="width:100%" required>
+        </td>
+        <td>
+          <select class="input-sm exchange-row-type" style="width:100%">
+            ${types.map(t => `<option value="${t}" ${t === offType ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-gen" value="${off.generation || 8}" min="1" max="25" style="width:60px">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-coupon" value="${off.couponPerPuzzle ?? 720}" min="0" step="10" style="width:75px">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-star-coupon" value="${off.starCouponCost ?? 360}" min="0" step="10" style="width:75px">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-medals-before" value="${before}" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+        </td>
+        <td>
+          <input type="number" class="input-sm exchange-row-medals-training" value="${training}" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+        </td>
+        <td>
+          <strong class="exchange-row-medals-total" style="color:var(--text1)">${total}</strong>
+        </td>
+        <td style="text-align:center">
+          <button type="button" class="btn-sm btn-ghost" onclick="removeExchangeRow(this)" title="Удалить строку" style="color:var(--red);padding:2px 6px">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  if (resultsCont) resultsCont.style.display = 'block';
+  if (submitBtn) submitBtn.disabled = tbody.children.length === 0;
+}
+
+function recalcExchangeRowTotal(input) {
+  const row = input.closest('tr');
+  if (!row) return;
+  const beforeInput = row.querySelector('.exchange-row-medals-before');
+  const trainingInput = row.querySelector('.exchange-row-medals-training');
+  const totalElem = row.querySelector('.exchange-row-medals-total');
+  const before = Math.max(0, parseInt(beforeInput?.value, 10) || 0);
+  const training = Math.max(0, parseInt(trainingInput?.value, 10) || 0);
+  const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+    ? logic.calculateTotalMedals(before, training)
+    : (before + training);
+  if (totalElem) totalElem.textContent = String(total);
+}
+
+function removeExchangeRow(btn) {
+  const row = btn.closest('tr');
+  if (row) row.remove();
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (submitBtn) {
+    submitBtn.disabled = !tbody || tbody.children.length === 0;
+  }
+}
+
+function addManualExchangeRow() {
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const resultsCont = document.getElementById('exchange-results-container');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (!tbody) return;
+
+  const types = (typeof logic !== 'undefined' && logic.OFFICER_TYPES)
+    ? logic.OFFICER_TYPES
+    : ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
+
+  const tr = document.createElement('tr');
+  tr.className = 'exchange-ocr-row';
+  tr.innerHTML = `
+    <td>
+      <input type="text" class="input-sm exchange-row-name" value="" placeholder="Имя командира" style="width:100%" required>
+    </td>
+    <td>
+      <select class="input-sm exchange-row-type" style="width:100%">
+        ${types.map(t => `<option value="${t}">${t}</option>`).join('')}
+      </select>
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-gen" value="8" min="1" max="25" style="width:60px">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-coupon" value="720" min="0" step="10" style="width:75px">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-star-coupon" value="360" min="0" step="10" style="width:75px">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-medals-before" value="480" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+    </td>
+    <td>
+      <input type="number" class="input-sm exchange-row-medals-training" value="900" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+    </td>
+    <td>
+      <strong class="exchange-row-medals-total" style="color:var(--text1)">1380</strong>
+    </td>
+    <td style="text-align:center">
+      <button type="button" class="btn-sm btn-ghost" onclick="removeExchangeRow(this)" title="Удалить строку" style="color:var(--red);padding:2px 6px">✕</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+
+  if (resultsCont) resultsCont.style.display = 'block';
+  if (submitBtn) submitBtn.disabled = false;
+  tr.querySelector('.exchange-row-name')?.focus();
+}
+
+async function submitBatchExchangeOfficers() {
+  const rows = document.querySelectorAll('#exchange-ocr-table-body tr');
+  if (!rows || rows.length === 0) {
+    toast('Нет офицеров для добавления', 'warning');
+    return;
+  }
+
+  const officers = [];
+  for (const row of rows) {
+    const nameInput = row.querySelector('.exchange-row-name');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) {
+      toast('Заполните имена всех офицеров в таблице', 'warning');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    const type = row.querySelector('.exchange-row-type')?.value || 'Пехота';
+    const generation = Math.max(1, parseInt(row.querySelector('.exchange-row-gen')?.value, 10) || 8);
+    const couponPerPuzzle = Math.max(0, parseInt(row.querySelector('.exchange-row-coupon')?.value, 10) || 720);
+    const starCouponCost = Math.max(0, parseInt(row.querySelector('.exchange-row-star-coupon')?.value, 10) || 360);
+    const medalsBeforeTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-before')?.value, 10) || 480);
+    const medalsTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-training')?.value, 10) || 900);
+    const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
+      ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining)
+      : (medalsBeforeTraining + medalsTraining);
+
+    officers.push({
+      name,
+      type,
+      generation,
+      couponPerPuzzle,
+      starCouponCost,
+      medalsBeforeTraining,
+      medalsTraining,
+      medalsTotal,
+      upgradeType: 'standard'
+    });
+  }
+
+  try {
+    const res = await apiFetch('/api/catalog/batch', {
+      method: 'POST',
+      body: { officers }
+    });
+
+    closeExchangeOcrModal();
+    toast(`Добавлено/обновлено офицеров: ${res?.count || officers.length}`);
+    await loadDataFromServer();
+    renderOfficers();
+  } catch (err) {
+    toast('Ошибка сохранения офицеров: ' + (err.message || err), 'error');
+  }
+}
+
 // ─── EVENT TYPE MODAL ─────────────────────────────────────────
 let editEtId = null;
 let etPlaceRows = [];
@@ -5524,9 +5865,15 @@ async function applyScanResultsToProfile() {
 }
 
 function handleScannerGlobalPaste(e) {
-  const modal = document.getElementById('modal-smart-scanner');
-  if (!modal || !modal.classList.contains('open')) return;
-  if (isScannerRunning) return;
+  const smartModal = document.getElementById('modal-smart-scanner');
+  const exchangeModal = document.getElementById('modal-exchange-ocr');
+
+  const isSmartOpen = smartModal && smartModal.classList.contains('open');
+  const isExchangeOpen = exchangeModal && exchangeModal.classList.contains('open');
+
+  if (!isSmartOpen && !isExchangeOpen) return;
+  if (isSmartOpen && isScannerRunning) return;
+  if (isExchangeOpen && isExchangeOcrRunning) return;
 
   const clipboardData = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
   if (!clipboardData || !clipboardData.items) return;
@@ -5544,7 +5891,11 @@ function handleScannerGlobalPaste(e) {
 
   if (imageFiles.length > 0) {
     e.preventDefault();
-    handleScannerFiles(imageFiles);
+    if (isSmartOpen) {
+      handleScannerFiles(imageFiles);
+    } else if (isExchangeOpen) {
+      handleExchangeFiles(imageFiles);
+    }
   }
 }
 
@@ -5608,6 +5959,7 @@ function initApp() {
   updateNetworkStatusUI();
   checkPwaInstallable();
   initSmartScanner();
+  initExchangeOcr();
   checkAuth().then(isAuth => {
     if (isAuth) {
       if (currentUser?.rank === 'r3') {

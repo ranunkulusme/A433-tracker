@@ -550,8 +550,140 @@
     };
   }
 
+  /**
+   * Распознавание скриншота магазина обмена медалей («Обмен на медали офицера»)
+   * @param {File|Blob|Array<File|Blob>} filesOrFile
+   * @param {Object} options
+   * @returns {Promise<{success: boolean, officers: Array<Object>, imagesProcessed: number, rawTexts: string[]}>}
+   */
+  async function runExchangeShopOcr(filesOrFile, options = {}) {
+    const fileList = Array.isArray(filesOrFile)
+      ? filesOrFile
+      : (filesOrFile && typeof filesOrFile.length === 'number' && typeof filesOrFile !== 'string' && !(filesOrFile instanceof Blob))
+        ? Array.from(filesOrFile)
+        : [filesOrFile];
+
+    const total = Math.max(1, fileList.length);
+    let processedCount = 0;
+    const rawTexts = [];
+    const recognizedOfficers = [];
+
+    const logic = resolveLogic(options.logic);
+    if (!logic || typeof logic.parseExchangeShopScreenshotText !== 'function') {
+      return {
+        success: false,
+        error: 'Модуль логики logic.js недоступен или не содержит parseExchangeShopScreenshotText',
+        officers: [],
+        imagesProcessed: 0,
+        rawTexts: [],
+      };
+    }
+
+    const onProgress = options.onProgress;
+    function reportProgress(step) {
+      if (typeof onProgress === 'function') {
+        try {
+          onProgress(step);
+        } catch (_) {}
+      }
+    }
+
+    reportProgress({
+      current: 0,
+      total,
+      percent: 5,
+      stage: 'loading',
+      details: 'Подключение OCR-движка Tesseract (rus+eng)...',
+    });
+
+    const worker = await getOcrWorker({
+      worker: options.worker,
+      onProgress: reportProgress,
+      onWorkerProgress: (m) => {
+        if (m && m.status === 'recognizing text') {
+          const subProgress = Math.min(1, Math.max(0, Number(m.progress) || 0));
+          const basePercent = 10 + (processedCount / total) * 80;
+          const currentPercent = Math.min(95, Math.round(basePercent + (subProgress / total) * 80));
+          reportProgress({
+            current: processedCount + 1,
+            total,
+            percent: currentPercent,
+            stage: 'recognizing',
+            details: `Распознавание текста магазина (${Math.round(subProgress * 100)}%)...`,
+          });
+        }
+      },
+    });
+
+    for (let i = 0; i < total; i++) {
+      const file = fileList[i];
+      const currentNumber = i + 1;
+      const basePercent = Math.round(10 + (i / total) * 80);
+
+      reportProgress({
+        current: currentNumber,
+        total,
+        percent: basePercent,
+        stage: 'preprocessing',
+        details: `Предобработка скриншота ${currentNumber} из ${total}...`,
+      });
+
+      const preprocessedCanvas = await preprocessCanvas(file, options);
+
+      reportProgress({
+        current: currentNumber,
+        total,
+        percent: Math.min(95, basePercent + Math.round(40 / total)),
+        stage: 'recognizing',
+        details: `Распознавание скриншота ${currentNumber} из ${total}...`,
+      });
+
+      const ocrResult = await worker.recognize(preprocessedCanvas);
+      const extractedText = (ocrResult && ocrResult.data && ocrResult.data.text) || '';
+      rawTexts.push(extractedText);
+
+      reportProgress({
+        current: currentNumber,
+        total,
+        percent: Math.min(98, Math.round(10 + (currentNumber / total) * 80)),
+        stage: 'parsing',
+        details: `Поиск командиров в тексте скриншота ${currentNumber} из ${total}...`,
+      });
+
+      const parsedItems = logic.parseExchangeShopScreenshotText(extractedText);
+      if (Array.isArray(parsedItems)) {
+        for (const item of parsedItems) {
+          if (!recognizedOfficers.some(o => o.name.toLowerCase() === item.name.toLowerCase())) {
+            recognizedOfficers.push(item);
+          }
+        }
+      }
+      processedCount++;
+    }
+
+    if (options.terminateWorkerOnComplete) {
+      await terminateWorker();
+    }
+
+    reportProgress({
+      current: total,
+      total,
+      percent: 100,
+      stage: 'done',
+      details: 'Распознавание магазина обмена успешно завершено',
+    });
+
+    return {
+      success: true,
+      officers: recognizedOfficers,
+      imagesProcessed: processedCount,
+      rawTexts,
+    };
+  }
+
   const smartScanner = {
     runSmartOcr,
+    runExchangeShopOcr,
     preprocessCanvas,
     preprocessImageForOcr,
     splitWarehouseColumns,

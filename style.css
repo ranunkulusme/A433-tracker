@@ -746,7 +746,8 @@ select option { background: var(--bg3); }
   width: min(640px, calc(100vw - 32px));
 }
 
-#modal-smart-scanner {
+#modal-smart-scanner,
+#modal-exchange-ocr {
   z-index: 105;
 }
 

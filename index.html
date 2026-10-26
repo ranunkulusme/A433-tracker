@@ -395,6 +395,73 @@
   </div>
 </div>
 
+<!-- Modal: Exchange Shop OCR Scanner -->
+<div class="modal modal-lg" id="modal-exchange-ocr" style="max-width:920px">
+  <div class="modal-header">
+    <h3 id="modal-exchange-ocr-title">📷 Распознавание офицеров из магазина обмена</h3>
+    <button class="modal-close" onclick="closeExchangeOcrModal()">✕</button>
+  </div>
+  <div class="modal-body" style="max-height:75vh;overflow-y:auto">
+    <div class="scanner-description" style="color:var(--text2);font-size:13px;line-height:1.45;margin-bottom:12px">
+      Загрузите скриншот из раздела <strong>«Обмен на медали офицера»</strong>.<br>
+      Система автоматически распознает сезон, имя командира, курс купонов готовности на медали и звёзды, а также предзаполнит медали (до подготовки: 480, подготовки: 900, сумма: 1380).
+    </div>
+
+    <!-- Dropzone -->
+    <div id="exchange-dropzone" class="scanner-dropzone" onclick="document.getElementById('exchange-file-input').click()">
+      <input type="file" id="exchange-file-input" multiple accept="image/*" style="display:none">
+      <div class="scanner-dropzone-icon">📷</div>
+      <div class="scanner-dropzone-title">Перетащите скриншот магазина сюда или нажмите для выбора</div>
+      <div class="scanner-dropzone-hint">Поддерживаются PNG, JPG, WebP. Вы можете загрузить сразу несколько скриншотов.</div>
+      <div class="scanner-dropzone-hint" style="margin-top:4px;font-size:11.5px;color:var(--blue)">💡 Или вставьте скриншот из буфера обмена: Ctrl+V / Cmd+V</div>
+    </div>
+
+    <!-- Progress Container (hidden by default) -->
+    <div id="exchange-progress-container" class="scanner-progress-container" style="display:none;margin-top:14px">
+      <div class="scanner-progress-header" style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span id="exchange-progress-status" class="scanner-progress-status" style="font-weight:600">Подготовка OCR...</span>
+        <span id="exchange-progress-percent" class="scanner-progress-percent" style="color:var(--blue)">0%</span>
+      </div>
+      <div class="progress-container" style="height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
+        <div id="exchange-progress-bar" class="progress-bar scanner-progress-bar" style="width:0%;height:100%;transition:width 0.2s;background:var(--blue)"></div>
+      </div>
+      <div id="exchange-progress-details" class="scanner-progress-details" style="font-size:12px;color:var(--text3);margin-top:4px"></div>
+    </div>
+
+    <!-- Results Preview Container (hidden by default) -->
+    <div id="exchange-results-container" class="scanner-results-container" style="display:none;margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-weight:600;font-size:14px" id="exchange-results-title">Найденные командиры</div>
+        <button class="btn-sm btn-secondary" onclick="addManualExchangeRow()">+ Добавить строку</button>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table class="table" style="font-size:12.5px;min-width:760px">
+          <thead>
+            <tr>
+              <th style="min-width:140px">Имя</th>
+              <th style="min-width:110px">Тип войск</th>
+              <th style="min-width:70px">Сезон</th>
+              <th style="min-width:90px" title="Купонов на 1 медаль">Купоны/пазл</th>
+              <th style="min-width:90px" title="Купонов за 110 звёзд">Купоны/110★</th>
+              <th style="min-width:80px" title="Медали до подготовки">До подгот.</th>
+              <th style="min-width:80px" title="Медали подготовки">Подгот.</th>
+              <th style="min-width:70px" title="Всего медалей (сумма)">Всего</th>
+              <th style="width:40px"></th>
+            </tr>
+          </thead>
+          <tbody id="exchange-ocr-table-body">
+            <!-- Строки генерируются динамически -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+    <button class="btn-ghost" onclick="closeExchangeOcrModal()">Отмена</button>
+    <button class="btn-primary" id="exchange-btn-submit" onclick="submitBatchExchangeOfficers()" disabled>✓ Добавить всех в каталог</button>
+  </div>
+</div>
+
 <!-- Modal: Event Type -->
 <div class="modal" id="modal-et">
   <div class="modal-header">
