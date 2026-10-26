@@ -1061,6 +1061,24 @@
       return true;
     }
 
+    // Active sector selection & new sector creation
+    if (ep === '/api/my-profile/active-sector' && m === 'POST') {
+      return true;
+    }
+    if (ep === '/api/my-sectors' && m === 'POST') {
+      return true;
+    }
+
+    // Sector updates (PUT /api/players/:id)
+    if (/^\/api\/players\/\d+$/.test(ep) && m === 'PUT') {
+      return true;
+    }
+
+    // Point officer operations (/api/players/:id/officers and /api/players/:id/officers/:offId)
+    if (/^\/api\/players\/\d+\/officers(\/.*)?$/.test(ep) && (m === 'POST' || m === 'PUT' || m === 'DELETE')) {
+      return true;
+    }
+
     // R3 Officer mutations (/api/my-profile/officers and /api/my-profile/officers/:id)
     if (ep === '/api/my-profile/officers' && (m === 'POST' || m === 'PUT')) {
       return true;
@@ -1075,6 +1093,42 @@
     }
 
     return false;
+  }
+
+  function findActiveSector(sectors, activeSectorId) {
+    if (!Array.isArray(sectors) || sectors.length === 0) {
+      return null;
+    }
+    if (activeSectorId !== undefined && activeSectorId !== null && activeSectorId !== '') {
+      const targetId = Number(activeSectorId);
+      const found = sectors.find(s => s && Number(s.id) === targetId);
+      if (found) {
+        return found;
+      }
+    }
+    return sectors[0];
+  }
+
+  function formatSectorTitle(sector) {
+    if (!sector || typeof sector !== 'object') {
+      return '';
+    }
+    const name = sector.name || 'Сектор';
+    const rawVip = sector.sector?.vipLevel ?? sector.vipLevel ?? 0;
+    const vip = Number(rawVip) || 0;
+    const rawPower = sector.sector?.power ?? sector.power ?? 0;
+    const power = Number(rawPower) || 0;
+
+    let fmtPower;
+    if (power >= 1000000) {
+      fmtPower = (power / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    } else if (power >= 1000) {
+      fmtPower = (power / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    } else {
+      fmtPower = `${power}`;
+    }
+
+    return `${name} (VIP ${vip} · ${fmtPower})`;
   }
 
   function createOutboxItem({ endpoint = '', method = 'POST', body = null, id, timestamp } = {}) {
@@ -1156,6 +1210,8 @@
     smartAutoPick,
     smartAutoPickWithRegistrations,
     isOfflineMutationAllowed,
+    findActiveSector,
+    formatSectorTitle,
     createOutboxItem,
     addToOutboxQueue,
     filterOutboxQueue,
