@@ -863,50 +863,112 @@ function createRequestHandler(staticDir) {
     if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
 
-      const { presetId = 'king-of-war', startDate, cyclesCount = 1 } = body || {};
-      const preset = (logic.EVENT_PRESETS || []).find(p => p.id === presetId) || (logic.EVENT_PRESETS && logic.EVENT_PRESETS[0]) || {
-        id: 'king-of-war',
-        name: 'Король Войны',
-        cycleDays: 14,
-        durationDays: 7
-      };
+      function ensureEventType(identifier, defaultColor) {
+        const eventTypes = db.getEventTypes();
+        const search = String(identifier || '').trim().toLowerCase();
+        let found = eventTypes.find(t => t.name && t.name.trim().toLowerCase() === search);
 
-      const eventTypes = db.getEventTypes();
-      let eventType = eventTypes.find(t => t.name && t.name.trim().toLowerCase() === preset.name.trim().toLowerCase());
-      if (!eventType) {
-        eventType = db.saveEventType({
-          name: preset.name,
-          color: preset.id === 'king-of-war' ? '#8b5cf6' : '#f59e0b',
-          places: [
-            { place: 1, label: '🥇 1 место', coupons: 12500 },
-            { place: 2, label: '🥈 2 место', coupons: 6500 },
-            { place: 3, label: '🥉 3 место', coupons: 3500 },
-            { place: 4, label: '4–10 место', coupons: 2750 },
-          ]
-        });
+        const preset = (logic.EVENT_PRESETS || []).find(p => p.id === search || p.name.trim().toLowerCase() === search);
+        if (!found && preset) {
+          found = eventTypes.find(t => t.name && t.name.trim().toLowerCase() === preset.name.trim().toLowerCase());
+        }
+
+        if (!found) {
+          const typeName = preset ? preset.name : (identifier || 'Событие');
+          let color = defaultColor || (preset ? preset.color : '#8b5cf6');
+          if (preset?.id === 'king-of-war') color = '#8b5cf6';
+          else if (preset?.id === 'mighty-forces') color = '#10b981';
+          else if (preset?.id === 'power-of-time') color = '#f59e0b';
+
+          found = db.saveEventType({
+            name: typeName,
+            color: color || '#8b5cf6',
+            places: [
+              { place: 1, label: '🥇 1 место', coupons: 12500 },
+              { place: 2, label: '🥈 2 место', coupons: 6500 },
+              { place: 3, label: '🥉 3 место', coupons: 3500 },
+              { place: 4, label: '4–10 место', coupons: 2750 },
+            ]
+          });
+        }
+        return found;
       }
 
-      const count = Math.max(1, Number(cyclesCount) || 1);
-      const scheduleItems = logic.generateSeasonSchedule({
-        startDate: startDate || new Date().toISOString().slice(0, 10),
-        cyclesCount: count,
-        presetId: preset.id
-      });
-
       const createdEvents = [];
-      for (const item of scheduleItems) {
-        const saved = db.saveEvent({
-          typeId: eventType.id,
-          dateFrom: item.dateFrom,
-          dateTo: item.dateTo,
-          note: item.note || '',
-          assignments: []
+
+      if (Array.isArray(body?.events)) {
+        // 1. Ready-made events array from UI preview (with possible deletions/edits)
+        for (const item of body.events) {
+          if (!item || !item.dateFrom || !item.dateTo) continue;
+          let et = null;
+          if (item.typeId && typeof item.typeId === 'number') {
+            const allTypes = db.getEventTypes();
+            et = allTypes.find(t => t.id === item.typeId);
+          }
+          if (!et) {
+            et = ensureEventType(item.typeName || item.name || item.typeId, item.color);
+          }
+          const saved = db.saveEvent({
+            typeId: et.id,
+            dateFrom: item.dateFrom,
+            dateTo: item.dateTo,
+            note: item.note || '',
+            assignments: []
+          });
+          createdEvents.push(saved);
+        }
+      } else if (body?.rules || body?.totalWeeks) {
+        // 2. Multi-rule season generation
+        const scheduleItems = logic.generateSeasonSchedule({
+          startDate: body.startDate || new Date().toISOString().slice(0, 10),
+          totalWeeks: body.totalWeeks,
+          rules: body.rules
         });
-        createdEvents.push(saved);
+
+        for (const item of scheduleItems) {
+          const et = ensureEventType(item.typeName || item.name || item.typeId, item.color);
+          const saved = db.saveEvent({
+            typeId: et.id,
+            dateFrom: item.dateFrom,
+            dateTo: item.dateTo,
+            note: item.note || '',
+            assignments: []
+          });
+          createdEvents.push(saved);
+        }
+      } else {
+        // 3. Legacy fallback (presetId, startDate, cyclesCount)
+        const { presetId = 'king-of-war', startDate, cyclesCount = 1 } = body || {};
+        const preset = (logic.EVENT_PRESETS || []).find(p => p.id === presetId) || (logic.EVENT_PRESETS && logic.EVENT_PRESETS[0]) || {
+          id: 'king-of-war',
+          name: 'Король Войны',
+          cycleDays: 14,
+          durationDays: 2
+        };
+
+        const eventType = ensureEventType(preset.name, preset.color);
+        const count = Math.max(1, Number(cyclesCount) || 1);
+        const scheduleItems = logic.generateSeasonSchedule({
+          startDate: startDate || new Date().toISOString().slice(0, 10),
+          cyclesCount: count,
+          presetId: preset.id
+        });
+
+        for (const item of scheduleItems) {
+          const saved = db.saveEvent({
+            typeId: eventType.id,
+            dateFrom: item.dateFrom,
+            dateTo: item.dateTo,
+            note: item.note || '',
+            assignments: []
+          });
+          createdEvents.push(saved);
+        }
       }
 
       return sendJson(res, 201, {
         success: true,
+        count: createdEvents.length,
         createdCount: createdEvents.length,
         events: createdEvents
       });

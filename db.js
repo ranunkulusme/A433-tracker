@@ -1121,7 +1121,7 @@ function seedDemoData(db) {
   const msType = saveEventType({
     id: 2,
     name: 'Мощные Силы',
-    color: '#06b6d4',
+    color: '#10b981',
     places: [
       { place: 1, label: '🥇 1 место', coupons: 12500 },
       { place: 2, label: '🥈 2 место', coupons: 6500 },
