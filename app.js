@@ -878,7 +878,6 @@ async function handleRegisterSubmit(e) {
   if (e) e.preventDefault();
   const username = document.getElementById('auth-reg-username')?.value.trim();
   const password = document.getElementById('auth-reg-password')?.value;
-  const playerSelect = document.getElementById('auth-reg-player-select');
   const playerNameInput = document.getElementById('auth-reg-player-name');
   const submitBtn = document.getElementById('auth-reg-submit');
 
@@ -891,13 +890,7 @@ async function handleRegisterSubmit(e) {
     return;
   }
 
-  const playerId = playerSelect?.value ? Number(playerSelect.value) : null;
   const playerName = playerNameInput?.value.trim() || '';
-
-  if (!playerId && !playerName) {
-    showAuthAlert('Выберите персонажа из списка или введите имя', 'error');
-    return;
-  }
 
   if (submitBtn) {
     submitBtn.disabled = true;
@@ -907,7 +900,6 @@ async function handleRegisterSubmit(e) {
 
   try {
     const body = { username, password };
-    if (playerId) body.playerId = playerId;
     if (playerName) body.playerName = playerName;
 
     const res = await fetch('/api/auth/register', {
@@ -1162,7 +1154,7 @@ function renderSidebarNav() {
     items = [
       { page: 'my_cabinet', label: 'Мой кабинет', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` },
       { page: 'calendar', label: 'Календарь', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
-      { page: 'players', label: 'Игроки', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>` },
+      { page: 'players', label: 'Секторы', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>` },
       { page: 'officers', label: 'Офицеры', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>` },
       { page: 'event_types', label: 'Типы ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>` },
       { page: 'calculator', label: 'Калькулятор и Аналитика', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` },
@@ -2236,12 +2228,12 @@ function navigate(page, params={}) {
   const titles = {
     my_cabinet: 'Мой кабинет',
     calendar: 'Календарь ивентов',
-    players: 'Игроки',
+    players: 'Секторы',
     officers: 'Офицеры',
     officer_detail: 'Офицер',
     event_types: 'Настройка ивентов',
     event_detail: 'Ивент',
-    player_detail: 'Игрок',
+    player_detail: 'Сектор',
     calculator: 'Калькулятор и Аналитика',
     pending_registrations: 'Заявки на регистрацию',
     users: 'Управление пользователями'
@@ -2728,22 +2720,26 @@ function renderPlayers() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-header">
-      <div class="section-title">Игроки (${state.players.length})</div>
-      ${canManage() ? `<button class="btn-primary" onclick="openPlayerModal()">+ Добавить игрока</button>` : ''}
+      <div class="section-title">Секторы альянса (${state.players.length})</div>
+      ${canManage() ? `<button class="btn-primary" onclick="openPlayerModal()">+ Добавить сектор</button>` : ''}
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Игрок</th><th>Ранг</th><th>Сектор</th><th>Офицеры</th><th>Запасы</th><th></th></tr></thead>
+        <thead><tr><th>Сектор (База)</th><th>Владелец</th><th>Ранг</th><th>Сектор (Статы)</th><th>Офицеры</th><th>Запасы</th><th></th></tr></thead>
         <tbody>
-          ${!state.players.length ? `<tr><td colspan="6" class="empty-state"><p>Нет игроков</p></td></tr>` : ''}
+          ${!state.players.length ? `<tr><td colspan="7" class="empty-state"><p>Нет секторов</p></td></tr>` : ''}
           ${state.players.map(p=>{
             const rewards = dailyRewards(p.sector);
             const stock = canSeeStock(p.id) ? `${fmtNum(p.stock.coupons)} куп. · ${fmtNum(p.stock.puzzles)} пазл. · ${fmtNum(p.stock.chests)} сун.` : 'Скрыто';
+            const ownerHtml = p.username
+              ? `<span class="badge badge-owner" title="Владелец: @${escapeHtml(p.username)}">👤 @${escapeHtml(p.username)}</span>`
+              : `<span class="badge badge-no-owner">Без владельца</span>`;
             return `<tr>
               <td>
                 <strong>${playerLink(p)}</strong>
                 ${p.realName ? `<div style="color:var(--text3);font-size:12px">${p.realName}</div>` : ''}
               </td>
+              <td>${ownerHtml}</td>
               <td><span class="badge badge-none">${p.rank}</span></td>
               <td style="color:var(--text2);font-size:12px">VIP ${fmtNum(p.sector.vipLevel)} · Конф. ${fmtNum(p.sector.confidentialityLevel)}<br>Сила ${fmtNum(p.sector.power)} · убийств ${fmtNum(p.sector.kills)} · очки ${fmtOne(p.sector.killPoints)}<br>+${fmtNum(rewards.puzzlesPerDay, 2)} пазл./день</td>
               <td>
@@ -2789,7 +2785,7 @@ function renderPlayerDetail(playerId) {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div style="margin-bottom:20px">
-      <button class="btn-ghost btn-sm" onclick="navigate('players')">← Игроки</button>
+      <button class="btn-ghost btn-sm" onclick="navigate('players')">← Секторы</button>
     </div>
     <div class="section-header">
       <div>
