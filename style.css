@@ -92,6 +92,18 @@ tr:hover td { background: rgba(255,255,255,.02); }
 .badge-rank-r4 { background: rgba(139,92,246,0.15); color: #c084fc; border: 1px solid rgba(139,92,246,0.4); }
 .badge-rank-r3 { background: rgba(46,160,67,0.15); color: #3fb950; border: 1px solid rgba(46,160,67,0.4); }
 .badge-pending { background: rgba(210,153,34,0.15); color: var(--amber); border: 1px solid rgba(210,153,34,0.4); }
+.badge-owner {
+  background: rgba(56, 139, 253, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(56, 139, 253, 0.4);
+  font-weight: 500;
+}
+.badge-no-owner {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px dashed var(--border);
+  font-style: italic;
+}
 
 .user-profile-badge {
   display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px;
@@ -851,6 +863,60 @@ select option { background: var(--bg3); }
   border-bottom: 1px solid var(--border);
 }
 
+.cabinet-sectors-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.cabinet-sectors-bar .csb-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cabinet-sectors-bar .csb-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.cabinet-sectors-bar .csb-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 200px;
+  max-width: 360px;
+}
+.cabinet-empty-card {
+  text-align: center;
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.cal-reg-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(46, 160, 67, 0.12);
+  border: 1px solid rgba(46, 160, 67, 0.35);
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 @media (max-width: 600px) {
   .modal.modal-lg {
     width: calc(100vw - 16px);
@@ -861,4 +927,56 @@ select option { background: var(--bg3); }
   .form-row-3 {
     grid-template-columns: 1fr;
   }
+  .cabinet-sectors-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cabinet-sectors-bar .csb-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cabinet-sectors-bar .csb-select {
+    min-width: unset;
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+/* ── SECTOR OFFICER MANAGEMENT & PICKERS ── */
+.stars-picker, .skills-picker {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+.star-btn {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text3);
+  padding: 0 2px;
+  transition: color 0.15s, transform 0.15s;
+}
+.star-btn.active {
+  color: #f1e05a;
+}
+.star-btn:hover {
+  transform: scale(1.2);
+}
+.skill-chip-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.skill-chip-btn.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  font-weight: 600;
 }

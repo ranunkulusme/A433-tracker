@@ -93,24 +93,14 @@ function registerUser({ username, password, playerId, playerName }) {
   let assignedPlayerId = null;
   if (playerId !== undefined && playerId !== null && playerId !== '') {
     assignedPlayerId = Number(playerId);
-    const player = db.prepare('SELECT id FROM players WHERE id = ?').get(assignedPlayerId);
+    const player = db.prepare('SELECT id, user_id FROM players WHERE id = ?').get(assignedPlayerId);
     if (!player) {
       return { error: 'PLAYER_NOT_FOUND', message: 'Игрок не найден' };
     }
     const alreadyLinked = db.prepare('SELECT id FROM users WHERE player_id = ?').get(assignedPlayerId);
-    if (alreadyLinked) {
+    if (alreadyLinked || player.user_id) {
       return { error: 'PLAYER_ALREADY_LINKED', message: 'Этот персонаж уже привязан к другому аккаунту' };
     }
-  } else if (playerName) {
-    const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-    const isFirstUser = userCount === 0;
-    const rank = isFirstUser ? 'r5' : 'r3';
-    const now = new Date().toISOString();
-    const res = db.prepare(`
-      INSERT INTO players (name, real_name, rank, updated_at)
-      VALUES (?, '', ?, ?)
-    `).run(playerName, rank, now);
-    assignedPlayerId = Number(res.lastInsertRowid);
   }
 
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
@@ -126,6 +116,19 @@ function registerUser({ username, password, playerId, playerName }) {
   `).run(username, hash, rank, isApproved, assignedPlayerId, now);
 
   const userId = Number(res.lastInsertRowid);
+
+  if (assignedPlayerId) {
+    db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(userId, assignedPlayerId);
+  } else if (playerName) {
+    const createdPlayer = createPlayer({
+      name: playerName,
+      rank,
+      userId
+    });
+    assignedPlayerId = createdPlayer.id;
+    db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(assignedPlayerId, userId);
+  }
+
   return {
     userId,
     id: userId,
@@ -254,14 +257,19 @@ function getCandidatePlayers() {
   return db.prepare(`
     SELECT id, name, real_name as realName
     FROM players
-    WHERE id NOT IN (SELECT player_id FROM users WHERE player_id IS NOT NULL)
+    WHERE user_id IS NULL AND id NOT IN (SELECT player_id FROM users WHERE player_id IS NOT NULL)
     ORDER BY name COLLATE NOCASE ASC
   `).all();
 }
 
 function getPlayers() {
   const db = getDb();
-  const playerRows = db.prepare('SELECT * FROM players ORDER BY id ASC').all();
+  const playerRows = db.prepare(`
+    SELECT p.*, u.username as owner_username, u.rank as owner_rank
+    FROM players p
+    LEFT JOIN users u ON u.id = p.user_id
+    ORDER BY p.id ASC
+  `).all();
   const officerRows = db.prepare('SELECT * FROM player_officers ORDER BY rowid ASC').all();
   const officersByPlayer = new Map();
   for (const o of officerRows) {
@@ -282,6 +290,9 @@ function getPlayers() {
     name: p.name,
     realName: p.real_name || '',
     rank: p.rank || 'r3',
+    userId: p.user_id || null,
+    username: p.owner_username || null,
+    userRank: p.owner_rank || null,
     sector: {
       vipLevel: p.vip_level || 0,
       vipPoints: p.vip_points || 0,
@@ -305,7 +316,12 @@ function getPlayers() {
 
 function getPlayerById(id) {
   const db = getDb();
-  const p = db.prepare('SELECT * FROM players WHERE id = ?').get(id);
+  const p = db.prepare(`
+    SELECT p.*, u.username as owner_username, u.rank as owner_rank
+    FROM players p
+    LEFT JOIN users u ON u.id = p.user_id
+    WHERE p.id = ?
+  `).get(id);
   if (!p) return null;
   const officerRows = db.prepare('SELECT * FROM player_officers WHERE player_id = ? ORDER BY rowid ASC').all(id);
   return {
@@ -313,6 +329,9 @@ function getPlayerById(id) {
     name: p.name,
     realName: p.real_name || '',
     rank: p.rank || 'r3',
+    userId: p.user_id || null,
+    username: p.owner_username || null,
+    userRank: p.owner_rank || null,
     sector: {
       vipLevel: p.vip_level || 0,
       vipPoints: p.vip_points || 0,
@@ -342,11 +361,97 @@ function getPlayerById(id) {
   };
 }
 
+function getPlayersByUserId(userId) {
+  if (userId === undefined || userId === null) return [];
+  const db = getDb();
+  const playerRows = db.prepare(`
+    SELECT p.*, u.username as owner_username, u.rank as owner_rank
+    FROM players p
+    LEFT JOIN users u ON u.id = p.user_id
+    WHERE p.user_id = ?
+    ORDER BY p.id ASC
+  `).all(Number(userId));
+  if (playerRows.length === 0) return [];
+
+  const officerRows = db.prepare(`
+    SELECT po.*
+    FROM player_officers po
+    JOIN players p ON p.id = po.player_id
+    WHERE p.user_id = ?
+    ORDER BY po.rowid ASC
+  `).all(Number(userId));
+
+  const officersByPlayer = new Map();
+  for (const o of officerRows) {
+    if (!officersByPlayer.has(o.player_id)) officersByPlayer.set(o.player_id, []);
+    officersByPlayer.get(o.player_id).push({
+      id: o.id,
+      catalogId: o.catalog_id,
+      name: o.name,
+      level: o.level,
+      coupons: o.coupons,
+      stars: o.stars,
+      skills: parseSkills(o.skills_json)
+    });
+  }
+
+  return playerRows.map(p => ({
+    id: p.id,
+    name: p.name,
+    realName: p.real_name || '',
+    rank: p.rank || 'r3',
+    userId: p.user_id || null,
+    username: p.owner_username || null,
+    userRank: p.owner_rank || null,
+    sector: {
+      vipLevel: p.vip_level || 0,
+      vipPoints: p.vip_points || 0,
+      confidentialityLevel: p.confidentiality_level || 0,
+      power: p.power || 0,
+      kills: p.kills || 0,
+      killPoints: p.kill_points || p.kills || 0
+    },
+    stock: {
+      coupons: p.stock_coupons || 0,
+      puzzles: p.stock_puzzles || 0,
+      starCoupons: p.stock_star_coupons || 0,
+      legendaryStars1: p.stock_legendary_stars_1 || 0,
+      legendaryStars2: p.stock_legendary_stars_2 || 0,
+      legendaryStars3: p.stock_legendary_stars_3 || 0,
+      chests: p.stock_chests || 0
+    },
+    officers: officersByPlayer.get(p.id) || []
+  }));
+}
+
+function setUserActiveSector(userId, sectorId) {
+  const db = getDb();
+  const uId = Number(userId);
+  const sId = Number(sectorId);
+
+  const owned = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(sId, uId);
+  if (!owned) {
+    return { ok: false, error: 'NOT_OWNER' };
+  }
+
+  db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(sId, uId);
+  return { ok: true, activeSectorId: sId };
+}
+
 function createPlayer(data = {}) {
   const db = getDb();
   const name = data.name || '';
   const realName = data.realName || data.real_name || '';
   const rank = data.rank || 'r3';
+  let userId = data.userId !== undefined
+    ? (data.userId ? Number(data.userId) : null)
+    : (data.user_id !== undefined ? (data.user_id ? Number(data.user_id) : null) : null);
+  if (userId) {
+    const userExists = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+    if (!userExists) {
+      userId = null;
+    }
+  }
   const sector = data.sector || {};
   const vipLevel = sector.vipLevel ?? data.vipLevel ?? data.vip_level ?? 0;
   const vipPoints = Number(sector.vipPoints ?? data.vipPoints ?? data.vip_points ?? 0) || 0;
@@ -367,12 +472,13 @@ function createPlayer(data = {}) {
   let playerId = data.id ? Number(data.id) : null;
   if (playerId) {
     db.prepare(`
-      INSERT INTO players (id, name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO players (id, name, real_name, rank, user_id, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         real_name = excluded.real_name,
         rank = excluded.rank,
+        user_id = excluded.user_id,
         vip_level = excluded.vip_level,
         vip_points = excluded.vip_points,
         confidentiality_level = excluded.confidentiality_level,
@@ -387,12 +493,12 @@ function createPlayer(data = {}) {
         stock_legendary_stars_3 = excluded.stock_legendary_stars_3,
         stock_chests = excluded.stock_chests,
         updated_at = excluded.updated_at
-    `).run(playerId, name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
+    `).run(playerId, name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
   } else {
     const res = db.prepare(`
-      INSERT INTO players (name, real_name, rank, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
+      INSERT INTO players (name, real_name, rank, user_id, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
     playerId = Number(res.lastInsertRowid);
   }
 
@@ -413,6 +519,17 @@ function updatePlayer(id, updates = {}) {
   const name = updates.name !== undefined ? updates.name : existing.name;
   const realName = updates.realName !== undefined ? updates.realName : (updates.real_name !== undefined ? updates.real_name : existing.realName);
   const rank = updates.rank !== undefined ? updates.rank : existing.rank;
+  let userId = updates.userId !== undefined
+    ? (updates.userId ? Number(updates.userId) : null)
+    : (updates.user_id !== undefined
+        ? (updates.user_id ? Number(updates.user_id) : null)
+        : existing.userId);
+  if (userId) {
+    const userExists = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+    if (!userExists) {
+      userId = null;
+    }
+  }
 
   const sec = updates.sector || {};
   const vipLevel = sec.vipLevel !== undefined ? sec.vipLevel : (updates.vipLevel !== undefined ? updates.vipLevel : (updates.vip_level !== undefined ? updates.vip_level : existing.sector.vipLevel));
@@ -434,17 +551,18 @@ function updatePlayer(id, updates = {}) {
 
   db.prepare(`
     UPDATE players
-    SET name = ?, real_name = ?, rank = ?,
+    SET name = ?, real_name = ?, rank = ?, user_id = ?,
         vip_level = ?, vip_points = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
         stock_coupons = ?, stock_puzzles = ?, stock_star_coupons = ?, stock_legendary_stars_1 = ?, stock_legendary_stars_2 = ?, stock_legendary_stars_3 = ?, stock_chests = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, realName, rank, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now, id);
+  `).run(name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now, id);
 
   return getPlayerById(id);
 }
 
 function deletePlayer(id) {
   const db = getDb();
+  db.prepare('UPDATE users SET player_id = NULL WHERE player_id = ?').run(id);
   db.prepare('DELETE FROM players WHERE id = ?').run(id);
   return true;
 }
@@ -810,11 +928,16 @@ function importKowJson(rawJson) {
 
   const rawOfficersByPlayerAndId = new Map();
   const rawPlayerVipPoints = new Map();
+  const rawPlayerUserId = new Map();
   if (Array.isArray(raw?.players)) {
     for (const rp of raw.players) {
       if (rp && rp.id !== undefined) {
         const vp = rp.sector?.vipPoints ?? rp.vipPoints ?? rp.vip_points ?? 0;
         rawPlayerVipPoints.set(rp.id, vp);
+        const uid = rp.userId ?? rp.user_id ?? null;
+        if (uid !== null && uid !== undefined) {
+          rawPlayerUserId.set(rp.id, Number(uid));
+        }
       }
       if (Array.isArray(rp?.officers)) {
         for (const ro of rp.officers) {
@@ -849,6 +972,9 @@ function importKowJson(rawJson) {
       if (rawPlayerVipPoints.has(p.id)) {
         p.sector = p.sector || {};
         p.sector.vipPoints = rawPlayerVipPoints.get(p.id);
+      }
+      if (rawPlayerUserId.has(p.id)) {
+        p.userId = rawPlayerUserId.get(p.id);
       }
       if (Array.isArray(p.officers)) {
         for (const o of p.officers) {
@@ -1029,6 +1155,9 @@ function migrateSchema(db) {
 
   const playerCols = getColumns('players');
   if (playerCols.length > 0) {
+    if (!playerCols.includes('user_id')) {
+      db.exec("ALTER TABLE players ADD COLUMN user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL;");
+    }
     if (!playerCols.includes('vip_points')) {
       db.exec("ALTER TABLE players ADD COLUMN vip_points INTEGER NOT NULL DEFAULT 0;");
     }
@@ -1094,6 +1223,7 @@ function initDb(filePath) {
       name TEXT NOT NULL,
       real_name TEXT DEFAULT '',
       rank TEXT NOT NULL DEFAULT 'r3',
+      user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
       vip_level INTEGER DEFAULT 0,
       vip_points INTEGER NOT NULL DEFAULT 0,
       confidentiality_level INTEGER DEFAULT 0,
@@ -1184,6 +1314,15 @@ function initDb(filePath) {
     seedDemoData(db);
   }
 
+  // Safe backfill for links from users.player_id -> players.user_id
+  try {
+    db.exec(`
+      UPDATE players
+      SET user_id = (SELECT id FROM users WHERE users.player_id = players.id)
+      WHERE user_id IS NULL AND id IN (SELECT player_id FROM users WHERE player_id IS NOT NULL);
+    `);
+  } catch (e) {}
+
   // Ensure all community officers are present/upserted in officer_catalog on startup
   // (both for newly seeded databases and existing v3.0.0 databases with partial catalog)
   if (COMMUNITY_OFFICERS && COMMUNITY_OFFICERS.length) {
@@ -1216,7 +1355,9 @@ module.exports = {
   changePassword,
   getCandidatePlayers,
   getPlayers,
+  getPlayersByUserId,
   getPlayerById,
+  setUserActiveSector,
   createPlayer,
   updatePlayer,
   deletePlayer,

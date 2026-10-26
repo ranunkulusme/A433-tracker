@@ -34,7 +34,7 @@
       </a>
       <a href="#" class="nav-item" data-page="players">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Игроки
+        Секторы
       </a>
       <a href="#" class="nav-item" data-page="officers">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>
@@ -128,12 +128,9 @@
         <input type="password" id="auth-reg-password" autocomplete="new-password" placeholder="Придумайте пароль (мин. 4 симв.)" required>
       </div>
       <div class="form-group">
-        <label>Персонаж в гильдии</label>
-        <select id="auth-reg-player-select" onchange="onAuthRegPlayerSelectChange(this.value)">
-          <option value="">— Новый персонаж (ввести имя) —</option>
-        </select>
-        <input type="text" id="auth-reg-player-name" placeholder="Ник персонажа в игре" style="margin-top:6px">
-        <span class="form-hint">Выберите персонажа из списка гильдии или введите свой никнейм</span>
+        <label for="auth-reg-player-name">Название сектора (базы в игре)</label>
+        <input type="text" id="auth-reg-player-name" placeholder="Например: [A433]Commander">
+        <span class="form-hint">Опционально. Вы можете указать игровой ник сейчас или создать базу позже в личном кабинете.</span>
       </div>
       <div class="auth-pending-info">
         ℹ️ Заявка будет отправлена руководству гильдии (Р4/Р5). После одобрения вы сможете войти.
@@ -148,7 +145,7 @@
 <!-- Modal: Player -->
 <div class="modal" id="modal-player">
   <div class="modal-header">
-    <h3 id="modal-player-title">Новый игрок</h3>
+    <h3 id="modal-player-title">Параметры сектора</h3>
     <div style="display:flex;align-items:center;gap:8px">
       <button type="button" class="btn btn-secondary btn-sm btn-scanner" onclick="openSmartScannerModal('player')">📷 Smart Scanner</button>
       <button class="modal-close" onclick="closeAllModals()">✕</button>
@@ -190,43 +187,6 @@
     <div id="vip-progress-hint" class="vip-progress-hint" style="display:none;margin-bottom:12px"></div>
     <div class="form-row form-row-3">
       <div class="form-group">
-        <label for="fp-stock-coupons">Купон готовности офицера</label>
-        <input type="number" id="fp-stock-coupons" min="0" value="0">
-      </div>
-      <div class="form-group">
-        <label for="fp-stock-puzzles">Медаль легендарного офицера</label>
-        <input type="number" id="fp-stock-puzzles" min="0" value="0">
-      </div>
-      <div class="form-group">
-        <label for="fp-stock-star-coupons">Купон готовности звезды</label>
-        <input type="number" id="fp-stock-star-coupons" min="0" value="0">
-      </div>
-    </div>
-    <div class="form-row form-row-3">
-      <div class="form-group">
-        <label for="fp-stock-legendary-stars-1">Легендарная звезда I (110)</label>
-        <input type="number" id="fp-stock-legendary-stars-1" min="0" value="0" oninput="updatePlayerModalStarPoints()">
-      </div>
-      <div class="form-group">
-        <label for="fp-stock-legendary-stars-2">Легендарная звезда II (420)</label>
-        <input type="number" id="fp-stock-legendary-stars-2" min="0" value="0" oninput="updatePlayerModalStarPoints()">
-      </div>
-      <div class="form-group">
-        <label for="fp-stock-legendary-stars-3">Легендарная звезда III (960)</label>
-        <input type="number" id="fp-stock-legendary-stars-3" min="0" value="0" oninput="updatePlayerModalStarPoints()">
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label for="fp-stock-chests">Сундук выбора</label>
-        <input type="number" id="fp-stock-chests" min="0" value="0">
-      </div>
-      <div class="form-group" style="display:flex;align-items:flex-end">
-        <div id="fp-total-star-points-badge" class="total-star-badge">✨ Итого очков звезд: 0</div>
-      </div>
-    </div>
-    <div class="form-row form-row-3">
-      <div class="form-group">
         <label>Сила</label>
         <input type="number" id="fp-power" min="0" value="0">
       </div>
@@ -239,18 +199,99 @@
         <input type="number" id="fp-kill-points" min="0" step="0.1" value="0">
       </div>
     </div>
-    <div class="form-group">
-      <label>Офицеры</label>
-      <div class="officer-row-header">
-        <span>Офицер</span><span>Уровень</span><span>Купонов</span><span>Звезды</span><span></span>
-      </div>
-      <div id="fp-officers-list"></div>
-      <button class="btn-outline btn-sm" onclick="addOfficerRow()" style="margin-top:8px">+ Добавить офицера</button>
-    </div>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
     <button class="btn-primary" onclick="savePlayer()">Сохранить</button>
+  </div>
+</div>
+
+<!-- Modal: Add Sector Officer -->
+<div class="modal" id="modal-add-sector-officer">
+  <div class="modal-header">
+    <h3>Добавить офицера в сектор</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group">
+      <label for="aso-catalog-select">Выберите офицера из каталога *</label>
+      <select id="aso-catalog-select" onchange="onAsoCatalogChange(this.value)"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="aso-level">Уровень (0-179)</label>
+        <input type="number" id="aso-level" min="0" max="179" value="0">
+      </div>
+      <div class="form-group">
+        <label for="aso-coupons">Вложено купонов</label>
+        <input type="number" id="aso-coupons" min="0" step="500" value="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Звёзды (1-6)</label>
+      <div id="aso-stars-picker" class="stars-picker"></div>
+    </div>
+    <div class="form-group">
+      <label>Навыки (1-5)</label>
+      <div id="aso-skills-picker" class="skills-picker"></div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button type="button" class="btn-primary" onclick="submitAddSectorOfficer()">Добавить офицера</button>
+  </div>
+</div>
+
+<!-- Modal: Edit Sector Officer -->
+<div class="modal" id="modal-sector-officer">
+  <div class="modal-header">
+    <h3 id="mso-title">Редактировать офицера</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="so-level">Уровень (0-179)</label>
+        <input type="number" id="so-level" min="0" max="179" value="0">
+      </div>
+      <div class="form-group">
+        <label for="so-coupons">Вложено купонов</label>
+        <input type="number" id="so-coupons" min="0" step="500" value="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Звёзды (1-6)</label>
+      <div id="so-stars-picker" class="stars-picker"></div>
+    </div>
+    <div class="form-group">
+      <label>Навыки (1-5)</label>
+      <div id="so-skills-picker" class="skills-picker"></div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button type="button" class="btn-primary" onclick="submitEditSectorOfficer()">Сохранить</button>
+  </div>
+</div>
+
+<!-- Modal: Change Sector Owner -->
+<div class="modal" id="modal-change-sector-owner">
+  <div class="modal-header">
+    <h3>Владелец сектора</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group">
+      <label for="cso-user-select">Привязать пользователя</label>
+      <select id="cso-user-select">
+        <option value="">— Без владельца (свободная база) —</option>
+      </select>
+      <span class="form-hint">Выберите пользователя сайта, которому принадлежит этот сектор (база)</span>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button type="button" class="btn-primary" onclick="submitChangeSectorOwner()">Сохранить</button>
   </div>
 </div>
 
@@ -419,6 +460,10 @@
   </div>
   <div class="modal-body">
     <div id="reg-event-info" class="auth-demo-hint" style="margin-bottom:6px"></div>
+    <div class="form-group" id="reg-sector-group" style="display:none">
+      <label for="reg-sector-select">Сектор для участия</label>
+      <select id="reg-sector-select" onchange="onRegSectorChange(this.value)"></select>
+    </div>
     <div class="form-group">
       <label for="reg-officer-select">Офицер для прокачки *</label>
       <select id="reg-officer-select" onchange="onRegisterModalChange()"></select>
@@ -433,6 +478,42 @@
     <button class="btn-ghost" onclick="closeAllModals()">Закрыть</button>
     <button class="btn-danger" id="reg-btn-cancel" style="display:none" onclick="handleCancelRegistration()">Отменить заявку</button>
     <button class="btn-primary" id="reg-btn-submit" onclick="handleSubmitRegistration()">Подать заявку</button>
+  </div>
+</div>
+
+<!-- Modal: Add Sector -->
+<div class="modal" id="modal-add-sector">
+  <div class="modal-header">
+    <h3 id="modal-add-sector-title">Новый сектор (база)</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="form-group">
+      <label for="as-name">Название сектора (базы) *</label>
+      <input type="text" id="as-name" placeholder="Например: [A433]ranu или ranu_farm" required>
+    </div>
+    <div class="form-group">
+      <label for="as-real-name">Реальное имя игрока</label>
+      <input type="text" id="as-real-name" placeholder="Имя владельца (опционально)">
+    </div>
+    <div class="form-row form-row-3">
+      <div class="form-group">
+        <label for="as-vip">Уровень VIP</label>
+        <input type="number" id="as-vip" min="0" max="30" value="0">
+      </div>
+      <div class="form-group">
+        <label for="as-power">Мощь / Сила</label>
+        <input type="number" id="as-power" min="0" value="0">
+      </div>
+      <div class="form-group">
+        <label for="as-kills">Убито</label>
+        <input type="number" id="as-kills" min="0" value="0">
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button type="button" class="btn-primary" onclick="submitAddSector()">Создать сектор</button>
   </div>
 </div>
 

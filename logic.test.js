@@ -29,6 +29,8 @@ const {
   EVENT_PRESETS,
   generateSeasonSchedule,
   isOfflineMutationAllowed,
+  findActiveSector,
+  formatSectorTitle,
   createOutboxItem,
   addToOutboxQueue,
   filterOutboxQueue,
@@ -571,14 +573,25 @@ test('PWA manifest and mobile app icons exist and are valid', () => {
   assert.ok(html.includes('<meta name="apple-mobile-web-app-capable" content="yes">'), 'index.html must have apple-mobile-web-app-capable');
 });
 
-test('isOfflineMutationAllowed distinguishes R3 profile and registration mutations from administrative actions', () => {
-  // Allowed R3 mutations
+test('isOfflineMutationAllowed distinguishes allowed sector, profile, and officer mutations from administrative actions', () => {
+  // Allowed R3 profile mutations
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'PUT' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'put' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers', method: 'POST' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers', method: 'PUT' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers/off-123', method: 'PUT' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/officers/off-123', method: 'DELETE' }), true);
+
+  // Allowed sector operations
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/active-sector', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-sectors', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/42', method: 'PUT' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/1', method: 'PUT' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/42/officers', method: 'POST' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/42/officers/off_1', method: 'PUT' }), true);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/42/officers/off_1', method: 'DELETE' }), true);
+
+  // Allowed event registrations
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'POST' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'DELETE' }), true);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations/reg-456', method: 'DELETE' }), true);
@@ -591,6 +604,8 @@ test('isOfflineMutationAllowed distinguishes R3 profile and registration mutatio
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'GET' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'POST' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: 'DELETE' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile/active-sector', method: 'GET' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-sectors', method: 'GET' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/registrations', method: 'GET' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/register', method: 'GET' }), false);
 
@@ -598,7 +613,8 @@ test('isOfflineMutationAllowed distinguishes R3 profile and registration mutatio
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/schedule-season', method: 'POST' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/events/10/autopick', method: 'POST' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players', method: 'POST' }), false);
-  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/1', method: 'PUT' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/42', method: 'DELETE' }), false);
+  assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/players/1', method: 'DELETE' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/catalog', method: 'POST' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/users/2', method: 'PATCH' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/import', method: 'POST' }), false);
@@ -609,6 +625,80 @@ test('isOfflineMutationAllowed distinguishes R3 profile and registration mutatio
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '', method: 'PUT' }), false);
   assert.strictEqual(isOfflineMutationAllowed({ endpoint: '/api/my-profile', method: '' }), false);
   assert.strictEqual(isOfflineMutationAllowed(null), false);
+});
+
+test('findActiveSector selects active sector by id or falls back to first sector', () => {
+  const sectors = [
+    { id: 10, name: 'Main' },
+    { id: 20, name: 'Farm 1' },
+    { id: 30, name: 'Farm 2' },
+  ];
+
+  // Matches numeric id
+  assert.deepEqual(findActiveSector(sectors, 20), { id: 20, name: 'Farm 1' });
+  // Matches string id
+  assert.deepEqual(findActiveSector(sectors, '30'), { id: 30, name: 'Farm 2' });
+  // Falls back to first sector if activeSectorId not found
+  assert.deepEqual(findActiveSector(sectors, 999), { id: 10, name: 'Main' });
+  // Falls back to first sector if activeSectorId is null or undefined or empty
+  assert.deepEqual(findActiveSector(sectors, null), { id: 10, name: 'Main' });
+  assert.deepEqual(findActiveSector(sectors, undefined), { id: 10, name: 'Main' });
+  assert.deepEqual(findActiveSector(sectors, ''), { id: 10, name: 'Main' });
+
+  // Returns null if sectors is empty or invalid
+  assert.strictEqual(findActiveSector([], 10), null);
+  assert.strictEqual(findActiveSector(null, 10), null);
+  assert.strictEqual(findActiveSector(undefined, 10), null);
+  assert.strictEqual(findActiveSector('not-an-array', 10), null);
+});
+
+test('formatSectorTitle formats sector label with VIP and compact power', () => {
+  // Millions formatting
+  assert.strictEqual(
+    formatSectorTitle({ name: '[A433]ranu', sector: { vipLevel: 12, power: 157600000 } }),
+    '[A433]ranu (VIP 12 · 157.6M)'
+  );
+  assert.strictEqual(
+    formatSectorTitle({ name: 'Leader', sector: { vipLevel: 15, power: 200000000 } }),
+    'Leader (VIP 15 · 200M)'
+  );
+
+  // Thousands formatting
+  assert.strictEqual(
+    formatSectorTitle({ name: 'Sub', sector: { vipLevel: 5, power: 450000 } }),
+    'Sub (VIP 5 · 450K)'
+  );
+  assert.strictEqual(
+    formatSectorTitle({ name: 'Sub2', sector: { vipLevel: 5, power: 45500 } }),
+    'Sub2 (VIP 5 · 45.5K)'
+  );
+
+  // Under thousands / zero
+  assert.strictEqual(
+    formatSectorTitle({ name: 'Ферма', sector: { vipLevel: 0, power: 0 } }),
+    'Ферма (VIP 0 · 0)'
+  );
+  assert.strictEqual(
+    formatSectorTitle({ name: 'Newbie', sector: { vipLevel: 1, power: 750 } }),
+    'Newbie (VIP 1 · 750)'
+  );
+
+  // Flat structure fallback (sector.vipLevel / sector.power)
+  assert.strictEqual(
+    formatSectorTitle({ name: 'Flat', vipLevel: 8, power: 1200000 }),
+    'Flat (VIP 8 · 1.2M)'
+  );
+
+  // Default name fallback if name is empty
+  assert.strictEqual(
+    formatSectorTitle({ sector: { vipLevel: 3, power: 5000 } }),
+    'Сектор (VIP 3 · 5K)'
+  );
+
+  // Safe handling of null / undefined / non-object
+  assert.strictEqual(formatSectorTitle(null), '');
+  assert.strictEqual(formatSectorTitle(undefined), '');
+  assert.strictEqual(formatSectorTitle('not an object'), '');
 });
 
 test('createOutboxItem creates structured item with id, timestamp, normalized method and cloned body', () => {

@@ -380,11 +380,19 @@ test('API User management and role patch by R5 only', async () => {
     })).json();
     assert.equal(officer1Me.user.rank, 'r4');
 
-    // R4 cannot access /api/users (only R5)
+    // R4 CAN access /api/users (expanded in v3.4.0)
     const r4UsersRes = await fetch(`${baseUrl}/api/users`, {
       headers: { Authorization: `Bearer ${officer1Login.token}` }
     });
-    assert.equal(r4UsersRes.status, 403);
+    assert.equal(r4UsersRes.status, 200);
+
+    // But R4 CANNOT patch users (only R5)
+    const r4PatchRes = await fetch(`${baseUrl}/api/users/${regRes.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${officer1Login.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r5' })
+    });
+    assert.equal(r4PatchRes.status, 403);
 
     // But R4 CAN access /api/users/pending!
     const r4PendingRes = await fetch(`${baseUrl}/api/users/pending`, {
@@ -1201,6 +1209,400 @@ test('API supports WASM static serving and star stock fields sanitization in pro
     if (fs.existsSync(dummyWasmPath)) {
       fs.unlinkSync(dummyWasmPath);
     }
+    await server.close();
+  }
+});
+
+test('API multi-sector profile, active sector switching and new sector creation', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // 1. Register a user who skips sector creation ("Сделать позже" -> no playerName / playerId)
+    const regNoSector = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'novice', password: 'password123' })
+    })).json();
+
+    await fetch(`${baseUrl}/api/users/${regNoSector.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+
+    const noviceLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'novice', password: 'password123' })
+    })).json();
+
+    // 2. GET /api/my-profile for user with 0 sectors -> 200 with empty sectors array, activeSectorId: null
+    const noSectorProfRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${noviceLogin.token}` }
+    });
+    assert.equal(noSectorProfRes.status, 200);
+    const noSectorProf = await noSectorProfRes.json();
+    assert.equal(noSectorProf.user.username, 'novice');
+    assert.deepEqual(noSectorProf.sectors, []);
+    assert.equal(noSectorProf.activeSectorId, null);
+    assert.equal(noSectorProf.sector, null);
+    assert.equal(noSectorProf.stock, null);
+    assert.deepEqual(noSectorProf.officers, []);
+
+    // 3. POST /api/my-sectors -> create first sector
+    const createSec1Res = await fetch(`${baseUrl}/api/my-sectors`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${noviceLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'База Мейн',
+        realName: 'Иван',
+        sector: { power: 50000000, vipLevel: 10, confidentialityLevel: 4 },
+        stock: { coupons: 5000, puzzles: 50 }
+      })
+    });
+    assert.equal(createSec1Res.status, 201);
+    const sec1 = await createSec1Res.json();
+    assert.equal(sec1.name, 'База Мейн');
+    assert.equal(sec1.userId, noviceLogin.user.id);
+    assert.equal(sec1.sector.power, 50000000);
+
+    // Profile now has 1 sector and it auto-became active
+    const profAfter1Res = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${noviceLogin.token}` }
+    });
+    assert.equal(profAfter1Res.status, 200);
+    const profAfter1 = await profAfter1Res.json();
+    assert.equal(profAfter1.activeSectorId, sec1.id);
+    assert.equal(profAfter1.name, 'База Мейн');
+    assert.equal(profAfter1.sectors.length, 1);
+
+    // 4. POST /api/my-sectors -> validation error on empty name
+    const badSecRes = await fetch(`${baseUrl}/api/my-sectors`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${noviceLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '   ' })
+    });
+    assert.equal(badSecRes.status, 400);
+
+    // 5. POST /api/my-sectors -> create second sector (Farm)
+    const createSec2Res = await fetch(`${baseUrl}/api/my-sectors`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${noviceLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'База Ферма',
+        sector: { power: 12000000, vipLevel: 6 }
+      })
+    });
+    assert.equal(createSec2Res.status, 201);
+    const sec2 = await createSec2Res.json();
+    assert.equal(sec2.name, 'База Ферма');
+    assert.equal(sec2.userId, noviceLogin.user.id);
+
+    // 6. Switch active sector via POST /api/my-profile/active-sector
+    const switchRes = await fetch(`${baseUrl}/api/my-profile/active-sector`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${noviceLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectorId: sec2.id })
+    });
+    assert.equal(switchRes.status, 200);
+    const switchData = await switchRes.json();
+    assert.equal(switchData.activeSectorId, sec2.id);
+
+    // Profile now reflects active sector sec2
+    const profAfterSwitch = await (await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${noviceLogin.token}` }
+    })).json();
+    assert.equal(profAfterSwitch.activeSectorId, sec2.id);
+    assert.equal(profAfterSwitch.name, 'База Ферма');
+    assert.equal(profAfterSwitch.sectors.length, 2);
+
+    // Query param ?sectorId=... can view a specific sector without switching active pointer
+    const profParamSec1 = await (await fetch(`${baseUrl}/api/my-profile?sectorId=${sec1.id}`, {
+      headers: { Authorization: `Bearer ${noviceLogin.token}` }
+    })).json();
+    assert.equal(profParamSec1.activeSectorId, sec1.id);
+    assert.equal(profParamSec1.name, 'База Мейн');
+
+    // 7. Attempt to set foreign sector as active -> 403
+    // Bootstrapped player id 1 belongs to demo or admin, not novice
+    const foreignSwitchRes = await fetch(`${baseUrl}/api/my-profile/active-sector`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${noviceLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectorId: 1 })
+    });
+    assert.equal(foreignSwitchRes.status, 403);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API unified PUT /api/players/:id and sector officer point CRUD with RBAC', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register user playerA (R3)
+    const regA = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'player_a', password: 'pass', playerName: 'Сектор А' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${regA.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const loginA = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'player_a', password: 'pass' })
+    })).json();
+    const sectorAId = loginA.user.playerId;
+
+    // Register user playerB (R3)
+    const regB = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'player_b', password: 'pass', playerName: 'Сектор Б' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${regB.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const loginB = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'player_b', password: 'pass' })
+    })).json();
+    const sectorBId = loginB.user.playerId;
+
+    // 1. PlayerA updates sectorA via PUT /api/players/:id -> 200
+    const updateSecARes = await fetch(`${baseUrl}/api/players/${sectorAId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${loginA.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        realName: 'Алекс',
+        sector: { power: 85000000, vipLevel: 11 },
+        stock: { coupons: 12000 },
+        // Attempt privilege escalation:
+        rank: 'r5',
+        userId: 999
+      })
+    });
+    assert.equal(updateSecARes.status, 200);
+    const updatedSecA = await updateSecARes.json();
+    assert.equal(updatedSecA.realName, 'Алекс');
+    assert.equal(updatedSecA.sector.power, 85000000);
+    // Escalated fields ignored:
+    assert.equal(updatedSecA.rank, 'r3');
+    assert.equal(updatedSecA.userId, loginA.user.id);
+
+    // 2. PlayerA tries to update sectorB -> 403 FORBIDDEN
+    const forbiddenPutRes = await fetch(`${baseUrl}/api/players/${sectorBId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${loginA.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Хакнуто' })
+    });
+    assert.equal(forbiddenPutRes.status, 403);
+
+    // 3. Point officer CRUD: POST /api/players/:id/officers
+    const addOffRes = await fetch(`${baseUrl}/api/players/${sectorAId}/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${loginA.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogId: 'aurora',
+        name: 'Аврора',
+        level: 12,
+        coupons: 450,
+        stars: 2,
+        skills: [3, 2, 1, 0]
+      })
+    });
+    assert.equal(addOffRes.status, 201);
+    const createdOff = await addOffRes.json();
+    assert(createdOff.id);
+    assert.equal(createdOff.catalogId, 'aurora');
+    assert.equal(createdOff.level, 12);
+
+    // 3b. PlayerB cannot add officer to sectorA -> 403
+    const foreignAddOff = await fetch(`${baseUrl}/api/players/${sectorAId}/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${loginB.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogId: 'rex', name: 'Рекс' })
+    });
+    assert.equal(foreignAddOff.status, 403);
+
+    // 4. Point officer CRUD: PUT /api/players/:id/officers/:offId
+    const putOffRes = await fetch(`${baseUrl}/api/players/${sectorAId}/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${loginA.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        level: 18,
+        stars: 3,
+        skills: [5, 5, 2, 1]
+      })
+    });
+    assert.equal(putOffRes.status, 200);
+    const updatedOff = await putOffRes.json();
+    assert.equal(updatedOff.level, 18);
+    assert.equal(updatedOff.stars, 3);
+
+    // 4b. PlayerB cannot edit officer of sectorA -> 403
+    const foreignPutOff = await fetch(`${baseUrl}/api/players/${sectorAId}/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${loginB.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: 99 })
+    });
+    assert.equal(foreignPutOff.status, 403);
+
+    // 5. Point officer CRUD: DELETE /api/players/:id/officers/:offId
+    // PlayerB cannot delete -> 403
+    const foreignDelOff = await fetch(`${baseUrl}/api/players/${sectorAId}/officers/${createdOff.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${loginB.token}` }
+    });
+    assert.equal(foreignDelOff.status, 403);
+
+    // Owner deletes -> 200
+    const delOffRes = await fetch(`${baseUrl}/api/players/${sectorAId}/officers/${createdOff.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${loginA.token}` }
+    });
+    assert.equal(delOffRes.status, 200);
+
+    // Verify officer is gone
+    const secAfterDel = await (await fetch(`${baseUrl}/api/players/${sectorAId}`, {
+      headers: { Authorization: `Bearer ${loginA.token}` }
+    })).json();
+    assert.equal(secAfterDel.officers.length, 0);
+
+    // 6. R5 can also perform point officer CRUD on any sector
+    const adminAddOff = await fetch(`${baseUrl}/api/players/${sectorAId}/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogId: 'rex', name: 'Рекс', level: 10 })
+    });
+    assert.equal(adminAddOff.status, 201);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API event multi-registration and multi-sector registrations listing', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register user commander
+    const regRes = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'commander', password: 'pass', playerName: 'Мейн База' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${regRes.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const cmdLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'commander', password: 'pass' })
+    })).json();
+    const mainSecId = cmdLogin.user.playerId;
+
+    // Commander creates a second sector (farm)
+    const farmSec = await (await fetch(`${baseUrl}/api/my-sectors`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cmdLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Ферма База' })
+    })).json();
+    const farmSecId = farmSec.id;
+
+    // Get an event to register for
+    const events = await (await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: `Bearer ${cmdLogin.token}` }
+    })).json();
+    assert(events.length > 0);
+    const eventId = events[0].id;
+
+    // 1. Register main base without explicit sectorId (uses active sector)
+    const reg1Res = await fetch(`${baseUrl}/api/events/${eventId}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cmdLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ desiredPlace: 1 })
+    });
+    assert.equal(reg1Res.status, 200);
+    const reg1Data = await reg1Res.json();
+    assert.equal(reg1Data.registration.playerId, mainSecId);
+
+    // 2. Register farm base with explicit sectorId
+    const reg2Res = await fetch(`${baseUrl}/api/events/${eventId}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cmdLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectorId: farmSecId, desiredPlace: 3 })
+    });
+    assert.equal(reg2Res.status, 200);
+    const reg2Data = await reg2Res.json();
+    assert.equal(reg2Data.registration.playerId, farmSecId);
+
+    // 3. GET /api/events returns both registrations in myRegistrations and preserves myRegistration
+    const eventsAfter = await (await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: `Bearer ${cmdLogin.token}` }
+    })).json();
+    const targetEv = eventsAfter.find(e => e.id === eventId);
+    assert(targetEv);
+    assert.equal(targetEv.myRegistrations.length, 2);
+    assert(targetEv.myRegistrations.some(r => r.playerId === mainSecId));
+    assert(targetEv.myRegistrations.some(r => r.playerId === farmSecId));
+    assert.equal(targetEv.myRegistration.playerId, mainSecId);
+
+    // 4. Try registering foreign sector -> 404 or 403
+    const foreignRegRes = await fetch(`${baseUrl}/api/events/${eventId}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cmdLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectorId: 9999 })
+    });
+    assert.equal(foreignRegRes.status, 404);
+
+    // 5. Unregister farm sector with query ?sectorId=...
+    const unregFarmRes = await fetch(`${baseUrl}/api/events/${eventId}/register?sectorId=${farmSecId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${cmdLogin.token}` }
+    });
+    assert.equal(unregFarmRes.status, 200);
+
+    // Verify only main base remains registered
+    const eventsAfterUnreg = await (await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: `Bearer ${cmdLogin.token}` }
+    })).json();
+    const targetEvAfter = eventsAfterUnreg.find(e => e.id === eventId);
+    assert.equal(targetEvAfter.myRegistrations.length, 1);
+    assert.equal(targetEvAfter.myRegistrations[0].playerId, mainSecId);
+  } finally {
     await server.close();
   }
 });

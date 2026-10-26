@@ -203,9 +203,14 @@ test('player and player officer CRUD operations', () => {
   const playerNoOfficer = dbModule.getPlayerById(newPlayer.id);
   assert.equal(playerNoOfficer.officers.length, 0);
 
-  // Delete player
+  // Delete player and ensure linked user's player_id is cleared
+  const regUser = dbModule.registerUser({ username: 'del_player_user_' + Date.now(), password: 'password123', playerId: newPlayer.id });
+  assert.equal(regUser.playerId, newPlayer.id);
+
   dbModule.deletePlayer(newPlayer.id);
   assert.equal(dbModule.getPlayerById(newPlayer.id), null);
+  const userAfterDelete = dbModule.findUserById(regUser.userId || regUser.id);
+  assert.equal(userAfterDelete.player_id, null);
 });
 
 test('event registrations CRUD and queries', () => {
@@ -634,4 +639,352 @@ test('player CRUD and export/import support star stock fields (starCoupons, lege
   assert.equal(reimported.stock.legendaryStars2, 10);
   assert.equal(reimported.stock.legendaryStars3, 5);
 });
+
+test('players table user_id migration and safe backfill from users.player_id', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const dbModule = require('./db.js');
+  
+  // Создаем базу вручную со старой схемой (без players.user_id)
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      rank TEXT NOT NULL DEFAULT 'r3',
+      is_approved INTEGER NOT NULL DEFAULT 1,
+      player_id INTEGER NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE players (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      real_name TEXT DEFAULT '',
+      rank TEXT NOT NULL DEFAULT 'r3',
+      vip_level INTEGER DEFAULT 0,
+      vip_points INTEGER NOT NULL DEFAULT 0,
+      confidentiality_level INTEGER DEFAULT 0,
+      power REAL DEFAULT 0,
+      kills REAL DEFAULT 0,
+      kill_points REAL DEFAULT 0,
+      stock_coupons INTEGER DEFAULT 0,
+      stock_puzzles INTEGER DEFAULT 0,
+      stock_star_coupons INTEGER NOT NULL DEFAULT 0,
+      stock_legendary_stars_1 INTEGER NOT NULL DEFAULT 0,
+      stock_legendary_stars_2 INTEGER NOT NULL DEFAULT 0,
+      stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0,
+      stock_chests INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO players (id, name, updated_at) VALUES (1, 'Старый Игрок 1', '2026-01-01');
+    INSERT INTO players (id, name, updated_at) VALUES (2, 'Старый Игрок 2', '2026-01-01');
+    INSERT INTO users (id, username, password_hash, player_id, created_at)
+      VALUES (10, 'old_user_1', 'hash', 1, '2026-01-01');
+  `);
+
+  // Проверяем, что колонки user_id в players изначально нет
+  const colsBefore = db.prepare('PRAGMA table_info(players)').all().map(c => c.name);
+  assert.equal(colsBefore.includes('user_id'), false);
+
+  // Вызываем initDb / migrateSchema
+  // Для тестирования передаем существующий db или используем initDb
+  // В dbModule.initDb(':memory:') создается новая база, поэтому проверим миграцию через временный файл
+  const tmpFile = path.join(__dirname, 'data', `kow-migration-test-${Date.now()}.db`);
+  try {
+    const fileDb = new DatabaseSync(tmpFile);
+    fileDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        is_approved INTEGER NOT NULL DEFAULT 1,
+        player_id INTEGER NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        real_name TEXT DEFAULT '',
+        rank TEXT NOT NULL DEFAULT 'r3',
+        vip_level INTEGER DEFAULT 0,
+        vip_points INTEGER NOT NULL DEFAULT 0,
+        confidentiality_level INTEGER DEFAULT 0,
+        power REAL DEFAULT 0,
+        kills REAL DEFAULT 0,
+        kill_points REAL DEFAULT 0,
+        stock_coupons INTEGER DEFAULT 0,
+        stock_puzzles INTEGER DEFAULT 0,
+        stock_star_coupons INTEGER NOT NULL DEFAULT 0,
+        stock_legendary_stars_1 INTEGER NOT NULL DEFAULT 0,
+        stock_legendary_stars_2 INTEGER NOT NULL DEFAULT 0,
+        stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0,
+        stock_chests INTEGER DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO players (id, name, updated_at) VALUES (1, 'Старый Игрок 1', '2026-01-01');
+      INSERT INTO players (id, name, updated_at) VALUES (2, 'Старый Игрок 2', '2026-01-01');
+      INSERT INTO users (id, username, password_hash, player_id, created_at)
+        VALUES (10, 'old_user_1', 'hash', 1, '2026-01-01');
+      CREATE TABLE IF NOT EXISTS player_officers (
+        id TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL,
+        catalog_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        level INTEGER NOT NULL DEFAULT 0,
+        coupons INTEGER NOT NULL DEFAULT 0,
+        stars INTEGER NOT NULL DEFAULT 0,
+        skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]'
+      );
+      CREATE TABLE IF NOT EXISTS officer_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        generation INTEGER NOT NULL DEFAULT 7,
+        coupon_per_puzzle INTEGER NOT NULL DEFAULT 500,
+        upgrade_type TEXT NOT NULL DEFAULT 'standard',
+        medals_before_training INTEGER DEFAULT 690,
+        medals_training INTEGER DEFAULT 900,
+        medals_total INTEGER DEFAULT 1590
+      );
+      CREATE TABLE IF NOT EXISTS event_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#8b5cf6',
+        places_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type_id INTEGER NOT NULL,
+        date_from TEXT NOT NULL,
+        date_to TEXT NOT NULL,
+        note TEXT DEFAULT '',
+        assignments_json TEXT NOT NULL DEFAULT '[]'
+      );
+      CREATE TABLE IF NOT EXISTS event_registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER NOT NULL,
+        player_id INTEGER NOT NULL,
+        officer_id TEXT NOT NULL,
+        desired_place INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS stock_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        coupons INTEGER NOT NULL,
+        puzzles INTEGER NOT NULL,
+        chests INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT
+      );
+    `);
+    fileDb.close();
+
+    // Запускаем initDb на этом файле
+    const migratedDb = dbModule.initDb(tmpFile);
+    const colsAfter = migratedDb.prepare('PRAGMA table_info(players)').all().map(c => c.name);
+    assert(colsAfter.includes('user_id'), 'players table must have user_id column');
+
+    // Проверяем, что связь безопасно перенесена
+    const p1 = migratedDb.prepare('SELECT user_id FROM players WHERE id = 1').get();
+    assert.equal(p1.user_id, 10, 'players id=1 should have user_id=10 from users.player_id');
+
+    const p2 = migratedDb.prepare('SELECT user_id FROM players WHERE id = 2').get();
+    assert.equal(p2.user_id, null, 'players id=2 should have user_id=null');
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch (e) {}
+  }
+});
+
+test('getPlayers and getPlayerById enrich sector with userId, username, userRank', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // Админ привязан к первому сектору (Командор)
+  const players = dbModule.getPlayers();
+  assert(players.length > 0);
+  const p1 = players.find(p => p.id === 1);
+  assert(p1);
+  assert.equal(p1.userId, 1);
+  assert.equal(p1.username, 'admin');
+  assert.equal(p1.userRank, 'r5');
+
+  // getPlayerById(1)
+  const single = dbModule.getPlayerById(1);
+  assert(single);
+  assert.equal(single.userId, 1);
+  assert.equal(single.username, 'admin');
+  assert.equal(single.userRank, 'r5');
+
+  // Сектор без владельца (id: 2)
+  const p2 = dbModule.getPlayerById(2);
+  assert(p2);
+  assert.equal(p2.userId, null);
+  assert.equal(p2.username, null);
+  assert.equal(p2.userRank, null);
+});
+
+test('getPlayersByUserId returns all sectors owned by user', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'multisector_user', password: 'pwd', playerName: 'База 1' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Создаем второй сектор для этого же пользователя
+  const sec2 = dbModule.createPlayer({
+    name: 'База 2 (Ферма)',
+    userId: reg.userId,
+    stock: { coupons: 500 }
+  });
+
+  const sectors = dbModule.getPlayersByUserId(reg.userId);
+  assert.equal(sectors.length, 2);
+  assert(sectors.some(s => s.name === 'База 1'));
+  assert(sectors.some(s => s.name === 'База 2 (Ферма)'));
+  assert.equal(sectors[0].userId, reg.userId);
+  assert.equal(sectors[0].username, 'multisector_user');
+  assert.equal(sectors[1].userId, reg.userId);
+
+  // Несуществующий пользователь возвращает пустой массив
+  const empty = dbModule.getPlayersByUserId(99999);
+  assert.deepEqual(empty, []);
+});
+
+test('setUserActiveSector switches active player_id only if user owns the sector', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'activesec_user', password: 'pwd', playerName: 'Мейн' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  const farm = dbModule.createPlayer({
+    name: 'Ферма',
+    userId: reg.userId
+  });
+
+  // Успешная смена активного сектора на Ферму
+  const resSuccess = dbModule.setUserActiveSector(reg.userId, farm.id);
+  assert.equal(resSuccess.ok, true);
+  assert.equal(resSuccess.activeSectorId, farm.id);
+
+  const user = dbModule.findUserById(reg.userId);
+  assert.equal(user.player_id, farm.id);
+
+  // Попытка переключиться на чужой сектор (например, сектор админа id: 1)
+  const resFail = dbModule.setUserActiveSector(reg.userId, 1);
+  assert.equal(resFail.ok, false);
+  assert.equal(resFail.error, 'NOT_OWNER');
+
+  // Активный сектор остался прежним
+  const userUnchanged = dbModule.findUserById(reg.userId);
+  assert.equal(userUnchanged.player_id, farm.id);
+});
+
+test('registerUser supports registration without sector (Сделать позже) and with sector', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const playersCountBefore = dbModule.getPlayers().length;
+
+  // 1. Без сектора
+  const regNoSector = dbModule.registerUser({ username: 'lazy_user', password: 'pwd' });
+  assert.equal(regNoSector.playerId, null);
+  assert.equal(regNoSector.player_id, null);
+  const playersCountAfter1 = dbModule.getPlayers().length;
+  assert.equal(playersCountAfter1, playersCountBefore, 'no sector should be created');
+
+  const userInDb = dbModule.findUserById(regNoSector.userId);
+  assert.equal(userInDb.player_id, null);
+
+  // 2. С созданием сектора
+  const regWithSector = dbModule.registerUser({ username: 'active_user', password: 'pwd', playerName: 'Новая База' });
+  assert(regWithSector.playerId);
+  const createdSector = dbModule.getPlayerById(regWithSector.playerId);
+  assert.equal(createdSector.name, 'Новая База');
+  assert.equal(createdSector.userId, regWithSector.userId);
+  assert.equal(createdSector.username, 'active_user');
+
+  const userWithSectorInDb = dbModule.findUserById(regWithSector.userId);
+  assert.equal(userWithSectorInDb.player_id, regWithSector.playerId);
+});
+
+test('updatePlayer updates sector userId to reassign or unassign owner', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'owner_user', password: 'pwd', playerName: 'База Владельца' });
+  const sectorId = reg.playerId;
+
+  // Создаем другого пользователя
+  const reg2 = dbModule.registerUser({ username: 'new_owner', password: 'pwd' });
+
+  // Переназначаем владельца
+  dbModule.updatePlayer(sectorId, { userId: reg2.userId });
+  const updated = dbModule.getPlayerById(sectorId);
+  assert.equal(updated.userId, reg2.userId);
+  assert.equal(updated.username, 'new_owner');
+
+  // Отвязываем владельца (userId: null)
+  dbModule.updatePlayer(sectorId, { userId: null });
+  const unlinked = dbModule.getPlayerById(sectorId);
+  assert.equal(unlinked.userId, null);
+  assert.equal(unlinked.username, null);
+});
+
+test('exportKowJson and importKowJson preserve sector userId', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'export_user', password: 'pwd', playerName: 'Экспортный Сектор' });
+  const sectorId = reg.playerId;
+
+  // Создаем еще один сектор с несуществующим пользователем в будущем
+  const sectorGhost = dbModule.createPlayer({ name: 'Сектор Призрака', userId: 1 });
+
+  const exported = dbModule.exportKowJson();
+  const exportedSector = exported.players.find(p => p.id === sectorId);
+  assert(exportedSector);
+  assert.equal(exportedSector.userId, reg.userId);
+
+  // Импорт в новую базу, где админ (userId=1) существует, а export_user зарегистрирован
+  dbModule.initDb(':memory:');
+  const regInNewDb = dbModule.registerUser({ username: 'export_user', password: 'pwd' });
+  assert.equal(regInNewDb.userId, reg.userId);
+
+  dbModule.importKowJson(exported);
+
+  const reimportedSector = dbModule.getPlayerById(sectorId);
+  assert(reimportedSector);
+  assert.equal(reimportedSector.userId, reg.userId);
+
+  const reimportedGhost = dbModule.getPlayerById(sectorGhost.id);
+  assert(reimportedGhost);
+  assert.equal(reimportedGhost.userId, 1);
+});
+
+test('importKowJson safely handles sector with non-existent userId without crashing', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const payload = {
+    version: 3,
+    players: [
+      { id: 99, name: 'Сектор без пользователя в целевой БД', userId: 9999 }
+    ]
+  };
+
+  // Не должно выбрасывать FOREIGN KEY constraint failed
+  dbModule.importKowJson(payload);
+  const imported = dbModule.getPlayerById(99);
+  assert(imported);
+  assert.equal(imported.userId, null);
+});
+
 
