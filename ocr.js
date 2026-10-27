@@ -271,13 +271,11 @@
       throw new Error('Некорректные габариты изображения: ширина или высота равна 0');
     }
 
-    // 1. Нормализация масштаба
+    // 1. Нормализация масштаба (не апскейлим низкое разрешение во избежание билинейного размытия шрифта)
     let scale = 1.0;
     if (typeof options.scale === 'number' && options.scale > 0) {
       scale = options.scale;
-    } else if (srcWidth < 1200) {
-      scale = Math.min(2.0, Math.max(1.5, 1600 / srcWidth));
-    } else if (srcWidth > 3200) {
+    } else if (srcWidth > 2560) {
       scale = 2400 / srcWidth;
     }
 
@@ -295,9 +293,9 @@
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(loaded, 0, 0, targetWidth, targetHeight);
 
-    // 2. Grayscale & Contrast / Thresholding
-    const doGrayscale = options.grayscale !== false;
-    const contrastFactor = typeof options.contrast === 'number' ? options.contrast : 1.35;
+    // 2. Grayscale & Contrast / Thresholding (по умолчанию сохраняем цветность для естественной бинаризации Tesseract)
+    const doGrayscale = Boolean(options.grayscale);
+    const contrastFactor = typeof options.contrast === 'number' ? options.contrast : 1.0;
     const doThreshold = Boolean(options.threshold);
     const thresholdVal = typeof options.threshold === 'number' ? options.threshold : 140;
 
@@ -496,7 +494,7 @@
 
       // Если это складской скриншот или скриншот не является профилем — выполняем анализ по колонкам
       const shouldTrySplit = options.splitWarehouse || (isWarehouseLike && options.splitWarehouse !== false) || (!profileParsed.isProfile && options.splitWarehouse !== false);
-      if (shouldTrySplit && !profileParsed.isProfile) {
+      if (shouldTrySplit) {
         const columns = splitWarehouseColumns(preprocessedCanvas, options);
         if (columns.length > 1) {
           const col1Res = await worker.recognize(columns[0]);
@@ -508,7 +506,7 @@
           const splitWarehouseParsed = logic.parseWarehouseScreenshotText(splitCombinedText);
           const countOriginal = Object.keys(warehouseParsed.stock || {}).length;
           const countSplit = Object.keys(splitWarehouseParsed.stock || {}).length;
-          if (countSplit >= countOriginal) {
+          if (countSplit >= countOriginal && countSplit > 0) {
             extractedText = splitCombinedText;
             warehouseParsed = splitWarehouseParsed;
           }
@@ -525,11 +523,13 @@
         details: `Слияние данных скриншота ${currentNumber} из ${total}...`,
       });
 
-      // Объединение результатов текущего скриншота с накопленными
+      // Объединение результатов текущего скриншота с накопленными.
+      // Если найдены складские запасы — это гарантированно склад, а не профиль игрока.
+      const isActualWarehouse = warehouseParsed.isWarehouse || Object.keys(warehouseParsed.stock || {}).length > 0;
       const currentScan = {
-        isProfile: profileParsed.isProfile,
-        isWarehouse: warehouseParsed.isWarehouse,
-        sector: profileParsed.sector || {},
+        isProfile: isActualWarehouse ? false : profileParsed.isProfile,
+        isWarehouse: isActualWarehouse,
+        sector: isActualWarehouse ? {} : (profileParsed.sector || {}),
         stock: warehouseParsed.stock || {},
       };
 

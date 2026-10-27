@@ -1090,6 +1090,50 @@ test('parseWarehouseScreenshotText accurately parses multi-item inventory withou
   assert.strictEqual(parsed.stock.legendaryStars3, 23, 'Legendary Star 3 must be exactly 23, not concatenated with next line');
 });
 
+test('parseWarehouseScreenshotText recognizes real-world noisy OCR stars and avoids false profile extraction', () => {
+  const realOcrText = `De —_——_, „@
+Эпическая звезда
+В наличии: 147
+[220 | Легендарная
+а звезда П
+x ; B наличии: 98
+| по’ | Эксклюзивная
+\\( 3 HE
+AWE Вналичии:1
+|500 | 500опыта
+7 то офицера
+7 | Вналичии: 142,881
+| 5000 | — 5000 опыта
+7 ч офицера
+% | Вналичии: 3,807
+
+EE ан сане aaa ОВЕН
+i он]
+а [| 10 J Легендарная
+TERT звезда!
+) \` 3 В наличии: 1155
+[660 Легендарная
+= 7 звезда Ш
+у Ь-— Вналичии:23
+о) (Е
+2 я, / Вналичии: 2,760,814
+| 1000 | 1,000 опыта
+у то офицера
+1 у 7 В наличии: 166,057
+| 10000 | 10,000 опыта
+ря офицера
+4 у A В наличии: 36,033`;
+
+  const parsed = parseWarehouseScreenshotText(realOcrText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.legendaryStars1, 1155);
+  assert.strictEqual(parsed.stock.legendaryStars2, 98);
+  assert.strictEqual(parsed.stock.legendaryStars3, 23);
+
+  const profileCheck = parseProfileScreenshotText(realOcrText);
+  assert.strictEqual(profileCheck.isProfile, false, 'Warehouse with exclusive star Natalia must not be parsed as player profile');
+});
+
 test('mergeScanResults combines multiple screenshots without losing or overwriting data', () => {
   const scan1 = {
     isProfile: true,
