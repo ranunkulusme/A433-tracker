@@ -1,0 +1,28 @@
+[Unit]
+Description=Kingdom of Winners (KoW) Tracker Service
+After=network.target
+
+[Service]
+Type=simple
+User=kow
+Group=kow
+WorkingDirectory=/opt/kow-tracker
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+# Ограничение прав процесса
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+
+# Переменные окружения
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DB_PATH=/opt/kow-tracker/data/kow.db
+
+# Ограничение ресурсов
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
