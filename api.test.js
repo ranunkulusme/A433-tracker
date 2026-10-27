@@ -2008,6 +2008,22 @@ test('API handles S3 status and manual S3 sync endpoints with RBAC', async () =>
   }
 });
 
+test('API serves application version via GET /api/version', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const res = await fetch(`${baseUrl}/api/version`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.ok(data.version);
+    assert.match(data.version, /^\d+\.\d+\.\d+/);
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

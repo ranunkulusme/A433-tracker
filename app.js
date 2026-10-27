@@ -1,4 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
+const APP_VERSION = 'v3.15.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -659,7 +660,7 @@ function seedDemo() {
 function totalPuzzles(o) { return o.level * PUZZLES_PER_LEVEL + Math.floor(o.coupons / COUPON_PER_PUZZLE); }
 function pct(v, m) { return Math.min(100, Math.round(v / Math.max(1,m) * 100)); }
 function fmtNum(value, digits=0) {
-  return (Number(value) || 0).toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).replace(/\u00a0/g, ' ');
+  return (Number(value) || 0).toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).replace(/[\u00a0\u202f]/g, ' ');
 }
 function fmtOne(value) { return fmtNum(value, 1); }
 function getPlayer(id) { return state.players.find(p => p.id === id); }
@@ -1546,73 +1547,8 @@ async function renderMyCabinet() {
     </div>
 
     ${profile.officers.length ? `
-      <div class="cabinet-officers-grid">
-        ${profile.officers.map(o => {
-          const cat = getCatalogOfficer(o.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
-          const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player: profile, targetLevel: 180, today });
-          const targetPuz = 180 * PUZZLES_PER_LEVEL;
-          const currPuz = def.currentPuzzles;
-          const pctVal = Math.min(100, Math.round((currPuz / targetPuz) * 100));
-
-          return `
-            <div class="cabinet-officer-card">
-              <div class="cabinet-officer-header">
-                <div>
-                  <div class="cabinet-officer-name">${escapeHtml(officerLabel(o))}</div>
-                  <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
-                    ${troopBadge(cat.type)}
-                    <span class="cabinet-stat-pill">Ген. ${cat.generation}</span>
-                  </div>
-                </div>
-                <div style="display:flex;gap:4px">
-                  <button class="action-btn" title="Редактировать уровень и купоны" onclick="openEditMyOfficerModal('${o.id}')">✏️</button>
-                  <button class="action-btn danger" title="Удалить офицера" onclick="deleteMyOfficer('${o.id}', '${escapeHtml(officerLabel(o))}')">🗑️</button>
-                </div>
-              </div>
-
-              <!-- Interactive Stars -->
-              <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);padding:6px 10px;border-radius:6px">
-                <div style="display:flex;align-items:center;gap:6px">
-                  <span style="font-size:12px;color:var(--text2)">Звёзды:</span>
-                  ${renderInteractiveStars(o)}
-                </div>
-                <div>
-                  ${def.starRequirement.isStarReady
-                    ? `<span class="badge badge-success" style="font-size:10px">6★ Готово</span>`
-                    : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 6★">Нужно 6★</span>`}
-                </div>
-              </div>
-
-              <!-- Interactive Skills -->
-              <div style="margin:4px 0">
-                ${renderCabinetOfficerSkills(o)}
-              </div>
-
-              <!-- Level and Progress -->
-              <div>
-                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-                  <span>Уровень: <strong>${o.level} / 180</strong></span>
-                  <span style="color:var(--text2)">Купоны: <strong>${fmtNum(o.coupons)}</strong></span>
-                </div>
-                <div class="progress-container">
-                  <div class="progress-fill" style="width:${pctVal}%"></div>
-                </div>
-              </div>
-
-              <!-- Deficit & Forecast -->
-              <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
-                <div style="display:flex;justify-content:space-between">
-                  <span style="color:var(--text3)">Дефицит до 180:</span>
-                  <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} пазл. ${def.costPerPuzzle > 0 ? `(${fmtNum(def.deficitCoupons)} куп.)` : '(только пазлы)'}</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between">
-                  <span style="color:var(--text3)">Прогноз без ивентов:</span>
-                  <span style="color:var(--text2)">${def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—'}</span>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('')}
+      <div class="cabinet-officers-grid" id="cabinet-officers-grid">
+        ${profile.officers.map(o => renderCabinetOfficerCardHtml(o, profile, today)).join('')}
       </div>
     ` : `
       <div class="empty-state" style="padding:24px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:24px">
@@ -1833,7 +1769,7 @@ function renderCabinetOfficerSkills(o) {
 }
 
 async function setMyOfficerSkill(officerId, skillIndex, level) {
-  const off = myCabinetProfile?.officers?.find(x => x.id === officerId);
+  const off = myCabinetProfile?.officers?.find(x => String(x.id) === String(officerId));
   if (!off) return;
   const skills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
   skills[skillIndex] = Math.max(1, Math.min(5, Number(level) || 1));
@@ -1843,8 +1779,26 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
       body: { skills }
     });
     off.skills = skills;
+    if (state.players) {
+      for (const p of state.players) {
+        if (p.officers) {
+          const o = p.officers.find(x => String(x.id) === String(officerId));
+          if (o) o.skills = skills;
+        }
+      }
+    }
     toast(`Навык ${skillIndex + 1} обновлен: ${skills[skillIndex]}/5`);
-    await renderMyCabinet();
+    const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+    if (cardEl && myCabinetProfile) {
+      const today = new Date().toISOString().slice(0, 10);
+      cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
+    } else {
+      await renderMyCabinet();
+    }
+    const simEl = document.getElementById('cabinet-sim-container');
+    if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+      simEl.innerHTML = renderCabinetSimulatorHtml();
+    }
   } catch (err) {
     toast('Ошибка обновления навыка: ' + err.message, 'error');
   }
@@ -2247,16 +2201,115 @@ async function submitAddSector() {
   }
 }
 
+function renderOfficerStarHintText(currentStars) {
+  if (typeof logic !== 'undefined' && logic.formatOfficerStarHint) {
+    return logic.formatOfficerStarHint(currentStars);
+  }
+  const count = Math.max(0, Math.min(6, Number(currentStars) || 0));
+  if (count >= 6) {
+    return '6★ Максимум (98 000 звёзд)';
+  }
+  const next = count + 1;
+  const cost = typeof starCostFor === 'function' ? starCostFor(next) : 0;
+  return `До ${next}★: ${fmtNum(cost)} звёзд`;
+}
+
+function onCabinetStarHover(officerId, star) {
+  const el = document.getElementById(`cabinet-star-hint-${officerId}`);
+  if (!el) return;
+  const cost = typeof starCostFor === 'function' ? starCostFor(star) : 0;
+  el.innerHTML = `<span class="star-hint-badge hover">✨ До <strong>${star}★</strong>: <strong>${fmtNum(cost)}</strong> звёзд (клик для выбора)</span>`;
+}
+
+function onCabinetStarLeave(officerId, currentStars) {
+  const el = document.getElementById(`cabinet-star-hint-${officerId}`);
+  if (!el) return;
+  el.innerHTML = `<span class="star-hint-badge">⭐ ${renderOfficerStarHintText(currentStars)}</span>`;
+}
+
 function renderInteractiveStars(officer) {
   const count = Number(officer.stars) || 0;
   return `<span class="stars">${Array.from({length:6},(_,i)=>{
     const star = i + 1;
     const cost = starCostFor(star);
-    const title = star < 6
-      ? `${fmtNum(cost)} звезд до ${star}★ (нажмите, чтобы установить)`
-      : `Итого ${fmtNum(cost)} звезд (нажмите, чтобы установить 6★)`;
-    return `<button type="button" class="star-btn ${count>=star?'active':''}" title="${title}" onclick="setMyOfficerStars('${officer.id}', ${star === count ? star - 1 : star})">${count>=star?'★':'☆'}</button>`;
+    const tooltipText = star < 6
+      ? `До ${star}★: ${fmtNum(cost)} звёзд`
+      : `Итого ${fmtNum(cost)} звёзд (6★ макс)`;
+    const newStars = star === count ? star - 1 : star;
+    return `<button type="button" class="star-btn ${count>=star?'active':''}" data-tooltip="${tooltipText}" title="${tooltipText}" aria-label="${tooltipText}" onmouseenter="onCabinetStarHover('${officer.id}', ${star})" onmouseleave="onCabinetStarLeave('${officer.id}', ${count})" onclick="setMyOfficerStars('${officer.id}', ${newStars})">${count>=star?'★':'☆'}</button>`;
   }).join('')}</span>`;
+}
+
+function renderCabinetOfficerCardHtml(o, profile, today) {
+  const cat = getCatalogOfficer(o.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
+  const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player: profile, targetLevel: 180, today });
+  const targetPuz = 180 * PUZZLES_PER_LEVEL;
+  const currPuz = def.currentPuzzles;
+  const pctVal = Math.min(100, Math.round((currPuz / targetPuz) * 100));
+
+  return `
+    <div class="cabinet-officer-card" id="cabinet-officer-card-${o.id}">
+      <div class="cabinet-officer-header">
+        <div>
+          <div class="cabinet-officer-name">${escapeHtml(officerLabel(o))}</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+            ${troopBadge(cat.type)}
+            <span class="cabinet-stat-pill">Ген. ${cat.generation}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button class="action-btn" title="Редактировать уровень и купоны" onclick="openEditMyOfficerModal('${o.id}')">✏️</button>
+          <button class="action-btn danger" title="Удалить офицера" onclick="deleteMyOfficer('${o.id}', '${escapeHtml(officerLabel(o))}')">🗑️</button>
+        </div>
+      </div>
+
+      <!-- Interactive Stars with dynamic hint -->
+      <div class="cabinet-officer-stars-box">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color:var(--text2)">Звёзды:</span>
+            ${renderInteractiveStars(o)}
+          </div>
+          <div>
+            ${def.starRequirement.isStarReady
+              ? `<span class="badge badge-success" style="font-size:10px">6★ Готово</span>`
+              : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 6★">Нужно 6★</span>`}
+          </div>
+        </div>
+        <div class="cabinet-star-hint" id="cabinet-star-hint-${o.id}">
+          <span class="star-hint-badge">⭐ ${renderOfficerStarHintText(o.stars)}</span>
+        </div>
+      </div>
+
+      <!-- Interactive Skills -->
+      <div style="margin:4px 0">
+        ${renderCabinetOfficerSkills(o)}
+      </div>
+
+      <!-- Level and Progress -->
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span>Уровень: <strong>${o.level} / 180</strong></span>
+          <span style="color:var(--text2)">Купоны: <strong>${fmtNum(o.coupons)}</strong></span>
+        </div>
+        <div class="progress-container">
+          <div class="progress-fill" style="width:${pctVal}%"></div>
+        </div>
+      </div>
+
+      <!-- Deficit & Forecast -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--text3)">Дефицит до 180:</span>
+          <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} пазл. ${def.costPerPuzzle > 0 ? `(${fmtNum(def.deficitCoupons)} куп.)` : '(только пазлы)'}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--text3)">Прогноз без ивентов:</span>
+          <span style="color:var(--text2)">${def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—'}</span>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 let myOfficerModalSkills = [1, 1, 1, 1];
@@ -2395,8 +2448,31 @@ async function setMyOfficerStars(officerId, stars) {
       method: 'PUT',
       body: { stars: count }
     });
+    if (myCabinetProfile && Array.isArray(myCabinetProfile.officers)) {
+      const off = myCabinetProfile.officers.find(o => String(o.id) === String(officerId));
+      if (off) off.stars = count;
+    }
+    if (state.players) {
+      for (const p of state.players) {
+        if (p.officers) {
+          const off = p.officers.find(o => String(o.id) === String(officerId));
+          if (off) off.stars = count;
+        }
+      }
+    }
     toast(`Звёзды обновлены: ${count}★`);
-    await renderMyCabinet();
+    const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+    const updatedOff = myCabinetProfile?.officers?.find(o => String(o.id) === String(officerId));
+    if (cardEl && updatedOff) {
+      const today = new Date().toISOString().slice(0, 10);
+      cardEl.outerHTML = renderCabinetOfficerCardHtml(updatedOff, myCabinetProfile, today);
+    } else {
+      await renderMyCabinet();
+    }
+    const simEl = document.getElementById('cabinet-sim-container');
+    if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+      simEl.innerHTML = renderCabinetSimulatorHtml();
+    }
   } catch (err) {
     toast('Ошибка обновления звёзд: ' + err.message, 'error');
   }
@@ -6660,11 +6736,38 @@ function initSmartScanner() {
   }
 }
 
+function updateSidebarVersion(ver) {
+  const v = ver || APP_VERSION;
+  const logoEl = document.getElementById('sidebar-logo-version');
+  if (logoEl) logoEl.textContent = v.startsWith('v') ? v : `v${v}`;
+  const textEl = document.getElementById('sidebar-app-version');
+  if (textEl) {
+    const rawNum = v.replace(/^v/, '');
+    textEl.textContent = `Версия ${rawNum}`;
+  }
+}
+
+async function fetchAndApplyAppVersion() {
+  updateSidebarVersion(APP_VERSION);
+  try {
+    const res = await fetch('/api/version');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.version) {
+        updateSidebarVersion(data.version);
+      }
+    }
+  } catch (_) {
+    // В оффлайн-режиме остаётся fallback значение APP_VERSION
+  }
+}
+
 function initApp() {
   load();
   renderSidebarNav();
   renderTopbarProfile();
   updateNetworkStatusUI();
+  fetchAndApplyAppVersion();
   checkPwaInstallable();
   initSmartScanner();
   initExchangeOcr();

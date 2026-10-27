@@ -12,6 +12,7 @@ const {
   canDeleteOfficer,
   canR3SubmitResult,
   starCostFor,
+  formatOfficerStarHint,
   validateImportData,
   buildAutoPick,
   OFFICER_TYPES,
@@ -212,8 +213,21 @@ test('allows r3 result submission only after next UTC midnight when empty', () =
 
 test('returns officer star tooltip costs including total sixth marker', () => {
   assert.equal(starCostFor(1), 500);
+  assert.equal(starCostFor(2), 1000);
+  assert.equal(starCostFor(3), 6500);
+  assert.equal(starCostFor(4), 25000);
   assert.equal(starCostFor(5), 65000);
   assert.equal(starCostFor(6), 98000);
+});
+
+test('formatOfficerStarHint formats correct hint for star levels 0 to 6', () => {
+  assert.equal(formatOfficerStarHint(0), 'До 1★: 500 звёзд');
+  assert.equal(formatOfficerStarHint(1), 'До 2★: 1 000 звёзд');
+  assert.equal(formatOfficerStarHint(2), 'До 3★: 6 500 звёзд');
+  assert.equal(formatOfficerStarHint(3), 'До 4★: 25 000 звёзд');
+  assert.equal(formatOfficerStarHint(4), 'До 5★: 65 000 звёзд');
+  assert.equal(formatOfficerStarHint(5), 'До 6★: 98 000 звёзд');
+  assert.equal(formatOfficerStarHint(6), '6★ Максимум (98 000 звёзд)');
 });
 
 test('exports full list of 5 officer types', () => {
