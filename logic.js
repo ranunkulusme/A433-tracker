@@ -343,15 +343,15 @@
     },
     {
       key: 'legendaryStars3',
-      pattern: /Легендарная\s+звезда\s*(?:III|iii|3|Ⅲ|ІІІ)\b/i,
+      pattern: /(?:960\s+)?Легендарная\s+звезда\s*(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)\b/i,
     },
     {
       key: 'legendaryStars2',
-      pattern: /Легендарная\s+звезда\s*(?:II|ii|2|Ⅱ|ІІ)\b/i,
+      pattern: /(?:420\s+)?Легендарная\s+звезда\s*(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)\b/i,
     },
     {
       key: 'legendaryStars1',
-      pattern: /Легендарная\s+звезда\s*(?:I|i|1|Ⅰ|І)\b/i,
+      pattern: /(?:110\s+)?Легендарная\s+звезда\s*(?:I|i|1|Ⅰ|І|l|\|)\b/i,
     },
   ];
 
@@ -369,17 +369,23 @@
       const startIndex = match.index + match[0].length;
       const windowText = text.slice(startIndex, startIndex + 250);
 
-      const countMatch = windowText.match(/(?:В\s*на[лп]ичи[ие]?|На[лп]ичи[ие]?)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+      // Ищем количество: "В наличии: <число>" строго без захвата переводов строк следующей карточки
+      const countMatch = windowText.match(/(?:В\s*на[лпд]ич[иеык]+|На[лпд]ич[иеык]+)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
       if (countMatch) {
         const val = cleanOcrNumber(countMatch[1]);
-        stock[def.key] = val;
+        if (val > 0) {
+          stock[def.key] = val;
+        }
       } else {
-        const numMatches = windowText.matchAll(/(?:^|[^\d])([0-9OoLlI.,\s']{2,})/g);
-        for (const nm of numMatches) {
-          const candidate = cleanOcrNumber(nm[1]);
-          if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
-            stock[def.key] = candidate;
-            break;
+        const lineMatches = windowText.split(/\r?\n/).slice(0, 4);
+        for (const line of lineMatches) {
+          const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27]{1,})/);
+          if (numMatch) {
+            const candidate = cleanOcrNumber(numMatch[1]);
+            if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
+              stock[def.key] = candidate;
+              break;
+            }
           }
         }
       }

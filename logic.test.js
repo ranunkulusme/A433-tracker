@@ -1064,6 +1064,32 @@ test('parseWarehouseScreenshotText extracts coupons, puzzles, starCoupons and le
   assert.deepStrictEqual(nonWarehouse.stock, {});
 });
 
+test('parseWarehouseScreenshotText accurately parses multi-item inventory without cross-line greedy number concatenation', () => {
+  const pcInventoryText = `
+Каждый предмет важен!
+РЕСУРСЫ УСКОРИТЕЛИ УСИЛЕНИЕ ДРУГИЕ
+В наличии: 4,628
+960 Эпическая звезда III
+В наличии: 147
+420 Легендарная звезда II
+В наличии: 98
+110 Эксклюзивная звезда (S2 Наталья)
+В наличии: 1
+110 Легендарная звезда I
+В наличии: 1,155
+960 Легендарная звезда III
+В наличии: 23
+100 100 опыта офицера
+В наличии: 2,760,814
+  `;
+
+  const parsed = parseWarehouseScreenshotText(pcInventoryText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.legendaryStars1, 1155, 'Legendary Star 1 must be exactly 1155, not concatenated with next line');
+  assert.strictEqual(parsed.stock.legendaryStars2, 98, 'Legendary Star 2 must be exactly 98, not concatenated with next line');
+  assert.strictEqual(parsed.stock.legendaryStars3, 23, 'Legendary Star 3 must be exactly 23, not concatenated with next line');
+});
+
 test('mergeScanResults combines multiple screenshots without losing or overwriting data', () => {
   const scan1 = {
     isProfile: true,

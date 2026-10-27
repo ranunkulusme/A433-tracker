@@ -490,8 +490,12 @@
       let profileParsed = logic.parseProfileScreenshotText(extractedText);
       let warehouseParsed = logic.parseWarehouseScreenshotText(extractedText);
 
-      // Если это складской скриншот или включена опция splitWarehouse — выполняем анализ по колонкам
-      const shouldTrySplit = options.splitWarehouse || (warehouseParsed.isWarehouse && options.splitWarehouse !== false);
+      // Проверяем наличие признаков инвентаря/склада или не-профиля
+      const isWarehouseLike = warehouseParsed.isWarehouse ||
+        /(?:вещи|предмет|наличи|звезд|опыт|купон|медаль|ресурс|ускорител|усилен|други)/i.test(extractedText);
+
+      // Если это складской скриншот или скриншот не является профилем — выполняем анализ по колонкам
+      const shouldTrySplit = options.splitWarehouse || (isWarehouseLike && options.splitWarehouse !== false) || (!profileParsed.isProfile && options.splitWarehouse !== false);
       if (shouldTrySplit && !profileParsed.isProfile) {
         const columns = splitWarehouseColumns(preprocessedCanvas, options);
         if (columns.length > 1) {
