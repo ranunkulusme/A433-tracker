@@ -744,14 +744,22 @@ function toast(msg, type='success') {
 }
 
 function openModal(id) {
-  document.getElementById('overlay').classList.add('open');
-  document.getElementById(id).classList.add('open');
+  document.getElementById('overlay')?.classList.add('open');
+  document.getElementById(id)?.classList.add('open');
+}
+function closeModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.remove('open');
+  const anyOpen = document.querySelector('.modal.open');
+  if (!anyOpen) {
+    document.getElementById('overlay')?.classList.remove('open');
+  }
 }
 function closeAllModals() {
   if (!currentUser && document.getElementById('modal-auth')?.classList.contains('open')) {
     return;
   }
-  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('overlay')?.classList.remove('open');
   document.getElementById('sidebar')?.classList.remove('open');
   document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));
 }
@@ -6371,4 +6379,7 @@ if (typeof window !== 'undefined') {
   window.handleQuickChangeStars = handleQuickChangeStars;
   window.openChangeSectorOwnerModal = openChangeSectorOwnerModal;
   window.submitChangeSectorOwner = submitChangeSectorOwner;
+  window.openExchangeOcrModal = openExchangeOcrModal;
+  window.closeExchangeOcrModal = closeExchangeOcrModal;
+  window.closeModal = closeModal;
 }

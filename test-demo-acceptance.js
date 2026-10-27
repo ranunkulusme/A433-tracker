@@ -706,8 +706,10 @@ VIP: 15`;
     // 10.2. Мобильное бургер-меню и надежное снятие оверлея
     try {
       const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
       assert(appJs.includes("document.getElementById('overlay')?.classList.remove('open')"), 'navigate() закрывает оверлей');
-      recordTest('10.2', 'Мобильное бургер-меню и надежное снятие оверлея', 'БЛОК 10', true, 'Закрытие оверлея в navigate() подтверждено');
+      assert(styleCss.includes('.sidebar.open') && styleCss.includes('z-index: 150'), 'Мобильный сайдбар имеет z-index 150 выше оверлея (100)');
+      recordTest('10.2', 'Мобильное бургер-меню и надежное снятие оверлея', 'БЛОК 10', true, 'Закрытие оверлея в navigate() и z-index 150 подтверждены');
     } catch (e) {
       recordTest('10.2', 'Мобильное бургер-меню и надежное снятие оверлея', 'БЛОК 10', false, e.message);
     }

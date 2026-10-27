@@ -24,11 +24,14 @@
 
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-        <rect width="28" height="28" rx="6" fill="#1a6ef5"/>
-        <path d="M6 14h4l3-6 4 12 3-6h2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <span class="logo-text">KoW Tracker</span>
+      <div class="logo-brand">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect width="28" height="28" rx="6" fill="#1a6ef5"/>
+          <path d="M6 14h4l3-6 4 12 3-6h2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="logo-text">KoW Tracker</span>
+      </div>
+      <button class="sidebar-close-btn" onclick="toggleSidebar()" aria-label="Закрыть меню">✕</button>
     </div>
     <nav class="sidebar-nav" id="sidebar-nav">
       <a href="#" class="nav-item active" data-page="calendar">
