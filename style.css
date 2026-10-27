@@ -34,8 +34,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
   transition: transform .25s ease;
 }
-.sidebar-logo { display: flex; align-items: center; gap: 10px; padding: 18px 16px 16px; border-bottom: 1px solid var(--border); }
+.sidebar-logo { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 16px 16px; border-bottom: 1px solid var(--border); }
+.logo-brand { display: flex; align-items: center; gap: 10px; }
 .logo-text { font-size: 15px; font-weight: 600; }
+.sidebar-close-btn { display: none; background: var(--bg3); border: 1px solid var(--border); color: var(--text2); border-radius: var(--radius); width: 30px; height: 30px; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; line-height: 1; transition: background .15s, color .15s; }
+.sidebar-close-btn:hover { background: var(--border2); color: var(--text); }
 .sidebar-nav { flex: 1; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius); color: var(--text2); text-decoration: none; font-size: 13.5px; font-weight: 500; transition: background .15s, color .15s; }
 .nav-item:hover { background: var(--bg3); color: var(--text); }
@@ -172,7 +175,7 @@ select option { background: var(--bg3); }
 /* ── MODAL ── */
 .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100; backdrop-filter: blur(2px); }
 .overlay.open { display: block; }
-.modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(520px, calc(100vw - 32px)); background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius-lg); z-index: 101; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(520px, calc(100vw - 32px)); background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius-lg); z-index: 200; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
 .modal.open { display: block; }
 .modal.modal-sm { width: min(360px, calc(100vw - 32px)); }
 .modal.modal-wide { width: min(860px, calc(100vw - 32px)); }
@@ -586,12 +589,26 @@ select option { background: var(--bg3); }
 /* ── RESPONSIVE ── */
 @media (max-width: 768px) {
   .sidebar {
+    width: 270px;
+    max-width: 82vw;
+    z-index: 150;
     transform: translateX(-100%);
+    box-shadow: none;
+    transition: transform .25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow .25s ease;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
     padding-left: env(safe-area-inset-left, 0px);
+    background: var(--bg2);
+    display: flex;
+    flex-direction: column;
   }
-  .sidebar.open { transform: translateX(0); }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 6px 0 32px rgba(0, 0, 0, 0.75);
+  }
+  .sidebar-close-btn {
+    display: flex;
+  }
   .main { margin-left: 0; }
   .burger { display: block; }
   .topbar {
@@ -835,7 +852,7 @@ select option { background: var(--bg3); }
 
 #modal-smart-scanner,
 #modal-exchange-ocr {
-  z-index: 105;
+  z-index: 205;
 }
 
 .scanner-dropzone {
@@ -1074,7 +1091,7 @@ select option { background: var(--bg3); }
 
 /* ── SEASON SCHEDULER & CADENCE CONSTRUCTOR ── */
 #modal-season-scheduler {
-  z-index: 105;
+  z-index: 205;
 }
 
 .season-config-grid {

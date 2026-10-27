@@ -449,15 +449,17 @@
     const results = [];
     let currentGeneration = 8;
 
-    const topSeasonMatch = text.match(/(?:сезон|season)\s*(\d+)/i) || text.match(/\bS(\d+)\b/i);
+    const topSeasonMatch = text.match(/(?:сезон|season|s|с)\s*(\d+)/i);
     if (topSeasonMatch) {
       currentGeneration = parseInt(topSeasonMatch[1], 10) || 8;
     }
 
+    const STOP_PATTERN = /^(?:обмен|0бмен|магазин|обновления|сезон|медали|офицера|офицер|стоимость|до|вход|время|таймер|купоны|звезды|season|exchange|shop|medals|officer)$/i;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      const seasonLineMatch = line.match(/(?:сезон|season)\s*(\d+)/i) || line.match(/\bS(\d+)\b/i);
+      const seasonLineMatch = line.match(/(?:сезон|season)\s*(\d+)/i);
       if (seasonLineMatch) {
         currentGeneration = parseInt(seasonLineMatch[1], 10) || currentGeneration;
       }
@@ -465,64 +467,87 @@
       let nameCandidate = '';
       let genCandidate = currentGeneration;
 
-      const sBadgeMatch = line.match(/^[Ss](\d+)\s*(.*)$/);
+      // Бейдж сезона: S8, С8, S 8, С 8, [S8], (S8), 58
+      const sBadgeMatch = line.match(/^[\(\[]?[SsСс5]\s*(\d+)[\)\]\.]?\s*(.*)$/);
       if (sBadgeMatch) {
         genCandidate = parseInt(sBadgeMatch[1], 10) || currentGeneration;
-        nameCandidate = sBadgeMatch[2].trim();
+        nameCandidate = (sBadgeMatch[2] || '').trim();
         if (!nameCandidate && i + 1 < lines.length) {
-          nameCandidate = lines[i + 1].trim();
+          const nextCandidate = lines[i + 1].trim();
+          if (!STOP_PATTERN.test(nextCandidate) && !/^(?:x\d+|110)/i.test(nextCandidate)) {
+            nameCandidate = nextCandidate;
+          }
         }
       } else if (
-        !line.includes('Обмен') &&
-        !line.includes('обновления') &&
-        !line.includes('ОБМЕН') &&
+        !STOP_PATTERN.test(line) &&
+        !line.match(/(?:обмен|магазин|обновления|сезон)/i) &&
         !line.match(/^\d+/) &&
-        !line.match(/^(?:x\d+|110\s*x\d+)/i) &&
+        !line.match(/^(?:[xXхХ]\s*\d+|110\s*[xXхХ]\s*\d+)/i) &&
         line.length >= 2 &&
         line.length <= 30
       ) {
-        const nextFew = lines.slice(i + 1, i + 5).join(' ');
-        if (/ОБМЕН/i.test(nextFew) || /x1/i.test(nextFew)) {
+        const nextFew = lines.slice(i + 1, i + 6).join(' ');
+        if (/(?:ОБМЕН|0БМЕН|ОБMEH|EXCHANGE|Обмен)/i.test(nextFew) || /[xXхХ]\s*1/i.test(nextFew) || /\b(?:720|600|500|360|300|250)\b/.test(nextFew)) {
           nameCandidate = line;
         }
       }
 
       if (nameCandidate) {
         nameCandidate = nameCandidate
-          .replace(/^[Ss]\d+\s*/, '')
-          .replace(/^(?:ОБМЕН|x\d+|110)/i, '')
+          .replace(/^[\(\[]?[SsСс5]\s*\d+[\)\]\.]?\s*/, '')
+          .replace(/^(?:ОБМЕН|0БМЕН|x\d+|х\d+|110)/i, '')
+          .replace(/^[^a-zA-Zа-яА-ЯёЁ]+/, '')
+          .replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s-]+$/, '')
           .trim();
       }
 
-      if (nameCandidate && nameCandidate.length >= 2 && !/^(?:ОБМЕН|сезон|обновления|до)$/i.test(nameCandidate)) {
-        const windowText = lines.slice(i, i + 7).join('\n');
+      if (
+        nameCandidate &&
+        nameCandidate.length >= 2 &&
+        !STOP_PATTERN.test(nameCandidate) &&
+        !/(?:магазин|обновления)/i.test(nameCandidate)
+      ) {
+        const windowLines = lines.slice(i, i + 8);
+        const windowText = windowLines.join('\n');
 
-        let couponPerPuzzle = genCandidate === 7 ? 600 : 720;
-        let starCouponCost = genCandidate === 7 ? 300 : 360;
+        let couponPerPuzzle = genCandidate === 7 ? 600 : (genCandidate <= 6 ? 500 : 720);
+        let starCouponCost = genCandidate === 7 ? 300 : (genCandidate <= 6 ? 250 : 360);
 
-        const puzzleMatch = windowText.match(/[xX]1\s+(\d{3,4})/);
-        if (puzzleMatch) {
-          couponPerPuzzle = parseInt(puzzleMatch[1], 10);
-        } else {
-          const exchangeMatches = [...windowText.matchAll(/(\d{3,4})\s*ОБМЕН/gi)];
-          if (exchangeMatches.length > 0) {
-            couponPerPuzzle = parseInt(exchangeMatches[0][1], 10);
-            if (exchangeMatches.length > 1) {
-              starCouponCost = parseInt(exchangeMatches[1][1], 10);
-            }
-          }
-        }
-
-        const starMatch = windowText.match(/110\s*[xX]1\s+(\d{3,4})/);
+        // Поиск стоимости звезд: 110 x1 360
+        const starMatch = windowText.match(/110\s*[xXхХ*]?\s*1?\s*(\d{3,4})/);
         if (starMatch) {
           starCouponCost = parseInt(starMatch[1], 10);
         }
+
+        // Поиск стоимости фрагмента/пазла (x1 720 без префикса 110)
+        for (let w = i; w < Math.min(lines.length, i + 7); w++) {
+          const l = lines[w];
+          if (/110/.test(l)) continue;
+          const pMatch = l.match(/[xXхХ*]\s*1\s+(\d{3,4})/);
+          if (pMatch) {
+            couponPerPuzzle = parseInt(pMatch[1], 10);
+            break;
+          }
+          const exMatch = l.match(/(\d{3,4})\s*(?:ОБМЕН|0БМЕН|ОБMEH|EXCHANGE|Обмен)/i);
+          if (exMatch) {
+            couponPerPuzzle = parseInt(exMatch[1], 10);
+            break;
+          }
+        }
+
+        // Определение типа войск, если встретилось рядом
+        let troopType = 'Пехота';
+        if (/Танк/i.test(windowText)) troopType = 'Танк';
+        else if (/ПТ-Сау|ПТ\s*Сау/i.test(windowText)) troopType = 'ПТ-Сау';
+        else if (/Горнизон/i.test(windowText)) troopType = 'Горнизон';
+        else if (/Осада/i.test(windowText)) troopType = 'Осада';
+        else if (/Пехота/i.test(windowText)) troopType = 'Пехота';
 
         if (!results.some(r => r.name.toLowerCase() === nameCandidate.toLowerCase())) {
           results.push({
             name: nameCandidate,
             generation: genCandidate,
-            type: 'Пехота',
+            type: troopType,
             couponPerPuzzle,
             starCouponCost,
             medalsBeforeTraining: 480,

@@ -1180,6 +1180,35 @@ x1 600 ОБМЕН
   assert.strictEqual(royshin.starCouponCost, 300);
 });
 
+test('parseExchangeShopScreenshotText handles Cyrillic C8 badges and OCR variations', () => {
+  const { parseExchangeShopScreenshotText } = require('./logic.js');
+
+  // Real world Tesseract OCR output with Cyrillic С8 (U+0421), spaces and OCR noise
+  const ocrNoiseText = `
+Магазин обмена
+С 8
+По
+х1 720 0БМЕН
+110 х1 360 0БМЕН
+С8 Валькирия
+х1 720 ОБМЕН
+110 х1 360 ОБМЕН
+`;
+
+  const results = parseExchangeShopScreenshotText(ocrNoiseText);
+  assert.strictEqual(results.length, 2);
+
+  const po = results.find(o => o.name === 'По');
+  assert.ok(po, 'Must detect По with Cyrillic C 8 badge');
+  assert.strictEqual(po.generation, 8);
+  assert.strictEqual(po.couponPerPuzzle, 720);
+  assert.strictEqual(po.starCouponCost, 360);
+
+  const valk = results.find(o => o.name === 'Валькирия');
+  assert.ok(valk, 'Must detect Валькирия with Cyrillic C8 badge');
+  assert.strictEqual(valk.generation, 8);
+});
+
 test('calculateVipDeficit and dailyRewards support dynamic vipTiers and default VIP 14 is 750000', () => {
   const { calculateVipDeficit, VIP_TIERS_DATA, dailyRewards } = require('./logic.js');
 
