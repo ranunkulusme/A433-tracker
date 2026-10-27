@@ -251,6 +251,14 @@ function createRequestHandler(staticDir) {
       // ─────────────────────────────────────────────────────────
       // AUTH ENDPOINTS
       // ─────────────────────────────────────────────────────────
+      if (pathname === '/api/auth/status' && req.method === 'GET') {
+        const isDefault = db.isDefaultAdminPassword();
+        return sendJson(res, 200, {
+          hasDefaultAdminPassword: isDefault,
+          demoAccessEnabled: isDefault
+        });
+      }
+
       if (pathname === '/api/auth/candidate-players' && req.method === 'GET') {
         return sendJson(res, 200, db.getCandidatePlayers());
       }
@@ -286,7 +294,10 @@ function createRequestHandler(staticDir) {
       }
       return sendJson(res, 200, {
         token: loginRes.token,
-        user: loginRes.user
+        user: {
+          ...loginRes.user,
+          hasDefaultAdminPassword: loginRes.user.username === 'admin' ? db.isDefaultAdminPassword() : false
+        }
       });
     }
 
@@ -302,7 +313,10 @@ function createRequestHandler(staticDir) {
       if (!requireAuth(req, res)) return;
       const player = req.user.playerId ? db.getPlayerById(req.user.playerId) : null;
       return sendJson(res, 200, {
-        user: req.user,
+        user: {
+          ...req.user,
+          hasDefaultAdminPassword: req.user.username === 'admin' ? db.isDefaultAdminPassword() : false
+        },
         player
       });
     }

@@ -1104,5 +1104,18 @@ test('catalog does not re-seed deleted officers on db reload and clearCatalog cl
   }
 });
 
+test('isDefaultAdminPassword tracks admin password changes correctly', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  assert.strictEqual(dbModule.isDefaultAdminPassword(), true, 'Initially admin has default password admin123');
+
+  const admin = dbModule.findUserByUsername('admin');
+  assert.ok(admin);
+
+  dbModule.changePassword(admin.id, 'MyNewSecretPass2026!');
+  assert.strictEqual(dbModule.isDefaultAdminPassword(), false, 'isDefaultAdminPassword returns false after password change');
+});
+
 
 
