@@ -1,6 +1,6 @@
 {
   "name": "kow-tracker",
-  "version": "3.10.1",
+  "version": "3.10.2",
   "description": "Kingdom of Winners Officer Tracker and Event Planner",
   "main": "server.js",
   "scripts": {
