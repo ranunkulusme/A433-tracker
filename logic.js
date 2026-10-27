@@ -324,7 +324,15 @@
       sector.killPoints = finalKp;
     }
 
-    const isProfile = Boolean(sector.power || sector.kills || sector.killPoints || sector.name || sector.allianceTag);
+    const hasStats = Boolean(sector.power || sector.kills || sector.killPoints);
+    const hasWarehouseMarkers = /(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|предмет|звезд|опыт|купон\s+готовност|медал[ья]\s+легендарн)/i.test(text);
+
+    // Если в скриншоте есть явные складские маркеры и нет боевых параметров (сила, убийства) — это инвентарь/склад, а не профиль
+    if (hasWarehouseMarkers && !hasStats) {
+      return { isProfile: false, sector: {} };
+    }
+
+    const isProfile = Boolean(hasStats || sector.name || sector.allianceTag);
     return { isProfile, sector };
   }
 
@@ -343,15 +351,15 @@
     },
     {
       key: 'legendaryStars3',
-      pattern: /(?:960\s+)?Легендарная\s+звезда\s*(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)\b/i,
+      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
     {
       key: 'legendaryStars2',
-      pattern: /(?:420\s+)?Легендарная\s+звезда\s*(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)\b/i,
+      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
     {
       key: 'legendaryStars1',
-      pattern: /(?:110\s+)?Легендарная\s+звезда\s*(?:I|i|1|Ⅰ|І|l|\|)\b/i,
+      pattern: /(?:110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
   ];
 
@@ -370,7 +378,7 @@
       const windowText = text.slice(startIndex, startIndex + 250);
 
       // Ищем количество: "В наличии: <число>" строго без захвата переводов строк следующей карточки
-      const countMatch = windowText.match(/(?:В\s*на[лпд]ич[иеык]+|На[лпд]ич[иеык]+)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
+      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
       if (countMatch) {
         const val = cleanOcrNumber(countMatch[1]);
         if (val > 0) {
