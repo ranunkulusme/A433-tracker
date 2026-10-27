@@ -1565,5 +1565,132 @@ select option { background: var(--bg3); }
   transform: translateX(-50%) translateY(0);
 }
 
+/* ── READONLY STAR TOOLTIPS & TABLE STAR HINTS ── */
+.star-readonly {
+  position: relative;
+}
+
+.star-readonly[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 11px;
+  font-family: var(--font);
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid #334155;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 100;
+}
+
+.star-readonly[data-tooltip]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px 5px 0 5px;
+  border-style: solid;
+  border-color: #334155 transparent transparent transparent;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease;
+  z-index: 100;
+}
+
+.star-readonly[data-tooltip]:hover::after,
+.star-readonly[data-tooltip]:hover::before {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+.table-officer-stars-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  position: relative;
+}
+
+.table-star-hint {
+  min-height: 16px;
+  line-height: 1.2;
+}
+
+.star-hint-badge-mini {
+  display: inline-block;
+  font-size: 10.5px;
+  color: var(--text3);
+  font-family: var(--mono);
+  white-space: nowrap;
+  letter-spacing: -0.2px;
+}
+
+.star-hint-badge-mini.hover {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.table-wrap td:has(.table-officer-stars-wrap) {
+  overflow: visible !important;
+}
+
+/* ── STOCK SYNC TOGGLE & SIM SURPLUS NOTE ── */
+.stock-sync-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text2);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  user-select: none;
+}
+
+.stock-sync-toggle-label input[type="checkbox"] {
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.sim-stock-surplus-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sim-stock-detail-hint {
+  cursor: help;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.toast.toast-with-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast-undo-btn:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+
 
 
