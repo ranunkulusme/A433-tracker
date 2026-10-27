@@ -87,6 +87,12 @@
     [10, 30, 50, 60], // Навык 4: 150 медалей
   ];
 
+  const SKILL_PROGRESSION_COSTS = [
+    10, 10, 15, 15, 30, 30, 40, 40, 45, 45, 50, 50, 75, 75, 80, 80
+  ];
+
+  const STAR_CUMULATIVE_COSTS = [0, 500, 1500, 8000, 33000, 98000, 98000];
+
   const OFFICER_PAIRINGS = {
     'general-rex': [
       { partnerId: 'angel', partnerName: 'Ангел', role: 'Открытое поле', synergy: 'Максимальный танковый урон и выживаемость' },
@@ -700,7 +706,7 @@
     };
   }
 
-  function calculateSkillMedalsProgress(skills = [1, 1, 1, 1]) {
+  function calculateSkillMedalsProgress(skills = [1, 1, 1, 1], maxMedals = 690) {
     const arr = Array.isArray(skills) ? skills : [1, 1, 1, 1];
     const normalized = [
       Math.max(1, Math.min(5, Number(arr[0]) || 1)),
@@ -709,19 +715,25 @@
       Math.max(1, Math.min(5, Number(arr[3]) || 1)),
     ];
 
-    let spentMedals = 0;
-    for (let i = 0; i < 4; i++) {
-      const lvl = normalized[i];
-      for (let step = 0; step < lvl - 1; step++) {
-        spentMedals += SKILL_UPGRADE_COSTS[i][step] || 0;
-      }
+    const totalUpgrades = (normalized[0] - 1) + (normalized[1] - 1) + (normalized[2] - 1) + (normalized[3] - 1);
+    const ceiling = Number(maxMedals) > 0 ? Number(maxMedals) : 690;
+
+    let baseSpent = 0;
+    for (let step = 0; step < totalUpgrades && step < SKILL_PROGRESSION_COSTS.length; step++) {
+      baseSpent += SKILL_PROGRESSION_COSTS[step];
     }
 
-    const remainingMedals = Math.max(0, 690 - spentMedals);
-    const isMaxSkills = spentMedals === 690 && normalized.every(lvl => lvl === 5);
+    let spentMedals = baseSpent;
+    if (ceiling !== 690) {
+      spentMedals = totalUpgrades === 16 ? ceiling : Math.round((baseSpent / 690) * ceiling);
+    }
+
+    const remainingMedals = Math.max(0, ceiling - spentMedals);
+    const isMaxSkills = totalUpgrades === 16 && spentMedals >= ceiling;
 
     return {
       spentMedals,
+      totalMedals: ceiling,
       remainingMedals,
       isMaxSkills,
       skills: normalized,
@@ -1449,16 +1461,237 @@
     return queue.filter(item => item && item.id !== completedId);
   }
 
+  function formatInputNumber(val, allowDecimals = false) {
+    if (val === null || val === undefined || val === '') return '';
+    const str = String(val).trim();
+    if (str === '') return '';
+
+    if (allowDecimals) {
+      const hasComma = str.includes(',');
+      const sep = hasComma ? ',' : (str.includes('.') ? '.' : '');
+      const parts = str.split(/[,\.]/);
+      let intPart = parts[0].replace(/\D/g, '');
+      if (intPart === '' && (parts.length > 1 || sep)) {
+        intPart = '0';
+      }
+      const formattedInt = intPart === '' ? '' : intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+      if (parts.length > 1 || sep) {
+        const decPart = parts.slice(1).join('').replace(/\D/g, '');
+        const usedSep = hasComma ? ',' : '.';
+        return formattedInt === '' ? `0${usedSep}${decPart}` : `${formattedInt}${usedSep}${decPart}`;
+      }
+      return formattedInt;
+    } else {
+      const cleaned = str.replace(/\D/g, '');
+      if (cleaned === '') return '';
+      return cleaned.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    }
+  }
+
+  function parseInputNumber(str, allowDecimals = false) {
+    if (typeof str === 'number') {
+      if (isNaN(str)) return 0;
+      return allowDecimals ? str : Math.round(str);
+    }
+    if (!str) return 0;
+    const s = String(str).replace(/\s+/g, '').trim();
+    if (!s) return 0;
+    if (allowDecimals) {
+      const normalized = s.replace(',', '.');
+      const num = parseFloat(normalized);
+      return isNaN(num) ? 0 : num;
+    }
+    const cleaned = s.replace(/\D/g, '');
+    if (!cleaned) return 0;
+    const num = parseInt(cleaned, 10);
+    return isNaN(num) ? 0 : num;
+  }
+
+  function calculateStarStockDelta(currentStars, newStars, stock, starCouponCost = 300) {
+    const fromStar = Math.max(0, Math.min(6, Number(currentStars) || 0));
+    const toStar = Math.max(0, Math.min(6, Number(newStars) || 0));
+    const deltaPoints = STAR_CUMULATIVE_COSTS[toStar] - STAR_CUMULATIVE_COSTS[fromStar];
+
+    if (deltaPoints === 0) {
+      return {
+        canAfford: true,
+        points: 0,
+        delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 }
+      };
+    }
+
+    const couponRate = Number(starCouponCost) > 0 ? Number(starCouponCost) : 300;
+    const st = normalizeStock(stock);
+
+    if (deltaPoints > 0) {
+      // 1-й приоритет: купоны звезды (couponRate купонов = 110 очков)
+      const availableCouponPoints = Math.floor((st.starCoupons * 110) / couponRate);
+      const pointsFromCoupons = Math.min(deltaPoints, availableCouponPoints);
+      const couponsToDeduct = pointsFromCoupons > 0 ? Math.ceil((pointsFromCoupons * couponRate) / 110) : 0;
+      let remPoints = deltaPoints - pointsFromCoupons;
+
+      // 2-й приоритет: готовые звёзды со склада (III = 960, II = 420, I = 110)
+      const deductStars3 = Math.min(st.legendaryStars3, Math.floor(remPoints / 960));
+      remPoints -= deductStars3 * 960;
+
+      const deductStars2 = Math.min(st.legendaryStars2, Math.floor(remPoints / 420));
+      remPoints -= deductStars2 * 420;
+
+      const deductStars1 = Math.min(st.legendaryStars1, Math.ceil(remPoints / 110));
+      remPoints -= deductStars1 * 110;
+
+      if (remPoints > 0) {
+        if (deductStars2 < st.legendaryStars2) {
+          remPoints -= 420;
+        } else if (deductStars3 < st.legendaryStars3) {
+          remPoints -= 960;
+        }
+      }
+
+      if (remPoints > 0) {
+        return {
+          canAfford: false,
+          deficitPoints: remPoints,
+          points: deltaPoints,
+          delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 }
+        };
+      }
+
+      return {
+        canAfford: true,
+        points: deltaPoints,
+        delta: {
+          starCoupons: couponsToDeduct ? -couponsToDeduct : 0,
+          legendaryStars1: deductStars1 ? -deductStars1 : 0,
+          legendaryStars2: deductStars2 ? -deductStars2 : 0,
+          legendaryStars3: deductStars3 ? -deductStars3 : 0,
+        }
+      };
+    } else {
+      // Понижение: возврат ресурсов в купоны звезды
+      const refundPoints = Math.abs(deltaPoints);
+      const couponsToAdd = Math.round((refundPoints * couponRate) / 110);
+      return {
+        canAfford: true,
+        points: deltaPoints,
+        delta: {
+          starCoupons: couponsToAdd,
+          legendaryStars1: 0,
+          legendaryStars2: 0,
+          legendaryStars3: 0,
+        }
+      };
+    }
+  }
+
+  function calculateSkillStockDelta(currentSkills, newSkills, stock, couponPerPuzzle = 500, upgradeType = 'standard', maxMedals = 690) {
+    const curMedals = calculateSkillMedalsProgress(currentSkills, maxMedals).spentMedals;
+    const newMedals = calculateSkillMedalsProgress(newSkills, maxMedals).spentMedals;
+    const deltaMedals = newMedals - curMedals;
+
+    if (deltaMedals === 0) {
+      return { canAfford: true, medals: 0, delta: { coupons: 0, puzzles: 0 } };
+    }
+
+    const st = normalizeStock(stock);
+    const rate = Number(couponPerPuzzle) > 0 ? Number(couponPerPuzzle) : 0;
+    const isSpecial = upgradeType === 'special' || rate === 0;
+
+    if (deltaMedals > 0) {
+      if (isSpecial) {
+        if (st.puzzles < deltaMedals) {
+          return { canAfford: false, deficitMedals: deltaMedals - st.puzzles, medals: deltaMedals, delta: { coupons: 0, puzzles: 0 } };
+        }
+        return { canAfford: true, medals: deltaMedals, delta: { coupons: 0, puzzles: deltaMedals ? -deltaMedals : 0 } };
+      }
+
+      // 1-й приоритет: купоны офицера
+      const puzFromCouponsAvailable = Math.floor(st.coupons / rate);
+      const takeFromCouponsPuz = Math.min(deltaMedals, puzFromCouponsAvailable);
+      const couponsToDeduct = takeFromCouponsPuz * rate;
+      const remMedals = deltaMedals - takeFromCouponsPuz;
+
+      // 2-й приоритет: медали склада
+      if (st.puzzles < remMedals) {
+        return { canAfford: false, deficitMedals: remMedals - st.puzzles, medals: deltaMedals, delta: { coupons: 0, puzzles: 0 } };
+      }
+
+      return {
+        canAfford: true,
+        medals: deltaMedals,
+        delta: { coupons: couponsToDeduct ? -couponsToDeduct : 0, puzzles: remMedals ? -remMedals : 0 }
+      };
+    } else {
+      const refundMedals = Math.abs(deltaMedals);
+      if (isSpecial) {
+        return { canAfford: true, medals: deltaMedals, delta: { coupons: 0, puzzles: refundMedals } };
+      }
+      return { canAfford: true, medals: deltaMedals, delta: { coupons: refundMedals * rate, puzzles: 0 } };
+    }
+  }
+
+  function calculateLevelStockDelta(currentLevel, newLevel, stock, couponPerPuzzle = 500, upgradeType = 'standard') {
+    const curLvl = Math.max(0, Math.min(MAX_LEVEL, Number(currentLevel) || 0));
+    const newLvl = Math.max(0, Math.min(MAX_LEVEL, Number(newLevel) || 0));
+    const deltaPuzzles = (newLvl - curLvl) * PUZZLES_PER_LEVEL;
+
+    if (deltaPuzzles === 0) {
+      return { canAfford: true, puzzles: 0, delta: { coupons: 0, puzzles: 0 } };
+    }
+
+    const st = normalizeStock(stock);
+    const rate = Number(couponPerPuzzle) > 0 ? Number(couponPerPuzzle) : 0;
+    const isSpecial = upgradeType === 'special' || rate === 0;
+
+    if (deltaPuzzles > 0) {
+      if (isSpecial) {
+        if (st.puzzles < deltaPuzzles) {
+          return { canAfford: false, deficitPuzzles: deltaPuzzles - st.puzzles, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: 0 } };
+        }
+        return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: deltaPuzzles ? -deltaPuzzles : 0 } };
+      }
+
+      // 1-й приоритет: купоны
+      const puzFromCoupons = Math.floor(st.coupons / rate);
+      const takeFromCoupons = Math.min(deltaPuzzles, puzFromCoupons);
+      const couponsDeduct = takeFromCoupons * rate;
+      const remPuzzles = deltaPuzzles - takeFromCoupons;
+
+      if (st.puzzles < remPuzzles) {
+        return { canAfford: false, deficitPuzzles: remPuzzles - st.puzzles, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: 0 } };
+      }
+
+      return {
+        canAfford: true,
+        puzzles: deltaPuzzles,
+        delta: { coupons: couponsDeduct ? -couponsDeduct : 0, puzzles: remPuzzles ? -remPuzzles : 0 }
+      };
+    } else {
+      const refundPuz = Math.abs(deltaPuzzles);
+      if (isSpecial) {
+        return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: refundPuz } };
+      }
+      return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: refundPuz * rate, puzzles: 0 } };
+    }
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
     MAX_LEVEL,
     STOCK_ZERO,
     STAR_COSTS,
+    STAR_CUMULATIVE_COSTS,
     DEFAULT_OFFICERS,
     COMMUNITY_OFFICERS,
     VIP_TIERS_DATA,
     SKILL_UPGRADE_COSTS,
+    SKILL_PROGRESSION_COSTS,
+    formatInputNumber,
+    parseInputNumber,
+    calculateStarStockDelta,
+    calculateSkillStockDelta,
+    calculateLevelStockDelta,
     OFFICER_PAIRINGS,
     EVENT_PRESETS,
     OFFICER_TYPES,

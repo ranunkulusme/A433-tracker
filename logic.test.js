@@ -24,7 +24,13 @@ const {
   VIP_TIERS_DATA,
   calculateVipDeficit,
   SKILL_UPGRADE_COSTS,
+  SKILL_PROGRESSION_COSTS,
   calculateSkillMedalsProgress,
+  calculateStarStockDelta,
+  calculateSkillStockDelta,
+  calculateLevelStockDelta,
+  formatInputNumber,
+  parseInputNumber,
   OFFICER_PAIRINGS,
   getRecommendedPairings,
   EVENT_PRESETS,
@@ -490,10 +496,10 @@ test('community officers roster, vip deficit, skills and pairings', () => {
   assert.strictEqual(skillsMax.remainingMedals, 0);
   assert.strictEqual(skillsMax.isMaxSkills, true);
 
-  // Промежуточная прокачка навыка 1 до 5
+  // Промежуточная прокачка навыка 1 до 5 (первые 4 шага: 10 + 10 + 15 + 15 = 50)
   const skillsPartial = calculateSkillMedalsProgress([5, 1, 1, 1]);
-  assert.strictEqual(skillsPartial.spentMedals, 100);
-  assert.strictEqual(skillsPartial.remainingMedals, 590);
+  assert.strictEqual(skillsPartial.spentMedals, 50);
+  assert.strictEqual(skillsPartial.remainingMedals, 640);
 
   // Тест связок
   const pairings = getRecommendedPairings('general-rex');
@@ -1464,6 +1470,149 @@ VIP 12
   assert.strictEqual(parsedUser.sector.power, 158204982);
   assert.strictEqual(parsedUser.sector.kills, 84778531);
   assert.strictEqual(parsedUser.sector.killPoints, 7588165023);
+});
+
+test('formatInputNumber and parseInputNumber format numbers with spaces and parse accurately', () => {
+  // 1. Целые числа
+  assert.strictEqual(formatInputNumber(158204982), '158 204 982');
+  assert.strictEqual(formatInputNumber('84778531'), '84 778 531');
+  assert.strictEqual(formatInputNumber('158 204 982'), '158 204 982');
+  assert.strictEqual(formatInputNumber(629500), '629 500');
+  assert.strictEqual(formatInputNumber(0), '0');
+  assert.strictEqual(formatInputNumber('0'), '0');
+  assert.strictEqual(formatInputNumber(''), '');
+  assert.strictEqual(formatInputNumber(null), '');
+  assert.strictEqual(formatInputNumber(undefined), '');
+
+  // 2. Дробные числа (allowDecimals = true)
+  assert.strictEqual(formatInputNumber('7588165023.5', true), '7 588 165 023.5');
+  assert.strictEqual(formatInputNumber('7588165023,5', true), '7 588 165 023,5');
+  assert.strictEqual(formatInputNumber(7588165023.5, true), '7 588 165 023.5');
+  assert.strictEqual(formatInputNumber('1234,', true), '1 234,');
+
+  // 3. Парсинг parseInputNumber
+  assert.strictEqual(parseInputNumber('158 204 982'), 158204982);
+  assert.strictEqual(parseInputNumber('84 778 531'), 84778531);
+  assert.strictEqual(parseInputNumber('7 588 165 023.5', true), 7588165023.5);
+  assert.strictEqual(parseInputNumber('7 588 165 023,5', true), 7588165023.5);
+  assert.strictEqual(parseInputNumber('0'), 0);
+  assert.strictEqual(parseInputNumber(''), 0);
+  assert.strictEqual(parseInputNumber(null), 0);
+  assert.strictEqual(parseInputNumber(undefined), 0);
+  assert.strictEqual(parseInputNumber(158204982), 158204982);
+});
+
+test('SKILL_PROGRESSION_COSTS and calculateSkillMedalsProgress follow the 16-step 690-medal game progression', () => {
+  // 1. Проверка структуры ряда из 16 шагов
+  assert.strictEqual(SKILL_PROGRESSION_COSTS.length, 16);
+  const totalSum = SKILL_PROGRESSION_COSTS.reduce((a, b) => a + b, 0);
+  assert.strictEqual(totalSum, 690, 'Сумма 16 шагов должна быть строго 690 медалей');
+  assert.deepStrictEqual(SKILL_PROGRESSION_COSTS, [
+    10, 10, 15, 15, 30, 30, 40, 40, 45, 45, 50, 50, 75, 75, 80, 80
+  ]);
+
+  // 2. Начальный уровень 1-1-1-1
+  const zero = calculateSkillMedalsProgress([1, 1, 1, 1]);
+  assert.strictEqual(zero.spentMedals, 0);
+  assert.strictEqual(zero.totalMedals, 690);
+  assert.strictEqual(zero.remainingMedals, 690);
+  assert.strictEqual(zero.isMaxSkills, false);
+
+  // 3. Прокачка одного навыка до 5-го уровня (4 апа): 10 + 10 + 15 + 15 = 50
+  const step4 = calculateSkillMedalsProgress([5, 1, 1, 1]);
+  assert.strictEqual(step4.spentMedals, 50);
+  assert.strictEqual(step4.remainingMedals, 640);
+
+  // 4. Прокачка двух навыков до 5-го уровня (8 апов): 50 + 30 + 30 + 40 + 40 = 190
+  const step8 = calculateSkillMedalsProgress([5, 5, 1, 1]);
+  assert.strictEqual(step8.spentMedals, 190);
+  assert.strictEqual(step8.remainingMedals, 500);
+
+  // 5. Прокачка трех навыков до 5-го уровня (12 апов): 190 + 45 + 45 + 50 + 50 = 380
+  const step12 = calculateSkillMedalsProgress([5, 5, 5, 1]);
+  assert.strictEqual(step12.spentMedals, 380);
+  assert.strictEqual(step12.remainingMedals, 310);
+
+  // 6. Максимальная прокачка 5-5-5-5 (16 апов): 380 + 75 + 75 + 80 + 80 = 690
+  const step16 = calculateSkillMedalsProgress([5, 5, 5, 5]);
+  assert.strictEqual(step16.spentMedals, 690);
+  assert.strictEqual(step16.remainingMedals, 0);
+  assert.strictEqual(step16.isMaxSkills, true);
+
+  // 7. Динамический потолок из карточки каталога (напр. 480)
+  const custom = calculateSkillMedalsProgress([5, 5, 5, 5], 480);
+  assert.strictEqual(custom.totalMedals, 480);
+  assert.strictEqual(custom.spentMedals, 480);
+  assert.strictEqual(custom.remainingMedals, 0);
+  assert.strictEqual(custom.isMaxSkills, true);
+});
+
+test('calculateStarStockDelta manages stock deduction and refunds with coupons-first priority', () => {
+  // Запас склада: 3000 купонов звезды (курс 300 = 110 очков, т.е. 1 100 очков) + 2 звезды III (2*960=1920) + 1 звезда I (110)
+  const stock = {
+    starCoupons: 3000,
+    legendaryStars1: 1,
+    legendaryStars2: 0,
+    legendaryStars3: 2,
+  };
+
+  // Повышение 0★ -> 1★ (требуется 500 очков звёзд)
+  // Курс: 300 купонов за 110 очков.
+  // Для 500 очков купонов достаточно: 500 * (300 / 110) = 1363.6 -> 1364 купона
+  const res1 = calculateStarStockDelta(0, 1, stock, 300);
+  assert.strictEqual(res1.canAfford, true);
+  assert.strictEqual(res1.points, 500);
+  assert.strictEqual(res1.delta.legendaryStars3, 0);
+  assert.strictEqual(res1.delta.legendaryStars1, 0);
+  assert(res1.delta.starCoupons < 0, 'Купоны должны списаться');
+
+  // Повышение 3★ -> 4★ (требуется 25 000 очков). На складе всего ~3 130 очков.
+  const resOverflow = calculateStarStockDelta(3, 4, stock, 300);
+  assert.strictEqual(resOverflow.canAfford, false);
+  assert(resOverflow.deficitPoints > 0);
+
+  // Понижение 4★ -> 3★ (возврат 25 000 очков)
+  const resRefund = calculateStarStockDelta(4, 3, stock, 300);
+  assert.strictEqual(resRefund.canAfford, true);
+  assert.strictEqual(resRefund.points, -25000);
+  assert(resRefund.delta.starCoupons > 0, 'Купоны должны вернуться на склад');
+});
+
+test('calculateSkillStockDelta and calculateLevelStockDelta prioritize coupons over medals for standard officers', () => {
+  const stock = {
+    coupons: 12000, // при курсе 600 (Ген. 7) это 20 пазлов/медалей
+    puzzles: 50,
+  };
+
+  // 1. Навыки: 0 -> 4 апа (50 медалей).
+  // Из 50 медалей: 20 берутся из 12 000 купонов, остальные 30 из медалей склада.
+  const skillRes = calculateSkillStockDelta([1, 1, 1, 1], [5, 1, 1, 1], stock, 600, 'standard', 690);
+  assert.strictEqual(skillRes.canAfford, true);
+  assert.strictEqual(skillRes.medals, 50);
+  assert.strictEqual(skillRes.delta.coupons, -12000);
+  assert.strictEqual(skillRes.delta.puzzles, -30);
+
+  // 2. Специальный офицер: купоны не применяются, только медали
+  const specialSkillRes = calculateSkillStockDelta([1, 1, 1, 1], [5, 1, 1, 1], stock, 0, 'special', 690);
+  assert.strictEqual(specialSkillRes.canAfford, true);
+  assert.strictEqual(specialSkillRes.delta.coupons, 0);
+  assert.strictEqual(specialSkillRes.delta.puzzles, -50);
+
+  // 3. Недостаточно ресурсов для навыков (требуется 190 медалей, а на складе всего 20 + 50 = 70)
+  const skillFail = calculateSkillStockDelta([1, 1, 1, 1], [5, 5, 1, 1], stock, 600, 'standard', 690);
+  assert.strictEqual(skillFail.canAfford, false);
+
+  // 4. Подготовка / уровни: 0 -> 10 ур. (10 * 5 = 50 пазлов)
+  const levelRes = calculateLevelStockDelta(0, 10, stock, 600, 'standard');
+  assert.strictEqual(levelRes.canAfford, true);
+  assert.strictEqual(levelRes.puzzles, 50);
+  assert.strictEqual(levelRes.delta.coupons, -12000);
+  assert.strictEqual(levelRes.delta.puzzles, -30);
+
+  // 5. Понижение уровня: 10 -> 0 ур. (возврат 50 пазлов в купоны)
+  const levelRefund = calculateLevelStockDelta(10, 0, stock, 600, 'standard');
+  assert.strictEqual(levelRefund.canAfford, true);
+  assert.strictEqual(levelRefund.delta.coupons, 30000);
 });
 
 

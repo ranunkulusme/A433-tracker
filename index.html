@@ -30,7 +30,6 @@
           <path d="M6 14h4l3-6 4 12 3-6h2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span class="logo-text">KoW Tracker</span>
-        <span class="logo-version-badge" id="sidebar-logo-version">v3.15.0</span>
       </div>
       <button class="sidebar-close-btn" onclick="toggleSidebar()" aria-label="Закрыть меню">✕</button>
     </div>
@@ -72,7 +71,7 @@
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(event)">
       <div class="sidebar-version-wrap">
         <span class="sidebar-version-dot"></span>
-        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.15.0</span>
+        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.16.0</span>
       </div>
     </div>
   </aside>
@@ -188,7 +187,7 @@
       </div>
       <div class="form-group">
         <label for="fp-vip-points">Очки VIP</label>
-        <input type="number" id="fp-vip-points" min="0" value="0" oninput="updateVipProgressHint()">
+        <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="fp-vip-points" value="0" oninput="updateVipProgressHint()">
       </div>
       <div class="form-group">
         <label for="fp-conf">Конфиденциальность</label>
@@ -199,15 +198,15 @@
     <div class="form-row form-row-3">
       <div class="form-group">
         <label>Сила</label>
-        <input type="number" id="fp-power" min="0" value="0">
+        <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="fp-power" value="0">
       </div>
       <div class="form-group">
         <label>Убито</label>
-        <input type="number" id="fp-kills" min="0" value="0">
+        <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="fp-kills" value="0">
       </div>
       <div class="form-group">
         <label>Очки за убийство</label>
-        <input type="number" id="fp-kill-points" min="0" step="0.1" value="0">
+        <input type="text" inputmode="decimal" autocomplete="off" id="fp-kill-points" value="0">
       </div>
     </div>
   </div>
@@ -827,11 +826,11 @@
       </div>
       <div class="form-group">
         <label for="as-power">Мощь / Сила</label>
-        <input type="number" id="as-power" min="0" value="0">
+        <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="as-power" value="0">
       </div>
       <div class="form-group">
         <label for="as-kills">Убито</label>
-        <input type="number" id="as-kills" min="0" value="0">
+        <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="as-kills" value="0">
       </div>
     </div>
   </div>
@@ -991,15 +990,15 @@
         <div class="form-row form-row-3">
           <div class="form-group">
             <label for="scanner-preview-power">Сила (Мощь)</label>
-            <input type="number" id="scanner-preview-power" min="0" value="0">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-power" value="0">
           </div>
           <div class="form-group">
             <label for="scanner-preview-kills">Убито</label>
-            <input type="number" id="scanner-preview-kills" min="0" value="0">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-kills" value="0">
           </div>
           <div class="form-group">
             <label for="scanner-preview-kill-points">Очки за убийство</label>
-            <input type="number" id="scanner-preview-kill-points" min="0" step="0.1" value="0">
+            <input type="text" inputmode="decimal" autocomplete="off" id="scanner-preview-kill-points" value="0">
           </div>
         </div>
         <div class="scanner-vip-notice" style="font-size:11.5px;color:var(--text3);margin-top:2px">
@@ -1013,29 +1012,29 @@
         <div class="form-row form-row-3">
           <div class="form-group">
             <label for="scanner-preview-coupons">Купон готовности офицера</label>
-            <input type="number" id="scanner-preview-coupons" min="0" value="0">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-coupons" value="0">
           </div>
           <div class="form-group">
             <label for="scanner-preview-puzzles">Медаль легендарного офицера</label>
-            <input type="number" id="scanner-preview-puzzles" min="0" value="0">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-puzzles" value="0">
           </div>
           <div class="form-group">
             <label for="scanner-preview-star-coupons">Купон готовности звезды</label>
-            <input type="number" id="scanner-preview-star-coupons" min="0" value="0">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-star-coupons" value="0">
           </div>
         </div>
         <div class="form-row form-row-3">
           <div class="form-group">
             <label for="scanner-preview-stars-1">Легендарная звезда I (110)</label>
-            <input type="number" id="scanner-preview-stars-1" min="0" value="0" oninput="updateScannerPreviewStarPoints()">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-stars-1" value="0" oninput="updateScannerPreviewStarPoints()">
           </div>
           <div class="form-group">
             <label for="scanner-preview-stars-2">Легендарная звезда II (420)</label>
-            <input type="number" id="scanner-preview-stars-2" min="0" value="0" oninput="updateScannerPreviewStarPoints()">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-stars-2" value="0" oninput="updateScannerPreviewStarPoints()">
           </div>
           <div class="form-group">
             <label for="scanner-preview-stars-3">Легендарная звезда III (960)</label>
-            <input type="number" id="scanner-preview-stars-3" min="0" value="0" oninput="updateScannerPreviewStarPoints()">
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-stars-3" value="0" oninput="updateScannerPreviewStarPoints()">
           </div>
         </div>
         <div style="margin-top:6px">
