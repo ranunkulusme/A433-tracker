@@ -23,20 +23,29 @@
   /**
    * Разрешение модуля бизнес-логики (logic.js)
    */
-  function resolveLogic(customLogic) {
+  function resolveLogic(customLogic, env = {}) {
     if (customLogic && typeof customLogic.parseProfileScreenshotText === 'function') {
       return customLogic;
     }
-    if (injectedLogic && typeof injectedLogic.parseProfileScreenshotText === 'function') {
-      return injectedLogic;
+    const injected = env.ignoreInjected ? null : injectedLogic;
+    if (injected && typeof injected.parseProfileScreenshotText === 'function') {
+      return injected;
     }
-    if (typeof globalThis !== 'undefined' && globalThis.logic && typeof globalThis.logic.parseProfileScreenshotText === 'function') {
-      return globalThis.logic;
+    const g = env.customGlobal || (typeof globalThis !== 'undefined' ? globalThis : null);
+    const w = typeof window !== 'undefined' ? window : null;
+    if (g && g.logic && typeof g.logic.parseProfileScreenshotText === 'function') {
+      return g.logic;
     }
-    if (typeof window !== 'undefined' && window.logic && typeof window.logic.parseProfileScreenshotText === 'function') {
-      return window.logic;
+    if (w && w.logic && typeof w.logic.parseProfileScreenshotText === 'function') {
+      return w.logic;
     }
-    if (typeof require !== 'undefined') {
+    if (g && typeof g.parseProfileScreenshotText === 'function') {
+      return g;
+    }
+    if (w && typeof w.parseProfileScreenshotText === 'function') {
+      return w;
+    }
+    if (!env.ignoreRequire && typeof require !== 'undefined') {
       try {
         const mod = require('./logic.js');
         if (mod && typeof mod.parseProfileScreenshotText === 'function') {
@@ -690,6 +699,7 @@
     loadTesseract,
     getOcrWorker,
     terminateWorker,
+    resolveLogic,
   };
 
   return smartScanner;

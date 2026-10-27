@@ -5,6 +5,18 @@
 
 ---
 
+## [3.10.2] - 2026-10-27
+
+### Исправлено (Fixed)
+- **Разрешение модуля бизнес-логики в Smart Scanner (`ocr.js`)**:
+  - Устранена ошибка `Ошибка сканера: Модуль logic.js не найден для обработки результатов OCR`, возникавшая при попытке сканирования скриншотов в браузерах (Safari, Chrome) и PWA.
+  - В браузерной UMD-обёртке [`logic.js`](file:///Users/ranunkulus/Downloads/KOW/logic.js) добавлен явный экспорт `root.logic = exports` наряду с `Object.assign(root, exports)`, гарантирующий наличие объекта `window.logic`.
+  - В [`ocr.js`](file:///Users/ranunkulus/Downloads/KOW/ocr.js) функция `resolveLogic` усилена прямой проверкой глобального контекста (`globalThis` / `window`), если методы парсинга были импортированы непосредственно в корень окружения.
+  - В [`app.js`](file:///Users/ranunkulus/Downloads/KOW/app.js) в методы вызова `runSmartOcr` и `runExchangeShopOcr` добавлена явная передача параметра `activeLogic`.
+  - В [`logic.test.js`](file:///Users/ranunkulus/Downloads/KOW/logic.test.js) добавлен юнит-тест, проверяющий корректность разрешения модуля `logic` во всех сценариях и точность парсинга скриншота профиля игрока.
+
+---
+
 ## [3.10.1] - 2026-10-27
 
 ### Исправлено (Fixed)

@@ -1,6 +1,10 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else Object.assign(root, factory());
+  else {
+    const exports = factory();
+    Object.assign(root, exports);
+    root.logic = exports;
+  }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const COUPON_PER_PUZZLE = 500;
   const PUZZLES_PER_LEVEL = 5;
