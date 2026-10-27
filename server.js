@@ -6,6 +6,12 @@ const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
 
+let APP_VERSION = '3.14.0';
+try {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  if (pkg.version) APP_VERSION = pkg.version;
+} catch (_) {}
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -267,8 +273,12 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       // ─────────────────────────────────────────────────────────
-      // AUTH ENDPOINTS
+      // AUTH & SYSTEM ENDPOINTS
       // ─────────────────────────────────────────────────────────
+      if (pathname === '/api/version' && req.method === 'GET') {
+        return sendJson(res, 200, { version: APP_VERSION });
+      }
+
       if (pathname === '/api/auth/status' && req.method === 'GET') {
         const isDefault = db.isDefaultAdminPassword();
         return sendJson(res, 200, {

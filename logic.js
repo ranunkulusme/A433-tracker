@@ -658,6 +658,17 @@
     return STAR_COSTS[Math.max(1, Math.min(6, Number(stars) || 1)) - 1];
   }
 
+  function formatOfficerStarHint(currentStars) {
+    const count = Math.max(0, Math.min(6, Number(currentStars) || 0));
+    if (count >= 6) {
+      return '6★ Максимум (98 000 звёзд)';
+    }
+    const next = count + 1;
+    const cost = starCostFor(next);
+    const formattedCost = String(cost).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return `До ${next}★: ${formattedCost} звёзд`;
+  }
+
   function calculateVipDeficit({ currentLevel = 0, currentPoints = 0, targetLevel, dailyPointsRate = 0, vipTiers } = {}) {
     const tiers = Array.isArray(vipTiers) && vipTiers.length > 0 ? vipTiers : VIP_TIERS_DATA;
     const curLvl = Math.max(0, Math.min(30, Number(currentLevel) || 0));
@@ -1464,6 +1475,7 @@
     canDeleteOfficer,
     canR3SubmitResult,
     starCostFor,
+    formatOfficerStarHint,
     validateImportData,
     buildAutoPick,
     calculateOfficerDeficit,

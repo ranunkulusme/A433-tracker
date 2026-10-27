@@ -30,6 +30,7 @@
           <path d="M6 14h4l3-6 4 12 3-6h2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span class="logo-text">KoW Tracker</span>
+        <span class="logo-version-badge" id="sidebar-logo-version">v3.15.0</span>
       </div>
       <button class="sidebar-close-btn" onclick="toggleSidebar()" aria-label="Закрыть меню">✕</button>
     </div>
@@ -69,6 +70,10 @@
         Экспорт JSON
       </button>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(event)">
+      <div class="sidebar-version-wrap">
+        <span class="sidebar-version-dot"></span>
+        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.15.0</span>
+      </div>
     </div>
   </aside>
 
