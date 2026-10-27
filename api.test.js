@@ -1902,6 +1902,112 @@ test('API serves favicon assets and handles /api/auth/status for demo hint dismi
   }
 });
 
+test('API handles S3 status and manual S3 sync endpoints with RBAC', async () => {
+  const { startServer } = require('./server.js');
+
+  // Start with mock S3 manager
+  let pushCalled = false;
+  const mockS3Manager = {
+    getStatus: () => ({
+      enabled: true,
+      bucket: 'test-bucket',
+      endpoint: 's3.timeweb.cloud',
+      key: 'kow.db',
+      lastSyncAt: '2026-10-27T12:00:00Z',
+      isSyncing: false,
+      lastError: null
+    }),
+    pull: async () => ({ found: true }),
+    pushImmediate: async () => {
+      pushCalled = true;
+      return { success: true, bytes: 12345 };
+    },
+    pushDebounced: () => {}
+  };
+
+  const server = await startServer({ port: 0, dbPath: ':memory:', s3Manager: mockS3Manager });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Unauthorized GET /api/admin/s3-status -> 401
+    const unauthRes = await fetch(`${baseUrl}/api/admin/s3-status`);
+    assert.equal(unauthRes.status, 401);
+
+    // 2. Login as admin (r5)
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    assert.equal(adminLoginRes.status, 200);
+    const adminData = await adminLoginRes.json();
+    const adminToken = adminData.token;
+
+    // 3. Register and approve r3 user
+    await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3user', password: 'password123' })
+    });
+    const usersRes = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(usersRes.status, 200);
+    const users = await usersRes.json();
+    assert(Array.isArray(users), 'Expected users to be an array');
+    const r3Target = users.find(u => u.username === 'r3user');
+    assert(r3Target, 'Target user r3user must be found');
+    await fetch(`${baseUrl}/api/users/${r3Target.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ is_approved: 1, rank: 'r3' })
+    });
+
+    const r3LoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3user', password: 'password123' })
+    });
+    const r3Token = (await r3LoginRes.json()).token;
+
+    // 4. R3 forbidden for status and sync -> 403
+    const r3StatusRes = await fetch(`${baseUrl}/api/admin/s3-status`, {
+      headers: { Authorization: `Bearer ${r3Token}` }
+    });
+    assert.equal(r3StatusRes.status, 403);
+
+    const r3SyncRes = await fetch(`${baseUrl}/api/admin/s3-sync`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Token}` }
+    });
+    assert.equal(r3SyncRes.status, 403);
+
+    // 5. Admin (r5) GET /api/admin/s3-status -> 200
+    const adminStatusRes = await fetch(`${baseUrl}/api/admin/s3-status`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(adminStatusRes.status, 200);
+    const statusData = await adminStatusRes.json();
+    assert.equal(statusData.enabled, true);
+    assert.equal(statusData.bucket, 'test-bucket');
+
+    // 6. Admin (r5) POST /api/admin/s3-sync -> 200
+    const syncRes = await fetch(`${baseUrl}/api/admin/s3-sync`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(syncRes.status, 200);
+    const syncData = await syncRes.json();
+    assert.equal(syncData.success, true);
+    assert.equal(pushCalled, true);
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

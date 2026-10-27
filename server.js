@@ -4,6 +4,7 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const db = require('./db.js');
 const logic = require('./logic.js');
+const s3 = require('./s3.js');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -143,6 +144,7 @@ const FORBIDDEN_FILES = new Set([
   'package-lock.json',
   'server.js',
   'db.js',
+  's3.js',
   'dockerfile',
   'docker-compose.yml',
   'readme.md'
@@ -210,9 +212,25 @@ function serveStaticFile(req, res, staticDir, pathname) {
   });
 }
 
-function createRequestHandler(staticDir) {
+function createRequestHandler(staticDir, s3Manager = null) {
   return async (req, res) => {
     try {
+      // Automatic S3 synchronization for mutating API requests
+      if (s3Manager && s3Manager.getStatus().enabled) {
+        res.on('finish', () => {
+          if (
+            res.statusCode >= 200 &&
+            res.statusCode < 400 &&
+            ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)
+          ) {
+            const pathName = req.url ? req.url.split('?')[0] : '';
+            if (pathName !== '/api/admin/s3-sync') {
+              s3Manager.pushDebounced();
+            }
+          }
+        });
+      }
+
       // CORS Preflight
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -1130,6 +1148,28 @@ function createRequestHandler(staticDir) {
       }
     }
 
+    // ─────────────────────────────────────────────────────────
+    // ADMIN S3 SYNCHRONIZATION & STATUS
+    // ─────────────────────────────────────────────────────────
+    if (pathname === '/api/admin/s3-status' && req.method === 'GET') {
+      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      const status = s3Manager ? s3Manager.getStatus() : { enabled: false };
+      return sendJson(res, 200, status);
+    }
+
+    if (pathname === '/api/admin/s3-sync' && req.method === 'POST') {
+      if (!requireRole(['r5'])(req, res)) return;
+      if (!s3Manager || !s3Manager.getStatus().enabled) {
+        return sendError(res, 400, 'S3_NOT_CONFIGURED', 'S3-хранилище не настроено в переменных окружения');
+      }
+      try {
+        const syncRes = await s3Manager.pushImmediate();
+        return sendJson(res, 200, { success: true, result: syncRes, status: s3Manager.getStatus() });
+      } catch (err) {
+        return sendError(res, 500, 'S3_SYNC_FAILED', err.message);
+      }
+    }
+
     // Unmatched API endpoint
     return sendError(res, 404, 'NOT_FOUND', `Endpoint ${pathname} not found`);
     } catch (err) {
@@ -1138,10 +1178,43 @@ function createRequestHandler(staticDir) {
   };
 }
 
-function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __dirname } = {}) {
-  db.initDb(dbPath);
+async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __dirname, s3Manager = null } = {}) {
+  let activeS3Manager = s3Manager;
+  if (!activeS3Manager && dbPath !== ':memory:') {
+    const s3Config = s3.getS3Config();
+    if (s3Config) {
+      activeS3Manager = new s3.S3SyncManager({
+        config: s3Config,
+        dbPath,
+        onCheckpoint: () => {
+          const currentDb = db.getDb();
+          if (currentDb) {
+            currentDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+          }
+        }
+      });
+    }
+  }
 
-  const server = http.createServer(createRequestHandler(staticDir));
+  if (activeS3Manager && activeS3Manager.getStatus().enabled) {
+    try {
+      const pullResult = await activeS3Manager.pull(dbPath);
+      db.initDb(dbPath);
+      if (!pullResult.found) {
+        await activeS3Manager.pushImmediate().catch(err => {
+          console.error('[S3] Initial push error:', err.message);
+        });
+      }
+    } catch (pullErr) {
+      console.error('[S3] Pull failed on startup, continuing with local db:', pullErr.message);
+      db.initDb(dbPath);
+    }
+  } else {
+    db.initDb(dbPath);
+  }
+
+  const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
+  server.s3Manager = activeS3Manager;
 
   // Promisify close for clean test teardowns
   const originalClose = server.close.bind(server);
@@ -1183,7 +1256,7 @@ if (require.main === module) {
     console.log(`Server started on port ${server.address().port}, db: ${dbPath}`);
 
     let isShuttingDown = false;
-    function handleShutdown(signal) {
+    async function handleShutdown(signal) {
       if (isShuttingDown) return;
       isShuttingDown = true;
       console.log(`Received ${signal}, starting graceful shutdown...`);
@@ -1192,17 +1265,28 @@ if (require.main === module) {
         if (currentDb) {
           console.log('Checkpointing SQLite WAL...');
           currentDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+        }
+        if (server.s3Manager && server.s3Manager.getStatus().enabled) {
+          console.log('[S3] Syncing final database state to S3...');
+          try {
+            await server.s3Manager.pushImmediate();
+            console.log('[S3] Final sync to S3 complete.');
+          } catch (s3Err) {
+            console.error('[S3] Final sync failed:', s3Err.message);
+          }
+        }
+        if (currentDb) {
           currentDb.close();
           console.log('SQLite database closed cleanly.');
         }
       } catch (err) {
-        console.error('Error during WAL checkpoint:', err);
+        console.error('Error during shutdown:', err);
       }
       server.close(() => {
         console.log('HTTP server closed.');
         process.exit(0);
       });
-      setTimeout(() => process.exit(0), 3000).unref();
+      setTimeout(() => process.exit(0), 4000).unref();
     }
 
     process.on('SIGTERM', () => handleShutdown('SIGTERM'));

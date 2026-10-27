@@ -1,16 +1,17 @@
 {
   "name": "kow-tracker",
-  "version": "3.9.1",
+  "version": "3.10.0",
   "description": "Kingdom of Winners Officer Tracker and Event Planner",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node logic.test.js && node db.test.js && node api.test.js && node deploy.test.js",
+    "test": "node logic.test.js && node db.test.js && node s3.test.js && node api.test.js && node deploy.test.js",
     "test:acceptance": "node test-demo-acceptance.js",
     "test:api": "node api.test.js",
     "test:db": "node db.test.js",
     "test:deploy": "node deploy.test.js",
-    "test:logic": "node logic.test.js"
+    "test:logic": "node logic.test.js",
+    "test:s3": "node s3.test.js"
   },
   "keywords": [],
   "author": "",
