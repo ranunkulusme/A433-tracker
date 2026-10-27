@@ -1163,11 +1163,50 @@ function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __dirnam
   });
 }
 
+function resolveDbPath() {
+  if (process.env.DB_PATH) {
+    return process.env.DB_PATH;
+  }
+  if (fs.existsSync('/app/data')) {
+    return '/app/data/kow.db';
+  }
+  if (fs.existsSync('/data')) {
+    return '/data/kow.db';
+  }
+  return path.join(__dirname, 'data', 'kow.db');
+}
+
 if (require.main === module) {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'kow.db');
+  const dbPath = resolveDbPath();
   startServer({ port, dbPath }).then(server => {
-    console.log(`Server started on port ${server.address().port}`);
+    console.log(`Server started on port ${server.address().port}, db: ${dbPath}`);
+
+    let isShuttingDown = false;
+    function handleShutdown(signal) {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      console.log(`Received ${signal}, starting graceful shutdown...`);
+      try {
+        const currentDb = db.getDb();
+        if (currentDb) {
+          console.log('Checkpointing SQLite WAL...');
+          currentDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+          currentDb.close();
+          console.log('SQLite database closed cleanly.');
+        }
+      } catch (err) {
+        console.error('Error during WAL checkpoint:', err);
+      }
+      server.close(() => {
+        console.log('HTTP server closed.');
+        process.exit(0);
+      });
+      setTimeout(() => process.exit(0), 3000).unref();
+    }
+
+    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+    process.on('SIGINT', () => handleShutdown('SIGINT'));
   }).catch(err => {
     console.error('Failed to start server:', err);
     process.exit(1);

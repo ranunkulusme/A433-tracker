@@ -1226,7 +1226,7 @@ function renderPendingBadge() {
   if (topbarBadge) {
     if (pendingRequestsCount > 0 && canManage()) {
       topbarBadge.style.display = 'inline-flex';
-      topbarBadge.innerHTML = `<span class="badge-alert">🔔 ${pendingRequestsCount} ${pluralizeRequests(pendingRequestsCount)}</span>`;
+      topbarBadge.innerHTML = `<span class="badge-alert">🔔 ${pendingRequestsCount} <span class="badge-alert-label">${pluralizeRequests(pendingRequestsCount)}</span></span>`;
     } else {
       topbarBadge.style.display = 'none';
     }
@@ -1267,14 +1267,14 @@ function renderTopbarProfile() {
 
   container.innerHTML = `
     <button id="topbar-pending-badge" class="badge-alert-btn" style="display:${showPending ? 'inline-flex' : 'none'}" onclick="navigate('pending_registrations')" title="Ожидают одобрения">
-      <span class="badge-alert">🔔 ${pendingRequestsCount} ${pluralizeRequests(pendingRequestsCount)}</span>
+      <span class="badge-alert">🔔 ${pendingRequestsCount} <span class="badge-alert-label">${pluralizeRequests(pendingRequestsCount)}</span></span>
     </button>
     <div class="user-profile-badge">
       <span class="badge badge-rank badge-rank-${currentUser.rank || 'r3'}">[${role}]</span>
       <span class="user-profile-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
     </div>
     <button class="btn-ghost btn-sm btn-logout" onclick="logout()" title="Выйти из аккаунта">
-      🚪 Выйти
+      🚪 <span class="btn-logout-text">Выйти</span>
     </button>
   `;
 }

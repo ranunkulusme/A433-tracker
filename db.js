@@ -1323,6 +1323,8 @@ function initDb(filePath) {
   if (dbPath !== ':memory:') {
     try {
       db.exec('PRAGMA journal_mode = WAL;');
+      db.exec('PRAGMA synchronous = NORMAL;');
+      db.exec('PRAGMA wal_autocheckpoint = 100;');
     } catch (e) {}
   }
   db.exec('PRAGMA foreign_keys = ON;');
