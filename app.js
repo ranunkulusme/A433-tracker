@@ -1531,88 +1531,10 @@ async function renderMyCabinet() {
       <div class="cabinet-card">
         <div class="cabinet-card-title">
           <span>📦 Запасы гильдейца</span>
-          <button type="button" class="btn-ghost btn-sm" id="btn-toggle-cabinet-stock" onclick="toggleCabinetStockEdit()">
-            <span id="stock-toggle-icon">✏️</span> <span id="stock-toggle-text">Изменить запасы</span>
-          </button>
+          <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
         </div>
-        <div class="stock-grid" style="margin-bottom:0">
-          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('coupons')" title="Нажмите, чтобы изменить количество купонов">
-            <span class="stock-card-edit-hint">✏️</span>
-            <div class="label">🎟️ Купон офицера</div>
-            <div class="value" style="font-size:17px">${fmtNum(profile.stock.coupons)}</div>
-          </div>
-          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('puzzles')" title="Нажмите, чтобы изменить количество медалей">
-            <span class="stock-card-edit-hint">✏️</span>
-            <div class="label">🧩 Медаль офицера</div>
-            <div class="value" style="font-size:17px">${fmtNum(profile.stock.puzzles)}</div>
-          </div>
-          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('starCoupons')" title="Нажмите, чтобы изменить купоны звезды">
-            <span class="stock-card-edit-hint">✏️</span>
-            <div class="label">⭐ Купон звезды</div>
-            <div class="value" style="font-size:17px">${fmtNum(profile.stock.starCoupons || 0)}</div>
-          </div>
-          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('legendaryStars1')" title="Нажмите, чтобы изменить количество звёзд">
-            <span class="stock-card-edit-hint">✏️</span>
-            <div class="label">🌟 Звезды I / II / III</div>
-            <div class="value" style="font-size:14px;font-family:var(--mono)">
-              ${fmtNum(profile.stock.legendaryStars1 || 0)} / ${fmtNum(profile.stock.legendaryStars2 || 0)} / ${fmtNum(profile.stock.legendaryStars3 || 0)}
-            </div>
-          </div>
-          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('chests')" title="Нажмите, чтобы изменить количество сундуков">
-            <span class="stock-card-edit-hint">✏️</span>
-            <div class="label">📦 Сундук выбора</div>
-            <div class="value" style="font-size:17px">${fmtNum(profile.stock.chests)}</div>
-          </div>
-          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('legendaryStars1')" title="Нажмите для перехода к звёздам">
-            <span class="stock-card-edit-hint">✏️</span>
-            <div class="label">✨ Очки звезд</div>
-            <div class="value" style="font-size:17px;color:#f1e05a">${fmtNum(totalStarPoints)}</div>
-          </div>
-        </div>
-
-        <!-- Collapsible Stock Edit Form -->
-        <div id="cabinet-stock-edit-container" class="stock-edit-container">
-          <div class="form-row form-row-3" style="margin-top:0">
-            <div class="form-group">
-              <label for="my-stock-coupons">Купон готовности офицера</label>
-              <input type="number" id="my-stock-coupons" min="0" value="${profile.stock.coupons || 0}">
-            </div>
-            <div class="form-group">
-              <label for="my-stock-puzzles">Медаль легендарного офицера</label>
-              <input type="number" id="my-stock-puzzles" min="0" value="${profile.stock.puzzles || 0}">
-            </div>
-            <div class="form-group">
-              <label for="my-stock-star-coupons">Купон готовности звезды</label>
-              <input type="number" id="my-stock-star-coupons" min="0" value="${profile.stock.starCoupons || 0}">
-            </div>
-          </div>
-          <div class="form-row form-row-3">
-            <div class="form-group">
-              <label for="my-stock-legendary-stars-1">Легендарная звезда I (110)</label>
-              <input type="number" id="my-stock-legendary-stars-1" min="0" value="${profile.stock.legendaryStars1 || 0}" oninput="updateCabinetTotalStarPoints()">
-            </div>
-            <div class="form-group">
-              <label for="my-stock-legendary-stars-2">Легендарная звезда II (420)</label>
-              <input type="number" id="my-stock-legendary-stars-2" min="0" value="${profile.stock.legendaryStars2 || 0}" oninput="updateCabinetTotalStarPoints()">
-            </div>
-            <div class="form-group">
-              <label for="my-stock-legendary-stars-3">Легендарная звезда III (960)</label>
-              <input type="number" id="my-stock-legendary-stars-3" min="0" value="${profile.stock.legendaryStars3 || 0}" oninput="updateCabinetTotalStarPoints()">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="my-stock-chests">Сундук выбора</label>
-              <input type="number" id="my-stock-chests" min="0" value="${profile.stock.chests || 0}">
-            </div>
-            <div class="form-group" style="display:flex;align-items:flex-end">
-              <div id="total-star-points-badge" class="total-star-badge">✨ Итого очков звезд: ${fmtNum(totalStarPoints)}</div>
-            </div>
-          </div>
-          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-            <button type="button" class="btn-primary btn-sm" onclick="saveMyStock()">💾 Сохранить запасы</button>
-            <button type="button" class="btn-ghost btn-sm" onclick="closeCabinetStockEdit()">Отмена</button>
-          </div>
+        <div class="stock-grid" id="cabinet-stock-grid-wrap" style="margin-bottom:0">
+          ${renderCabinetStockGridHtml(profile, totalStarPoints)}
         </div>
       </div>
     </div>
@@ -1995,77 +1917,246 @@ async function saveMyCabinetProfile() {
   }
 }
 
-function openCabinetStockEdit(fieldKey) {
-  const container = document.getElementById('cabinet-stock-edit-container');
-  if (!container) return;
-  container.classList.add('open');
+let cabinetInlineEditingKey = null;
 
-  const toggleIcon = document.getElementById('stock-toggle-icon');
-  const toggleText = document.getElementById('stock-toggle-text');
-  if (toggleIcon) toggleIcon.textContent = '✕';
-  if (toggleText) toggleText.textContent = 'Свернуть';
+function renderCabinetStockGridHtml(profile, totalStarPoints) {
+  const st = profile.stock || {};
+  const starPts = totalStarPoints !== undefined ? totalStarPoints : ((typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints(st) : 0);
 
-  const fieldMap = {
-    coupons: 'my-stock-coupons',
-    puzzles: 'my-stock-puzzles',
-    starCoupons: 'my-stock-star-coupons',
-    legendaryStars1: 'my-stock-legendary-stars-1',
-    legendaryStars2: 'my-stock-legendary-stars-2',
-    legendaryStars3: 'my-stock-legendary-stars-3',
-    chests: 'my-stock-chests',
-  };
+  const cards = [];
 
-  const targetId = fieldMap[fieldKey] || 'my-stock-coupons';
-  const inputEl = document.getElementById(targetId);
-  if (inputEl) {
-    inputEl.focus();
-    inputEl.select();
-    inputEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-function closeCabinetStockEdit() {
-  const container = document.getElementById('cabinet-stock-edit-container');
-  if (!container) return;
-  container.classList.remove('open');
-
-  const toggleIcon = document.getElementById('stock-toggle-icon');
-  const toggleText = document.getElementById('stock-toggle-text');
-  if (toggleIcon) toggleIcon.textContent = '✏️';
-  if (toggleText) toggleText.textContent = 'Изменить запасы';
-}
-
-function toggleCabinetStockEdit() {
-  const container = document.getElementById('cabinet-stock-edit-container');
-  if (!container) return;
-  if (container.classList.contains('open')) {
-    closeCabinetStockEdit();
+  // 1. Coupons
+  if (cabinetInlineEditingKey === 'coupons') {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-cabinet-coupons" onclick="event.stopPropagation()">
+        <div class="label">🎟️ Купон офицера</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-cabinet-coupons" min="0" value="${st.coupons || 0}" onkeydown="handleCabinetInlineKey(event, 'coupons')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('coupons')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
   } else {
-    openCabinetStockEdit('coupons');
+    cards.push(`
+      <div class="stock-card stock-card-clickable" id="card-cabinet-coupons" onclick="openCabinetInline('coupons')" title="Нажмите, чтобы изменить количество купонов">
+        <span class="stock-card-edit-hint">✏️</span>
+        <div class="label">🎟️ Купон офицера</div>
+        <div class="value" style="font-size:17px">${fmtNum(st.coupons)}</div>
+      </div>
+    `);
+  }
+
+  // 2. Puzzles
+  if (cabinetInlineEditingKey === 'puzzles') {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-cabinet-puzzles" onclick="event.stopPropagation()">
+        <div class="label">🧩 Медаль офицера</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-cabinet-puzzles" min="0" value="${st.puzzles || 0}" onkeydown="handleCabinetInlineKey(event, 'puzzles')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('puzzles')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card stock-card-clickable" id="card-cabinet-puzzles" onclick="openCabinetInline('puzzles')" title="Нажмите, чтобы изменить количество медалей">
+        <span class="stock-card-edit-hint">✏️</span>
+        <div class="label">🧩 Медаль офицера</div>
+        <div class="value" style="font-size:17px">${fmtNum(st.puzzles)}</div>
+      </div>
+    `);
+  }
+
+  // 3. Star Coupons
+  if (cabinetInlineEditingKey === 'starCoupons') {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-cabinet-star-coupons" onclick="event.stopPropagation()">
+        <div class="label">⭐ Купон звезды</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-cabinet-star-coupons" min="0" value="${st.starCoupons || 0}" onkeydown="handleCabinetInlineKey(event, 'starCoupons')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('starCoupons')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card stock-card-clickable" id="card-cabinet-star-coupons" onclick="openCabinetInline('starCoupons')" title="Нажмите, чтобы изменить купоны звезды">
+        <span class="stock-card-edit-hint">✏️</span>
+        <div class="label">⭐ Купон звезды</div>
+        <div class="value" style="font-size:17px">${fmtNum(st.starCoupons || 0)}</div>
+      </div>
+    `);
+  }
+
+  // 4. Legendary Stars I / II / III
+  if (cabinetInlineEditingKey === 'stars') {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-cabinet-stars" onclick="event.stopPropagation()" style="grid-column: span 2">
+        <div class="label">🌟 Звезды I (110) / II (420) / III (960)</div>
+        <div class="stock-inline-stars-row">
+          <div class="stock-inline-star-col">
+            <span class="stock-star-sublabel">I (110):</span>
+            <input type="number" class="stock-inline-input" id="input-cabinet-stars-1" min="0" value="${st.legendaryStars1 || 0}" onkeydown="handleCabinetInlineKey(event, 'stars')" oninput="updateCabinetLiveStars()">
+          </div>
+          <div class="stock-inline-star-col">
+            <span class="stock-star-sublabel">II (420):</span>
+            <input type="number" class="stock-inline-input" id="input-cabinet-stars-2" min="0" value="${st.legendaryStars2 || 0}" onkeydown="handleCabinetInlineKey(event, 'stars')" oninput="updateCabinetLiveStars()">
+          </div>
+          <div class="stock-inline-star-col">
+            <span class="stock-star-sublabel">III (960):</span>
+            <input type="number" class="stock-inline-input" id="input-cabinet-stars-3" min="0" value="${st.legendaryStars3 || 0}" onkeydown="handleCabinetInlineKey(event, 'stars')" oninput="updateCabinetLiveStars()">
+          </div>
+        </div>
+        <div class="stock-inline-actions" style="margin-top:8px">
+          <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('stars')" title="Сохранить звёзды (Enter)">✓ Сохранить</button>
+          <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕ Отмена</button>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card stock-card-clickable" id="card-cabinet-stars" onclick="openCabinetInline('stars')" title="Нажмите, чтобы изменить количество звёзд">
+        <span class="stock-card-edit-hint">✏️</span>
+        <div class="label">🌟 Звезды I / II / III</div>
+        <div class="value" style="font-size:14px;font-family:var(--mono)">
+          ${fmtNum(st.legendaryStars1 || 0)} / ${fmtNum(st.legendaryStars2 || 0)} / ${fmtNum(st.legendaryStars3 || 0)}
+        </div>
+      </div>
+    `);
+  }
+
+  // 5. Chests
+  if (cabinetInlineEditingKey === 'chests') {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-cabinet-chests" onclick="event.stopPropagation()">
+        <div class="label">📦 Сундук выбора</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-cabinet-chests" min="0" value="${st.chests || 0}" onkeydown="handleCabinetInlineKey(event, 'chests')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('chests')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card stock-card-clickable" id="card-cabinet-chests" onclick="openCabinetInline('chests')" title="Нажмите, чтобы изменить количество сундуков">
+        <span class="stock-card-edit-hint">✏️</span>
+        <div class="label">📦 Сундук выбора</div>
+        <div class="value" style="font-size:17px">${fmtNum(st.chests)}</div>
+      </div>
+    `);
+  }
+
+  // 6. Star Points (Calculation Badge)
+  cards.push(`
+    <div class="stock-card stock-card-clickable" id="card-cabinet-star-points" onclick="openCabinetInline('stars')" title="Нажмите для перехода к звёздам">
+      <span class="stock-card-edit-hint">✏️</span>
+      <div class="label">✨ Очки звезд</div>
+      <div class="value" id="val-cabinet-star-points" style="font-size:17px;color:#f1e05a">${fmtNum(starPts)}</div>
+    </div>
+  `);
+
+  return cards.join('');
+}
+
+function openCabinetInline(key) {
+  cabinetInlineEditingKey = key;
+  const wrap = document.getElementById('cabinet-stock-grid-wrap');
+  if (!wrap || !myCabinetProfile) return;
+  wrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+
+  setTimeout(() => {
+    if (key === 'stars') {
+      const el = document.getElementById('input-cabinet-stars-1');
+      if (el) { el.focus(); el.select(); }
+    } else {
+      const el = document.getElementById(`input-cabinet-${key === 'starCoupons' ? 'star-coupons' : key}`);
+      if (el) { el.focus(); el.select(); }
+    }
+  }, 10);
+}
+
+function closeCabinetInline() {
+  cabinetInlineEditingKey = null;
+  const wrap = document.getElementById('cabinet-stock-grid-wrap');
+  if (!wrap || !myCabinetProfile) return;
+  wrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+}
+
+function handleCabinetInlineKey(e, key) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    saveCabinetInline(key);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCabinetInline();
   }
 }
 
-async function saveMyStock() {
-  const coupons = Math.max(0, parseInt(document.getElementById('my-stock-coupons')?.value) || 0);
-  const puzzles = Math.max(0, parseInt(document.getElementById('my-stock-puzzles')?.value) || 0);
-  const starCoupons = Math.max(0, parseInt(document.getElementById('my-stock-star-coupons')?.value) || 0);
-  const legendaryStars1 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-1')?.value) || 0);
-  const legendaryStars2 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-2')?.value) || 0);
-  const legendaryStars3 = Math.max(0, parseInt(document.getElementById('my-stock-legendary-stars-3')?.value) || 0);
-  const chests = Math.max(0, parseInt(document.getElementById('my-stock-chests')?.value) || 0);
+function updateCabinetLiveStars() {
+  const s1 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-1')?.value) || 0);
+  const s2 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-2')?.value) || 0);
+  const s3 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-3')?.value) || 0);
+  const total = s1 * 110 + s2 * 420 + s3 * 960;
+  const ptsEl = document.getElementById('val-cabinet-star-points');
+  if (ptsEl) ptsEl.textContent = fmtNum(total);
+}
+
+async function saveCabinetInline(key) {
+  if (!myCabinetProfile) return;
+  const stock = { ...myCabinetProfile.stock };
+
+  if (key === 'coupons') {
+    stock.coupons = Math.max(0, parseInt(document.getElementById('input-cabinet-coupons')?.value) || 0);
+  } else if (key === 'puzzles') {
+    stock.puzzles = Math.max(0, parseInt(document.getElementById('input-cabinet-puzzles')?.value) || 0);
+  } else if (key === 'starCoupons') {
+    stock.starCoupons = Math.max(0, parseInt(document.getElementById('input-cabinet-star-coupons')?.value) || 0);
+  } else if (key === 'chests') {
+    stock.chests = Math.max(0, parseInt(document.getElementById('input-cabinet-chests')?.value) || 0);
+  } else if (key === 'stars') {
+    stock.legendaryStars1 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-1')?.value) || 0);
+    stock.legendaryStars2 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-2')?.value) || 0);
+    stock.legendaryStars3 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-3')?.value) || 0);
+  }
 
   try {
     await apiFetch('/api/my-profile', {
       method: 'PUT',
-      body: {
-        stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
-      }
+      body: { stock }
     });
-    toast('Запасы успешно сохранены');
+    myCabinetProfile.stock = stock;
+    cabinetInlineEditingKey = null;
+    toast('✓ Запасы обновлены');
     await renderMyCabinet();
   } catch (err) {
-    toast('Ошибка сохранения запасов: ' + err.message, 'error');
+    toast('Ошибка сохранения: ' + err.message, 'error');
   }
+}
+
+function openCabinetStockEdit(fieldKey) {
+  openCabinetInline(fieldKey === 'legendaryStars1' || fieldKey === 'legendaryStars2' || fieldKey === 'legendaryStars3' ? 'stars' : fieldKey);
+}
+function closeCabinetStockEdit() {
+  closeCabinetInline();
+}
+function toggleCabinetStockEdit() {
+  if (cabinetInlineEditingKey) closeCabinetInline();
+  else openCabinetInline('coupons');
+}
+async function saveMyStock() {
+  if (cabinetInlineEditingKey) await saveCabinetInline(cabinetInlineEditingKey);
 }
 
 async function switchCabinetSector(sectorId) {
@@ -3328,59 +3419,12 @@ function renderPlayerDetail(playerId) {
     ${stockVisible ? `
       <div class="section-header">
         <div class="section-title">📦 Запасы сектора</div>
-        ${canEditSector ? `
-          <button type="button" class="btn-ghost btn-sm" id="btn-toggle-sector-stock" onclick="toggleSectorStockEdit()">
-            <span id="sector-stock-toggle-icon">✏️</span> <span id="sector-stock-toggle-text">Изменить запасы</span>
-          </button>
-        ` : ''}
+        ${canEditSector ? `<span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>` : ''}
       </div>
-      <div class="stock-grid" style="margin-bottom:0">
-        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'coupons\')" title="Нажмите, чтобы изменить купоны"' : ''}>
-          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-          <div class="label">🎟️ Купон офицера</div><div class="value">${fmtNum(p.stock.coupons)}</div>
-        </div>
-        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'puzzles\')" title="Нажмите, чтобы изменить медали"' : ''}>
-          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-          <div class="label">🧩 Медаль офицера</div><div class="value">${fmtNum(p.stock.puzzles)}</div>
-        </div>
-        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'starCoupons\')" title="Нажмите, чтобы изменить купоны звезды"' : ''}>
-          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-          <div class="label">⭐ Купон звезды</div><div class="value">${fmtNum(p.stock.starCoupons || 0)}</div>
-        </div>
-        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'legendaryStars1\')" title="Нажмите, чтобы изменить звёзды"' : ''}>
-          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-          <div class="label">🌟 Звезды I / II / III</div><div class="value" style="font-size:14px;font-family:var(--mono)">${fmtNum(p.stock.legendaryStars1 || 0)} / ${fmtNum(p.stock.legendaryStars2 || 0)} / ${fmtNum(p.stock.legendaryStars3 || 0)}</div>
-        </div>
-        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'chests\')" title="Нажмите, чтобы изменить сундуки"' : ''}>
-          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-          <div class="label">📦 Сундук выбора</div><div class="value">${fmtNum(p.stock.chests)}</div>
-        </div>
-        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'legendaryStars1\')" title="Нажмите для перехода к звёздам"' : ''}>
-          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-          <div class="label">✨ Очки звезд</div><div class="value" style="color:#f1e05a">${fmtNum((typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints(p.stock) : 0)}</div>
-        </div>
-        <div class="stock-card"><div class="label">Ежедневно</div><div class="value">+${fmtNum(rewards.puzzlesPerDay, 2)}</div></div>
+      <div class="stock-grid" id="sector-stock-grid-wrap-${p.id}" style="margin-bottom:20px">
+        ${renderSectorStockGridHtml(p, canEditSector)}
       </div>
-      <div id="sector-stock-edit-container" class="stock-edit-container">
-        <div class="form-row form-row-3" style="margin-top:0;margin-bottom:8px">
-          <input type="number" id="stock-coupons" placeholder="Купон готовности офицера" value="${p.stock.coupons}">
-          <input type="number" id="stock-puzzles" placeholder="Медаль легендарного офицера" value="${p.stock.puzzles}">
-          <input type="number" id="stock-star-coupons" placeholder="Купон готовности звезды" value="${p.stock.starCoupons || 0}">
-        </div>
-        <div class="form-row form-row-3" style="margin-bottom:8px">
-          <input type="number" id="stock-legendary-stars-1" placeholder="Легендарная звезда I (110)" value="${p.stock.legendaryStars1 || 0}">
-          <input type="number" id="stock-legendary-stars-2" placeholder="Легендарная звезда II (420)" value="${p.stock.legendaryStars2 || 0}">
-          <input type="number" id="stock-legendary-stars-3" placeholder="Легендарная звезда III (960)" value="${p.stock.legendaryStars3 || 0}">
-        </div>
-        <div class="form-row" style="margin-bottom:12px">
-          <input type="number" id="stock-chests" placeholder="Сундук выбора" value="${p.stock.chests}">
-        </div>
-        <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
-          <button class="btn-primary btn-sm" onclick="saveStockCorrection(${p.id})">💾 Сохранить запасы</button>
-          <button class="btn-ghost btn-sm" onclick="rollbackLastStock(${p.id})">Откатить последнюю</button>
-          <button class="btn-ghost btn-sm" onclick="closeSectorStockEdit()">Отмена</button>
-        </div>
-      </div>` : `<div class="empty-state"><p>Запасы скрыты для роли ${state.currentRole}</p></div>`}
+    ` : `<div class="empty-state"><p>Запасы скрыты для роли ${state.currentRole}</p></div>`}
     <div class="section-header">
       <div class="section-title">Офицеры сектора (${(p.officers || []).length})</div>
       ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openAddSectorOfficerModal(${p.id})">+ Добавить офицера</button>` : ''}
@@ -3425,54 +3469,259 @@ function renderPlayerDetail(playerId) {
   `;
 }
 
-function openSectorStockEdit(fieldKey) {
-  const container = document.getElementById('sector-stock-edit-container');
-  if (!container) return;
-  container.classList.add('open');
+let sectorInlineEditing = { playerId: null, key: null };
 
-  const toggleIcon = document.getElementById('sector-stock-toggle-icon');
-  const toggleText = document.getElementById('sector-stock-toggle-text');
-  if (toggleIcon) toggleIcon.textContent = '✕';
-  if (toggleText) toggleText.textContent = 'Свернуть';
+function renderSectorStockGridHtml(p, canEditSector) {
+  const st = p.stock || {};
+  const starPts = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints(st) : 0;
+  const rewards = dailyRewards(p.sector);
+  const pid = p.id;
+  const isEditing = (k) => canEditSector && sectorInlineEditing.playerId === pid && sectorInlineEditing.key === k;
 
-  const fieldMap = {
-    coupons: 'stock-coupons',
-    puzzles: 'stock-puzzles',
-    starCoupons: 'stock-star-coupons',
-    legendaryStars1: 'stock-legendary-stars-1',
-    legendaryStars2: 'stock-legendary-stars-2',
-    legendaryStars3: 'stock-legendary-stars-3',
-    chests: 'stock-chests',
-  };
+  const cards = [];
 
-  const targetId = fieldMap[fieldKey] || 'stock-coupons';
-  const inputEl = document.getElementById(targetId);
-  if (inputEl) {
-    inputEl.focus();
-    inputEl.select();
-    inputEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-function closeSectorStockEdit() {
-  const container = document.getElementById('sector-stock-edit-container');
-  if (!container) return;
-  container.classList.remove('open');
-
-  const toggleIcon = document.getElementById('sector-stock-toggle-icon');
-  const toggleText = document.getElementById('sector-stock-toggle-text');
-  if (toggleIcon) toggleIcon.textContent = '✏️';
-  if (toggleText) toggleText.textContent = 'Изменить запасы';
-}
-
-function toggleSectorStockEdit() {
-  const container = document.getElementById('sector-stock-edit-container');
-  if (!container) return;
-  if (container.classList.contains('open')) {
-    closeSectorStockEdit();
+  // 1. Coupons
+  if (isEditing('coupons')) {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-sector-coupons-${pid}" onclick="event.stopPropagation()">
+        <div class="label">🎟️ Купон офицера</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-sector-coupons-${pid}" min="0" value="${st.coupons || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'coupons')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'coupons')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
   } else {
-    openSectorStockEdit('coupons');
+    cards.push(`
+      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-coupons-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'coupons')" title="Нажмите для изменения купонов"` : ''}>
+        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+        <div class="label">🎟️ Купон офицера</div>
+        <div class="value">${fmtNum(st.coupons)}</div>
+      </div>
+    `);
   }
+
+  // 2. Puzzles
+  if (isEditing('puzzles')) {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-sector-puzzles-${pid}" onclick="event.stopPropagation()">
+        <div class="label">🧩 Медаль офицера</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-sector-puzzles-${pid}" min="0" value="${st.puzzles || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'puzzles')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'puzzles')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-puzzles-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'puzzles')" title="Нажмите для изменения медалей"` : ''}>
+        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+        <div class="label">🧩 Медаль офицера</div>
+        <div class="value">${fmtNum(st.puzzles)}</div>
+      </div>
+    `);
+  }
+
+  // 3. Star Coupons
+  if (isEditing('starCoupons')) {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-sector-star-coupons-${pid}" onclick="event.stopPropagation()">
+        <div class="label">⭐ Купон звезды</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-sector-star-coupons-${pid}" min="0" value="${st.starCoupons || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'starCoupons')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'starCoupons')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-star-coupons-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'starCoupons')" title="Нажмите для изменения купонов звезды"` : ''}>
+        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+        <div class="label">⭐ Купон звезды</div>
+        <div class="value">${fmtNum(st.starCoupons || 0)}</div>
+      </div>
+    `);
+  }
+
+  // 4. Legendary Stars I / II / III
+  if (isEditing('stars')) {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-sector-stars-${pid}" onclick="event.stopPropagation()" style="grid-column: span 2">
+        <div class="label">🌟 Звезды I (110) / II (420) / III (960)</div>
+        <div class="stock-inline-stars-row">
+          <div class="stock-inline-star-col">
+            <span class="stock-star-sublabel">I (110):</span>
+            <input type="number" class="stock-inline-input" id="input-sector-stars-1-${pid}" min="0" value="${st.legendaryStars1 || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'stars')" oninput="updateSectorLiveStars(${pid})">
+          </div>
+          <div class="stock-inline-star-col">
+            <span class="stock-star-sublabel">II (420):</span>
+            <input type="number" class="stock-inline-input" id="input-sector-stars-2-${pid}" min="0" value="${st.legendaryStars2 || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'stars')" oninput="updateSectorLiveStars(${pid})">
+          </div>
+          <div class="stock-inline-star-col">
+            <span class="stock-star-sublabel">III (960):</span>
+            <input type="number" class="stock-inline-input" id="input-sector-stars-3-${pid}" min="0" value="${st.legendaryStars3 || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'stars')" oninput="updateSectorLiveStars(${pid})">
+          </div>
+        </div>
+        <div class="stock-inline-actions" style="margin-top:8px">
+          <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'stars')" title="Сохранить звёзды (Enter)">✓ Сохранить</button>
+          <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕ Отмена</button>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-stars-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'stars')" title="Нажмите для изменения звёзд"` : ''}>
+        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+        <div class="label">🌟 Звезды I / II / III</div>
+        <div class="value" style="font-size:14px;font-family:var(--mono)">${fmtNum(st.legendaryStars1 || 0)} / ${fmtNum(st.legendaryStars2 || 0)} / ${fmtNum(st.legendaryStars3 || 0)}</div>
+      </div>
+    `);
+  }
+
+  // 5. Chests
+  if (isEditing('chests')) {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-sector-chests-${pid}" onclick="event.stopPropagation()">
+        <div class="label">📦 Сундук выбора</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-sector-chests-${pid}" min="0" value="${st.chests || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'chests')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'chests')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-chests-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'chests')" title="Нажмите для изменения сундуков"` : ''}>
+        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+        <div class="label">📦 Сундук выбора</div>
+        <div class="value">${fmtNum(st.chests)}</div>
+      </div>
+    `);
+  }
+
+  // 6. Star Points (Calculation Badge)
+  cards.push(`
+    <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-star-points-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'stars')" title="Нажмите для перехода к звёздам"` : ''}>
+      ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+      <div class="label">✨ Очки звезд</div>
+      <div class="value" id="val-sector-star-points-${pid}" style="color:#f1e05a">${fmtNum(starPts)}</div>
+    </div>
+  `);
+
+  // 7. Daily rewards
+  cards.push(`
+    <div class="stock-card"><div class="label">Ежедневно</div><div class="value">+${fmtNum(rewards.puzzlesPerDay, 2)}</div></div>
+  `);
+
+  return cards.join('');
+}
+
+function openSectorInline(playerId, key) {
+  sectorInlineEditing = { playerId, key };
+  const wrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+  const p = getPlayer(playerId);
+  if (!wrap || !p) return;
+  wrap.innerHTML = renderSectorStockGridHtml(p, true);
+
+  setTimeout(() => {
+    if (key === 'stars') {
+      const el = document.getElementById(`input-sector-stars-1-${playerId}`);
+      if (el) { el.focus(); el.select(); }
+    } else {
+      const el = document.getElementById(`input-sector-${key === 'starCoupons' ? 'star-coupons' : key}-${playerId}`);
+      if (el) { el.focus(); el.select(); }
+    }
+  }, 10);
+}
+
+function closeSectorInline(playerId) {
+  sectorInlineEditing = { playerId: null, key: null };
+  const wrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+  const p = getPlayer(playerId);
+  if (!wrap || !p) return;
+  wrap.innerHTML = renderSectorStockGridHtml(p, true);
+}
+
+function handleSectorInlineKey(e, playerId, key) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    saveSectorInline(playerId, key);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeSectorInline(playerId);
+  }
+}
+
+function updateSectorLiveStars(playerId) {
+  const s1 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-1-${playerId}`)?.value) || 0);
+  const s2 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-2-${playerId}`)?.value) || 0);
+  const s3 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-3-${playerId}`)?.value) || 0);
+  const total = s1 * 110 + s2 * 420 + s3 * 960;
+  const ptsEl = document.getElementById(`val-sector-star-points-${playerId}`);
+  if (ptsEl) ptsEl.textContent = fmtNum(total);
+}
+
+async function saveSectorInline(playerId, key) {
+  const p = getPlayer(playerId);
+  if (!p) return;
+  const before = { ...p.stock };
+  const stock = { ...p.stock };
+
+  if (key === 'coupons') {
+    stock.coupons = Math.max(0, parseInt(document.getElementById(`input-sector-coupons-${playerId}`)?.value) || 0);
+  } else if (key === 'puzzles') {
+    stock.puzzles = Math.max(0, parseInt(document.getElementById(`input-sector-puzzles-${playerId}`)?.value) || 0);
+  } else if (key === 'starCoupons') {
+    stock.starCoupons = Math.max(0, parseInt(document.getElementById(`input-sector-star-coupons-${playerId}`)?.value) || 0);
+  } else if (key === 'chests') {
+    stock.chests = Math.max(0, parseInt(document.getElementById(`input-sector-chests-${playerId}`)?.value) || 0);
+  } else if (key === 'stars') {
+    stock.legendaryStars1 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-1-${playerId}`)?.value) || 0);
+    stock.legendaryStars2 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-2-${playerId}`)?.value) || 0);
+    stock.legendaryStars3 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-3-${playerId}`)?.value) || 0);
+  }
+
+  p.stock = stock;
+  state.stockHistory.push({ id: state.nextId++, playerId, date: new Date().toISOString(), before, after: stock });
+  if (typeof save === 'function') save();
+
+  try {
+    await apiFetch(`/api/players/${playerId}`, {
+      method: 'PUT',
+      body: { stock }
+    });
+  } catch (_) {}
+
+  sectorInlineEditing = { playerId: null, key: null };
+  toast('✓ Запасы обновлены');
+  renderPlayerDetail(playerId);
+}
+
+function openSectorStockEdit(fieldKey) {
+  const pId = state.selectedPlayerId || (state.players && state.players[0] && state.players[0].id);
+  if (pId) openSectorInline(pId, fieldKey === 'legendaryStars1' || fieldKey === 'legendaryStars2' || fieldKey === 'legendaryStars3' ? 'stars' : fieldKey);
+}
+function closeSectorStockEdit() {
+  const pId = state.selectedPlayerId || (state.players && state.players[0] && state.players[0].id);
+  if (pId) closeSectorInline(pId);
+}
+function toggleSectorStockEdit() {
+  const pId = state.selectedPlayerId || (state.players && state.players[0] && state.players[0].id);
+  if (!pId) return;
+  if (sectorInlineEditing.playerId === pId && sectorInlineEditing.key) closeSectorInline(pId);
+  else openSectorInline(pId, 'coupons');
 }
 
 function saveStockCorrection(playerId) {
