@@ -1324,6 +1324,64 @@ test('generateSeasonSchedule preserves backward compatibility with legacy preset
   assert.equal(items[0].dateFrom, '2026-12-01');
 });
 
+test('smartScanner resolveLogic and browser UMD exports in logic.js', () => {
+  const ocr = require('./ocr.js');
+  const logic = require('./logic.js');
+
+  // 1. resolveLogic should be exposed on smartScanner
+  assert.strictEqual(typeof ocr.resolveLogic, 'function', 'resolveLogic must be exported');
+
+  // 2. Explicit options.logic works
+  assert.strictEqual(ocr.resolveLogic(logic), logic);
+
+  // 3. Fallback to direct globalThis/window when root.logic is not defined but functions exist on root
+  const mockGlobal = {
+    parseProfileScreenshotText: () => ({ isProfile: true }),
+    parseWarehouseScreenshotText: () => ({ isWarehouse: true }),
+  };
+  const resolvedDirect = ocr.resolveLogic(null, { ignoreInjected: true, ignoreRequire: true, customGlobal: mockGlobal });
+  assert.strictEqual(resolvedDirect, mockGlobal, 'Must resolve to customGlobal directly when functions exist on root');
+
+  // Also test fallback to root.logic when customGlobal.logic exists
+  const mockWithLogic = {
+    logic: {
+      parseProfileScreenshotText: () => ({ isProfile: true }),
+    },
+  };
+  const resolvedNested = ocr.resolveLogic(null, { ignoreInjected: true, ignoreRequire: true, customGlobal: mockWithLogic });
+  assert.strictEqual(resolvedNested, mockWithLogic.logic, 'Must resolve to customGlobal.logic when present');
+
+  // 4. Test browser UMD wrapper sets both root.logic and root properties
+  const fs = require('fs');
+  const vm = require('vm');
+  const mockBrowserRoot = {};
+  const logicCode = fs.readFileSync(__dirname + '/logic.js', 'utf8');
+  const context = { console };
+  context.window = mockBrowserRoot;
+  context.globalThis = mockBrowserRoot;
+  vm.createContext(context);
+  vm.runInContext(logicCode, context);
+  assert(mockBrowserRoot.logic, 'mockBrowserRoot.logic must be populated in browser environment');
+  assert.strictEqual(typeof mockBrowserRoot.logic.parseProfileScreenshotText, 'function');
+  assert.strictEqual(typeof mockBrowserRoot.parseProfileScreenshotText, 'function');
+
+  // 5. Test user screenshot profile OCR text
+  const userScreenshotText = `
+[A433]ranu
+Сила: 158 204 982
+Убито: 84 778 531
+Очки за убийство: 7 588 165 023
+VIP 12
+  `;
+  const parsedUser = logic.parseProfileScreenshotText(userScreenshotText);
+  assert.strictEqual(parsedUser.isProfile, true);
+  assert.strictEqual(parsedUser.sector.name, 'ranu');
+  assert.strictEqual(parsedUser.sector.allianceTag, 'A433');
+  assert.strictEqual(parsedUser.sector.power, 158204982);
+  assert.strictEqual(parsedUser.sector.kills, 84778531);
+  assert.strictEqual(parsedUser.sector.killPoints, 7588165023);
+});
+
 
 
 

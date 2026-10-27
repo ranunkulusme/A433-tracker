@@ -4889,8 +4889,12 @@ async function handleExchangeFiles(filesList) {
   if (progressDetails) progressDetails.textContent = 'Загрузка словарей rus + eng';
 
   try {
+    const activeLogic = (typeof logic !== 'undefined' ? logic : null) ||
+      (typeof window !== 'undefined' && (window.logic || (typeof window.parseProfileScreenshotText === 'function' ? window : null))) ||
+      (typeof globalThis !== 'undefined' && (globalThis.logic || (typeof globalThis.parseProfileScreenshotText === 'function' ? globalThis : null)));
+
     const result = await ocrEngine.runExchangeShopOcr(files, {
-      logic: typeof logic !== 'undefined' ? logic : (window.logic || null),
+      logic: activeLogic,
       onProgress: (p) => {
         const pct = Math.min(100, Math.max(0, p.percent || 0));
         if (progressBar) progressBar.style.width = `${pct}%`;
@@ -5986,7 +5990,11 @@ async function handleScannerFiles(fileList) {
       }
     };
 
-    const result = await scanner.runSmartOcr(files, onProgress);
+    const activeLogic = (typeof logic !== 'undefined' ? logic : null) ||
+      (typeof window !== 'undefined' && (window.logic || (typeof window.parseProfileScreenshotText === 'function' ? window : null))) ||
+      (typeof globalThis !== 'undefined' && (globalThis.logic || (typeof globalThis.parseProfileScreenshotText === 'function' ? globalThis : null)));
+
+    const result = await scanner.runSmartOcr(files, onProgress, { logic: activeLogic });
     lastScanResults = result;
     displayScannerResults(result);
   } catch (err) {
