@@ -1533,7 +1533,7 @@ async function renderMyCabinet() {
           <span>📦 Запасы гильдейца</span>
           <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
         </div>
-        <div class="stock-grid" id="cabinet-stock-grid-wrap" style="margin-bottom:0">
+        <div class="stock-grid stock-grid-3x2" id="cabinet-stock-grid-wrap" style="margin-bottom:0">
           ${renderCabinetStockGridHtml(profile, totalStarPoints)}
         </div>
       </div>
@@ -1973,7 +1973,31 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     `);
   }
 
-  // 3. Star Coupons
+  // 3. Chests (Moved before stars)
+  if (cabinetInlineEditingKey === 'chests') {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-cabinet-chests" onclick="event.stopPropagation()">
+        <div class="label">📦 Сундук выбора</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-cabinet-chests" min="0" value="${st.chests || 0}" onkeydown="handleCabinetInlineKey(event, 'chests')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('chests')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card stock-card-clickable" id="card-cabinet-chests" onclick="openCabinetInline('chests')" title="Нажмите, чтобы изменить количество сундуков">
+        <span class="stock-card-edit-hint">✏️</span>
+        <div class="label">📦 Сундук выбора</div>
+        <div class="value" style="font-size:17px">${fmtNum(st.chests)}</div>
+      </div>
+    `);
+  }
+
+  // 4. Star Coupons
   if (cabinetInlineEditingKey === 'starCoupons') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-star-coupons" onclick="event.stopPropagation()">
@@ -1997,10 +2021,10 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     `);
   }
 
-  // 4. Legendary Stars I / II / III
+  // 5. Legendary Stars I / II / III
   if (cabinetInlineEditingKey === 'stars') {
     cards.push(`
-      <div class="stock-card stock-card-editing" id="card-cabinet-stars" onclick="event.stopPropagation()" style="grid-column: span 2">
+      <div class="stock-card stock-card-editing" id="card-cabinet-stars" onclick="event.stopPropagation()">
         <div class="label">🌟 Звезды I (110) / II (420) / III (960)</div>
         <div class="stock-inline-stars-row">
           <div class="stock-inline-star-col">
@@ -2030,30 +2054,6 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
         <div class="value" style="font-size:14px;font-family:var(--mono)">
           ${fmtNum(st.legendaryStars1 || 0)} / ${fmtNum(st.legendaryStars2 || 0)} / ${fmtNum(st.legendaryStars3 || 0)}
         </div>
-      </div>
-    `);
-  }
-
-  // 5. Chests
-  if (cabinetInlineEditingKey === 'chests') {
-    cards.push(`
-      <div class="stock-card stock-card-editing" id="card-cabinet-chests" onclick="event.stopPropagation()">
-        <div class="label">📦 Сундук выбора</div>
-        <div class="stock-inline-edit-wrap">
-          <input type="number" class="stock-inline-input" id="input-cabinet-chests" min="0" value="${st.chests || 0}" onkeydown="handleCabinetInlineKey(event, 'chests')">
-          <div class="stock-inline-actions">
-            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('chests')" title="Сохранить (Enter)">✓</button>
-            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
-          </div>
-        </div>
-      </div>
-    `);
-  } else {
-    cards.push(`
-      <div class="stock-card stock-card-clickable" id="card-cabinet-chests" onclick="openCabinetInline('chests')" title="Нажмите, чтобы изменить количество сундуков">
-        <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">📦 Сундук выбора</div>
-        <div class="value" style="font-size:17px">${fmtNum(st.chests)}</div>
       </div>
     `);
   }
@@ -3528,7 +3528,36 @@ function renderSectorStockGridHtml(p, canEditSector) {
     `);
   }
 
-  // 3. Star Coupons
+  // 3. Chests (Moved before stars)
+  if (isEditing('chests')) {
+    cards.push(`
+      <div class="stock-card stock-card-editing" id="card-sector-chests-${pid}" onclick="event.stopPropagation()">
+        <div class="label">📦 Сундук выбора</div>
+        <div class="stock-inline-edit-wrap">
+          <input type="number" class="stock-inline-input" id="input-sector-chests-${pid}" min="0" value="${st.chests || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'chests')">
+          <div class="stock-inline-actions">
+            <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'chests')" title="Сохранить (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕</button>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    cards.push(`
+      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-chests-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'chests')" title="Нажмите для изменения сундуков"` : ''}>
+        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+        <div class="label">📦 Сундук выбора</div>
+        <div class="value">${fmtNum(st.chests)}</div>
+      </div>
+    `);
+  }
+
+  // 4. Daily rewards
+  cards.push(`
+    <div class="stock-card"><div class="label">Ежедневно</div><div class="value">+${fmtNum(rewards.puzzlesPerDay, 2)}</div></div>
+  `);
+
+  // 5. Star Coupons (Stars placed last)
   if (isEditing('starCoupons')) {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-sector-star-coupons-${pid}" onclick="event.stopPropagation()">
@@ -3552,10 +3581,10 @@ function renderSectorStockGridHtml(p, canEditSector) {
     `);
   }
 
-  // 4. Legendary Stars I / II / III
+  // 6. Legendary Stars I / II / III
   if (isEditing('stars')) {
     cards.push(`
-      <div class="stock-card stock-card-editing" id="card-sector-stars-${pid}" onclick="event.stopPropagation()" style="grid-column: span 2">
+      <div class="stock-card stock-card-editing" id="card-sector-stars-${pid}" onclick="event.stopPropagation()">
         <div class="label">🌟 Звезды I (110) / II (420) / III (960)</div>
         <div class="stock-inline-stars-row">
           <div class="stock-inline-star-col">
@@ -3587,42 +3616,13 @@ function renderSectorStockGridHtml(p, canEditSector) {
     `);
   }
 
-  // 5. Chests
-  if (isEditing('chests')) {
-    cards.push(`
-      <div class="stock-card stock-card-editing" id="card-sector-chests-${pid}" onclick="event.stopPropagation()">
-        <div class="label">📦 Сундук выбора</div>
-        <div class="stock-inline-edit-wrap">
-          <input type="number" class="stock-inline-input" id="input-sector-chests-${pid}" min="0" value="${st.chests || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'chests')">
-          <div class="stock-inline-actions">
-            <button type="button" class="btn-primary btn-xs" onclick="saveSectorInline(${pid}, 'chests')" title="Сохранить (Enter)">✓</button>
-            <button type="button" class="btn-ghost btn-xs" onclick="closeSectorInline(${pid})" title="Отмена (Esc)">✕</button>
-          </div>
-        </div>
-      </div>
-    `);
-  } else {
-    cards.push(`
-      <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-chests-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'chests')" title="Нажмите для изменения сундуков"` : ''}>
-        ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-        <div class="label">📦 Сундук выбора</div>
-        <div class="value">${fmtNum(st.chests)}</div>
-      </div>
-    `);
-  }
-
-  // 6. Star Points (Calculation Badge)
+  // 7. Star Points (Calculation Badge - Placed last)
   cards.push(`
     <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-star-points-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'stars')" title="Нажмите для перехода к звёздам"` : ''}>
       ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
       <div class="label">✨ Очки звезд</div>
       <div class="value" id="val-sector-star-points-${pid}" style="color:#f1e05a">${fmtNum(starPts)}</div>
     </div>
-  `);
-
-  // 7. Daily rewards
-  cards.push(`
-    <div class="stock-card"><div class="label">Ежедневно</div><div class="value">+${fmtNum(rewards.puzzlesPerDay, 2)}</div></div>
   `);
 
   return cards.join('');
