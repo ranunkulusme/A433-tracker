@@ -236,6 +236,12 @@ function changePassword(userId, newPassword) {
   return true;
 }
 
+function isDefaultAdminPassword() {
+  const admin = findUserByUsername('admin');
+  if (!admin) return false;
+  return verifyPassword('admin123', admin.password_hash);
+}
+
 // ─── PLAYERS & OFFICERS ──────────────────────────────────────
 function parseSkills(skillsData) {
   let skills = [1, 1, 1, 1];
@@ -1467,6 +1473,7 @@ module.exports = {
   getUsers,
   updateUser,
   changePassword,
+  isDefaultAdminPassword,
   getCandidatePlayers,
   getPlayers,
   getPlayersByUserId,

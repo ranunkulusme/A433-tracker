@@ -1847,6 +1847,61 @@ test('API schedule-season supports complex multi-event season and batch events a
   }
 });
 
+test('API serves favicon assets and handles /api/auth/status for demo hint dismissal', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // 1. Static serving of favicons
+    const svgRes = await fetch(`${baseUrl}/favicon.svg`);
+    assert.equal(svgRes.status, 200);
+    assert.equal(svgRes.headers.get('content-type'), 'image/svg+xml');
+
+    const icoRes = await fetch(`${baseUrl}/favicon.ico`);
+    assert.equal(icoRes.status, 200);
+    assert.equal(icoRes.headers.get('content-type'), 'image/x-icon');
+
+    // 2. /api/auth/status initially has default admin password
+    const statusRes1 = await fetch(`${baseUrl}/api/auth/status`);
+    assert.equal(statusRes1.status, 200);
+    const status1 = await statusRes1.json();
+    assert.equal(status1.demoAccessEnabled, true);
+    assert.equal(status1.hasDefaultAdminPassword, true);
+
+    // 3. Admin logs in with default password
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    assert.equal(loginRes.status, 200);
+    const loginData = await loginRes.json();
+
+    // 4. Admin changes password
+    const changePassRes = await fetch(`${baseUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${loginData.token}`
+      },
+      body: JSON.stringify({
+        oldPassword: 'admin123',
+        newPassword: 'SuperSecretAdminPassword2026!'
+      })
+    });
+    assert.equal(changePassRes.status, 200);
+
+    // 5. /api/auth/status now returns demoAccessEnabled = false
+    const statusRes2 = await fetch(`${baseUrl}/api/auth/status`);
+    assert.equal(statusRes2.status, 200);
+    const status2 = await statusRes2.json();
+    assert.equal(status2.demoAccessEnabled, false);
+    assert.equal(status2.hasDefaultAdminPassword, false);
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

@@ -808,9 +808,21 @@ function updateCabinetVipProgressHint() {
 }
 
 // ─── AUTH & SESSION ──────────────────────────────────────────
+async function checkAuthDemoHint() {
+  const hint = document.getElementById('auth-demo-hint');
+  if (!hint) return;
+  try {
+    const res = await apiFetch('/api/auth/status');
+    hint.style.display = (res && res.demoAccessEnabled) ? 'block' : 'none';
+  } catch (e) {
+    hint.style.display = 'none';
+  }
+}
+
 function openAuthModal(tab = 'login', alertMessage = null) {
   openModal('modal-auth');
   switchAuthTab(tab);
+  checkAuthDemoHint();
   if (alertMessage) {
     showAuthAlert(alertMessage, 'info');
   } else {
@@ -1004,6 +1016,86 @@ async function logout() {
     renderTopbarProfile();
     renderSidebarNav();
     openAuthModal('login');
+  }
+}
+
+function openChangePasswordModal() {
+  document.getElementById('form-change-password')?.reset();
+  const alertEl = document.getElementById('change-pass-alert');
+  if (alertEl) {
+    alertEl.style.display = 'none';
+    alertEl.textContent = '';
+  }
+  openModal('modal-change-password');
+  setTimeout(() => document.getElementById('change-old-password')?.focus(), 50);
+}
+
+async function submitChangePassword(e) {
+  if (e) e.preventDefault();
+  const oldPassword = document.getElementById('change-old-password')?.value || '';
+  const newPassword = document.getElementById('change-new-password')?.value || '';
+  const confirmPassword = document.getElementById('change-confirm-password')?.value || '';
+  const alertEl = document.getElementById('change-pass-alert');
+
+  if (!oldPassword || !newPassword) {
+    if (alertEl) {
+      alertEl.className = 'auth-alert error';
+      alertEl.textContent = 'Заполните все обязательные поля';
+      alertEl.style.display = 'block';
+    }
+    return;
+  }
+
+  if (newPassword.length < 4) {
+    if (alertEl) {
+      alertEl.className = 'auth-alert error';
+      alertEl.textContent = 'Новый пароль должен содержать не менее 4 символов';
+      alertEl.style.display = 'block';
+    }
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    if (alertEl) {
+      alertEl.className = 'auth-alert error';
+      alertEl.textContent = 'Новый пароль и подтверждение не совпадают';
+      alertEl.style.display = 'block';
+    }
+    return;
+  }
+
+  const saveBtn = document.getElementById('btn-save-new-password');
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    await apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: { oldPassword, newPassword }
+    });
+
+    toast('Пароль успешно изменен! Оповещение о демо-доступе отключено.', 'success');
+    closeAllModals();
+
+    if (currentUser) {
+      currentUser.hasDefaultAdminPassword = false;
+      try {
+        localStorage.setItem('kow_user', JSON.stringify(currentUser));
+      } catch (err) {}
+    }
+
+    const secAlert = document.getElementById('admin-security-alert');
+    if (secAlert) secAlert.style.display = 'none';
+
+    const hint = document.getElementById('auth-demo-hint');
+    if (hint) hint.style.display = 'none';
+  } catch (err) {
+    if (alertEl) {
+      alertEl.className = 'auth-alert error';
+      alertEl.textContent = err.message || 'Ошибка смены пароля';
+      alertEl.style.display = 'block';
+    }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1350,9 +1442,21 @@ async function renderMyCabinet() {
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button type="button" class="btn btn-secondary btn-scanner" onclick="openSmartScannerModal('my_cabinet')">📷 Smart Scanner</button>
+        <button type="button" class="btn-ghost btn-sm" onclick="openChangePasswordModal()">🔑 Сменить пароль</button>
         <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 Обновить</button>
       </div>
     </div>
+
+    ${(currentUser && currentUser.username === 'admin' && currentUser.hasDefaultAdminPassword) ? `
+      <div class="security-alert-card" id="admin-security-alert">
+        <div class="security-alert-icon">⚠️</div>
+        <div class="security-alert-text">
+          <strong>Внимание:</strong> Установлен стандартный пароль <code>admin123</code>.
+          Пожалуйста, смените его для защиты альянса. После смены пароля подсказка о демо-доступе на странице входа будет скрыта.
+        </div>
+        <button type="button" class="btn-primary btn-sm" onclick="openChangePasswordModal()">Сменить пароль</button>
+      </div>
+    ` : ''}
 
     <!-- SECTORS BAR -->
     <div class="cabinet-sectors-bar">
@@ -2359,6 +2463,16 @@ async function handleResetUserPassword(userId, username) {
       body: { password: newPass }
     });
     toast(`Пароль для "${username}" успешно обновлен`);
+    if (username === 'admin') {
+      if (currentUser && currentUser.username === 'admin') {
+        currentUser.hasDefaultAdminPassword = false;
+        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (e) {}
+        const secAlert = document.getElementById('admin-security-alert');
+        if (secAlert) secAlert.style.display = 'none';
+      }
+      const hint = document.getElementById('auth-demo-hint');
+      if (hint) hint.style.display = 'none';
+    }
   } catch (err) {
     toast(`Ошибка смены пароля: ${err.message}`, 'error');
   }

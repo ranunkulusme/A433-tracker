@@ -571,6 +571,17 @@ test('PWA manifest and mobile app icons exist and are valid', () => {
   assert.ok(html.includes('<link rel="manifest" href="/manifest.json">'), 'index.html must link manifest.json');
   assert.ok(html.includes('<meta name="theme-color" content="#0f172a">'), 'index.html must have theme-color');
   assert.ok(html.includes('<meta name="apple-mobile-web-app-capable" content="yes">'), 'index.html must have apple-mobile-web-app-capable');
+
+  const svgFaviconPath = path.join(__dirname, 'favicon.svg');
+  const icoFaviconPath = path.join(__dirname, 'favicon.ico');
+  assert.ok(fs.existsSync(svgFaviconPath), 'favicon.svg must exist');
+  assert.ok(fs.statSync(svgFaviconPath).size > 0, 'favicon.svg must not be empty');
+  assert.ok(fs.existsSync(icoFaviconPath), 'favicon.ico must exist');
+  assert.ok(fs.statSync(icoFaviconPath).size > 0, 'favicon.ico must not be empty');
+
+  assert.ok(html.includes('href="/favicon.svg"'), 'index.html must link favicon.svg');
+  assert.ok(html.includes('href="/favicon.ico"'), 'index.html must link favicon.ico');
+  assert.ok(!html.includes('href="data:,"'), 'index.html must not suppress favicon with data:,');
 });
 
 test('isOfflineMutationAllowed distinguishes allowed sector, profile, and officer mutations from administrative actions', () => {

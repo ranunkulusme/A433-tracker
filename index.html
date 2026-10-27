@@ -8,9 +8,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="KoW Tracker">
 <link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192.png">
+<link rel="shortcut icon" href="/favicon.ico">
 <title>KoW Officer Tracker</title>
-<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -109,7 +112,7 @@
         <label for="auth-login-password">Пароль *</label>
         <input type="password" id="auth-login-password" autocomplete="current-password" placeholder="Пароль" required>
       </div>
-      <div class="auth-demo-hint">
+      <div class="auth-demo-hint" id="auth-demo-hint" style="display:none">
         💡 Демо-доступ для главы (Р5): <code>admin</code> / <code>admin123</code>
       </div>
       <div class="auth-form-actions">
@@ -1036,6 +1039,35 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeSmartScannerModal()">Отмена</button>
     <button class="btn-primary" id="scanner-btn-apply" onclick="applyScanResultsToProfile()" disabled>✓ Применить в профиль</button>
+  </div>
+</div>
+
+<!-- Modal: Change Password -->
+<div class="modal" id="modal-change-password">
+  <div class="modal-header">
+    <h3>🔑 Смена пароля</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <div id="change-pass-alert" class="auth-alert" style="display:none"></div>
+    <form id="form-change-password" onsubmit="submitChangePassword(event)">
+      <div class="form-group">
+        <label for="change-old-password">Текущий пароль *</label>
+        <input type="password" id="change-old-password" required autocomplete="current-password" placeholder="Введите текущий пароль">
+      </div>
+      <div class="form-group">
+        <label for="change-new-password">Новый пароль *</label>
+        <input type="password" id="change-new-password" required autocomplete="new-password" placeholder="Минимум 4 символа">
+      </div>
+      <div class="form-group">
+        <label for="change-confirm-password">Подтвердите новый пароль *</label>
+        <input type="password" id="change-confirm-password" required autocomplete="new-password" placeholder="Повторите новый пароль">
+      </div>
+      <div class="modal-footer" style="padding:12px 0 0; border-top:none">
+        <button type="button" class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+        <button type="submit" class="btn-primary" id="btn-save-new-password">Сохранить пароль</button>
+      </div>
+    </form>
   </div>
 </div>
 
