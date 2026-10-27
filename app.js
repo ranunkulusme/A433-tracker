@@ -1531,75 +1531,88 @@ async function renderMyCabinet() {
       <div class="cabinet-card">
         <div class="cabinet-card-title">
           <span>📦 Запасы гильдейца</span>
-          <span style="font-size:11px;color:var(--text3)">Быстрое обновление</span>
+          <button type="button" class="btn-ghost btn-sm" id="btn-toggle-cabinet-stock" onclick="toggleCabinetStockEdit()">
+            <span id="stock-toggle-icon">✏️</span> <span id="stock-toggle-text">Изменить запасы</span>
+          </button>
         </div>
         <div class="stock-grid" style="margin-bottom:0">
-          <div class="stock-card" style="padding:10px">
+          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('coupons')" title="Нажмите, чтобы изменить количество купонов">
+            <span class="stock-card-edit-hint">✏️</span>
             <div class="label">🎟️ Купон офицера</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.coupons)}</div>
           </div>
-          <div class="stock-card" style="padding:10px">
+          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('puzzles')" title="Нажмите, чтобы изменить количество медалей">
+            <span class="stock-card-edit-hint">✏️</span>
             <div class="label">🧩 Медаль офицера</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.puzzles)}</div>
           </div>
-          <div class="stock-card" style="padding:10px">
+          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('starCoupons')" title="Нажмите, чтобы изменить купоны звезды">
+            <span class="stock-card-edit-hint">✏️</span>
             <div class="label">⭐ Купон звезды</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.starCoupons || 0)}</div>
           </div>
-          <div class="stock-card" style="padding:10px">
+          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('legendaryStars1')" title="Нажмите, чтобы изменить количество звёзд">
+            <span class="stock-card-edit-hint">✏️</span>
             <div class="label">🌟 Звезды I / II / III</div>
             <div class="value" style="font-size:14px;font-family:var(--mono)">
               ${fmtNum(profile.stock.legendaryStars1 || 0)} / ${fmtNum(profile.stock.legendaryStars2 || 0)} / ${fmtNum(profile.stock.legendaryStars3 || 0)}
             </div>
           </div>
-          <div class="stock-card" style="padding:10px">
+          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('chests')" title="Нажмите, чтобы изменить количество сундуков">
+            <span class="stock-card-edit-hint">✏️</span>
             <div class="label">📦 Сундук выбора</div>
             <div class="value" style="font-size:17px">${fmtNum(profile.stock.chests)}</div>
           </div>
-          <div class="stock-card" style="padding:10px">
+          <div class="stock-card stock-card-clickable" style="padding:10px" onclick="openCabinetStockEdit('legendaryStars1')" title="Нажмите для перехода к звёздам">
+            <span class="stock-card-edit-hint">✏️</span>
             <div class="label">✨ Очки звезд</div>
             <div class="value" style="font-size:17px;color:#f1e05a">${fmtNum(totalStarPoints)}</div>
           </div>
         </div>
-        <div class="form-row form-row-3" style="margin-top:12px">
-          <div class="form-group">
-            <label for="my-stock-coupons">Купон готовности офицера</label>
-            <input type="number" id="my-stock-coupons" min="0" value="${profile.stock.coupons || 0}">
+
+        <!-- Collapsible Stock Edit Form -->
+        <div id="cabinet-stock-edit-container" class="stock-edit-container">
+          <div class="form-row form-row-3" style="margin-top:0">
+            <div class="form-group">
+              <label for="my-stock-coupons">Купон готовности офицера</label>
+              <input type="number" id="my-stock-coupons" min="0" value="${profile.stock.coupons || 0}">
+            </div>
+            <div class="form-group">
+              <label for="my-stock-puzzles">Медаль легендарного офицера</label>
+              <input type="number" id="my-stock-puzzles" min="0" value="${profile.stock.puzzles || 0}">
+            </div>
+            <div class="form-group">
+              <label for="my-stock-star-coupons">Купон готовности звезды</label>
+              <input type="number" id="my-stock-star-coupons" min="0" value="${profile.stock.starCoupons || 0}">
+            </div>
           </div>
-          <div class="form-group">
-            <label for="my-stock-puzzles">Медаль легендарного офицера</label>
-            <input type="number" id="my-stock-puzzles" min="0" value="${profile.stock.puzzles || 0}">
+          <div class="form-row form-row-3">
+            <div class="form-group">
+              <label for="my-stock-legendary-stars-1">Легендарная звезда I (110)</label>
+              <input type="number" id="my-stock-legendary-stars-1" min="0" value="${profile.stock.legendaryStars1 || 0}" oninput="updateCabinetTotalStarPoints()">
+            </div>
+            <div class="form-group">
+              <label for="my-stock-legendary-stars-2">Легендарная звезда II (420)</label>
+              <input type="number" id="my-stock-legendary-stars-2" min="0" value="${profile.stock.legendaryStars2 || 0}" oninput="updateCabinetTotalStarPoints()">
+            </div>
+            <div class="form-group">
+              <label for="my-stock-legendary-stars-3">Легендарная звезда III (960)</label>
+              <input type="number" id="my-stock-legendary-stars-3" min="0" value="${profile.stock.legendaryStars3 || 0}" oninput="updateCabinetTotalStarPoints()">
+            </div>
           </div>
-          <div class="form-group">
-            <label for="my-stock-star-coupons">Купон готовности звезды</label>
-            <input type="number" id="my-stock-star-coupons" min="0" value="${profile.stock.starCoupons || 0}">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="my-stock-chests">Сундук выбора</label>
+              <input type="number" id="my-stock-chests" min="0" value="${profile.stock.chests || 0}">
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end">
+              <div id="total-star-points-badge" class="total-star-badge">✨ Итого очков звезд: ${fmtNum(totalStarPoints)}</div>
+            </div>
           </div>
-        </div>
-        <div class="form-row form-row-3">
-          <div class="form-group">
-            <label for="my-stock-legendary-stars-1">Легендарная звезда I (110)</label>
-            <input type="number" id="my-stock-legendary-stars-1" min="0" value="${profile.stock.legendaryStars1 || 0}" oninput="updateCabinetTotalStarPoints()">
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            <button type="button" class="btn-primary btn-sm" onclick="saveMyStock()">💾 Сохранить запасы</button>
+            <button type="button" class="btn-ghost btn-sm" onclick="closeCabinetStockEdit()">Отмена</button>
           </div>
-          <div class="form-group">
-            <label for="my-stock-legendary-stars-2">Легендарная звезда II (420)</label>
-            <input type="number" id="my-stock-legendary-stars-2" min="0" value="${profile.stock.legendaryStars2 || 0}" oninput="updateCabinetTotalStarPoints()">
-          </div>
-          <div class="form-group">
-            <label for="my-stock-legendary-stars-3">Легендарная звезда III (960)</label>
-            <input type="number" id="my-stock-legendary-stars-3" min="0" value="${profile.stock.legendaryStars3 || 0}" oninput="updateCabinetTotalStarPoints()">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="my-stock-chests">Сундук выбора</label>
-            <input type="number" id="my-stock-chests" min="0" value="${profile.stock.chests || 0}">
-          </div>
-          <div class="form-group" style="display:flex;align-items:flex-end">
-            <div id="total-star-points-badge" class="total-star-badge">✨ Итого очков звезд: ${fmtNum(totalStarPoints)}</div>
-          </div>
-        </div>
-        <div style="margin-top:8px">
-          <button type="button" class="btn-primary btn-sm" onclick="saveMyStock()">💾 Сохранить запасы</button>
         </div>
       </div>
     </div>
@@ -1979,6 +1992,56 @@ async function saveMyCabinetProfile() {
   } catch (err) {
     toast('Ошибка сохранения профиля: ' + err.message, 'error');
     throw err;
+  }
+}
+
+function openCabinetStockEdit(fieldKey) {
+  const container = document.getElementById('cabinet-stock-edit-container');
+  if (!container) return;
+  container.classList.add('open');
+
+  const toggleIcon = document.getElementById('stock-toggle-icon');
+  const toggleText = document.getElementById('stock-toggle-text');
+  if (toggleIcon) toggleIcon.textContent = '✕';
+  if (toggleText) toggleText.textContent = 'Свернуть';
+
+  const fieldMap = {
+    coupons: 'my-stock-coupons',
+    puzzles: 'my-stock-puzzles',
+    starCoupons: 'my-stock-star-coupons',
+    legendaryStars1: 'my-stock-legendary-stars-1',
+    legendaryStars2: 'my-stock-legendary-stars-2',
+    legendaryStars3: 'my-stock-legendary-stars-3',
+    chests: 'my-stock-chests',
+  };
+
+  const targetId = fieldMap[fieldKey] || 'my-stock-coupons';
+  const inputEl = document.getElementById(targetId);
+  if (inputEl) {
+    inputEl.focus();
+    inputEl.select();
+    inputEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function closeCabinetStockEdit() {
+  const container = document.getElementById('cabinet-stock-edit-container');
+  if (!container) return;
+  container.classList.remove('open');
+
+  const toggleIcon = document.getElementById('stock-toggle-icon');
+  const toggleText = document.getElementById('stock-toggle-text');
+  if (toggleIcon) toggleIcon.textContent = '✏️';
+  if (toggleText) toggleText.textContent = 'Изменить запасы';
+}
+
+function toggleCabinetStockEdit() {
+  const container = document.getElementById('cabinet-stock-edit-container');
+  if (!container) return;
+  if (container.classList.contains('open')) {
+    closeCabinetStockEdit();
+  } else {
+    openCabinetStockEdit('coupons');
   }
 }
 
@@ -3263,32 +3326,60 @@ function renderPlayerDetail(playerId) {
       ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openPlayerModal(${p.id})">Редактировать</button>` : ''}
     </div>
     ${stockVisible ? `
-      <div class="stock-grid">
-        <div class="stock-card"><div class="label">🎟️ Купон офицера</div><div class="value">${fmtNum(p.stock.coupons)}</div></div>
-        <div class="stock-card"><div class="label">🧩 Медаль офицера</div><div class="value">${fmtNum(p.stock.puzzles)}</div></div>
-        <div class="stock-card"><div class="label">⭐ Купон звезды</div><div class="value">${fmtNum(p.stock.starCoupons || 0)}</div></div>
-        <div class="stock-card"><div class="label">🌟 Звезды I / II / III</div><div class="value" style="font-size:14px;font-family:var(--mono)">${fmtNum(p.stock.legendaryStars1 || 0)} / ${fmtNum(p.stock.legendaryStars2 || 0)} / ${fmtNum(p.stock.legendaryStars3 || 0)}</div></div>
-        <div class="stock-card"><div class="label">📦 Сундук выбора</div><div class="value">${fmtNum(p.stock.chests)}</div></div>
-        <div class="stock-card"><div class="label">✨ Очки звезд</div><div class="value" style="color:#f1e05a">${fmtNum((typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints(p.stock) : 0)}</div></div>
+      <div class="section-header">
+        <div class="section-title">📦 Запасы сектора</div>
+        ${canEditSector ? `
+          <button type="button" class="btn-ghost btn-sm" id="btn-toggle-sector-stock" onclick="toggleSectorStockEdit()">
+            <span id="sector-stock-toggle-icon">✏️</span> <span id="sector-stock-toggle-text">Изменить запасы</span>
+          </button>
+        ` : ''}
+      </div>
+      <div class="stock-grid" style="margin-bottom:0">
+        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'coupons\')" title="Нажмите, чтобы изменить купоны"' : ''}>
+          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+          <div class="label">🎟️ Купон офицера</div><div class="value">${fmtNum(p.stock.coupons)}</div>
+        </div>
+        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'puzzles\')" title="Нажмите, чтобы изменить медали"' : ''}>
+          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+          <div class="label">🧩 Медаль офицера</div><div class="value">${fmtNum(p.stock.puzzles)}</div>
+        </div>
+        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'starCoupons\')" title="Нажмите, чтобы изменить купоны звезды"' : ''}>
+          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+          <div class="label">⭐ Купон звезды</div><div class="value">${fmtNum(p.stock.starCoupons || 0)}</div>
+        </div>
+        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'legendaryStars1\')" title="Нажмите, чтобы изменить звёзды"' : ''}>
+          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+          <div class="label">🌟 Звезды I / II / III</div><div class="value" style="font-size:14px;font-family:var(--mono)">${fmtNum(p.stock.legendaryStars1 || 0)} / ${fmtNum(p.stock.legendaryStars2 || 0)} / ${fmtNum(p.stock.legendaryStars3 || 0)}</div>
+        </div>
+        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'chests\')" title="Нажмите, чтобы изменить сундуки"' : ''}>
+          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+          <div class="label">📦 Сундук выбора</div><div class="value">${fmtNum(p.stock.chests)}</div>
+        </div>
+        <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" ${canEditSector ? 'onclick="openSectorStockEdit(\'legendaryStars1\')" title="Нажмите для перехода к звёздам"' : ''}>
+          ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
+          <div class="label">✨ Очки звезд</div><div class="value" style="color:#f1e05a">${fmtNum((typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints(p.stock) : 0)}</div>
+        </div>
         <div class="stock-card"><div class="label">Ежедневно</div><div class="value">+${fmtNum(rewards.puzzlesPerDay, 2)}</div></div>
       </div>
-      <div class="section-header"><div class="section-title">Корректировка запасов</div></div>
-      <div class="form-row form-row-3" style="margin-bottom:8px">
-        <input type="number" id="stock-coupons" placeholder="Купон готовности офицера" value="${p.stock.coupons}">
-        <input type="number" id="stock-puzzles" placeholder="Медаль легендарного офицера" value="${p.stock.puzzles}">
-        <input type="number" id="stock-star-coupons" placeholder="Купон готовности звезды" value="${p.stock.starCoupons || 0}">
-      </div>
-      <div class="form-row form-row-3" style="margin-bottom:8px">
-        <input type="number" id="stock-legendary-stars-1" placeholder="Легендарная звезда I (110)" value="${p.stock.legendaryStars1 || 0}">
-        <input type="number" id="stock-legendary-stars-2" placeholder="Легендарная звезда II (420)" value="${p.stock.legendaryStars2 || 0}">
-        <input type="number" id="stock-legendary-stars-3" placeholder="Легендарная звезда III (960)" value="${p.stock.legendaryStars3 || 0}">
-      </div>
-      <div class="form-row" style="margin-bottom:12px">
-        <input type="number" id="stock-chests" placeholder="Сундук выбора" value="${p.stock.chests}">
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:20px">
-        <button class="btn-primary btn-sm" onclick="saveStockCorrection(${p.id})">Сохранить запасы</button>
-        <button class="btn-ghost btn-sm" onclick="rollbackLastStock(${p.id})">Откатить последнюю</button>
+      <div id="sector-stock-edit-container" class="stock-edit-container">
+        <div class="form-row form-row-3" style="margin-top:0;margin-bottom:8px">
+          <input type="number" id="stock-coupons" placeholder="Купон готовности офицера" value="${p.stock.coupons}">
+          <input type="number" id="stock-puzzles" placeholder="Медаль легендарного офицера" value="${p.stock.puzzles}">
+          <input type="number" id="stock-star-coupons" placeholder="Купон готовности звезды" value="${p.stock.starCoupons || 0}">
+        </div>
+        <div class="form-row form-row-3" style="margin-bottom:8px">
+          <input type="number" id="stock-legendary-stars-1" placeholder="Легендарная звезда I (110)" value="${p.stock.legendaryStars1 || 0}">
+          <input type="number" id="stock-legendary-stars-2" placeholder="Легендарная звезда II (420)" value="${p.stock.legendaryStars2 || 0}">
+          <input type="number" id="stock-legendary-stars-3" placeholder="Легендарная звезда III (960)" value="${p.stock.legendaryStars3 || 0}">
+        </div>
+        <div class="form-row" style="margin-bottom:12px">
+          <input type="number" id="stock-chests" placeholder="Сундук выбора" value="${p.stock.chests}">
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
+          <button class="btn-primary btn-sm" onclick="saveStockCorrection(${p.id})">💾 Сохранить запасы</button>
+          <button class="btn-ghost btn-sm" onclick="rollbackLastStock(${p.id})">Откатить последнюю</button>
+          <button class="btn-ghost btn-sm" onclick="closeSectorStockEdit()">Отмена</button>
+        </div>
       </div>` : `<div class="empty-state"><p>Запасы скрыты для роли ${state.currentRole}</p></div>`}
     <div class="section-header">
       <div class="section-title">Офицеры сектора (${(p.officers || []).length})</div>
@@ -3332,6 +3423,56 @@ function renderPlayerDetail(playerId) {
       </tbody></table>
     </div>
   `;
+}
+
+function openSectorStockEdit(fieldKey) {
+  const container = document.getElementById('sector-stock-edit-container');
+  if (!container) return;
+  container.classList.add('open');
+
+  const toggleIcon = document.getElementById('sector-stock-toggle-icon');
+  const toggleText = document.getElementById('sector-stock-toggle-text');
+  if (toggleIcon) toggleIcon.textContent = '✕';
+  if (toggleText) toggleText.textContent = 'Свернуть';
+
+  const fieldMap = {
+    coupons: 'stock-coupons',
+    puzzles: 'stock-puzzles',
+    starCoupons: 'stock-star-coupons',
+    legendaryStars1: 'stock-legendary-stars-1',
+    legendaryStars2: 'stock-legendary-stars-2',
+    legendaryStars3: 'stock-legendary-stars-3',
+    chests: 'stock-chests',
+  };
+
+  const targetId = fieldMap[fieldKey] || 'stock-coupons';
+  const inputEl = document.getElementById(targetId);
+  if (inputEl) {
+    inputEl.focus();
+    inputEl.select();
+    inputEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function closeSectorStockEdit() {
+  const container = document.getElementById('sector-stock-edit-container');
+  if (!container) return;
+  container.classList.remove('open');
+
+  const toggleIcon = document.getElementById('sector-stock-toggle-icon');
+  const toggleText = document.getElementById('sector-stock-toggle-text');
+  if (toggleIcon) toggleIcon.textContent = '✏️';
+  if (toggleText) toggleText.textContent = 'Изменить запасы';
+}
+
+function toggleSectorStockEdit() {
+  const container = document.getElementById('sector-stock-edit-container');
+  if (!container) return;
+  if (container.classList.contains('open')) {
+    closeSectorStockEdit();
+  } else {
+    openSectorStockEdit('coupons');
+  }
 }
 
 function saveStockCorrection(playerId) {
