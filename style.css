@@ -133,6 +133,29 @@ tr:hover td { background: rgba(255,255,255,.02); }
   border: 1px dashed var(--border);
   font-style: italic;
 }
+.badge-more-officers {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px dashed rgba(99, 102, 241, 0.35);
+  border-radius: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: fit-content;
+}
+.badge-more-officers:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: var(--primary);
+  color: #fff;
+  transform: translateY(-1px);
+}
 
 .user-profile-badge {
   display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px;

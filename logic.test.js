@@ -1253,9 +1253,9 @@ x1 600 ОБМЕН
   assert.strictEqual(po.generation, 8);
   assert.strictEqual(po.couponPerPuzzle, 720);
   assert.strictEqual(po.starCouponCost, 360);
-  assert.strictEqual(po.medalsBeforeTraining, 480);
+  assert.strictEqual(po.medalsBeforeTraining, 690);
   assert.strictEqual(po.medalsTraining, 900);
-  assert.strictEqual(po.medalsTotal, 1380);
+  assert.strictEqual(po.medalsTotal, 1590);
 
   const sara = results.find(o => o.name === 'Sara');
   assert.ok(sara, 'Officer Sara must be parsed');
@@ -1578,41 +1578,126 @@ test('calculateStarStockDelta manages stock deduction and refunds with coupons-f
   assert(resRefund.delta.starCoupons > 0, 'Купоны должны вернуться на склад');
 });
 
-test('calculateSkillStockDelta and calculateLevelStockDelta prioritize coupons over medals for standard officers', () => {
+test('sortOfficersByGeneration sorts officers by descending catalog generation and tie-breakers', () => {
+  const { sortOfficersByGeneration } = require('./logic.js');
+
+  const catalog = [
+    { id: 'cat-rex', name: 'Генерал Рекс', generation: 7 },
+    { id: 'cat-liora', name: 'Лиора', generation: 7 },
+    { id: 'cat-valk', name: 'Валькирия', generation: 9 },
+    { id: 'cat-aurora', name: 'Аврора', generation: 8 },
+    { id: 'cat-tank9', name: 'ТАНК9', generation: 9 },
+  ];
+
+  const officers = [
+    { id: 'o-liora', catalogId: 'cat-liora', name: 'Лиора', stars: 6, level: 180 },
+    { id: 'o-rex', catalogId: 'cat-rex', name: 'Генерал Рекс', stars: 5, level: 120 },
+    { id: 'o-tank9', catalogId: 'cat-tank9', name: 'ТАНК9', stars: 0, level: 0 },
+    { id: 'o-valk', catalogId: 'cat-valk', name: 'Валькирия', stars: 4, level: 60 },
+    { id: 'o-aurora', catalogId: 'cat-aurora', name: 'Аврора', stars: 6, level: 180 },
+  ];
+
+  const sorted = sortOfficersByGeneration(officers, catalog);
+  assert.strictEqual(sorted.length, 5);
+  // Ген 9: Валькирия (4★), затем ТАНК9 (0★)
+  assert.strictEqual(sorted[0].id, 'o-valk');
+  assert.strictEqual(sorted[1].id, 'o-tank9');
+  // Ген 8: Аврора
+  assert.strictEqual(sorted[2].id, 'o-aurora');
+  // Ген 7: Лиора (6★), затем Рекс (5★)
+  assert.strictEqual(sorted[3].id, 'o-liora');
+  assert.strictEqual(sorted[4].id, 'o-rex');
+});
+
+test('calculateStarStockDelta tracks invested resources and refunds exact stars and coupons (user scenario)', () => {
+  const { calculateStarStockDelta, INVESTED_ZERO } = require('./logic.js');
+
+  // Сценарий пользователя:
+  // Было купонов звезды: 253 000 (по курсу 300 за 110 это ~92 766 очков)
+  // Было звёзд III (960): 200 шт (192 000 очков)
+  // Качаем офицера 0★ -> 6★ (требуется 98 000 очков звёзд)
   const stock = {
-    coupons: 12000, // при курсе 600 (Ген. 7) это 20 пазлов/медалей
-    puzzles: 50,
+    starCoupons: 253000,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 200,
   };
 
-  // 1. Навыки: 0 -> 4 апа (50 медалей).
-  // Из 50 медалей: 20 берутся из 12 000 купонов, остальные 30 из медалей склада.
-  const skillRes = calculateSkillStockDelta([1, 1, 1, 1], [5, 1, 1, 1], stock, 600, 'standard', 690);
-  assert.strictEqual(skillRes.canAfford, true);
-  assert.strictEqual(skillRes.medals, 50);
-  assert.strictEqual(skillRes.delta.coupons, -12000);
-  assert.strictEqual(skillRes.delta.puzzles, -30);
+  const initialInvested = { ...INVESTED_ZERO };
 
-  // 2. Специальный офицер: купоны не применяются, только медали
-  const specialSkillRes = calculateSkillStockDelta([1, 1, 1, 1], [5, 1, 1, 1], stock, 0, 'special', 690);
-  assert.strictEqual(specialSkillRes.canAfford, true);
-  assert.strictEqual(specialSkillRes.delta.coupons, 0);
-  assert.strictEqual(specialSkillRes.delta.puzzles, -50);
+  // 1. Повышение 0★ -> 6★:
+  // Все 253 000 купонов звезды списываются (покрывают 92 766 очков).
+  // Остаток очков 98 000 - 92 766 = 5 234 очка покрывается звёздами III.
+  // 5234 / 960 = 5.45 -> списывается 6 звёзд III (или 5 звёзд III и остаток).
+  const upgradeRes = calculateStarStockDelta(0, 6, stock, 300, initialInvested);
+  assert.strictEqual(upgradeRes.canAfford, true);
+  assert.strictEqual(upgradeRes.delta.starCoupons, -253000);
+  assert.ok(upgradeRes.delta.legendaryStars3 < 0, 'Звёзды III должны списаться');
+  assert.ok(upgradeRes.newInvested, 'Должен сформироваться newInvested');
+  assert.strictEqual(upgradeRes.newInvested.starCoupons, 253000);
+  assert.strictEqual(upgradeRes.newInvested.legendaryStars3, Math.abs(upgradeRes.delta.legendaryStars3));
 
-  // 3. Недостаточно ресурсов для навыков (требуется 190 медалей, а на складе всего 20 + 50 = 70)
-  const skillFail = calculateSkillStockDelta([1, 1, 1, 1], [5, 5, 1, 1], stock, 600, 'standard', 690);
-  assert.strictEqual(skillFail.canAfford, false);
+  // 2. Понижение 6★ -> 0★ с учётом invested:
+  // Должны вернуться ровно 253 000 купонов и ровно списанные звёзды III!
+  const refundRes = calculateStarStockDelta(6, 0, stock, 300, upgradeRes.newInvested);
+  assert.strictEqual(refundRes.canAfford, true);
+  assert.strictEqual(refundRes.delta.starCoupons, 253000, 'Купоны звезды должны вернуться в исходном объеме');
+  assert.strictEqual(refundRes.delta.legendaryStars3, upgradeRes.newInvested.legendaryStars3, 'Списанные звёзды III должны вернуться на склад!');
+  assert.strictEqual(refundRes.delta.legendaryStars1, 0);
+  assert.strictEqual(refundRes.delta.legendaryStars2, 0);
+  assert.strictEqual(refundRes.newInvested.starCoupons, 0);
+  assert.strictEqual(refundRes.newInvested.legendaryStars3, 0);
 
-  // 4. Подготовка / уровни: 0 -> 10 ур. (10 * 5 = 50 пазлов)
-  const levelRes = calculateLevelStockDelta(0, 10, stock, 600, 'standard');
-  assert.strictEqual(levelRes.canAfford, true);
-  assert.strictEqual(levelRes.puzzles, 50);
-  assert.strictEqual(levelRes.delta.coupons, -12000);
-  assert.strictEqual(levelRes.delta.puzzles, -30);
+  // 3. Офицер вне трекера (invested = 0):
+  // При понижении 6★ -> 0★ ресурсы на склад НЕ возвращаются (delta = 0)
+  const untrackedRefund = calculateStarStockDelta(6, 0, stock, 300, INVESTED_ZERO);
+  assert.strictEqual(untrackedRefund.canAfford, true);
+  assert.strictEqual(untrackedRefund.delta.starCoupons, 0, 'Для офицера вне трекера купоны не начисляются');
+  assert.strictEqual(untrackedRefund.delta.legendaryStars3, 0, 'Для офицера вне трекера звёзды не начисляются');
+});
 
-  // 5. Понижение уровня: 10 -> 0 ур. (возврат 50 пазлов в купоны)
-  const levelRefund = calculateLevelStockDelta(10, 0, stock, 600, 'standard');
-  assert.strictEqual(levelRefund.canAfford, true);
-  assert.strictEqual(levelRefund.delta.coupons, 30000);
+test('calculateSkillStockDelta and calculateLevelStockDelta track invested and do not refund untracked officers', () => {
+  const { calculateSkillStockDelta, calculateLevelStockDelta, INVESTED_ZERO } = require('./logic.js');
+
+  const stock = { coupons: 12000, puzzles: 50 };
+  const initialInvested = { ...INVESTED_ZERO };
+
+  // 1. Повышение навыков 1-1-1-1 -> 5-1-1-1 (50 медалей: 12 000 купонов + 30 медалей)
+  const skillUp = calculateSkillStockDelta([1, 1, 1, 1], [5, 1, 1, 1], stock, 600, 'standard', 690, initialInvested);
+  assert.strictEqual(skillUp.canAfford, true);
+  assert.strictEqual(skillUp.delta.coupons, -12000);
+  assert.strictEqual(skillUp.delta.puzzles, -30);
+  assert.strictEqual(skillUp.newInvested.coupons, 12000);
+  assert.strictEqual(skillUp.newInvested.puzzles, 30);
+
+  // 2. Понижение навыков 5-1-1-1 -> 1-1-1-1 с invested:
+  // Возвращаются ровно 12 000 купонов и 30 медалей
+  const skillRefund = calculateSkillStockDelta([5, 1, 1, 1], [1, 1, 1, 1], stock, 600, 'standard', 690, skillUp.newInvested);
+  assert.strictEqual(skillRefund.canAfford, true);
+  assert.strictEqual(skillRefund.delta.coupons, 12000);
+  assert.strictEqual(skillRefund.delta.puzzles, 30);
+  assert.strictEqual(skillRefund.newInvested.coupons, 0);
+  assert.strictEqual(skillRefund.newInvested.puzzles, 0);
+
+  // 3. Офицер вне трекера: понижение 5-5-5-5 -> 1-1-1-1 без вложений даёт delta = 0
+  const untrackedSkill = calculateSkillStockDelta([5, 5, 5, 5], [1, 1, 1, 1], stock, 600, 'standard', 690, INVESTED_ZERO);
+  assert.strictEqual(untrackedSkill.delta.coupons, 0);
+  assert.strictEqual(untrackedSkill.delta.puzzles, 0);
+
+  // 4. Подготовка / уровни: 0 -> 10 ур. с invested
+  const lvlUp = calculateLevelStockDelta(0, 10, stock, 600, 'standard', initialInvested);
+  assert.strictEqual(lvlUp.newInvested.coupons, 12000);
+  assert.strictEqual(lvlUp.newInvested.puzzles, 30);
+
+  // 5. Понижение уровней 10 -> 0 с invested
+  const lvlRefund = calculateLevelStockDelta(10, 0, stock, 600, 'standard', lvlUp.newInvested);
+  assert.strictEqual(lvlRefund.delta.coupons, 12000);
+  assert.strictEqual(lvlRefund.delta.puzzles, 30);
+
+  // 6. Уровень вне трекера: 180 -> 0 ур. без вложений даёт delta = 0
+  const untrackedLvl = calculateLevelStockDelta(180, 0, stock, 600, 'standard', INVESTED_ZERO);
+  assert.strictEqual(untrackedLvl.delta.coupons, 0);
+  assert.strictEqual(untrackedLvl.delta.puzzles, 0);
 });
 
 

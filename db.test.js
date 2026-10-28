@@ -1037,9 +1037,9 @@ test('catalog officer supports star_coupon_cost, medals before/training, total s
     starCouponCost: 360
   });
 
-  assert.equal(saved.medalsBeforeTraining, 480);
+  assert.equal(saved.medalsBeforeTraining, 690);
   assert.equal(saved.medalsTraining, 900);
-  assert.equal(saved.medalsTotal, 1380);
+  assert.equal(saved.medalsTotal, 1590);
   assert.equal(saved.starCouponCost, 360);
   assert.equal(saved.couponPerPuzzle, 720);
 
@@ -1047,9 +1047,9 @@ test('catalog officer supports star_coupon_cost, medals before/training, total s
   const po = catalog.find(o => o.id === 'officer-po');
   assert(po);
   assert.equal(po.name, 'По');
-  assert.equal(po.medalsBeforeTraining, 480);
+  assert.equal(po.medalsBeforeTraining, 690);
   assert.equal(po.medalsTraining, 900);
-  assert.equal(po.medalsTotal, 1380);
+  assert.equal(po.medalsTotal, 1590);
   assert.equal(po.starCouponCost, 360);
 
   // Редактируем с кастомными медалями
@@ -1115,6 +1115,69 @@ test('isDefaultAdminPassword tracks admin password changes correctly', () => {
 
   dbModule.changePassword(admin.id, 'MyNewSecretPass2026!');
   assert.strictEqual(dbModule.isDefaultAdminPassword(), false, 'isDefaultAdminPassword returns false after password change');
+});
+
+test('player officers store and retrieve invested resources across CRUD and export/import', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const p = dbModule.createPlayer({ name: 'Тестовый сектор' });
+  assert.ok(p && p.id);
+
+  // Добавляем офицера с вложенными ресурсами
+  const off = dbModule.addPlayerOfficer(p.id, {
+    catalogId: 'admiral-nathon',
+    name: 'Адмирал Нейтон',
+    stars: 6,
+    level: 180,
+    skills: [5, 5, 5, 5],
+    invested: {
+      starCoupons: 253000,
+      legendaryStars3: 6,
+      coupons: 12000,
+      puzzles: 30
+    }
+  });
+
+  assert.strictEqual(off.invested.starCoupons, 253000);
+  assert.strictEqual(off.invested.legendaryStars3, 6);
+  assert.strictEqual(off.invested.coupons, 12000);
+  assert.strictEqual(off.invested.puzzles, 30);
+  assert.strictEqual(off.invested.legendaryStars1, 0);
+
+  // Проверяем получение через getPlayerById
+  const pLoaded = dbModule.getPlayerById(p.id);
+  const offLoaded = pLoaded.officers.find(o => o.id === off.id);
+  assert.ok(offLoaded);
+  assert.strictEqual(offLoaded.invested.starCoupons, 253000);
+  assert.strictEqual(offLoaded.invested.legendaryStars3, 6);
+
+  // Обновляем офицера
+  const offUpdated = dbModule.updatePlayerOfficer(p.id, off.id, {
+    stars: 0,
+    invested: {
+      starCoupons: 0,
+      legendaryStars3: 0,
+      coupons: 0,
+      puzzles: 0
+    }
+  });
+  assert.strictEqual(offUpdated.stars, 0);
+  assert.strictEqual(offUpdated.invested.starCoupons, 0);
+  assert.strictEqual(offUpdated.invested.legendaryStars3, 0);
+
+  // Проверяем exportKowJson / importKowJson
+  dbModule.updatePlayerOfficer(p.id, off.id, {
+    invested: { starCoupons: 9999 }
+  });
+  const exported = dbModule.exportKowJson();
+  dbModule.initDb(':memory:');
+  dbModule.importKowJson(exported);
+
+  const importedPlayer = dbModule.getPlayerById(p.id);
+  const importedOff = importedPlayer.officers.find(o => o.id === off.id);
+  assert.ok(importedOff);
+  assert.strictEqual(importedOff.invested.starCoupons, 9999);
 });
 
 

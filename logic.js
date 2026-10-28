@@ -24,27 +24,50 @@
     legendaryStars3: 0,
     chests: 0,
   };
+  const INVESTED_ZERO = Object.freeze({
+    starCoupons: 0,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 0,
+    coupons: 0,
+    puzzles: 0,
+  });
+
+  function normalizeInvested(inv) {
+    if (!inv || typeof inv !== 'object') {
+      return { ...INVESTED_ZERO };
+    }
+    return {
+      starCoupons: Math.max(0, Math.round(Number(inv.starCoupons) || 0)),
+      legendaryStars1: Math.max(0, Math.round(Number(inv.legendaryStars1) || 0)),
+      legendaryStars2: Math.max(0, Math.round(Number(inv.legendaryStars2) || 0)),
+      legendaryStars3: Math.max(0, Math.round(Number(inv.legendaryStars3) || 0)),
+      coupons: Math.max(0, Math.round(Number(inv.coupons) || 0)),
+      puzzles: Math.max(0, Math.round(Number(inv.puzzles) || 0)),
+    };
+  }
+
   const OFFICER_TYPES = ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
 
   const DEFAULT_OFFICERS = [
-    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ-Сау', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ-Сау', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
   ];
 
   const COMMUNITY_OFFICERS = [
-    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ-Сау', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'aurora', name: 'Аврора', type: 'Горнизон', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'valkyrie', name: 'Валькирия', type: 'Осада', generation: 9, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'angel', name: 'Ангел', type: 'Танк', generation: 2, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'halina', name: 'Халина', type: 'ПТ-Сау', generation: 2, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'betty', name: 'Бетти', type: 'Пехота', generation: 3, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'eva', name: 'Ева', type: 'Танк', generation: 2, couponPerPuzzle: 500, starCouponCost: 250, upgradeType: 'standard', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'grace', name: 'Грейс', type: 'Танк', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'jessica', name: 'Джессика', type: 'Танк', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
-    { id: 'marjorie', name: 'Марджори', type: 'Пехота', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 480, medalsTraining: 900, medalsTotal: 1380 },
+    { id: 'admiral-nathon', name: 'Адмирал Нейтон', type: 'Пехота', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'general-rex', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'captain-black', name: 'Капитан Блэк', type: 'ПТ-Сау', generation: 7, couponPerPuzzle: 600, starCouponCost: 300, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'aurora', name: 'Аврора', type: 'Горнизон', generation: 8, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'valkyrie', name: 'Валькирия', type: 'Осада', generation: 9, couponPerPuzzle: 720, starCouponCost: 360, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'angel', name: 'Ангел', type: 'Танк', generation: 2, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'halina', name: 'Халина', type: 'ПТ-Сау', generation: 2, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'betty', name: 'Бетти', type: 'Пехота', generation: 3, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'eva', name: 'Ева', type: 'Танк', generation: 2, couponPerPuzzle: 500, starCouponCost: 250, upgradeType: 'standard', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'grace', name: 'Грейс', type: 'Танк', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'jessica', name: 'Джессика', type: 'Танк', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
+    { id: 'marjorie', name: 'Марджори', type: 'Пехота', generation: 1, couponPerPuzzle: 0, starCouponCost: 0, upgradeType: 'special', medalsBeforeTraining: 690, medalsTraining: 900, medalsTotal: 1590 },
   ];
 
   const VIP_TIERS_DATA = [
@@ -574,9 +597,9 @@
             type: troopType,
             couponPerPuzzle,
             starCouponCost,
-            medalsBeforeTraining: 480,
+            medalsBeforeTraining: 690,
             medalsTraining: 900,
-            medalsTotal: 1380,
+            medalsTotal: 1590,
             upgradeType: 'standard'
           });
         }
@@ -1507,16 +1530,72 @@
     return isNaN(num) ? 0 : num;
   }
 
-  function calculateStarStockDelta(currentStars, newStars, stock, starCouponCost = 300) {
+  function sortOfficersByGeneration(officers, catalog) {
+    if (!Array.isArray(officers)) return [];
+    const catList = Array.isArray(catalog) ? catalog : [];
+    const catMap = new Map();
+    for (const c of catList) {
+      if (!c) continue;
+      if (c.id) catMap.set(String(c.id), c);
+      if (c.name) catMap.set(String(c.name).toLowerCase(), c);
+    }
+
+    function getGen(off) {
+      if (!off) return 0;
+      let cat = null;
+      if (off.catalogId && catMap.has(String(off.catalogId))) {
+        cat = catMap.get(String(off.catalogId));
+      } else if (off.id && catMap.has(String(off.id))) {
+        cat = catMap.get(String(off.id));
+      } else if (off.name && catMap.has(String(off.name).toLowerCase())) {
+        cat = catMap.get(String(off.name).toLowerCase());
+      }
+
+      if (cat) {
+        if (typeof cat.generation === 'number') return cat.generation;
+        if (cat.season) {
+          const m = String(cat.season).match(/\d+/);
+          if (m) return parseInt(m[0], 10);
+        }
+      }
+      if (typeof off.generation === 'number') return off.generation;
+      if (off.season) {
+        const m = String(off.season).match(/\d+/);
+        if (m) return parseInt(m[0], 10);
+      }
+      return 0;
+    }
+
+    return [...officers].sort((a, b) => {
+      const genA = getGen(a);
+      const genB = getGen(b);
+      if (genB !== genA) return genB - genA;
+
+      const starsA = Number(a?.stars) || 0;
+      const starsB = Number(b?.stars) || 0;
+      if (starsB !== starsA) return starsB - starsA;
+
+      const lvlA = Number(a?.level) || 0;
+      const lvlB = Number(b?.level) || 0;
+      if (lvlB !== lvlA) return lvlB - lvlA;
+
+      return String(a?.name || '').localeCompare(String(b?.name || ''));
+    });
+  }
+
+  function calculateStarStockDelta(currentStars, newStars, stock, starCouponCost = 300, invested) {
     const fromStar = Math.max(0, Math.min(6, Number(currentStars) || 0));
     const toStar = Math.max(0, Math.min(6, Number(newStars) || 0));
     const deltaPoints = STAR_CUMULATIVE_COSTS[toStar] - STAR_CUMULATIVE_COSTS[fromStar];
+    const hasInvested = invested !== undefined && invested !== null;
+    const inv = hasInvested ? normalizeInvested(invested) : null;
 
     if (deltaPoints === 0) {
       return {
         canAfford: true,
         points: 0,
-        delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 }
+        delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 },
+        ...(hasInvested ? { newInvested: { ...inv } } : {})
       };
     }
 
@@ -1527,23 +1606,32 @@
       // 1-й приоритет: купоны звезды (couponRate купонов = 110 очков)
       const availableCouponPoints = Math.floor((st.starCoupons * 110) / couponRate);
       const pointsFromCoupons = Math.min(deltaPoints, availableCouponPoints);
-      const couponsToDeduct = pointsFromCoupons > 0 ? Math.ceil((pointsFromCoupons * couponRate) / 110) : 0;
+      let couponsToDeduct = 0;
+      if (pointsFromCoupons > 0) {
+        if (pointsFromCoupons === availableCouponPoints) {
+          couponsToDeduct = st.starCoupons;
+        } else {
+          couponsToDeduct = Math.ceil((pointsFromCoupons * couponRate) / 110);
+        }
+      }
       let remPoints = deltaPoints - pointsFromCoupons;
 
       // 2-й приоритет: готовые звёзды со склада (III = 960, II = 420, I = 110)
-      const deductStars3 = Math.min(st.legendaryStars3, Math.floor(remPoints / 960));
+      let deductStars3 = Math.min(st.legendaryStars3, Math.floor(remPoints / 960));
       remPoints -= deductStars3 * 960;
 
-      const deductStars2 = Math.min(st.legendaryStars2, Math.floor(remPoints / 420));
+      let deductStars2 = Math.min(st.legendaryStars2, Math.floor(remPoints / 420));
       remPoints -= deductStars2 * 420;
 
-      const deductStars1 = Math.min(st.legendaryStars1, Math.ceil(remPoints / 110));
+      let deductStars1 = Math.min(st.legendaryStars1, Math.ceil(remPoints / 110));
       remPoints -= deductStars1 * 110;
 
       if (remPoints > 0) {
         if (deductStars2 < st.legendaryStars2) {
+          deductStars2 += 1;
           remPoints -= 420;
         } else if (deductStars3 < st.legendaryStars3) {
+          deductStars3 += 1;
           remPoints -= 960;
         }
       }
@@ -1553,9 +1641,18 @@
           canAfford: false,
           deficitPoints: remPoints,
           points: deltaPoints,
-          delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 }
+          delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 },
+          ...(hasInvested ? { newInvested: { ...inv } } : {})
         };
       }
+
+      const newInvested = inv ? {
+        ...inv,
+        starCoupons: inv.starCoupons + couponsToDeduct,
+        legendaryStars1: inv.legendaryStars1 + deductStars1,
+        legendaryStars2: inv.legendaryStars2 + deductStars2,
+        legendaryStars3: inv.legendaryStars3 + deductStars3,
+      } : undefined;
 
       return {
         canAfford: true,
@@ -1565,32 +1662,124 @@
           legendaryStars1: deductStars1 ? -deductStars1 : 0,
           legendaryStars2: deductStars2 ? -deductStars2 : 0,
           legendaryStars3: deductStars3 ? -deductStars3 : 0,
-        }
+        },
+        ...(newInvested ? { newInvested } : {})
       };
     } else {
-      // Понижение: возврат ресурсов в купоны звезды
       const refundPoints = Math.abs(deltaPoints);
-      const couponsToAdd = Math.round((refundPoints * couponRate) / 110);
+
+      if (!hasInvested) {
+        // Обратная совместимость для вызовов без invested: всё в купоны
+        const couponsToAdd = Math.round((refundPoints * couponRate) / 110);
+        return {
+          canAfford: true,
+          points: deltaPoints,
+          delta: {
+            starCoupons: couponsToAdd,
+            legendaryStars1: 0,
+            legendaryStars2: 0,
+            legendaryStars3: 0,
+          }
+        };
+      }
+
+      // Если офицер вне трекера (все вложения равны 0): ничего не возвращать
+      const isUntracked = inv.starCoupons === 0 &&
+        inv.legendaryStars1 === 0 &&
+        inv.legendaryStars2 === 0 &&
+        inv.legendaryStars3 === 0;
+
+      if (isUntracked) {
+        return {
+          canAfford: true,
+          points: deltaPoints,
+          delta: { starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 },
+          newInvested: { ...inv }
+        };
+      }
+
+      // Полное обнуление звёзд (toStar === 0): возвращаем 100% того, что было вложено в звёзды
+      if (toStar === 0) {
+        return {
+          canAfford: true,
+          points: deltaPoints,
+          delta: {
+            starCoupons: inv.starCoupons,
+            legendaryStars1: inv.legendaryStars1,
+            legendaryStars2: inv.legendaryStars2,
+            legendaryStars3: inv.legendaryStars3,
+          },
+          newInvested: {
+            ...inv,
+            starCoupons: 0,
+            legendaryStars1: 0,
+            legendaryStars2: 0,
+            legendaryStars3: 0,
+          }
+        };
+      }
+
+      // Частичное понижение звёзд: LIFO (сначала звёзды III -> II -> I -> купоны)
+      let remRefund = refundPoints;
+      const curInv = { ...inv };
+      let refundStars3 = 0;
+      let refundStars2 = 0;
+      let refundStars1 = 0;
+      let refundStarCoupons = 0;
+
+      if (curInv.legendaryStars3 > 0 && remRefund > 0) {
+        const count = Math.min(curInv.legendaryStars3, Math.ceil(remRefund / 960));
+        refundStars3 = count;
+        remRefund = Math.max(0, remRefund - count * 960);
+        curInv.legendaryStars3 -= count;
+      }
+      if (curInv.legendaryStars2 > 0 && remRefund > 0) {
+        const count = Math.min(curInv.legendaryStars2, Math.ceil(remRefund / 420));
+        refundStars2 = count;
+        remRefund = Math.max(0, remRefund - count * 420);
+        curInv.legendaryStars2 -= count;
+      }
+      if (curInv.legendaryStars1 > 0 && remRefund > 0) {
+        const count = Math.min(curInv.legendaryStars1, Math.ceil(remRefund / 110));
+        refundStars1 = count;
+        remRefund = Math.max(0, remRefund - count * 110);
+        curInv.legendaryStars1 -= count;
+      }
+      if (curInv.starCoupons > 0 && remRefund > 0) {
+        const couponsNeeded = Math.round((remRefund * couponRate) / 110);
+        refundStarCoupons = Math.min(curInv.starCoupons, couponsNeeded);
+        curInv.starCoupons -= refundStarCoupons;
+        remRefund = 0;
+      }
+
       return {
         canAfford: true,
         points: deltaPoints,
         delta: {
-          starCoupons: couponsToAdd,
-          legendaryStars1: 0,
-          legendaryStars2: 0,
-          legendaryStars3: 0,
-        }
+          starCoupons: refundStarCoupons,
+          legendaryStars1: refundStars1,
+          legendaryStars2: refundStars2,
+          legendaryStars3: refundStars3,
+        },
+        newInvested: curInv
       };
     }
   }
 
-  function calculateSkillStockDelta(currentSkills, newSkills, stock, couponPerPuzzle = 500, upgradeType = 'standard', maxMedals = 690) {
+  function calculateSkillStockDelta(currentSkills, newSkills, stock, couponPerPuzzle = 500, upgradeType = 'standard', maxMedals = 690, invested) {
     const curMedals = calculateSkillMedalsProgress(currentSkills, maxMedals).spentMedals;
     const newMedals = calculateSkillMedalsProgress(newSkills, maxMedals).spentMedals;
     const deltaMedals = newMedals - curMedals;
+    const hasInvested = invested !== undefined && invested !== null;
+    const inv = hasInvested ? normalizeInvested(invested) : null;
 
     if (deltaMedals === 0) {
-      return { canAfford: true, medals: 0, delta: { coupons: 0, puzzles: 0 } };
+      return {
+        canAfford: true,
+        medals: 0,
+        delta: { coupons: 0, puzzles: 0 },
+        ...(hasInvested ? { newInvested: { ...inv } } : {})
+      };
     }
 
     const st = normalizeStock(stock);
@@ -1600,9 +1789,21 @@
     if (deltaMedals > 0) {
       if (isSpecial) {
         if (st.puzzles < deltaMedals) {
-          return { canAfford: false, deficitMedals: deltaMedals - st.puzzles, medals: deltaMedals, delta: { coupons: 0, puzzles: 0 } };
+          return {
+            canAfford: false,
+            deficitMedals: deltaMedals - st.puzzles,
+            medals: deltaMedals,
+            delta: { coupons: 0, puzzles: 0 },
+            ...(hasInvested ? { newInvested: { ...inv } } : {})
+          };
         }
-        return { canAfford: true, medals: deltaMedals, delta: { coupons: 0, puzzles: deltaMedals ? -deltaMedals : 0 } };
+        const newInvested = inv ? { ...inv, puzzles: inv.puzzles + deltaMedals } : undefined;
+        return {
+          canAfford: true,
+          medals: deltaMedals,
+          delta: { coupons: 0, puzzles: deltaMedals ? -deltaMedals : 0 },
+          ...(newInvested ? { newInvested } : {})
+        };
       }
 
       // 1-й приоритет: купоны офицера
@@ -1613,30 +1814,98 @@
 
       // 2-й приоритет: медали склада
       if (st.puzzles < remMedals) {
-        return { canAfford: false, deficitMedals: remMedals - st.puzzles, medals: deltaMedals, delta: { coupons: 0, puzzles: 0 } };
+        return {
+          canAfford: false,
+          deficitMedals: remMedals - st.puzzles,
+          medals: deltaMedals,
+          delta: { coupons: 0, puzzles: 0 },
+          ...(hasInvested ? { newInvested: { ...inv } } : {})
+        };
+      }
+
+      const newInvested = inv ? {
+        ...inv,
+        coupons: inv.coupons + couponsToDeduct,
+        puzzles: inv.puzzles + remMedals
+      } : undefined;
+
+      return {
+        canAfford: true,
+        medals: deltaMedals,
+        delta: { coupons: couponsToDeduct ? -couponsToDeduct : 0, puzzles: remMedals ? -remMedals : 0 },
+        ...(newInvested ? { newInvested } : {})
+      };
+    } else {
+      const refundMedals = Math.abs(deltaMedals);
+
+      if (!hasInvested) {
+        if (isSpecial) {
+          return { canAfford: true, medals: deltaMedals, delta: { coupons: 0, puzzles: refundMedals } };
+        }
+        return { canAfford: true, medals: deltaMedals, delta: { coupons: refundMedals * rate, puzzles: 0 } };
+      }
+
+      // Для офицера вне трекера:
+      if (inv.coupons === 0 && inv.puzzles === 0) {
+        return {
+          canAfford: true,
+          medals: deltaMedals,
+          delta: { coupons: 0, puzzles: 0 },
+          newInvested: { ...inv }
+        };
+      }
+
+      // Полный сброс навыков до базы (newMedals === 0): возвращаем все вложенные купоны и медали
+      if (newMedals === 0) {
+        return {
+          canAfford: true,
+          medals: deltaMedals,
+          delta: { coupons: inv.coupons, puzzles: inv.puzzles },
+          newInvested: { ...inv, coupons: 0, puzzles: 0 }
+        };
+      }
+
+      // Частичный сброс: сначала медали (puzzles), затем купоны
+      let remRefund = refundMedals;
+      const curInv = { ...inv };
+      let refundPuzzles = 0;
+      let refundCoupons = 0;
+
+      if (curInv.puzzles > 0 && remRefund > 0) {
+        refundPuzzles = Math.min(curInv.puzzles, remRefund);
+        remRefund -= refundPuzzles;
+        curInv.puzzles -= refundPuzzles;
+      }
+      if (curInv.coupons > 0 && remRefund > 0) {
+        const couponsNeeded = remRefund * rate;
+        refundCoupons = Math.min(curInv.coupons, couponsNeeded);
+        curInv.coupons -= refundCoupons;
+        remRefund = 0;
       }
 
       return {
         canAfford: true,
         medals: deltaMedals,
-        delta: { coupons: couponsToDeduct ? -couponsToDeduct : 0, puzzles: remMedals ? -remMedals : 0 }
+        delta: { coupons: refundCoupons, puzzles: refundPuzzles },
+        newInvested: curInv
       };
-    } else {
-      const refundMedals = Math.abs(deltaMedals);
-      if (isSpecial) {
-        return { canAfford: true, medals: deltaMedals, delta: { coupons: 0, puzzles: refundMedals } };
-      }
-      return { canAfford: true, medals: deltaMedals, delta: { coupons: refundMedals * rate, puzzles: 0 } };
     }
   }
 
-  function calculateLevelStockDelta(currentLevel, newLevel, stock, couponPerPuzzle = 500, upgradeType = 'standard') {
+  function calculateLevelStockDelta(currentLevel, newLevel, stock, couponPerPuzzle = 500, upgradeType = 'standard', invested) {
     const curLvl = Math.max(0, Math.min(MAX_LEVEL, Number(currentLevel) || 0));
     const newLvl = Math.max(0, Math.min(MAX_LEVEL, Number(newLevel) || 0));
     const deltaPuzzles = (newLvl - curLvl) * PUZZLES_PER_LEVEL;
+    const hasInvested = invested !== undefined && invested !== null;
+    const inv = hasInvested ? normalizeInvested(invested) : null;
 
     if (deltaPuzzles === 0) {
-      return { canAfford: true, puzzles: 0, delta: { coupons: 0, puzzles: 0 } };
+      return {
+        canAfford: true,
+        puzzles: 0,
+        delta: { coupons: 0, puzzles: 0 },
+        ...(hasInvested ? { newInvested: { ...inv } } : {})
+      };
     }
 
     const st = normalizeStock(stock);
@@ -1646,9 +1915,21 @@
     if (deltaPuzzles > 0) {
       if (isSpecial) {
         if (st.puzzles < deltaPuzzles) {
-          return { canAfford: false, deficitPuzzles: deltaPuzzles - st.puzzles, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: 0 } };
+          return {
+            canAfford: false,
+            deficitPuzzles: deltaPuzzles - st.puzzles,
+            puzzles: deltaPuzzles,
+            delta: { coupons: 0, puzzles: 0 },
+            ...(hasInvested ? { newInvested: { ...inv } } : {})
+          };
         }
-        return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: deltaPuzzles ? -deltaPuzzles : 0 } };
+        const newInvested = inv ? { ...inv, puzzles: inv.puzzles + deltaPuzzles } : undefined;
+        return {
+          canAfford: true,
+          puzzles: deltaPuzzles,
+          delta: { coupons: 0, puzzles: deltaPuzzles ? -deltaPuzzles : 0 },
+          ...(newInvested ? { newInvested } : {})
+        };
       }
 
       // 1-й приоритет: купоны
@@ -1658,20 +1939,78 @@
       const remPuzzles = deltaPuzzles - takeFromCoupons;
 
       if (st.puzzles < remPuzzles) {
-        return { canAfford: false, deficitPuzzles: remPuzzles - st.puzzles, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: 0 } };
+        return {
+          canAfford: false,
+          deficitPuzzles: remPuzzles - st.puzzles,
+          puzzles: deltaPuzzles,
+          delta: { coupons: 0, puzzles: 0 },
+          ...(hasInvested ? { newInvested: { ...inv } } : {})
+        };
+      }
+
+      const newInvested = inv ? {
+        ...inv,
+        coupons: inv.coupons + couponsDeduct,
+        puzzles: inv.puzzles + remPuzzles
+      } : undefined;
+
+      return {
+        canAfford: true,
+        puzzles: deltaPuzzles,
+        delta: { coupons: couponsDeduct ? -couponsDeduct : 0, puzzles: remPuzzles ? -remPuzzles : 0 },
+        ...(newInvested ? { newInvested } : {})
+      };
+    } else {
+      const refundPuz = Math.abs(deltaPuzzles);
+
+      if (!hasInvested) {
+        if (isSpecial) {
+          return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: refundPuz } };
+        }
+        return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: refundPuz * rate, puzzles: 0 } };
+      }
+
+      if (inv.coupons === 0 && inv.puzzles === 0) {
+        return {
+          canAfford: true,
+          puzzles: deltaPuzzles,
+          delta: { coupons: 0, puzzles: 0 },
+          newInvested: { ...inv }
+        };
+      }
+
+      if (newLvl === 0) {
+        return {
+          canAfford: true,
+          puzzles: deltaPuzzles,
+          delta: { coupons: inv.coupons, puzzles: inv.puzzles },
+          newInvested: { ...inv, coupons: 0, puzzles: 0 }
+        };
+      }
+
+      let remRefund = refundPuz;
+      const curInv = { ...inv };
+      let refundPuzzles = 0;
+      let refundCoupons = 0;
+
+      if (curInv.puzzles > 0 && remRefund > 0) {
+        refundPuzzles = Math.min(curInv.puzzles, remRefund);
+        remRefund -= refundPuzzles;
+        curInv.puzzles -= refundPuzzles;
+      }
+      if (curInv.coupons > 0 && remRefund > 0) {
+        const couponsNeeded = remRefund * rate;
+        refundCoupons = Math.min(curInv.coupons, couponsNeeded);
+        curInv.coupons -= refundCoupons;
+        remRefund = 0;
       }
 
       return {
         canAfford: true,
         puzzles: deltaPuzzles,
-        delta: { coupons: couponsDeduct ? -couponsDeduct : 0, puzzles: remPuzzles ? -remPuzzles : 0 }
+        delta: { coupons: refundCoupons, puzzles: refundPuzzles },
+        newInvested: curInv
       };
-    } else {
-      const refundPuz = Math.abs(deltaPuzzles);
-      if (isSpecial) {
-        return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: refundPuz } };
-      }
-      return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: refundPuz * rate, puzzles: 0 } };
     }
   }
 
@@ -1680,6 +2019,9 @@
     PUZZLES_PER_LEVEL,
     MAX_LEVEL,
     STOCK_ZERO,
+    INVESTED_ZERO,
+    normalizeInvested,
+    sortOfficersByGeneration,
     STAR_COSTS,
     STAR_CUMULATIVE_COSTS,
     DEFAULT_OFFICERS,

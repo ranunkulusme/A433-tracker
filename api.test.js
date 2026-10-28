@@ -984,12 +984,15 @@ test('API schedule-season, fair play autopick, profile skills and vip points', a
       method: 'PUT',
       headers: { Authorization: `Bearer ${r3Token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        skills: [5, 5, 5, 5]
+        skills: [5, 5, 5, 5],
+        invested: { starCoupons: 253000, legendaryStars3: 6 }
       })
     });
     assert.equal(putOffRes.status, 200);
     const putOffData = await putOffRes.json();
     assert.deepEqual(putOffData.skills, [5, 5, 5, 5]);
+    assert.equal(putOffData.invested.starCoupons, 253000);
+    assert.equal(putOffData.invested.legendaryStars3, 6);
 
     // 6. Test /api/players (POST and PUT) with vipPoints and skills
     const newPlayerRes = await fetch(`${baseUrl}/api/players`, {
