@@ -14,7 +14,7 @@ let state = {
   stockHistory: [],
   currentRole: 'r5',
   currentPlayerId: null,
-  stockSyncEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('kow_stock_sync_enabled') !== 'false' : true,
+  stockSyncEnabled: true,
   nextId: 1,
 };
 
@@ -771,13 +771,6 @@ function showUndoToast(msg, undoFn, type = 'success') {
   }, 6500);
 }
 
-function toggleStockSync(enabled) {
-  state.stockSyncEnabled = Boolean(enabled);
-  try {
-    localStorage.setItem('kow_stock_sync_enabled', state.stockSyncEnabled ? 'true' : 'false');
-  } catch (_) {}
-  toast(state.stockSyncEnabled ? 'Связь со складом: ВКЛ' : 'Связь со складом: ВЫКЛ (симуляция)');
-}
 function getPlayer(id) { return state.players.find(p => p.id === id); }
 function getEventType(id) { return state.eventTypes.find(t => t.id === id); }
 function getEvent(id) { return state.events.find(e => e.id === id); }
@@ -1604,13 +1597,7 @@ async function renderMyCabinet() {
       <div class="cabinet-card">
         <div class="cabinet-card-title">
           <span>⚙️ Параметры сектора</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            <label class="stock-sync-toggle-label" title="Автоматически списывать и возвращать ресурсы на складе при прокачке звёзд, навыков и уровней офицеров">
-              <input type="checkbox" id="cabinet-stock-sync-toggle" ${state.stockSyncEnabled ? 'checked' : ''} onchange="toggleStockSync(this.checked)">
-              <span>Связь со складом</span>
-            </label>
-            <span class="badge badge-none">+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день</span>
-          </div>
+          <span class="badge badge-none">+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день</span>
         </div>
         <div class="form-row form-row-3">
           <div class="form-group">
@@ -1929,7 +1916,7 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
   let stockDelta = null;
   let newStock = null;
 
-  if (state.stockSyncEnabled && myCabinetProfile?.stock) {
+  if (myCabinetProfile?.stock) {
     const cat = getCatalogOfficer(off.catalogId);
     const rawCost = Number(cat?.couponPerPuzzle);
     const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
@@ -2610,7 +2597,7 @@ async function saveMyOfficerSubmit() {
   let newStock = null;
   let levelStockDelta = null;
 
-  if (myOfficerEditId && state.stockSyncEnabled && myCabinetProfile?.stock) {
+  if (myOfficerEditId && myCabinetProfile?.stock) {
     const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(myOfficerEditId));
     if (oldOff && oldOff.level !== level) {
       const cat = getCatalogOfficer(oldOff.catalogId);
@@ -2693,7 +2680,7 @@ async function setMyOfficerStars(officerId, stars) {
   let stockDelta = null;
   let newStock = null;
 
-  if (state.stockSyncEnabled && myCabinetProfile?.stock) {
+  if (myCabinetProfile?.stock) {
     const cat = getCatalogOfficer(off.catalogId);
     const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
     const deltaFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
@@ -4174,7 +4161,7 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
   let stockDelta = null;
   let newStock = null;
 
-  if (state.stockSyncEnabled && p?.stock) {
+  if (p?.stock) {
     const cat = off ? getCatalogOfficer(off.catalogId) : null;
     const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
     const deltaFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
