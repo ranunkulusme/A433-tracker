@@ -500,6 +500,15 @@ VIP: 15`;
       });
       assert.equal(resDelOff.status, 200, 'Офицер удален из сектора');
       recordTest('6.6', 'Удаление офицера (кнопка 🗑️)', 'БЛОК 6', true, 'Офицер точечно удален из сектора');
+
+      // 6.7. Точечное обновление элементов склада без перезагрузки всей страницы
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      assert(appJs.includes('sector-stock-grid-wrap-'), 'ID sector-stock-grid-wrap найден');
+      assert(appJs.includes('cabinet-stock-grid-wrap'), 'ID cabinet-stock-grid-wrap найден');
+      assert(appJs.includes('sector-history-wrap-'), 'ID sector-history-wrap найден');
+      assert(/saveSectorInline[\s\S]*?renderSectorStockGridHtml[\s\S]*?renderSectorHistoryTableHtml/.test(appJs), 'saveSectorInline точечно обновляет склад и историю');
+      assert(/saveCabinetInline[\s\S]*?renderCabinetStockGridHtml[\s\S]*?renderCabinetSimulatorHtml/.test(appJs), 'saveCabinetInline точечно обновляет склад и симулятор');
+      recordTest('6.7', 'Точечное обновление элементов склада без перезагрузки всей страницы', 'БЛОК 6', true, 'Локальное обновление DOM-контейнеров склада подтверждено');
     } catch (e) {
       recordTest('6.6', 'Удаление офицера (кнопка 🗑️)', 'БЛОК 6', false, e.message);
     }

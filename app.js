@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.17.0';
+const APP_VERSION = 'v3.17.1';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -2029,7 +2029,21 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
           myCabinetProfile.stock = prevStock;
         }
         Object.assign(off, prevOfficer);
-        await renderMyCabinet();
+        const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+        if (cardEl && myCabinetProfile) {
+          const today = new Date().toISOString().slice(0, 10);
+          cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
+        } else {
+          await renderMyCabinet();
+        }
+        const simEl = document.getElementById('cabinet-sim-container');
+        if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+          simEl.innerHTML = renderCabinetSimulatorHtml();
+        }
+        const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
+        if (stockGridWrap && myCabinetProfile) {
+          stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+        }
         toast('Действие отменено, ресурсы и навыки восстановлены');
       } catch (err) {
         toast('Ошибка отмены: ' + (err.message || err), 'error');
@@ -2330,7 +2344,13 @@ async function saveCabinetInline(key) {
     myCabinetProfile.stock = stock;
     cabinetInlineEditingKey = null;
     toast('✓ Запасы обновлены');
-    await renderMyCabinet();
+    const wrap = document.getElementById('cabinet-stock-grid-wrap');
+    if (wrap) wrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+    else await renderMyCabinet();
+    const simEl = document.getElementById('cabinet-sim-container');
+    if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+      simEl.innerHTML = renderCabinetSimulatorHtml();
+    }
   } catch (err) {
     toast('Ошибка сохранения: ' + err.message, 'error');
   }
@@ -2818,7 +2838,21 @@ async function setMyOfficerStars(officerId, stars) {
           myCabinetProfile.stock = prevStock;
         }
         Object.assign(off, prevOfficer);
-        await renderMyCabinet();
+        const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+        if (cardEl) {
+          const today = new Date().toISOString().slice(0, 10);
+          cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
+        } else {
+          await renderMyCabinet();
+        }
+        const simEl = document.getElementById('cabinet-sim-container');
+        if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+          simEl.innerHTML = renderCabinetSimulatorHtml();
+        }
+        const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
+        if (stockGridWrap && myCabinetProfile) {
+          stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+        }
         toast('Действие отменено, ресурсы и звёзды восстановлены');
       } catch (err) {
         toast('Ошибка отмены: ' + (err.message || err), 'error');
@@ -3915,11 +3949,18 @@ function renderPlayerDetail(playerId) {
       </table>
     </div>
     <div class="section-header"><div class="section-title">История корректировок</div></div>
-    <div class="table-wrap">
-      <table><thead><tr><th>Дата</th><th>Было</th><th>Стало</th></tr></thead><tbody>
-        ${history.map(h=>`<tr><td>${formatDate(h.date.slice(0,10))}</td><td>${fmtNum(h.before.coupons)}/${fmtNum(h.before.puzzles)}/${fmtNum(h.before.chests)}</td><td>${fmtNum(h.after.coupons)}/${fmtNum(h.after.puzzles)}/${fmtNum(h.after.chests)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">Нет корректировок</td></tr>'}
-      </tbody></table>
+    <div class="table-wrap" id="sector-history-wrap-${p.id}">
+      ${renderSectorHistoryTableHtml(p.id)}
     </div>
+  `;
+}
+
+function renderSectorHistoryTableHtml(playerId) {
+  const history = state.stockHistory.filter(h => h.playerId === playerId).slice(-8).reverse();
+  return `
+    <table><thead><tr><th>Дата</th><th>Было</th><th>Стало</th></tr></thead><tbody>
+      ${history.map(h => `<tr><td>${formatDate(h.date.slice(0, 10))}</td><td>${fmtNum(h.before.coupons)}/${fmtNum(h.before.puzzles)}/${fmtNum(h.before.chests)}</td><td>${fmtNum(h.after.coupons)}/${fmtNum(h.after.puzzles)}/${fmtNum(h.after.chests)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">Нет корректировок</td></tr>'}
+    </tbody></table>
   `;
 }
 
@@ -4088,6 +4129,7 @@ function openSectorInline(playerId, key) {
   const p = getPlayer(playerId);
   if (!wrap || !p) return;
   wrap.innerHTML = renderSectorStockGridHtml(p, true);
+  if (typeof bindAllNumericInputs === 'function') bindAllNumericInputs(wrap);
 
   setTimeout(() => {
     if (key === 'stars') {
@@ -4160,7 +4202,11 @@ async function saveSectorInline(playerId, key) {
 
   sectorInlineEditing = { playerId: null, key: null };
   toast('✓ Запасы обновлены');
-  renderPlayerDetail(playerId);
+  const wrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+  if (wrap) wrap.innerHTML = renderSectorStockGridHtml(p, true);
+  else renderPlayerDetail(playerId);
+  const histWrap = document.getElementById(`sector-history-wrap-${playerId}`);
+  if (histWrap) histWrap.innerHTML = renderSectorHistoryTableHtml(playerId);
 }
 
 function openSectorStockEdit(fieldKey) {
@@ -4180,6 +4226,7 @@ function toggleSectorStockEdit() {
 
 function saveStockCorrection(playerId) {
   const p = getPlayer(playerId);
+  if (!p) return;
   const before = {...p.stock};
   const after = {
     coupons: Math.max(0,parseInt(document.getElementById('stock-coupons')?.value)||0),
@@ -4192,16 +4239,29 @@ function saveStockCorrection(playerId) {
   };
   p.stock = after;
   state.stockHistory.push({ id:state.nextId++, playerId, date:new Date().toISOString(), before, after });
-  save(); toast('Запасы обновлены'); renderPlayerDetail(playerId);
+  if (typeof save === 'function') save();
+  toast('Запасы обновлены');
+  const wrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+  if (wrap) wrap.innerHTML = renderSectorStockGridHtml(p, true);
+  else renderPlayerDetail(playerId);
+  const histWrap = document.getElementById(`sector-history-wrap-${playerId}`);
+  if (histWrap) histWrap.innerHTML = renderSectorHistoryTableHtml(playerId);
 }
 
 function rollbackLastStock(playerId) {
   const idx = state.stockHistory.map((h,i)=>h.playerId===playerId?i:-1).filter(i=>i>=0).pop();
   if (idx === undefined) { toast('Нет корректировок','error'); return; }
   const h = state.stockHistory[idx];
-  getPlayer(playerId).stock = h.before;
+  const p = getPlayer(playerId);
+  if (p) p.stock = h.before;
   state.stockHistory.splice(idx,1);
-  save(); toast('Откат выполнен','info'); renderPlayerDetail(playerId);
+  if (typeof save === 'function') save();
+  toast('Откат выполнен','info');
+  const wrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+  if (wrap) wrap.innerHTML = renderSectorStockGridHtml(p, true);
+  else renderPlayerDetail(playerId);
+  const histWrap = document.getElementById(`sector-history-wrap-${playerId}`);
+  if (histWrap) histWrap.innerHTML = renderSectorHistoryTableHtml(playerId);
 }
 
 // ─── SECTOR OFFICERS & OWNER MANAGEMENT ────────────────────────
@@ -4312,6 +4372,10 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
     } else {
       renderPlayerDetail(playerId);
     }
+    const stockWrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+    if (stockWrap && p) {
+      stockWrap.innerHTML = renderSectorStockGridHtml(p, true);
+    }
 
     const actionText = stockDelta && stockDelta.delta.starCoupons < 0
       ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.starCoupons))} купонов звезды`
@@ -4336,7 +4400,16 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
           Object.assign(off, prevOfficer);
         }
         if (typeof save === 'function') save();
-        renderPlayerDetail(playerId);
+        const cellEl = document.getElementById(`sector-officer-stars-cell-${officerId}`);
+        if (cellEl && off) {
+          cellEl.innerHTML = renderSectorOfficerStars(playerId, officerId, off.stars);
+        }
+        const stockWrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
+        if (stockWrap && p) {
+          stockWrap.innerHTML = renderSectorStockGridHtml(p, true);
+        } else {
+          renderPlayerDetail(playerId);
+        }
         toast('Действие отменено, ресурсы и звёзды восстановлены');
       } catch (err) {
         toast('Ошибка отмены: ' + (err.message || err), 'error');
