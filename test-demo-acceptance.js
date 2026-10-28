@@ -413,6 +413,18 @@ VIP: 15`;
       recordTest('5.5', 'Smart Scanner (OCR-сканер скриншотов профиля и склада)', 'БЛОК 5', false, e.message);
     }
 
+    // 5.6. Точечное обновление карточки офицера в личном кабинете без перезагрузки всей страницы
+    try {
+      const appJsContent = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const saveMyOfficerBlock = appJsContent.match(/async function saveMyOfficerSubmit\(\) \{([\s\S]*?)\nfunction /)?.[1] || '';
+      assert(saveMyOfficerBlock.includes('cabinet-officer-card-'), 'saveMyOfficerSubmit ищет карточку cabinet-officer-card-');
+      assert(saveMyOfficerBlock.includes('renderCabinetOfficerCardHtml'), 'saveMyOfficerSubmit вызывает renderCabinetOfficerCardHtml');
+      assert(!saveMyOfficerBlock.includes('await renderMyCabinet();\n  } catch'), 'saveMyOfficerSubmit не делает безусловный renderMyCabinet в конце');
+      recordTest('5.6', 'Точечное обновление карточки офицера в личном кабинете без перезагрузки всей страницы', 'БЛОК 5', true, 'Локальное обновление карточки и зависимых блоков подтверждено');
+    } catch (e) {
+      recordTest('5.6', 'Точечное обновление карточки офицера в личном кабинете без перезагрузки всей страницы', 'БЛОК 5', false, e.message);
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // БЛОК 6. Реестр секторов и точечное управление командирами
     // ══════════════════════════════════════════════════════════════════

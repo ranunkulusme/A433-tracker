@@ -2518,8 +2518,8 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
           </div>
         </div>
         <div style="display:flex;gap:4px">
-          <button class="action-btn" title="Редактировать уровень и купоны" onclick="openEditMyOfficerModal('${o.id}')">✏️</button>
-          <button class="action-btn danger" title="Удалить офицера" onclick="deleteMyOfficer('${o.id}', '${escapeHtml(officerLabel(o))}')">🗑️</button>
+          <button type="button" class="action-btn" title="Редактировать уровень и купоны" onclick="openEditMyOfficerModal('${o.id}')">✏️</button>
+          <button type="button" class="action-btn danger" title="Удалить офицера" onclick="deleteMyOfficer('${o.id}', '${escapeHtml(officerLabel(o))}')">🗑️</button>
         </div>
       </div>
 
@@ -2690,7 +2690,7 @@ async function saveMyOfficerSubmit() {
 
   try {
     if (myOfficerEditId) {
-      await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
+      const updatedOffData = await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
         method: 'PUT',
         body: { level, coupons, stars, skills }
       });
@@ -2705,7 +2705,55 @@ async function saveMyOfficerSubmit() {
           if (me) me.stock = newStock;
         }
       }
+
+      const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(myOfficerEditId));
+      if (off) {
+        if (updatedOffData && updatedOffData.id) {
+          Object.assign(off, updatedOffData);
+        } else {
+          off.level = level;
+          off.coupons = coupons;
+          off.stars = stars;
+          off.skills = skills;
+        }
+      }
+      if (state.players) {
+        for (const p of state.players) {
+          if (p.id === myCabinetProfile?.id && p.officers) {
+            const po = p.officers.find(o => String(o.id) === String(myOfficerEditId));
+            if (po) {
+              if (updatedOffData && updatedOffData.id) Object.assign(po, updatedOffData);
+              else {
+                po.level = level;
+                po.coupons = coupons;
+                po.stars = stars;
+                po.skills = skills;
+              }
+            }
+          }
+        }
+      }
+
+      closeAllModals();
       toast('Офицер обновлен');
+
+      // Точечное обновление только измененной карточки офицера и связанных блоков
+      const today = new Date().toISOString().slice(0, 10);
+      const cardEl = document.getElementById(`cabinet-officer-card-${myOfficerEditId}`);
+      if (cardEl && off) {
+        cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
+      } else {
+        await renderMyCabinet();
+      }
+
+      const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
+      if (stockGridWrap && myCabinetProfile) {
+        stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+      }
+      const simEl = document.getElementById('cabinet-sim-container');
+      if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+        simEl.innerHTML = renderCabinetSimulatorHtml();
+      }
     } else {
       const catalogId = document.getElementById('my-officer-catalog-select').value;
       if (!catalogId) {
@@ -2717,10 +2765,10 @@ async function saveMyOfficerSubmit() {
         method: 'POST',
         body: { catalogId, name: cat?.name || '', level, coupons, stars, skills }
       });
+      closeAllModals();
       toast('Офицер добавлен в профиль');
+      await renderMyCabinet();
     }
-    closeAllModals();
-    await renderMyCabinet();
   } catch (err) {
     toast('Ошибка сохранения офицера: ' + err.message, 'error');
   }
@@ -2732,7 +2780,26 @@ async function deleteMyOfficer(officerId, officerName) {
   try {
     await apiFetch(`/api/my-profile/officers/${officerId}`, { method: 'DELETE' });
     toast('Офицер удален из кабинета', 'info');
-    await renderMyCabinet();
+    if (myCabinetProfile && Array.isArray(myCabinetProfile.officers)) {
+      myCabinetProfile.officers = myCabinetProfile.officers.filter(o => String(o.id) !== String(officerId));
+    }
+    if (state.players) {
+      for (const p of state.players) {
+        if (p.id === myCabinetProfile?.id && p.officers) {
+          p.officers = p.officers.filter(o => String(o.id) !== String(officerId));
+        }
+      }
+    }
+    const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+    if (cardEl) {
+      cardEl.remove();
+    } else {
+      await renderMyCabinet();
+    }
+    const simEl = document.getElementById('cabinet-sim-container');
+    if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
+      simEl.innerHTML = renderCabinetSimulatorHtml();
+    }
   } catch (err) {
     toast('Ошибка удаления офицера: ' + err.message, 'error');
   }
