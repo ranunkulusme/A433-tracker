@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.16.1';
+const APP_VERSION = 'v3.17.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -887,6 +887,15 @@ function setCurrentRole(role) {
 }
 
 // ─── VIP DEFICIT HINT ────────────────────────────────────────
+function pluralOfficers(count) {
+  const n = Math.abs(count) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return 'офицеров';
+  if (n1 > 1 && n1 < 5) return 'офицера';
+  if (n1 === 1) return 'офицер';
+  return 'офицеров';
+}
+
 function updateVipProgressHint(isCabinet = false) {
   const vipInput = isCabinet
     ? (document.getElementById('my-sector-vip') || document.getElementById('fp-vip'))
@@ -901,7 +910,8 @@ function updateVipProgressHint(isCabinet = false) {
   if (!hintEl) return;
 
   const vip = Math.max(0, Math.min(30, parseInt(vipInput?.value) || 0));
-  const pts = Math.max(0, parseInt(ptsInput?.value) || 0);
+  const parseFn = (typeof logic !== 'undefined' && logic.parseInputNumber) ? logic.parseInputNumber : (typeof parseInputNumber === 'function' ? parseInputNumber : null);
+  const pts = Math.max(0, parseFn ? parseFn(ptsInput?.value) : (parseInt(String(ptsInput?.value || '').replace(/\s+/g, ''), 10) || 0));
 
   if (vip >= 30) {
     hintEl.style.display = 'block';
@@ -1656,7 +1666,13 @@ async function renderMyCabinet() {
 
     ${profile.officers.length ? `
       <div class="cabinet-officers-grid" id="cabinet-officers-grid">
-        ${profile.officers.map(o => renderCabinetOfficerCardHtml(o, profile, today)).join('')}
+        ${(() => {
+          const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
+            ? logic.sortOfficersByGeneration
+            : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
+          const sorted = sortFn ? sortFn(profile.officers, state.officerCatalog) : profile.officers;
+          return sorted.map(o => renderCabinetOfficerCardHtml(o, profile, today)).join('');
+        })()}
       </div>
     ` : `
       <div class="empty-state" style="padding:24px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:24px">
@@ -1745,7 +1761,13 @@ function renderCabinetSimulatorHtml() {
         <div class="form-group">
           <label>Офицер для расчета</label>
           <select onchange="onCabinetSimOfficerChange(this.value)">
-            ${myCabinetProfile.officers.map(o => `<option value="${o.id}" ${o.id===selectedOfficer.id?'selected':''}>${escapeHtml(officerLabel(o))} (ур. ${o.level})</option>`).join('')}
+            ${(() => {
+              const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
+                ? logic.sortOfficersByGeneration
+                : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
+              const sorted = sortFn ? sortFn(myCabinetProfile.officers, state.officerCatalog) : myCabinetProfile.officers;
+              return sorted.map(o => `<option value="${o.id}" ${o.id===selectedOfficer.id?'selected':''}>${escapeHtml(officerLabel(o))} (ур. ${o.level})</option>`).join('');
+            })()}
           </select>
         </div>
         <div class="form-group">
@@ -1910,6 +1932,9 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
   const newLevel = Math.max(1, Math.min(5, Number(level) || 1));
   if (oldLevel === newLevel) return;
 
+  const prevStock = myCabinetProfile?.stock ? JSON.parse(JSON.stringify(myCabinetProfile.stock)) : null;
+  const prevOfficer = JSON.parse(JSON.stringify(off));
+
   const newSkills = [...currentSkills];
   newSkills[skillIndex] = newLevel;
 
@@ -1924,7 +1949,7 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
     const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
 
     const deltaFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
-    stockDelta = deltaFn(currentSkills, newSkills, myCabinetProfile.stock, costPerPuzzle, upgradeType, maxMedals);
+    stockDelta = deltaFn(currentSkills, newSkills, myCabinetProfile.stock, costPerPuzzle, upgradeType, maxMedals, off.invested);
 
     if (!stockDelta.canAfford) {
       toast(`❌ Недостаточно ресурсов на складе для улучшения навыка (не хватает ${fmtNum(stockDelta.deficitMedals || 0)} медалей). Повышение отменено.`, 'error');
@@ -1933,15 +1958,17 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
 
     newStock = {
       ...myCabinetProfile.stock,
-      coupons: Math.max(0, (myCabinetProfile.stock.coupons || 0) + stockDelta.delta.coupons),
-      puzzles: Math.max(0, (myCabinetProfile.stock.puzzles || 0) + stockDelta.delta.puzzles),
+      coupons: Math.max(0, (myCabinetProfile.stock.coupons || 0) + (stockDelta.delta.coupons || 0)),
+      puzzles: Math.max(0, (myCabinetProfile.stock.puzzles || 0) + (stockDelta.delta.puzzles || 0)),
     };
   }
+
+  const newInvested = stockDelta?.newInvested;
 
   try {
     await apiFetch(`/api/my-profile/officers/${officerId}`, {
       method: 'PUT',
-      body: { skills: newSkills }
+      body: { skills: newSkills, ...(newInvested ? { invested: newInvested } : {}) }
     });
     if (newStock) {
       await apiFetch('/api/my-profile', {
@@ -1952,11 +1979,15 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
     }
 
     off.skills = newSkills;
+    if (newInvested) off.invested = newInvested;
     if (state.players) {
       for (const p of state.players) {
         if (p.officers) {
           const o = p.officers.find(x => String(x.id) === String(officerId));
-          if (o) o.skills = newSkills;
+          if (o) {
+            o.skills = newSkills;
+            if (newInvested) o.invested = newInvested;
+          }
         }
         if (p.id === myCabinetProfile.id && newStock) {
           p.stock = newStock;
@@ -1985,7 +2016,24 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
       : (stockDelta && stockDelta.delta.puzzles < 0 ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.puzzles))} медалей` : '');
 
     showUndoToast(`Навык ${skillIndex + 1} обновлен: ${newSkills[skillIndex]}/5.${actionText}`, async () => {
-      await setMyOfficerSkill(officerId, skillIndex, oldLevel);
+      try {
+        await apiFetch(`/api/my-profile/officers/${officerId}`, {
+          method: 'PUT',
+          body: { skills: prevOfficer.skills, invested: prevOfficer.invested }
+        });
+        if (prevStock) {
+          await apiFetch('/api/my-profile', {
+            method: 'PUT',
+            body: { stock: prevStock }
+          });
+          myCabinetProfile.stock = prevStock;
+        }
+        Object.assign(off, prevOfficer);
+        await renderMyCabinet();
+        toast('Действие отменено, ресурсы и навыки восстановлены');
+      } catch (err) {
+        toast('Ошибка отмены: ' + (err.message || err), 'error');
+      }
     });
   } catch (err) {
     toast('Ошибка обновления навыка: ' + err.message, 'error');
@@ -2248,9 +2296,9 @@ function handleCabinetInlineKey(e, key) {
 }
 
 function updateCabinetLiveStars() {
-  const s1 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-1')?.value) || 0);
-  const s2 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-2')?.value) || 0);
-  const s3 = Math.max(0, parseInt(document.getElementById('input-cabinet-stars-3')?.value) || 0);
+  const s1 = Math.max(0, parseInputNumber(document.getElementById('input-cabinet-stars-1')?.value) || 0);
+  const s2 = Math.max(0, parseInputNumber(document.getElementById('input-cabinet-stars-2')?.value) || 0);
+  const s3 = Math.max(0, parseInputNumber(document.getElementById('input-cabinet-stars-3')?.value) || 0);
   const total = s1 * 110 + s2 * 420 + s3 * 960;
   const ptsEl = document.getElementById('val-cabinet-star-points');
   if (ptsEl) ptsEl.textContent = fmtNum(total);
@@ -2677,6 +2725,9 @@ async function setMyOfficerStars(officerId, stars) {
   const oldStars = Number(off.stars) || 0;
   if (oldStars === count) return;
 
+  const prevStock = myCabinetProfile?.stock ? JSON.parse(JSON.stringify(myCabinetProfile.stock)) : null;
+  const prevOfficer = JSON.parse(JSON.stringify(off));
+
   let stockDelta = null;
   let newStock = null;
 
@@ -2684,7 +2735,7 @@ async function setMyOfficerStars(officerId, stars) {
     const cat = getCatalogOfficer(off.catalogId);
     const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
     const deltaFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-    stockDelta = deltaFn(oldStars, count, myCabinetProfile.stock, starCouponCost);
+    stockDelta = deltaFn(oldStars, count, myCabinetProfile.stock, starCouponCost, off.invested);
 
     if (!stockDelta.canAfford) {
       toast(`❌ Недостаточно ресурсов на складе! Требуется ${fmtNum(stockDelta.points)} очков звёзд (не хватает ${fmtNum(stockDelta.deficitPoints)}). Повышение отменено.`, 'error');
@@ -2693,17 +2744,19 @@ async function setMyOfficerStars(officerId, stars) {
 
     newStock = {
       ...myCabinetProfile.stock,
-      starCoupons: Math.max(0, (myCabinetProfile.stock.starCoupons || 0) + stockDelta.delta.starCoupons),
-      legendaryStars1: Math.max(0, (myCabinetProfile.stock.legendaryStars1 || 0) + stockDelta.delta.legendaryStars1),
-      legendaryStars2: Math.max(0, (myCabinetProfile.stock.legendaryStars2 || 0) + stockDelta.delta.legendaryStars2),
-      legendaryStars3: Math.max(0, (myCabinetProfile.stock.legendaryStars3 || 0) + stockDelta.delta.legendaryStars3),
+      starCoupons: Math.max(0, (myCabinetProfile.stock.starCoupons || 0) + (stockDelta.delta.starCoupons || 0)),
+      legendaryStars1: Math.max(0, (myCabinetProfile.stock.legendaryStars1 || 0) + (stockDelta.delta.legendaryStars1 || 0)),
+      legendaryStars2: Math.max(0, (myCabinetProfile.stock.legendaryStars2 || 0) + (stockDelta.delta.legendaryStars2 || 0)),
+      legendaryStars3: Math.max(0, (myCabinetProfile.stock.legendaryStars3 || 0) + (stockDelta.delta.legendaryStars3 || 0)),
     };
   }
+
+  const newInvested = stockDelta?.newInvested;
 
   try {
     await apiFetch(`/api/my-profile/officers/${officerId}`, {
       method: 'PUT',
-      body: { stars: count }
+      body: { stars: count, ...(newInvested ? { invested: newInvested } : {}) }
     });
     if (newStock) {
       await apiFetch('/api/my-profile', {
@@ -2714,11 +2767,15 @@ async function setMyOfficerStars(officerId, stars) {
     }
 
     off.stars = count;
+    if (newInvested) off.invested = newInvested;
     if (state.players) {
       for (const p of state.players) {
         if (p.officers) {
           const o = p.officers.find(x => String(x.id) === String(officerId));
-          if (o) o.stars = count;
+          if (o) {
+            o.stars = count;
+            if (newInvested) o.invested = newInvested;
+          }
         }
         if (p.id === myCabinetProfile.id && newStock) {
           p.stock = newStock;
@@ -2748,7 +2805,24 @@ async function setMyOfficerStars(officerId, stars) {
       : '';
 
     showUndoToast(`⭐ Звёзды ${escapeHtml(officerLabel(off))}: ${count}★.${actionText}`, async () => {
-      await setMyOfficerStars(officerId, oldStars);
+      try {
+        await apiFetch(`/api/my-profile/officers/${officerId}`, {
+          method: 'PUT',
+          body: { stars: prevOfficer.stars, invested: prevOfficer.invested }
+        });
+        if (prevStock) {
+          await apiFetch('/api/my-profile', {
+            method: 'PUT',
+            body: { stock: prevStock }
+          });
+          myCabinetProfile.stock = prevStock;
+        }
+        Object.assign(off, prevOfficer);
+        await renderMyCabinet();
+        toast('Действие отменено, ресурсы и звёзды восстановлены');
+      } catch (err) {
+        toast('Ошибка отмены: ' + (err.message || err), 'error');
+      }
     });
   } catch (err) {
     toast('Ошибка обновления звёзд: ' + err.message, 'error');
@@ -3696,6 +3770,19 @@ function renderPlayers() {
             const ownerHtml = p.username
               ? `<span class="badge badge-owner" title="Владелец: @${escapeHtml(p.username)}">👤 @${escapeHtml(p.username)}</span>`
               : `<span class="badge badge-no-owner">Без владельца</span>`;
+            const allOfficers = Array.isArray(p.officers) ? p.officers : [];
+            const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
+              ? logic.sortOfficersByGeneration
+              : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
+            const sortedOfficers = sortFn ? sortFn(allOfficers, state.officerCatalog) : allOfficers;
+            const topOfficers = sortedOfficers.slice(0, 2);
+            const remainingCount = sortedOfficers.length - topOfficers.length;
+            const remainingTooltip = remainingCount > 0
+              ? 'Остальные офицеры:\n' + sortedOfficers.slice(2).map(o => {
+                  const stars = o.stars ? `${o.stars}★` : '0★';
+                  return `• ${officerLabel(o)} (Ур. ${fmtNum(o.level)}, ${stars})`;
+                }).join('\n')
+              : '';
             return `<tr>
               <td>
                 <strong>${playerLink(p)}</strong>
@@ -3706,13 +3793,18 @@ function renderPlayers() {
               <td style="color:var(--text2);font-size:12px">VIP ${fmtNum(p.sector.vipLevel)} · Конф. ${fmtNum(p.sector.confidentialityLevel)}<br>Сила ${fmtNum(p.sector.power)} · убийств ${fmtNum(p.sector.kills)} · очки ${fmtOne(p.sector.killPoints)}<br>+${fmtNum(rewards.puzzlesPerDay, 2)} пазл./день</td>
               <td>
                 <div style="display:flex;flex-direction:column;gap:4px">
-                  ${p.officers.map(o=>`
+                  ${topOfficers.map(o=>`
                     <div style="display:flex;align-items:center;gap:8px">
                       <span style="color:var(--text2);font-size:12px">${officerLink(o)}</span>
                       <span class="badge badge-none" style="font-size:10px">Ур. ${fmtNum(o.level)}</span>
                       <span style="font-size:11px;color:var(--text3)">${fmtNum(o.coupons)} купонов</span>
                       ${renderStars(o.stars)}
                     </div>`).join('')}
+                  ${remainingCount > 0 ? `
+                    <a href="javascript:void(0)" class="badge-more-officers" onclick="navigate('player_detail', ${p.id})" title="${escapeHtml(remainingTooltip)}">
+                      + ещё ${remainingCount} ${pluralOfficers(remainingCount)}
+                    </a>
+                  ` : ''}
                 </div>
               </td>
               <td style="font-family:var(--mono);font-size:12px">${stock}</td>
@@ -3790,7 +3882,12 @@ function renderPlayerDetail(playerId) {
         <thead><tr><th>Офицер</th><th>Тип</th><th>Поколение</th><th>Уровень</th><th>Звёзды</th><th>Навыки</th><th>До максимума</th><th>Действия</th></tr></thead>
         <tbody>
           ${!(p.officers || []).length ? `<tr><td colspan="8" class="empty-state">Нет офицеров в этом секторе</td></tr>` : ''}
-          ${(p.officers || []).map(o => {
+          ${(() => {
+            const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
+              ? logic.sortOfficersByGeneration
+              : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
+            const sorted = sortFn ? sortFn(p.officers || [], state.officerCatalog) : (p.officers || []);
+            return sorted.map(o => {
             const cat = getCatalogOfficer(o.catalogId);
             const forecast = forecastOfficer({ today: new Date().toISOString().slice(0, 10), officer: o, player: p, officerCatalog: state.officerCatalog, events: state.events, eventTypes: state.eventTypes });
             const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
@@ -3812,7 +3909,8 @@ function renderPlayerDetail(playerId) {
               <td>${forecast.date || 'за пределами прогноза'}</td>
               <td>${actionsHtml}</td>
             </tr>`;
-          }).join('')}
+          }).join('');
+          })()}
         </tbody>
       </table>
     </div>
@@ -4021,9 +4119,9 @@ function handleSectorInlineKey(e, playerId, key) {
 }
 
 function updateSectorLiveStars(playerId) {
-  const s1 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-1-${playerId}`)?.value) || 0);
-  const s2 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-2-${playerId}`)?.value) || 0);
-  const s3 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-3-${playerId}`)?.value) || 0);
+  const s1 = Math.max(0, parseInputNumber(document.getElementById(`input-sector-stars-1-${playerId}`)?.value) || 0);
+  const s2 = Math.max(0, parseInputNumber(document.getElementById(`input-sector-stars-2-${playerId}`)?.value) || 0);
+  const s3 = Math.max(0, parseInputNumber(document.getElementById(`input-sector-stars-3-${playerId}`)?.value) || 0);
   const total = s1 * 110 + s2 * 420 + s3 * 960;
   const ptsEl = document.getElementById(`val-sector-star-points-${playerId}`);
   if (ptsEl) ptsEl.textContent = fmtNum(total);
@@ -4036,17 +4134,17 @@ async function saveSectorInline(playerId, key) {
   const stock = { ...p.stock };
 
   if (key === 'coupons') {
-    stock.coupons = Math.max(0, parseInt(document.getElementById(`input-sector-coupons-${playerId}`)?.value) || 0);
+    stock.coupons = Math.max(0, parseInputNumber(document.getElementById(`input-sector-coupons-${playerId}`)?.value) || 0);
   } else if (key === 'puzzles') {
-    stock.puzzles = Math.max(0, parseInt(document.getElementById(`input-sector-puzzles-${playerId}`)?.value) || 0);
+    stock.puzzles = Math.max(0, parseInputNumber(document.getElementById(`input-sector-puzzles-${playerId}`)?.value) || 0);
   } else if (key === 'starCoupons') {
-    stock.starCoupons = Math.max(0, parseInt(document.getElementById(`input-sector-star-coupons-${playerId}`)?.value) || 0);
+    stock.starCoupons = Math.max(0, parseInputNumber(document.getElementById(`input-sector-star-coupons-${playerId}`)?.value) || 0);
   } else if (key === 'chests') {
-    stock.chests = Math.max(0, parseInt(document.getElementById(`input-sector-chests-${playerId}`)?.value) || 0);
+    stock.chests = Math.max(0, parseInputNumber(document.getElementById(`input-sector-chests-${playerId}`)?.value) || 0);
   } else if (key === 'stars') {
-    stock.legendaryStars1 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-1-${playerId}`)?.value) || 0);
-    stock.legendaryStars2 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-2-${playerId}`)?.value) || 0);
-    stock.legendaryStars3 = Math.max(0, parseInt(document.getElementById(`input-sector-stars-3-${playerId}`)?.value) || 0);
+    stock.legendaryStars1 = Math.max(0, parseInputNumber(document.getElementById(`input-sector-stars-1-${playerId}`)?.value) || 0);
+    stock.legendaryStars2 = Math.max(0, parseInputNumber(document.getElementById(`input-sector-stars-2-${playerId}`)?.value) || 0);
+    stock.legendaryStars3 = Math.max(0, parseInputNumber(document.getElementById(`input-sector-stars-3-${playerId}`)?.value) || 0);
   }
 
   p.stock = stock;
@@ -4158,6 +4256,9 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
   const oldStars = off ? Number(off.stars) || 0 : 0;
   if (oldStars === s) return;
 
+  const prevStock = p?.stock ? JSON.parse(JSON.stringify(p.stock)) : null;
+  const prevOfficer = off ? JSON.parse(JSON.stringify(off)) : null;
+
   let stockDelta = null;
   let newStock = null;
 
@@ -4165,7 +4266,7 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
     const cat = off ? getCatalogOfficer(off.catalogId) : null;
     const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
     const deltaFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-    stockDelta = deltaFn(oldStars, s, p.stock, starCouponCost);
+    stockDelta = deltaFn(oldStars, s, p.stock, starCouponCost, off?.invested);
 
     if (!stockDelta.canAfford) {
       toast(`❌ Недостаточно ресурсов на складе! Требуется ${fmtNum(stockDelta.points)} очков звёзд (не хватает ${fmtNum(stockDelta.deficitPoints)}).`, 'error');
@@ -4174,17 +4275,19 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
 
     newStock = {
       ...p.stock,
-      starCoupons: Math.max(0, (p.stock.starCoupons || 0) + stockDelta.delta.starCoupons),
-      legendaryStars1: Math.max(0, (p.stock.legendaryStars1 || 0) + stockDelta.delta.legendaryStars1),
-      legendaryStars2: Math.max(0, (p.stock.legendaryStars2 || 0) + stockDelta.delta.legendaryStars2),
-      legendaryStars3: Math.max(0, (p.stock.legendaryStars3 || 0) + stockDelta.delta.legendaryStars3),
+      starCoupons: Math.max(0, (p.stock.starCoupons || 0) + (stockDelta.delta.starCoupons || 0)),
+      legendaryStars1: Math.max(0, (p.stock.legendaryStars1 || 0) + (stockDelta.delta.legendaryStars1 || 0)),
+      legendaryStars2: Math.max(0, (p.stock.legendaryStars2 || 0) + (stockDelta.delta.legendaryStars2 || 0)),
+      legendaryStars3: Math.max(0, (p.stock.legendaryStars3 || 0) + (stockDelta.delta.legendaryStars3 || 0)),
     };
   }
+
+  const newInvested = stockDelta?.newInvested;
 
   try {
     const res = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
       method: 'PUT',
-      body: { stars: s }
+      body: { stars: s, ...(newInvested ? { invested: newInvested } : {}) }
     });
     if (newStock) {
       await apiFetch(`/api/players/${playerId}`, {
@@ -4196,7 +4299,10 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
 
     if (off) {
       if (res && res.id) Object.assign(off, res);
-      else off.stars = s;
+      else {
+        off.stars = s;
+        if (newInvested) off.invested = newInvested;
+      }
     }
     if (typeof save === 'function') save();
 
@@ -4212,7 +4318,29 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
       : '';
 
     showUndoToast(`⭐ Звёзды ${escapeHtml(officerLabel(off))}: ${s}★.${actionText}`, async () => {
-      await handleQuickChangeStars(playerId, officerId, oldStars);
+      try {
+        if (prevOfficer) {
+          await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+            method: 'PUT',
+            body: { stars: prevOfficer.stars, invested: prevOfficer.invested }
+          });
+        }
+        if (prevStock) {
+          await apiFetch(`/api/players/${playerId}`, {
+            method: 'PUT',
+            body: { stock: prevStock }
+          });
+          p.stock = prevStock;
+        }
+        if (off && prevOfficer) {
+          Object.assign(off, prevOfficer);
+        }
+        if (typeof save === 'function') save();
+        renderPlayerDetail(playerId);
+        toast('Действие отменено, ресурсы и звёзды восстановлены');
+      } catch (err) {
+        toast('Ошибка отмены: ' + (err.message || err), 'error');
+      }
     });
   } catch (err) {
     toast('Ошибка обновления звёзд: ' + (err.message || err), 'error');
@@ -4595,8 +4723,15 @@ function renderOfficers() {
               <th></th>
             </tr>
           </thead>
-          <tbody>${state.officerCatalog.map(o => {
-            const b = o.medalsBeforeTraining ?? 480;
+          <tbody>${(() => {
+            const sortedCatalog = [...(state.officerCatalog || [])].sort((a, b) => {
+              const genA = Number(a?.generation) || 0;
+              const genB = Number(b?.generation) || 0;
+              if (genB !== genA) return genB - genA;
+              return String(a?.name || '').localeCompare(String(b?.name || ''));
+            });
+            return sortedCatalog.map(o => {
+            const b = o.medalsBeforeTraining ?? 690;
             const t = o.medalsTraining ?? 900;
             const total = o.medalsTotal ?? (b + t);
             return `<tr>
@@ -4614,7 +4749,8 @@ function renderOfficers() {
                 </div>
               </td>
             </tr>`;
-          }).join('')}</tbody>
+          }).join('');
+          })()}</tbody>
         </table>
       </div>
     `}
@@ -5411,7 +5547,7 @@ function openOfficerCatalogModal(id=null) {
   const starCoupInput = document.getElementById('fo-star-coupon-cost');
   if (starCoupInput) starCoupInput.value = officer?.starCouponCost ?? 360;
   const bInput = document.getElementById('fo-medals-before');
-  if (bInput) bInput.value = officer?.medalsBeforeTraining ?? 480;
+  if (bInput) bInput.value = officer?.medalsBeforeTraining ?? 690;
   const tInput = document.getElementById('fo-medals-training');
   if (tInput) tInput.value = officer?.medalsTraining ?? 900;
   updateOfficerCatalogTotalMedals();
@@ -5446,7 +5582,7 @@ async function saveOfficerCatalog() {
   const generation = Math.max(1, parseInt(document.getElementById('fo-generation').value) || 8);
   const couponPerPuzzle = Math.max(0, parseInt(document.getElementById('fo-coupon-per-puzzle').value) || 0);
   const starCouponCost = Math.max(0, parseInt(document.getElementById('fo-star-coupon-cost')?.value) || 360);
-  const medalsBeforeTraining = Math.max(0, parseInt(document.getElementById('fo-medals-before')?.value) || 480);
+  const medalsBeforeTraining = Math.max(0, parseInt(document.getElementById('fo-medals-before')?.value) || 690);
   const medalsTraining = Math.max(0, parseInt(document.getElementById('fo-medals-training')?.value) || 900);
   const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
     ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining)
@@ -5760,9 +5896,9 @@ async function handleExchangeFiles(filesList) {
         generation: 8,
         couponPerPuzzle: 720,
         starCouponCost: 360,
-        medalsBeforeTraining: 480,
+        medalsBeforeTraining: 690,
         medalsTraining: 900,
-        medalsTotal: 1380
+        medalsTotal: 1590
       }]);
     }
   } catch (err) {
@@ -5783,7 +5919,7 @@ function renderExchangeOcrTable(officersList) {
     : ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
 
   tbody.innerHTML = (officersList || []).map((off, idx) => {
-    const before = Math.max(0, parseInt(off.medalsBeforeTraining, 10) || 480);
+    const before = Math.max(0, parseInt(off.medalsBeforeTraining, 10) || 690);
     const training = Math.max(0, parseInt(off.medalsTraining, 10) || 900);
     const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
       ? logic.calculateTotalMedals(before, training)
@@ -5884,13 +6020,13 @@ function addManualExchangeRow() {
       <input type="number" class="input-sm exchange-row-star-coupon" value="360" min="0" step="10" style="width:75px">
     </td>
     <td>
-      <input type="number" class="input-sm exchange-row-medals-before" value="480" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
+      <input type="number" class="input-sm exchange-row-medals-before" value="690" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
     </td>
     <td>
       <input type="number" class="input-sm exchange-row-medals-training" value="900" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)">
     </td>
     <td>
-      <strong class="exchange-row-medals-total" style="color:var(--text1)">1380</strong>
+      <strong class="exchange-row-medals-total" style="color:var(--text1)">1590</strong>
     </td>
     <td style="text-align:center">
       <button type="button" class="btn-sm btn-ghost" onclick="removeExchangeRow(this)" title="Удалить строку" style="color:var(--red);padding:2px 6px">✕</button>
@@ -5924,7 +6060,7 @@ async function submitBatchExchangeOfficers() {
     const generation = Math.max(1, parseInt(row.querySelector('.exchange-row-gen')?.value, 10) || 8);
     const couponPerPuzzle = Math.max(0, parseInt(row.querySelector('.exchange-row-coupon')?.value, 10) || 720);
     const starCouponCost = Math.max(0, parseInt(row.querySelector('.exchange-row-star-coupon')?.value, 10) || 360);
-    const medalsBeforeTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-before')?.value, 10) || 480);
+    const medalsBeforeTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-before')?.value, 10) || 690);
     const medalsTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-training')?.value, 10) || 900);
     const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals)
       ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining)

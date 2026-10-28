@@ -6,7 +6,7 @@ const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
 
-let APP_VERSION = '3.14.0';
+let APP_VERSION = '3.17.0';
 try {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   if (pkg.version) APP_VERSION = pkg.version;
@@ -91,6 +91,18 @@ function sanitizeSkills(skills) {
   const arr = skills.slice(0, 4);
   while (arr.length < 4) arr.push(1);
   return arr.map(n => Math.max(1, Math.min(5, Math.floor(Number(n) || 1))));
+}
+
+function sanitizeInvested(invested) {
+  if (!invested || typeof invested !== 'object') return { ...logic.INVESTED_ZERO };
+  return {
+    starCoupons: Math.max(0, Math.round(Number(invested.starCoupons) || 0)),
+    legendaryStars1: Math.max(0, Math.round(Number(invested.legendaryStars1) || 0)),
+    legendaryStars2: Math.max(0, Math.round(Number(invested.legendaryStars2) || 0)),
+    legendaryStars3: Math.max(0, Math.round(Number(invested.legendaryStars3) || 0)),
+    coupons: Math.max(0, Math.round(Number(invested.coupons) || 0)),
+    puzzles: Math.max(0, Math.round(Number(invested.puzzles) || 0)),
+  };
 }
 
 function sanitizeVipPoints(pts) {
@@ -511,6 +523,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           if (o.skills !== undefined) {
             o.skills = sanitizeSkills(o.skills);
           }
+          if (o.invested !== undefined) {
+            o.invested = sanitizeInvested(o.invested);
+          }
           if (o.id) {
             const updatedOff = db.updatePlayerOfficer(req.user.playerId, o.id, o);
             if (!updatedOff) {
@@ -537,6 +552,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.skills !== undefined) {
         body.skills = sanitizeSkills(body.skills);
       }
+      if (body.invested !== undefined) {
+        body.invested = sanitizeInvested(body.invested);
+      }
       const off = db.addPlayerOfficer(req.user.playerId, body);
       return sendJson(res, 200, off);
     }
@@ -550,6 +568,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const officerId = myOfficerMatch[1];
       if (body.skills !== undefined) {
         body.skills = sanitizeSkills(body.skills);
+      }
+      if (body.invested !== undefined) {
+        body.invested = sanitizeInvested(body.invested);
       }
       const off = db.updatePlayerOfficer(req.user.playerId, officerId, body);
       if (!off) {
@@ -591,6 +612,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
         for (const o of body.officers) {
           if (o.skills !== undefined) {
             o.skills = sanitizeSkills(o.skills);
+          }
+          if (o.invested !== undefined) {
+            o.invested = sanitizeInvested(o.invested);
           }
         }
       }
@@ -656,6 +680,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           if (o.skills !== undefined) {
             o.skills = sanitizeSkills(o.skills);
           }
+          if (o.invested !== undefined) {
+            o.invested = sanitizeInvested(o.invested);
+          }
           if (o.id) {
             const updatedOff = db.updatePlayerOfficer(targetPlayerId, o.id, o);
             if (!updatedOff) {
@@ -688,6 +715,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.skills !== undefined) {
         body.skills = sanitizeSkills(body.skills);
       }
+      if (body.invested !== undefined) {
+        body.invested = sanitizeInvested(body.invested);
+      }
       const off = db.addPlayerOfficer(targetPlayerId, body);
       return sendJson(res, 201, off);
     }
@@ -701,6 +731,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       if (body.skills !== undefined) {
         body.skills = sanitizeSkills(body.skills);
+      }
+      if (body.invested !== undefined) {
+        body.invested = sanitizeInvested(body.invested);
       }
       const off = db.updatePlayerOfficer(targetPlayerId, offId, body);
       if (!off) {

@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState } = require('./logic.js');
+const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested } = require('./logic.js');
 
 let currentDb = null;
 
@@ -258,6 +258,17 @@ function parseSkills(skillsData) {
   return skills;
 }
 
+function parseInvested(investedData) {
+  if (!investedData) return { ...INVESTED_ZERO };
+  if (typeof investedData === 'object') return normalizeInvested(investedData);
+  if (typeof investedData === 'string') {
+    try {
+      return normalizeInvested(JSON.parse(investedData));
+    } catch (e) {}
+  }
+  return { ...INVESTED_ZERO };
+}
+
 function getCandidatePlayers() {
   const db = getDb();
   return db.prepare(`
@@ -287,7 +298,8 @@ function getPlayers() {
       level: o.level,
       coupons: o.coupons,
       stars: o.stars,
-      skills: parseSkills(o.skills_json)
+      skills: parseSkills(o.skills_json),
+      invested: parseInvested(o.invested_json)
     });
   }
 
@@ -362,7 +374,8 @@ function getPlayerById(id) {
       level: o.level,
       coupons: o.coupons,
       stars: o.stars,
-      skills: parseSkills(o.skills_json)
+      skills: parseSkills(o.skills_json),
+      invested: parseInvested(o.invested_json)
     }))
   };
 }
@@ -397,7 +410,8 @@ function getPlayersByUserId(userId) {
       level: o.level,
       coupons: o.coupons,
       stars: o.stars,
-      skills: parseSkills(o.skills_json)
+      skills: parseSkills(o.skills_json),
+      invested: parseInvested(o.invested_json)
     });
   }
 
@@ -583,20 +597,23 @@ function addPlayerOfficer(playerId, officerData) {
   const stars = Number(officerData.stars) || 0;
   const skills = parseSkills(officerData.skills ?? officerData.skills_json);
   const skillsJson = JSON.stringify(skills);
+  const invested = parseInvested(officerData.invested ?? officerData.invested_json);
+  const investedJson = JSON.stringify(invested);
 
   db.prepare(`
-    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, skills_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, skills_json, invested_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       catalog_id = excluded.catalog_id,
       name = excluded.name,
       level = excluded.level,
       coupons = excluded.coupons,
       stars = excluded.stars,
-      skills_json = excluded.skills_json
-  `).run(id, playerId, catalogId, name, level, coupons, stars, skillsJson);
+      skills_json = excluded.skills_json,
+      invested_json = excluded.invested_json
+  `).run(id, playerId, catalogId, name, level, coupons, stars, skillsJson, investedJson);
 
-  return { id, playerId, catalogId, name, level, coupons, stars, skills };
+  return { id, playerId, catalogId, name, level, coupons, stars, skills, invested };
 }
 
 function updatePlayerOfficer(playerId, officerId, updates) {
@@ -617,11 +634,19 @@ function updatePlayerOfficer(playerId, officerId, updates) {
   }
   const skillsJson = JSON.stringify(skills);
 
+  let invested;
+  if (updates.invested !== undefined || updates.invested_json !== undefined) {
+    invested = parseInvested(updates.invested ?? updates.invested_json);
+  } else {
+    invested = parseInvested(existing.invested_json);
+  }
+  const investedJson = JSON.stringify(invested);
+
   db.prepare(`
     UPDATE player_officers
-    SET level = ?, coupons = ?, stars = ?, name = ?, skills_json = ?
+    SET level = ?, coupons = ?, stars = ?, name = ?, skills_json = ?, invested_json = ?
     WHERE id = ? AND player_id = ?
-  `).run(level, coupons, stars, name, skillsJson, officerId, playerId);
+  `).run(level, coupons, stars, name, skillsJson, investedJson, officerId, playerId);
 
   return {
     id: officerId,
@@ -630,7 +655,8 @@ function updatePlayerOfficer(playerId, officerId, updates) {
     level,
     coupons,
     stars,
-    skills
+    skills,
+    invested
   };
 }
 
@@ -726,9 +752,9 @@ function getCatalog() {
     couponPerPuzzle: r.coupon_per_puzzle,
     starCouponCost: r.star_coupon_cost ?? 360,
     upgradeType: r.upgrade_type || 'standard',
-    medalsBeforeTraining: r.medals_before_training ?? 480,
+    medalsBeforeTraining: r.medals_before_training ?? 690,
     medalsTraining: r.medals_training ?? 900,
-    medalsTotal: r.medals_total ?? ((r.medals_before_training ?? 480) + (r.medals_training ?? 900))
+    medalsTotal: r.medals_total ?? ((r.medals_before_training ?? 690) + (r.medals_training ?? 900))
   }));
 }
 
@@ -742,7 +768,7 @@ function saveCatalogItem(itemOrDb, maybeItem) {
     item = itemOrDb;
   }
   const upgradeType = item.upgradeType || item.upgrade_type || 'standard';
-  const medalsBeforeTraining = item.medalsBeforeTraining ?? item.medals_before_training ?? 480;
+  const medalsBeforeTraining = item.medalsBeforeTraining ?? item.medals_before_training ?? 690;
   const medalsTraining = item.medalsTraining ?? item.medals_training ?? 900;
   const medalsTotal = item.medalsTotal ?? item.medals_total ?? (Number(medalsBeforeTraining) + Number(medalsTraining));
   const starCouponCost = item.starCouponCost ?? item.star_coupon_cost ?? 360;
@@ -1081,6 +1107,11 @@ function importKowJson(rawJson) {
             } else if (rawOfficer.skills_json !== undefined) {
               o.skills_json = rawOfficer.skills_json;
             }
+            if (rawOfficer.invested !== undefined) {
+              o.invested = rawOfficer.invested;
+            } else if (rawOfficer.invested_json !== undefined) {
+              o.invested_json = rawOfficer.invested_json;
+            }
           }
         }
       }
@@ -1272,8 +1303,13 @@ function migrateSchema(db) {
   }
 
   const officerCols = getColumns('player_officers');
-  if (officerCols.length > 0 && !officerCols.includes('skills_json')) {
-    db.exec("ALTER TABLE player_officers ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]';");
+  if (officerCols.length > 0) {
+    if (!officerCols.includes('skills_json')) {
+      db.exec("ALTER TABLE player_officers ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]';");
+    }
+    if (!officerCols.includes('invested_json')) {
+      db.exec("ALTER TABLE player_officers ADD COLUMN invested_json TEXT NOT NULL DEFAULT '{}';");
+    }
   }
 
   const catalogCols = getColumns('officer_catalog');
@@ -1370,7 +1406,8 @@ function initDb(filePath) {
       level INTEGER NOT NULL DEFAULT 0,
       coupons INTEGER NOT NULL DEFAULT 0,
       stars INTEGER NOT NULL DEFAULT 0,
-      skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]'
+      skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]',
+      invested_json TEXT NOT NULL DEFAULT '{}'
     );
 
     CREATE TABLE IF NOT EXISTS officer_catalog (
@@ -1381,9 +1418,9 @@ function initDb(filePath) {
       coupon_per_puzzle INTEGER NOT NULL DEFAULT 720,
       star_coupon_cost INTEGER NOT NULL DEFAULT 360,
       upgrade_type TEXT NOT NULL DEFAULT 'standard',
-      medals_before_training INTEGER DEFAULT 480,
+      medals_before_training INTEGER DEFAULT 690,
       medals_training INTEGER DEFAULT 900,
-      medals_total INTEGER DEFAULT 1380
+      medals_total INTEGER DEFAULT 1590
     );
 
     CREATE TABLE IF NOT EXISTS vip_tiers (
