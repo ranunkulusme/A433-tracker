@@ -2548,8 +2548,9 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
 
       <!-- Level and Progress -->
       <div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:3px;flex-wrap:wrap;gap:4px">
           <span>Уровень: <strong>${o.level} / 180</strong></span>
+          <span style="color:var(--accent);font-weight:600">🧩 Пазлы: <strong>${fmtNum(o.personalPuzzles || o.personal_puzzles || 0)}</strong></span>
           <span style="color:var(--text2)">Купоны: <strong>${fmtNum(o.coupons)}</strong></span>
         </div>
         <div class="progress-container">
@@ -2629,6 +2630,8 @@ function openAddMyOfficerModal() {
 
   document.getElementById('my-officer-level').value = 0;
   document.getElementById('my-officer-coupons').value = 0;
+  const puzEl = document.getElementById('my-officer-personal-puzzles');
+  if (puzEl) puzEl.value = 0;
   document.getElementById('my-officer-stars').value = 0;
   myOfficerModalSkills = [1, 1, 1, 1];
   renderMyOfficerModalSkills();
@@ -2647,6 +2650,8 @@ function openEditMyOfficerModal(officerId) {
 
   document.getElementById('my-officer-level').value = off.level || 0;
   document.getElementById('my-officer-coupons').value = off.coupons || 0;
+  const editPuzEl = document.getElementById('my-officer-personal-puzzles');
+  if (editPuzEl) editPuzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
   document.getElementById('my-officer-stars').value = off.stars || 0;
   myOfficerModalSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
   renderMyOfficerModalSkills();
@@ -2657,6 +2662,7 @@ function openEditMyOfficerModal(officerId) {
 async function saveMyOfficerSubmit() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('my-officer-level').value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('my-officer-coupons').value) || 0);
+  const personalPuzzles = Math.max(0, parseInt(document.getElementById('my-officer-personal-puzzles')?.value) || 0);
   const stars = Math.max(0, Math.min(6, parseInt(document.getElementById('my-officer-stars').value) || 0));
   const skills = Array.isArray(myOfficerModalSkills) && myOfficerModalSkills.length === 4
     ? myOfficerModalSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
@@ -2692,7 +2698,7 @@ async function saveMyOfficerSubmit() {
     if (myOfficerEditId) {
       const updatedOffData = await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
         method: 'PUT',
-        body: { level, coupons, stars, skills }
+        body: { level, coupons, stars, skills, personalPuzzles }
       });
       if (newStock) {
         await apiFetch('/api/my-profile', {
@@ -2715,6 +2721,7 @@ async function saveMyOfficerSubmit() {
           off.coupons = coupons;
           off.stars = stars;
           off.skills = skills;
+          off.personalPuzzles = personalPuzzles;
         }
       }
       if (state.players) {
@@ -2728,6 +2735,7 @@ async function saveMyOfficerSubmit() {
                 po.coupons = coupons;
                 po.stars = stars;
                 po.skills = skills;
+                po.personalPuzzles = personalPuzzles;
               }
             }
           }
@@ -2763,7 +2771,7 @@ async function saveMyOfficerSubmit() {
       const cat = getCatalogOfficer(catalogId);
       await apiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: { catalogId, name: cat?.name || '', level, coupons, stars, skills }
+        body: { catalogId, name: cat?.name || '', level, coupons, stars, skills, personalPuzzles }
       });
       closeAllModals();
       toast('Офицер добавлен в профиль');
@@ -4537,6 +4545,8 @@ function openAddSectorOfficerModal(playerId) {
   if (lvlEl) lvlEl.value = 0;
   const coupEl = document.getElementById('aso-coupons');
   if (coupEl) coupEl.value = 0;
+  const puzEl = document.getElementById('aso-personal-puzzles');
+  if (puzEl) puzEl.value = 0;
 
   renderAsoStarsPicker(asoSelectedStars);
   renderAsoSkillsPicker(asoSelectedSkills);
@@ -4609,6 +4619,7 @@ async function submitAddSectorOfficer() {
   const cat = getCatalogOfficer(catalogId);
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('aso-level')?.value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('aso-coupons')?.value) || 0);
+  const personalPuzzles = Math.max(0, parseInt(document.getElementById('aso-personal-puzzles')?.value) || 0);
   const stars = Math.max(0, Math.min(6, parseInt(asoSelectedStars) || 0));
   const skills = Array.isArray(asoSelectedSkills) && asoSelectedSkills.length === 4
     ? asoSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
@@ -4620,7 +4631,8 @@ async function submitAddSectorOfficer() {
     level,
     coupons,
     stars,
-    skills
+    skills,
+    personalPuzzles
   };
 
   try {
@@ -4660,6 +4672,8 @@ function openEditSectorOfficerModal(playerId, officerId) {
   if (lvlEl) lvlEl.value = off.level || 0;
   const coupEl = document.getElementById('so-coupons');
   if (coupEl) coupEl.value = off.coupons || 0;
+  const puzEl = document.getElementById('so-personal-puzzles');
+  if (puzEl) puzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
   soSelectedStars = off.stars || 0;
   soSelectedSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
 
@@ -4727,12 +4741,13 @@ async function submitEditSectorOfficer() {
   if (!editSectorOfficerPlayerId || !editSectorOfficerId) return;
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('so-level')?.value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('so-coupons')?.value) || 0);
+  const personalPuzzles = Math.max(0, parseInt(document.getElementById('so-personal-puzzles')?.value) || 0);
   const stars = Math.max(0, Math.min(6, parseInt(soSelectedStars) || 0));
   const skills = Array.isArray(soSelectedSkills) && soSelectedSkills.length === 4
     ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
 
-  const payload = { level, coupons, stars, skills };
+  const payload = { level, coupons, stars, skills, personalPuzzles };
   try {
     const res = await apiFetch(`/api/players/${editSectorOfficerPlayerId}/officers/${editSectorOfficerId}`, {
       method: 'PUT',
@@ -5416,7 +5431,12 @@ function renderEventTypes() {
   c.innerHTML = `
     <div class="section-header">
       <div class="section-title">Типы ивентов</div>
-      ${canManage() ? `<button class="btn-primary" onclick="openEventTypeModal()">+ Добавить тип</button>` : ''}
+      <div style="display:flex;gap:8px">
+        ${canManage() ? `
+          <button class="btn-secondary" id="btn-bulk-rewards" onclick="openBulkRewardsModal()">⚡ Массовое обновление наград</button>
+          <button class="btn-primary" onclick="openEventTypeModal()">+ Добавить тип</button>
+        ` : ''}
+      </div>
     </div>
     <div id="et-list">
       ${state.eventTypes.map(et=>renderEventTypeCard(et)).join('')}
@@ -5426,24 +5446,34 @@ function renderEventTypes() {
 }
 
 function renderEventTypeCard(et) {
+  const formatRangeFn = (typeof logic !== 'undefined' && logic.formatDayRange) ? logic.formatDayRange : (typeof formatDayRange === 'function' ? formatDayRange : null);
+  const isPeriodic = et.isPeriodic !== false && et.isPeriodic !== 0;
+  const dayRangeLabel = (isPeriodic && formatRangeFn)
+    ? formatRangeFn(et.startDayOfWeek || 2, et.endDayOfWeek || 3)
+    : (isPeriodic ? `День ${et.startDayOfWeek || 2}–${et.endDayOfWeek || 3}` : 'Разовое событие');
+
+  const scheduleBadge = isPeriodic
+    ? `<span class="badge" style="background:var(--accent-glow);color:var(--accent);font-size:11px">📅 ${escapeHtml(dayRangeLabel)} · Ритм: ${et.activeWeeks || 1}/${et.breakWeeks || 1} нед.${et.weekOffset ? ` · Смещение: ${et.weekOffset} нед.` : ''}</span>`
+    : `<span class="badge" style="background:var(--surface2);color:var(--text2);font-size:11px">Разовое / Спец. событие</span>`;
+
   return `<div class="et-card" style="--ev-color:${et.color}">
     <div class="et-card-header">
-      <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span class="et-dot" style="background:${et.color}"></span>
-        <strong>${et.name}</strong>
+        <strong>${escapeHtml(et.name)}</strong>
+        ${scheduleBadge}
       </div>
       <div style="display:flex;gap:6px">
         ${canManage() ? `<button class="action-btn" onclick="openEventTypeModal(${et.id})">✏️ Редактировать</button><button class="action-btn danger" onclick="confirmDeleteEventType(${et.id})">🗑</button>` : ''}
       </div>
     </div>
     <table style="margin:0;font-size:13px">
-      <thead><tr><th>Место</th><th>Название</th><th>Купонов</th><th>Пазлов</th></tr></thead>
+      <thead><tr><th style="width:70px">Место</th><th>Название</th><th style="text-align:right">Награда (купоны)</th></tr></thead>
       <tbody>
         ${et.places.map(pl=>`<tr>
           <td style="font-family:var(--mono)">${fmtNum(pl.place)}</td>
-          <td>${pl.label}</td>
-          <td style="font-family:var(--mono);color:var(--green)">${fmtNum(pl.coupons)}</td>
-          <td style="font-family:var(--mono);color:var(--text2)">${fmtNum(Math.floor(pl.coupons/COUPON_PER_PUZZLE))}</td>
+          <td>${escapeHtml(pl.label)}</td>
+          <td style="font-family:var(--mono);color:var(--green);font-weight:600;text-align:right">${fmtNum(pl.coupons)} куп.</td>
         </tr>`).join('')}
       </tbody>
     </table>
@@ -6241,14 +6271,33 @@ let etPlaceRows = [];
 function openEventTypeModal(etId=null) {
   editEtId = etId;
   document.getElementById('modal-et-title').textContent = etId ? 'Редактировать тип' : 'Новый тип ивента';
+  const isPeriodicCheck = document.getElementById('fet-is-periodic');
+  const startDaySelect = document.getElementById('fet-start-day');
+  const endDaySelect = document.getElementById('fet-end-day');
+  const activeWeeksInput = document.getElementById('fet-active-weeks');
+  const breakWeeksInput = document.getElementById('fet-break-weeks');
+  const weekOffsetInput = document.getElementById('fet-week-offset');
+
   if (etId) {
     const et = getEventType(etId);
     document.getElementById('fet-name').value = et.name;
     document.getElementById('fet-color').value = et.color;
+    if (isPeriodicCheck) isPeriodicCheck.checked = (et.isPeriodic !== false && et.isPeriodic !== 0);
+    if (startDaySelect) startDaySelect.value = et.startDayOfWeek || 2;
+    if (endDaySelect) endDaySelect.value = et.endDayOfWeek || 3;
+    if (activeWeeksInput) activeWeeksInput.value = et.activeWeeks || 1;
+    if (breakWeeksInput) breakWeeksInput.value = (et.breakWeeks !== undefined && et.breakWeeks !== null) ? et.breakWeeks : 1;
+    if (weekOffsetInput) weekOffsetInput.value = et.weekOffset || 0;
     etPlaceRows = et.places.map(p=>({...p}));
   } else {
     document.getElementById('fet-name').value = '';
     document.getElementById('fet-color').value = '#8b5cf6';
+    if (isPeriodicCheck) isPeriodicCheck.checked = true;
+    if (startDaySelect) startDaySelect.value = 2;
+    if (endDaySelect) endDaySelect.value = 3;
+    if (activeWeeksInput) activeWeeksInput.value = 1;
+    if (breakWeeksInput) breakWeeksInput.value = 1;
+    if (weekOffsetInput) weekOffsetInput.value = 0;
     etPlaceRows = [
       { place:1, label:'🥇 1 место', coupons:12500 },
       { place:2, label:'🥈 2 место', coupons:6500  },
@@ -6256,16 +6305,37 @@ function openEventTypeModal(etId=null) {
       { place:4, label:'4–10 место', coupons:2750  },
     ];
   }
+  onEtDaysChange();
+  toggleEtScheduleFields();
   renderEtPlaceRows();
   openModal('modal-et');
+}
+
+function onEtDaysChange() {
+  const badge = document.getElementById('fet-duration-badge');
+  if (!badge) return;
+  const startDay = parseInt(document.getElementById('fet-start-day')?.value) || 2;
+  const endDay = parseInt(document.getElementById('fet-end-day')?.value) || 3;
+  const formatRangeFn = (typeof logic !== 'undefined' && logic.formatDayRange) ? logic.formatDayRange : (typeof formatDayRange === 'function' ? formatDayRange : null);
+  if (formatRangeFn) {
+    badge.textContent = formatRangeFn(startDay, endDay);
+  }
+}
+
+function toggleEtScheduleFields() {
+  const isChecked = document.getElementById('fet-is-periodic')?.checked;
+  const fields = document.getElementById('fet-schedule-fields');
+  const badge = document.getElementById('fet-duration-badge');
+  if (fields) fields.style.display = isChecked ? 'block' : 'none';
+  if (badge) badge.style.display = isChecked ? 'inline-block' : 'none';
 }
 
 function renderEtPlaceRows() {
   document.getElementById('fet-places-list').innerHTML = etPlaceRows.map((pl,i)=>`
     <div class="officer-row">
       <input type="number" placeholder="Место" value="${pl.place}" min="1" style="width:60px" oninput="etPlaceRows[${i}].place=parseInt(this.value)||1">
-      <input type="text" placeholder="Название" value="${pl.label}" style="flex:1" oninput="etPlaceRows[${i}].label=this.value">
-      <input type="number" placeholder="Купонов" value="${pl.coupons}" min="0" step="500" style="width:100px" oninput="etPlaceRows[${i}].coupons=parseInt(this.value)||0">
+      <input type="text" placeholder="Название" value="${escapeHtml(pl.label)}" style="flex:1" oninput="etPlaceRows[${i}].label=this.value">
+      <input type="number" placeholder="Купонов" value="${pl.coupons}" min="0" step="500" style="width:140px" oninput="etPlaceRows[${i}].coupons=parseInt(this.value)||0">
       <button class="action-btn danger" onclick="etPlaceRows.splice(${i},1);renderEtPlaceRows()">✕</button>
     </div>`).join('');
 }
@@ -6280,14 +6350,33 @@ async function saveEventType() {
   const name = document.getElementById('fet-name').value.trim();
   if (!name) { toast('Введите название','error'); return; }
   const color = document.getElementById('fet-color').value;
-  const places = etPlaceRows.filter(p=>p.label.trim()).sort((a,b)=>a.place-b.place);
+  const isPeriodic = document.getElementById('fet-is-periodic')?.checked ? 1 : 0;
+  const startDayOfWeek = parseInt(document.getElementById('fet-start-day')?.value) || 2;
+  const endDayOfWeek = parseInt(document.getElementById('fet-end-day')?.value) || 3;
+  const activeWeeks = Math.max(1, parseInt(document.getElementById('fet-active-weeks')?.value) || 1);
+  const breakWeeks = Math.max(0, parseInt(document.getElementById('fet-break-weeks')?.value) || 1);
+  const weekOffset = Math.max(0, parseInt(document.getElementById('fet-week-offset')?.value) || 0);
+
+  const places = etPlaceRows.filter(p=>p.label && p.label.trim()).sort((a,b)=>a.place-b.place);
   if (!places.length) { toast('Добавьте хотя бы одно место','error'); return; }
 
   try {
     if (editEtId) {
       const et = getEventType(editEtId);
       const prizeHistory = [...(et?.prizeHistory || []), { date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }];
-      const payload = { id: editEtId, name, color, places, prizeHistory };
+      const payload = {
+        id: editEtId,
+        name,
+        color,
+        isPeriodic,
+        startDayOfWeek,
+        endDayOfWeek,
+        activeWeeks,
+        breakWeeks,
+        weekOffset,
+        places,
+        prizeHistory
+      };
       const res = await apiFetch(`/api/event-types/${editEtId}`, {
         method: 'PUT',
         body: payload
@@ -6298,6 +6387,12 @@ async function saveEventType() {
       const payload = {
         name,
         color,
+        isPeriodic,
+        startDayOfWeek,
+        endDayOfWeek,
+        activeWeeks,
+        breakWeeks,
+        weekOffset,
         places,
         prizeHistory: [{ date:new Date().toISOString().slice(0,10), places:places.map(p=>({...p})) }]
       };
@@ -6314,6 +6409,115 @@ async function saveEventType() {
     navigate('event_types');
   } catch (err) {
     toast('Ошибка сохранения типа ивента: ' + err.message, 'error');
+  }
+}
+
+// ─── BULK REWARDS MODAL ───────────────────────────────────────
+let bulkPlaceRows = [];
+
+function openBulkRewardsModal() {
+  if (!state.eventTypes.length) {
+    toast('Нет типов событий для обновления', 'warning');
+    return;
+  }
+
+  const listEl = document.getElementById('bulk-rewards-types-list');
+  if (listEl) {
+    listEl.innerHTML = state.eventTypes.map(et => `
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:4px 6px;background:var(--surface);border-radius:4px">
+        <input type="checkbox" class="bulk-et-checkbox" value="${et.id}" checked>
+        <span class="et-dot" style="background:${et.color};width:10px;height:10px;border-radius:50%;display:inline-block"></span>
+        <span style="font-weight:500">${escapeHtml(et.name)}</span>
+      </label>
+    `).join('');
+  }
+
+  const selectAll = document.getElementById('bulk-rewards-select-all');
+  if (selectAll) selectAll.checked = true;
+
+  const firstEt = state.eventTypes.find(et => et.isPeriodic) || state.eventTypes[0];
+  if (firstEt && Array.isArray(firstEt.places) && firstEt.places.length) {
+    bulkPlaceRows = firstEt.places.map(p => ({ place: p.place, label: p.label, coupons: p.coupons }));
+  } else {
+    bulkPlaceRows = [
+      { place: 1, label: '🥇 1 место', coupons: 12500 },
+      { place: 2, label: '🥈 2 место', coupons: 6500 },
+      { place: 3, label: '🥉 3 место', coupons: 3500 },
+      { place: 4, label: '4–10 место', coupons: 2750 },
+    ];
+  }
+
+  renderBulkPlaceRows();
+  openModal('modal-bulk-rewards');
+}
+
+function toggleBulkSelectAll(checked) {
+  const checkboxes = document.querySelectorAll('.bulk-et-checkbox');
+  checkboxes.forEach(cb => { cb.checked = checked; });
+}
+
+function renderBulkPlaceRows() {
+  const container = document.getElementById('bulk-places-list');
+  if (!container) return;
+  container.innerHTML = bulkPlaceRows.map((pl, i) => `
+    <div class="officer-row">
+      <input type="number" placeholder="Место" value="${pl.place}" min="1" style="width:60px" oninput="bulkPlaceRows[${i}].place=parseInt(this.value)||1">
+      <input type="text" placeholder="Название" value="${escapeHtml(pl.label)}" style="flex:1" oninput="bulkPlaceRows[${i}].label=this.value">
+      <input type="number" placeholder="Купонов" value="${pl.coupons}" min="0" step="500" style="width:140px" oninput="bulkPlaceRows[${i}].coupons=parseInt(this.value)||0">
+      <button class="action-btn danger" onclick="bulkPlaceRows.splice(${i},1);renderBulkPlaceRows()">✕</button>
+    </div>`).join('');
+}
+
+function addBulkPlaceRow() {
+  const nextPlace = bulkPlaceRows.length ? Math.max(...bulkPlaceRows.map(p => p.place)) + 1 : 1;
+  bulkPlaceRows.push({ place: nextPlace, label: `${nextPlace} место`, coupons: 0 });
+  renderBulkPlaceRows();
+}
+
+async function submitBulkRewards() {
+  const checkedBoxes = Array.from(document.querySelectorAll('.bulk-et-checkbox:checked'));
+  const typeIds = checkedBoxes.map(cb => Number(cb.value)).filter(n => !isNaN(n) && n > 0);
+  if (!typeIds.length) {
+    toast('Выберите хотя бы один тип события', 'error');
+    return;
+  }
+  const places = bulkPlaceRows.filter(p => p.label && p.label.trim()).sort((a, b) => a.place - b.place);
+  if (!places.length) {
+    toast('Добавьте хотя бы одно призовое место', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-bulk-rewards');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Обновление...';
+  }
+
+  try {
+    const res = await apiFetch('/api/event-types/bulk-rewards', {
+      method: 'POST',
+      body: { typeIds, places }
+    });
+
+    for (const tid of typeIds) {
+      const et = state.eventTypes.find(t => t.id === tid);
+      if (et) {
+        et.places = places.map(p => ({ ...p }));
+      }
+    }
+
+    toast(`✅ Награды успешно обновлены в ${res?.updatedCount || typeIds.length} событиях!`);
+    closeAllModals();
+    save();
+    await loadDataFromServer();
+    navigate('event_types');
+  } catch (err) {
+    toast('Ошибка массового обновления наград: ' + (err.message || err), 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Применить награды';
+    }
   }
 }
 
@@ -6363,6 +6567,95 @@ function setSeasonDurationWeeks(weeks) {
   updateSeasonSchedulePreview();
 }
 
+function renderSeasonEventCards() {
+  const container = document.getElementById('season-event-cards');
+  if (!container) return;
+
+  const periodicTypes = (state.eventTypes || []).filter(et => et.isPeriodic !== false && et.isPeriodic !== 0);
+
+  if (!periodicTypes.length) {
+    container.innerHTML = `
+      <div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--text3);background:var(--surface2);border-radius:8px">
+        Нет периодических типов событий. Добавьте их кнопкой «+ Добавить тип события» выше.
+      </div>
+    `;
+    return;
+  }
+
+  const formatRangeFn = (typeof logic !== 'undefined' && logic.formatDayRange) ? logic.formatDayRange : (typeof formatDayRange === 'function' ? formatDayRange : null);
+
+  const daysOptions = (selectedDay) => [
+    { val: 1, label: 'Понедельник (Пн)' },
+    { val: 2, label: 'Вторник (Вт)' },
+    { val: 3, label: 'Среда (Ср)' },
+    { val: 4, label: 'Четверг (Чт)' },
+    { val: 5, label: 'Пятница (Пт)' },
+    { val: 6, label: 'Суббота (Сб)' },
+    { val: 7, label: 'Воскресенье (Вс)' }
+  ].map(d => `<option value="${d.val}" ${d.val === selectedDay ? 'selected' : ''}>${d.label}</option>`).join('');
+
+  container.innerHTML = periodicTypes.map(et => {
+    const startDay = et.startDayOfWeek || 2;
+    const endDay = et.endDayOfWeek || 3;
+    const rangeLabel = formatRangeFn ? formatRangeFn(startDay, endDay) : `Дни ${startDay}–${endDay}`;
+
+    return `
+      <div class="season-event-card" id="season-card-${et.id}" style="border-top:3px solid ${et.color || '#8b5cf6'}">
+        <div class="season-card-header">
+          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:${et.color || '#c084fc'}">
+            <input type="checkbox" class="season-enable-check" id="season-enable-${et.id}" data-id="${et.id}" checked onchange="updateSeasonSchedulePreview()">
+            <span class="et-dot" style="background:${et.color || '#8b5cf6'};width:10px;height:10px;border-radius:50%;display:inline-block"></span>
+            <span>${escapeHtml(et.name)}</span>
+          </label>
+          <span class="badge" id="season-range-badge-${et.id}" style="background:rgba(255,255,255,0.08);color:var(--text);font-size:11px">${escapeHtml(rangeLabel)}</span>
+        </div>
+        <div class="season-card-body">
+          <div class="season-input-row">
+            <label for="season-startday-${et.id}">День старта:</label>
+            <select id="season-startday-${et.id}" onchange="onSeasonCardDayChange(${et.id})">
+              ${daysOptions(startDay)}
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label for="season-endday-${et.id}">День конца:</label>
+            <select id="season-endday-${et.id}" onchange="onSeasonCardDayChange(${et.id})">
+              ${daysOptions(endDay)}
+            </select>
+          </div>
+          <div class="season-input-row">
+            <label>Ритм активности:</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input type="number" id="season-active-${et.id}" min="1" max="12" value="${et.activeWeeks || 1}" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
+              <input type="number" id="season-break-${et.id}" min="0" max="12" value="${(et.breakWeeks !== undefined && et.breakWeeks !== null) ? et.breakWeeks : 1}" style="width:48px" onchange="updateSeasonSchedulePreview()">
+              <span style="font-size:11px;color:var(--text3)">перерыв</span>
+            </div>
+          </div>
+          <div class="season-input-row">
+            <label for="season-offset-${et.id}">Смещение нед.:</label>
+            <select id="season-offset-${et.id}" onchange="updateSeasonSchedulePreview()">
+              <option value="0" ${(et.weekOffset || 0) === 0 ? 'selected' : ''}>Неделя 1 (без смещения)</option>
+              <option value="1" ${(et.weekOffset || 0) === 1 ? 'selected' : ''}>Неделя 2 (со 2-й недели)</option>
+              <option value="2" ${(et.weekOffset || 0) === 2 ? 'selected' : ''}>Неделя 3 (с 3-й недели)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function onSeasonCardDayChange(typeId) {
+  const startDay = parseInt(document.getElementById(`season-startday-${typeId}`)?.value) || 2;
+  const endDay = parseInt(document.getElementById(`season-endday-${typeId}`)?.value) || 3;
+  const badge = document.getElementById(`season-range-badge-${typeId}`);
+  const formatRangeFn = (typeof logic !== 'undefined' && logic.formatDayRange) ? logic.formatDayRange : (typeof formatDayRange === 'function' ? formatDayRange : null);
+  if (badge && formatRangeFn) {
+    badge.textContent = formatRangeFn(startDay, endDay);
+  }
+  updateSeasonSchedulePreview();
+}
+
 function openSeasonSchedulerModal() {
   // Find next Monday (or today if today is Monday)
   const now = new Date();
@@ -6375,37 +6668,8 @@ function openSeasonSchedulerModal() {
   const dateInput = document.getElementById('season-start-date');
   if (dateInput) dateInput.value = defaultStart;
 
+  renderSeasonEventCards();
   setSeasonDurationWeeks(8);
-
-  // Set default checkbox and select values
-  const setVal = (id, val) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (el.type === 'checkbox') el.checked = Boolean(val);
-    else el.value = val;
-  };
-
-  setVal('season-enable-kow', true);
-  setVal('season-startday-kow', '2');
-  setVal('season-duration-kow', '2');
-  setVal('season-active-kow', '1');
-  setVal('season-break-kow', '1');
-  setVal('season-offset-kow', '0');
-
-  setVal('season-enable-mf', true);
-  setVal('season-startday-mf', '6');
-  setVal('season-duration-mf', '3');
-  setVal('season-active-mf', '1');
-  setVal('season-break-mf', '1');
-  setVal('season-offset-mf', '0');
-
-  setVal('season-enable-pot', true);
-  setVal('season-startday-pot', '2');
-  setVal('season-duration-pot', '3');
-  setVal('season-active-pot', '1');
-  setVal('season-break-pot', '1');
-  setVal('season-offset-pot', '1');
-
   updateSeasonSchedulePreview();
   openModal('modal-season-scheduler');
 }
@@ -6414,53 +6678,34 @@ function updateSeasonSchedulePreview() {
   const startDate = document.getElementById('season-start-date')?.value || new Date().toISOString().slice(0, 10);
   const totalWeeks = Math.max(1, parseInt(document.getElementById('season-total-weeks')?.value, 10) || 8);
 
-  const getNum = (id, fallback) => {
-    const el = document.getElementById(id);
-    return el ? (parseInt(el.value, 10) || fallback) : fallback;
-  };
-  const isChecked = (id) => {
-    const el = document.getElementById(id);
-    return el ? el.checked : false;
-  };
-
+  const periodicTypes = (state.eventTypes || []).filter(et => et.isPeriodic !== false && et.isPeriodic !== 0);
   const rules = [];
 
-  if (isChecked('season-enable-kow')) {
-    rules.push({
-      id: 'king-of-war',
-      name: 'Король Войны',
-      color: '#8b5cf6',
-      startDayOfWeek: getNum('season-startday-kow', 2),
-      durationDays: getNum('season-duration-kow', 2),
-      activeWeeks: getNum('season-active-kow', 1),
-      breakWeeks: getNum('season-break-kow', 1),
-      weekOffset: getNum('season-offset-kow', 0),
-    });
-  }
+  const calcDaysFn = (typeof logic !== 'undefined' && logic.calculateDurationDays) ? logic.calculateDurationDays : null;
 
-  if (isChecked('season-enable-mf')) {
-    rules.push({
-      id: 'mighty-forces',
-      name: 'Мощные Силы',
-      color: '#10b981',
-      startDayOfWeek: getNum('season-startday-mf', 6),
-      durationDays: getNum('season-duration-mf', 3),
-      activeWeeks: getNum('season-active-mf', 1),
-      breakWeeks: getNum('season-break-mf', 1),
-      weekOffset: getNum('season-offset-mf', 0),
-    });
-  }
+  for (const et of periodicTypes) {
+    const checkEl = document.getElementById(`season-enable-${et.id}`);
+    const isEnabled = checkEl ? checkEl.checked : true;
+    if (!isEnabled) continue;
 
-  if (isChecked('season-enable-pot')) {
+    const startDay = parseInt(document.getElementById(`season-startday-${et.id}`)?.value) || et.startDayOfWeek || 2;
+    const endDay = parseInt(document.getElementById(`season-endday-${et.id}`)?.value) || et.endDayOfWeek || 3;
+    const durationDays = calcDaysFn ? calcDaysFn(startDay, endDay) : (endDay >= startDay ? endDay - startDay + 1 : 7 - startDay + 1 + endDay);
+    const activeWeeks = parseInt(document.getElementById(`season-active-${et.id}`)?.value) || et.activeWeeks || 1;
+    const breakWeeks = parseInt(document.getElementById(`season-break-${et.id}`)?.value) ?? ((et.breakWeeks !== undefined && et.breakWeeks !== null) ? et.breakWeeks : 1);
+    const weekOffset = parseInt(document.getElementById(`season-offset-${et.id}`)?.value) ?? (et.weekOffset || 0);
+
     rules.push({
-      id: 'power-of-time',
-      name: 'Сила Времени',
-      color: '#f59e0b',
-      startDayOfWeek: getNum('season-startday-pot', 2),
-      durationDays: getNum('season-duration-pot', 3),
-      activeWeeks: getNum('season-active-pot', 1),
-      breakWeeks: getNum('season-break-pot', 1),
-      weekOffset: getNum('season-offset-pot', 1),
+      id: String(et.id),
+      typeId: et.id,
+      name: et.name,
+      color: et.color,
+      startDayOfWeek: startDay,
+      endDayOfWeek: endDay,
+      durationDays,
+      activeWeeks,
+      breakWeeks,
+      weekOffset
     });
   }
 
@@ -6468,7 +6713,7 @@ function updateSeasonSchedulePreview() {
     ? logic.generateSeasonSchedule
     : (typeof generateSeasonSchedule === 'function' ? generateSeasonSchedule : null);
 
-  if (scheduleGenerator) {
+  if (scheduleGenerator && rules.length > 0) {
     state.seasonPreviewEvents = scheduleGenerator({ startDate, totalWeeks, rules });
   } else {
     state.seasonPreviewEvents = [];
@@ -6496,16 +6741,16 @@ function renderSeasonSchedulePreviewTable() {
   }
 
   tbody.innerHTML = events.map((ev, idx) => {
-    let badgeClass = 'badge-event-kow';
-    if (ev.typeId === 'mighty-forces' || ev.name.includes('Мощные')) badgeClass = 'badge-event-mf';
-    else if (ev.typeId === 'power-of-time' || ev.name.includes('Времени')) badgeClass = 'badge-event-pot';
+    const bgStyle = ev.color ? `${ev.color}22` : 'rgba(139,92,246,0.15)';
+    const textStyle = ev.color || '#c084fc';
+    const borderStyle = ev.color ? `${ev.color}44` : 'transparent';
 
     return `
       <tr>
         <td style="color:var(--text3)">${idx + 1}</td>
         <td><strong>${escapeHtml(ev.dateFrom)}</strong> – ${escapeHtml(ev.dateTo)}</td>
         <td>${escapeHtml(ev.dayFromStr || '')} – ${escapeHtml(ev.dayToStr || '')}</td>
-        <td><span class="badge-event-tag ${badgeClass}">${escapeHtml(ev.name)}</span></td>
+        <td><span class="badge-event-tag" style="background:${bgStyle};color:${textStyle};border:1px solid ${borderStyle}">${escapeHtml(ev.name)}</span></td>
         <td>${ev.durationDays} дн.</td>
         <td style="text-align:center">
           <button type="button" class="btn-remove-event-row" onclick="removeSeasonPreviewEvent(${idx})" title="Удалить это событие">✕</button>
