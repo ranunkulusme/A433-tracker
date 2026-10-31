@@ -852,6 +852,23 @@ VIP: 15`;
       recordTest('11.4', 'Динамический конструктор сезонов и элементы интерфейса', 'БЛОК 11', false, e.message);
     }
 
+    // 11.5. Режим «Ретроспектива» при добавлении офицера без списания ресурсов склада
+    try {
+      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      assert(indexHtml.includes('id="my-officer-retro-on"'), 'Модальное окно кабинета содержит радиобаттон ретроспективы');
+      assert(indexHtml.includes('id="aso-retro-on"'), 'Модальное окно сектора содержит радиобаттон ретроспективы');
+      assert(indexHtml.includes('id="so-retro-on"'), 'Модальное окно редактирования содержит радиобаттон ретроспективы');
+      assert(appJs.includes('my-officer-retro-on'), 'app.js проверяет состояние радиобаттона ретроспективы');
+
+      const retroCalc = logic.calculateRetrospectiveOfficerStock({ isRetrospective: true });
+      assert.strictEqual(retroCalc.deductStock, false, 'Ретроспектива отключает списание со склада');
+      assert.strictEqual(retroCalc.canAfford, true, 'Ретроспектива позволяет сохранить офицера без блокировки склада');
+      recordTest('11.5', 'Режим «Ретроспектива» при добавлении офицеров (без списания со склада)', 'БЛОК 11', true, 'Радиобаттоны ретроспективы и логика сохранения без списания подтверждены');
+    } catch (e) {
+      recordTest('11.5', 'Режим «Ретроспектива» при добавлении офицеров (без списания со склада)', 'БЛОК 11', false, e.message);
+    }
+
   } finally {
     await server.close();
     try {

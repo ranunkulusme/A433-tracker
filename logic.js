@@ -2044,12 +2044,36 @@
     }
   }
 
+  function calculateRetrospectiveOfficerStock({ isRetrospective = false } = {}) {
+    if (isRetrospective) {
+      return {
+        isRetrospective: true,
+        canAfford: true,
+        deductStock: false,
+        delta: {
+          coupons: 0,
+          puzzles: 0,
+          starCoupons: 0,
+          legendaryStars1: 0,
+          legendaryStars2: 0,
+          legendaryStars3: 0
+        },
+        newInvested: { ...INVESTED_ZERO }
+      };
+    }
+    return {
+      isRetrospective: false,
+      deductStock: true
+    };
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
     MAX_LEVEL,
     STOCK_ZERO,
     INVESTED_ZERO,
+    calculateRetrospectiveOfficerStock,
     normalizeInvested,
     sortOfficersByGeneration,
     STAR_COSTS,
