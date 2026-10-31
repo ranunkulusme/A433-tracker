@@ -6,7 +6,7 @@ const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
 
-let APP_VERSION = '3.17.2';
+let APP_VERSION = '3.18.0';
 try {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   if (pkg.version) APP_VERSION = pkg.version;
