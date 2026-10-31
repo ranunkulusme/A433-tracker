@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.19.0';
+const APP_VERSION = 'v3.20.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -16,6 +16,7 @@ let state = {
   currentPlayerId: null,
   stockSyncEnabled: true,
   nextId: 1,
+  sectorOfficerFilter: [],
 };
 
 let currentUser = null;
@@ -3876,33 +3877,159 @@ async function cancelRegistrationFromDetail(eventId, sectorId = null) {
 }
 
 // ─── PAGE: PLAYERS ───────────────────────────────────────────
+function onSectorOfficerFilterChange(slotIndex, value) {
+  if (!Array.isArray(state.sectorOfficerFilter)) {
+    state.sectorOfficerFilter = [];
+  }
+  const cleanVal = String(value || '').trim();
+  if (cleanVal) {
+    state.sectorOfficerFilter[slotIndex] = cleanVal;
+  } else {
+    state.sectorOfficerFilter.splice(slotIndex, 1);
+  }
+  state.sectorOfficerFilter = state.sectorOfficerFilter.filter(Boolean);
+  renderPlayers();
+}
+
+function removeSectorOfficerFilter(index) {
+  if (Array.isArray(state.sectorOfficerFilter)) {
+    state.sectorOfficerFilter.splice(index, 1);
+    state.sectorOfficerFilter = state.sectorOfficerFilter.filter(Boolean);
+  }
+  renderPlayers();
+}
+
+function clearSectorOfficerFilter() {
+  state.sectorOfficerFilter = [];
+  renderPlayers();
+}
+
 function renderPlayers() {
   const c = document.getElementById('content');
+  const filterList = (state.sectorOfficerFilter || []).filter(Boolean);
+  const filterFn = (typeof logic !== 'undefined' && logic.filterPlayersByOfficers)
+    ? logic.filterPlayersByOfficers
+    : (typeof filterPlayersByOfficers === 'function' ? filterPlayersByOfficers : null);
+  const filteredPlayers = filterFn ? filterFn(state.players, filterList) : state.players;
+  const hasFilter = filterList.length > 0;
+
+  const catOfficers = [...(state.officerCatalog || [])].sort((a, b) => {
+    const gDiff = (Number(b.generation) || 0) - (Number(a.generation) || 0);
+    if (gDiff !== 0) return gDiff;
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  const selectedOfficers = filterList
+    .map(id => (state.officerCatalog || []).find(co => co.id === id))
+    .filter(Boolean);
+  const selectedOfficersNames = selectedOfficers.map(co => co.name).join(' + ');
+
+  const slot1Value = filterList[0] || '';
+  const slot2Value = filterList[1] || '';
+
   c.innerHTML = `
     <div class="section-header">
       <div class="section-title">Секторы альянса (${state.players.length})</div>
       ${canManage() ? `<button class="btn-primary" onclick="openPlayerModal()">+ Добавить сектор</button>` : ''}
     </div>
+
+    <!-- SECTORS OFFICERS PAIR FILTER -->
+    <div class="sectors-filter-bar">
+      <div class="sectors-filter-title">
+        <span>🔍 Фильтр по офицерам (связки и пары):</span>
+        ${hasFilter ? `
+          <button type="button" class="btn-ghost btn-xs" onclick="clearSectorOfficerFilter()" title="Сбросить все фильтры">✕ Очистить фильтр</button>
+        ` : ''}
+      </div>
+      <div class="sectors-filter-controls">
+        <div class="sectors-filter-slot">
+          <label for="filter-officer-1" class="sectors-filter-label">Офицер 1:</label>
+          <select id="filter-officer-1" class="sectors-filter-select" onchange="onSectorOfficerFilterChange(0, this.value)">
+            <option value="">— Любой офицер —</option>
+            ${catOfficers.map(co => `
+              <option value="${co.id}" ${slot1Value === co.id ? 'selected' : ''}>
+                ${escapeHtml(co.name)} (${co.type}, Ген. ${co.generation})
+              </option>
+            `).join('')}
+          </select>
+        </div>
+
+        <span class="sectors-filter-plus">+</span>
+
+        <div class="sectors-filter-slot">
+          <label for="filter-officer-2" class="sectors-filter-label">Офицер 2 (в пару):</label>
+          <select id="filter-officer-2" class="sectors-filter-select" onchange="onSectorOfficerFilterChange(1, this.value)">
+            <option value="">— Любой в пару —</option>
+            ${catOfficers.map(co => `
+              <option value="${co.id}" ${slot2Value === co.id ? 'selected' : ''} ${slot1Value === co.id ? 'style="color:var(--text3)"' : ''}>
+                ${escapeHtml(co.name)} (${co.type}, Ген. ${co.generation})
+              </option>
+            `).join('')}
+          </select>
+        </div>
+
+        <div class="sectors-filter-counter">
+          ${hasFilter ? `
+            <span class="badge ${filteredPlayers.length ? 'badge-success' : 'badge-warning'}">
+              Найдено: <strong>${filteredPlayers.length}</strong> из ${state.players.length}
+            </span>
+          ` : `
+            <span class="badge badge-none" style="color:var(--text3)">
+              Всего секторов: ${state.players.length}
+            </span>
+          `}
+        </div>
+      </div>
+
+      ${selectedOfficers.length ? `
+        <div class="sectors-filter-chips">
+          <span style="font-size:12px;color:var(--text3)">Связка для поиска:</span>
+          ${selectedOfficers.map((co, idx) => `
+            <span class="filter-officer-chip">
+              ${troopBadge(co.type)}
+              <strong>${escapeHtml(co.name)}</strong>
+              <span style="color:var(--text3);font-size:11px">Ген. ${co.generation}</span>
+              <button type="button" class="chip-remove-btn" onclick="removeSectorOfficerFilter(${idx})" title="Удалить из связки">✕</button>
+            </span>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+
     <div class="table-wrap">
       <table>
         <thead><tr><th>Сектор (База)</th><th>Владелец</th><th>Ранг</th><th>Сектор (Статы)</th><th>Офицеры</th><th>Запасы</th><th></th></tr></thead>
         <tbody>
-          ${!state.players.length ? `<tr><td colspan="7" class="empty-state"><p>Нет секторов</p></td></tr>` : ''}
-          ${state.players.map(p=>{
+          ${!filteredPlayers.length ? (hasFilter ? `
+            <tr>
+              <td colspan="7" class="empty-state" style="padding:28px 16px;text-align:center">
+                <p style="font-size:14px;color:var(--text2);margin-bottom:8px">
+                  Нет секторов, у которых есть выбранная связка: <strong>${escapeHtml(selectedOfficersNames)}</strong>
+                </p>
+                <button type="button" class="btn-ghost btn-sm" onclick="clearSectorOfficerFilter()">✕ Очистить фильтр</button>
+              </td>
+            </tr>
+          ` : `
+            <tr><td colspan="7" class="empty-state"><p>Нет секторов</p></td></tr>
+          `) : ''}
+          ${filteredPlayers.map(p=>{
             const rewards = dailyRewards(p.sector);
             const stock = canSeeStock(p.id) ? `${fmtNum(p.stock.coupons)} куп. · ${fmtNum(p.stock.puzzles)} пазл. · ${fmtNum(p.stock.chests)} сун.` : 'Скрыто';
             const ownerHtml = p.username
               ? `<span class="badge badge-owner" title="Владелец: @${escapeHtml(p.username)}">👤 @${escapeHtml(p.username)}</span>`
               : `<span class="badge badge-no-owner">Без владельца</span>`;
             const allOfficers = Array.isArray(p.officers) ? p.officers : [];
-            const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
-              ? logic.sortOfficersByGeneration
-              : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
-            const sortedOfficers = sortFn ? sortFn(allOfficers, state.officerCatalog) : allOfficers;
-            const topOfficers = sortedOfficers.slice(0, 2);
+            const prioritizeFn = (typeof logic !== 'undefined' && logic.prioritizeFilteredOfficers)
+              ? logic.prioritizeFilteredOfficers
+              : (typeof prioritizeFilteredOfficers === 'function' ? prioritizeFilteredOfficers : null);
+            const sortedOfficers = prioritizeFn
+              ? prioritizeFn(allOfficers, filterList, state.officerCatalog)
+              : allOfficers;
+            const topLimit = Math.max(2, filterList.length);
+            const topOfficers = sortedOfficers.slice(0, topLimit);
             const remainingCount = sortedOfficers.length - topOfficers.length;
             const remainingTooltip = remainingCount > 0
-              ? 'Остальные офицеры:\n' + sortedOfficers.slice(2).map(o => {
+              ? 'Остальные офицеры:\n' + sortedOfficers.slice(topLimit).map(o => {
                   const stars = o.stars ? `${o.stars}★` : '0★';
                   return `• ${officerLabel(o)} (Ур. ${fmtNum(o.level)}, ${stars})`;
                 }).join('\n')
@@ -3916,14 +4043,19 @@ function renderPlayers() {
               <td><span class="badge badge-none">${p.rank}</span></td>
               <td style="color:var(--text2);font-size:12px">VIP ${fmtNum(p.sector.vipLevel)} · Конф. ${fmtNum(p.sector.confidentialityLevel)}<br>Сила ${fmtNum(p.sector.power)} · убийств ${fmtNum(p.sector.kills)} · очки ${fmtOne(p.sector.killPoints)}<br>+${fmtNum(rewards.puzzlesPerDay, 2)} пазл./день</td>
               <td>
-                <div style="display:flex;flex-direction:column;gap:4px">
-                  ${topOfficers.map(o=>`
-                    <div style="display:flex;align-items:center;gap:8px">
-                      <span style="color:var(--text2);font-size:12px">${officerLink(o)}</span>
-                      <span class="badge badge-none" style="font-size:10px">Ур. ${fmtNum(o.level)}</span>
-                      <span style="font-size:11px;color:var(--text3)">${fmtNum(o.coupons)} купонов</span>
-                      ${renderStars(o.stars)}
-                    </div>`).join('')}
+                <div style="display:flex;flex-direction:column;gap:5px">
+                  ${topOfficers.map(o => {
+                    const isMatched = Boolean(o.isMatched);
+                    return `
+                      <div class="${isMatched ? 'officer-row-matched' : ''}" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                        <span style="color:var(--text2);font-size:12px">${officerLink(o)}</span>
+                        ${isMatched ? `<span class="badge-matched-pair">🎯 В связке</span>` : ''}
+                        <span class="badge badge-none" style="font-size:10px">Ур. ${fmtNum(o.level)}</span>
+                        <span style="font-size:11px;color:var(--text3)">${fmtNum(o.coupons)} купонов</span>
+                        ${renderStars(o.stars)}
+                      </div>
+                    `;
+                  }).join('')}
                   ${remainingCount > 0 ? `
                     <a href="javascript:void(0)" class="badge-more-officers" onclick="navigate('player_detail', ${p.id})" title="${escapeHtml(remainingTooltip)}">
                       + ещё ${remainingCount} ${pluralOfficers(remainingCount)}
@@ -7825,4 +7957,7 @@ if (typeof window !== 'undefined') {
   window.openExchangeOcrModal = openExchangeOcrModal;
   window.closeExchangeOcrModal = closeExchangeOcrModal;
   window.closeModal = closeModal;
+  window.onSectorOfficerFilterChange = onSectorOfficerFilterChange;
+  window.removeSectorOfficerFilter = removeSectorOfficerFilter;
+  window.clearSectorOfficerFilter = clearSectorOfficerFilter;
 }

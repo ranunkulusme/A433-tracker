@@ -1749,6 +1749,160 @@ select option { background: var(--bg3); }
   width: min(560px, calc(100vw - 32px));
 }
 
+/* ── SECTOR OFFICERS PAIR FILTER ── */
+.sectors-filter-bar {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectors-filter-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.sectors-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sectors-filter-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectors-filter-label {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.sectors-filter-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text1);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  min-width: 200px;
+  max-width: 260px;
+  cursor: pointer;
+}
+
+.sectors-filter-select:focus {
+  border-color: var(--blue);
+  outline: none;
+}
+
+.sectors-filter-plus {
+  color: var(--text3);
+  font-weight: 700;
+  font-size: 16px;
+  user-select: none;
+}
+
+.sectors-filter-counter {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectors-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.filter-officer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text1);
+}
+
+.filter-officer-chip .chip-remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.filter-officer-chip .chip-remove-btn:hover {
+  color: #ef4444;
+}
+
+.officer-row-matched {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 6px;
+}
+
+.badge-matched-pair {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .sectors-filter-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sectors-filter-slot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sectors-filter-select {
+    min-width: 100%;
+    max-width: 100%;
+  }
+  .sectors-filter-plus {
+    text-align: center;
+  }
+  .sectors-filter-counter {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
+
 
 
 
