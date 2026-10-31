@@ -2285,6 +2285,584 @@ test('API officer endpoints support onlyPersonalPuzzles setting', async () => {
   }
 });
 
+test('API delegated permissions: R3 view_sectors and zero-trust stock masking', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // 1. Register soldier with sector and stock
+    const soldierReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'soldier_stock', password: 'pass', playerName: 'База Солдата' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${soldierReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const soldierLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'soldier_stock', password: 'pass' })
+    })).json();
+    // Update soldier stock
+    await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${soldierLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stock: {
+          coupons: 9500,
+          puzzles: 85,
+          chests: 12,
+          starCoupons: 340,
+          legendaryStars1: 2,
+          legendaryStars2: 1,
+          legendaryStars3: 0
+        }
+      })
+    });
+
+    // 2. Register analyst (R3)
+    const analystReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'analyst_r3', password: 'pass', playerName: 'Аналитик' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${analystReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const analystLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'analyst_r3', password: 'pass' })
+    })).json();
+
+    // Set analyst own stock
+    await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${analystLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stock: { coupons: 1200, puzzles: 10, chests: 1 }
+      })
+    });
+
+    // 3. Analyst without permissions gets 403 on GET /api/players
+    const noPermRes = await fetch(`${baseUrl}/api/players`, {
+      headers: { Authorization: `Bearer ${analystLogin.token}` }
+    });
+    assert.equal(noPermRes.status, 403);
+
+    // 4. Admin delegates view_sectors to analyst
+    const patchRes = await fetch(`${baseUrl}/api/users/${analystReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['view_sectors'] })
+    });
+    assert.equal(patchRes.status, 200);
+
+    // Verify /api/auth/me and /api/my-profile return permissions
+    const meRes = await (await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${analystLogin.token}` }
+    })).json();
+    assert.deepEqual(meRes.user.permissions, ['view_sectors']);
+
+    const myProfRes = await (await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${analystLogin.token}` }
+    })).json();
+    assert.deepEqual(myProfRes.user.permissions, ['view_sectors']);
+
+    // 5. Analyst with view_sectors can access GET /api/players
+    const playersRes = await fetch(`${baseUrl}/api/players`, {
+      headers: { Authorization: `Bearer ${analystLogin.token}` }
+    });
+    assert.equal(playersRes.status, 200);
+    const playersList = await playersRes.json();
+    assert(playersList.length >= 2);
+
+    // Soldier's stock MUST be masked (Zero Trust)
+    const otherPlayer = playersList.find(p => p.userId === soldierReg.userId);
+    assert(otherPlayer, 'Other player sector must be found in players list');
+    assert.equal(otherPlayer.stock.masked, true);
+    assert.equal(otherPlayer.stock.coupons, 0);
+    assert.equal(otherPlayer.stock.puzzles, 0);
+    assert.equal(otherPlayer.stock.chests, 0);
+    assert.equal(otherPlayer.stock.starCoupons, 0);
+    assert.equal(otherPlayer.stock.legendaryStars1, 0);
+    assert.equal(otherPlayer.stock.legendaryStars2, 0);
+    assert.equal(otherPlayer.stock.legendaryStars3, 0);
+
+    // Analyst's own sector MUST NOT be masked
+    const ownPlayer = playersList.find(p => p.userId === analystReg.userId);
+    assert(ownPlayer, 'Analyst own sector must be found');
+    assert.notEqual(ownPlayer.stock.masked, true);
+    assert.equal(ownPlayer.stock.coupons, 1200);
+
+    // 6. Admin now delegates view_stocks as well
+    await fetch(`${baseUrl}/api/users/${analystReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['view_sectors', 'view_stocks'] })
+    });
+
+    // Analyst now sees unmasked stock of other players
+    const unmaskedPlayers = await (await fetch(`${baseUrl}/api/players`, {
+      headers: { Authorization: `Bearer ${analystLogin.token}` }
+    })).json();
+    const otherUnmasked = unmaskedPlayers.find(p => p.userId === soldierReg.userId);
+    assert.notEqual(otherUnmasked.stock.masked, true);
+    assert.equal(otherUnmasked.stock.coupons, 9500);
+    assert.equal(otherUnmasked.stock.starCoupons, 340);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API delegated permissions: checkSectorAccess and read-only GET /api/players/:id vs mutations', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register target soldier with sector
+    const soldierReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'soldier_target', password: 'pass', playerName: 'База Цель' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${soldierReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const soldierLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'soldier_target', password: 'pass' })
+    })).json();
+    const soldierProfile = await (await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${soldierLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock: { coupons: 7777 } })
+    })).json();
+    const targetPlayerId = soldierProfile.id;
+
+    // Register viewer (R3) with view_sectors
+    const viewerReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'viewer_r3', password: 'pass', playerName: 'Зритель' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${viewerReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    await fetch(`${baseUrl}/api/users/${viewerReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['view_sectors'] })
+    });
+    const viewerLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'viewer_r3', password: 'pass' })
+    })).json();
+
+    // 1. GET /api/players/:id succeeds with masked stock for view_sectors without view_stocks
+    const readRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}`, {
+      headers: { Authorization: `Bearer ${viewerLogin.token}` }
+    });
+    assert.equal(readRes.status, 200);
+    const readPlayer = await readRes.json();
+    assert.equal(readPlayer.name, 'База Цель');
+    assert.equal(readPlayer.stock.masked, true);
+    assert.equal(readPlayer.stock.coupons, 0);
+
+    // 2. PUT /api/players/:id is strictly FORBIDDEN for non-owner without leader rank
+    const putRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${viewerLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Хакерская База' })
+    });
+    assert.equal(putRes.status, 403);
+
+    // 3. Sector officer mutation is strictly FORBIDDEN
+    const postOffRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${viewerLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Хакерский офицер', level: 1 })
+    });
+    assert.equal(postOffRes.status, 403);
+
+    // 4. Sector DELETE is strictly FORBIDDEN
+    const delRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${viewerLogin.token}` }
+    });
+    assert.equal(delRes.status, 403);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API delegated permissions: manage_events allows event CRUD, schedule-season, autopick and registration inspection', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register tactician (R3) with manage_events
+    const tacticianReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'tactician_r3', password: 'pass', playerName: 'Тактик' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${tacticianReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    await fetch(`${baseUrl}/api/users/${tacticianReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['manage_events'] })
+    });
+    const tacticianLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'tactician_r3', password: 'pass' })
+    })).json();
+
+    // Register regular soldier (R3, no permissions)
+    const soldierReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'regular_soldier', password: 'pass', playerName: 'Рядовой Боец' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${soldierReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const soldierLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'regular_soldier', password: 'pass' })
+    })).json();
+
+    // 1. Regular soldier cannot create event
+    const badCreate = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${soldierLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dateFrom: '2026-11-01', dateTo: '2026-11-02', typeId: 1 })
+    });
+    assert.equal(badCreate.status, 403);
+
+    // 2. Tactician CAN create event
+    const createRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tacticianLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dateFrom: '2026-11-01', dateTo: '2026-11-02', typeId: 1, note: 'Тест тактика' })
+    });
+    assert.equal(createRes.status, 200);
+    const createdEvent = await createRes.json();
+    assert(createdEvent.id);
+
+    // 3. Soldier registers for event
+    await fetch(`${baseUrl}/api/events/${createdEvent.id}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${soldierLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ desiredPlace: 1 })
+    });
+
+    // 4. Soldier GET /api/events does NOT see all registrations
+    const soldierEvents = await (await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: `Bearer ${soldierLogin.token}` }
+    })).json();
+    const evForSoldier = soldierEvents.find(e => e.id === createdEvent.id);
+    assert.equal(evForSoldier.registrations, undefined);
+    assert(evForSoldier.myRegistration);
+
+    // 5. Tactician GET /api/events DOES see registrations
+    const tacticianEvents = await (await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: `Bearer ${tacticianLogin.token}` }
+    })).json();
+    const evForTactician = tacticianEvents.find(e => e.id === createdEvent.id);
+    assert(Array.isArray(evForTactician.registrations));
+    assert(evForTactician.registrations.length >= 1);
+
+    // 6. Tactician GET /api/events/:id also sees registrations
+    const singleEvent = await (await fetch(`${baseUrl}/api/events/${createdEvent.id}`, {
+      headers: { Authorization: `Bearer ${tacticianLogin.token}` }
+    })).json();
+    assert(Array.isArray(singleEvent.registrations));
+
+    // 7. Tactician can PUT event
+    const putRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${tacticianLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...createdEvent, note: 'Обновленная заметка тактика' })
+    });
+    assert.equal(putRes.status, 200);
+
+    // 8. Tactician can schedule-season
+    const schedRes = await fetch(`${baseUrl}/api/events/schedule-season`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tacticianLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        startDate: '2026-11-09',
+        cyclesCount: 1,
+        presetId: 'king-of-war'
+      })
+    });
+    assert.equal(schedRes.status, 201);
+
+    // 9. Tactician can run autopick
+    const autopickRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/autopick`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tacticianLogin.token}` }
+    });
+    assert.equal(autopickRes.status, 200);
+
+    // 10. Tactician can DELETE event
+    const delRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tacticianLogin.token}` }
+    });
+    assert.equal(delRes.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API delegated permissions: approve_users allows pending approvals restricted to R3 only', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register HR user (R3) with approve_users
+    const hrReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'hr_r3', password: 'pass', playerName: 'Кадровик' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${hrReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    await fetch(`${baseUrl}/api/users/${hrReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['approve_users'] })
+    });
+    const hrLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'hr_r3', password: 'pass' })
+    })).json();
+
+    // Register recruit 1
+    const recruit1 = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'recruit_one', password: 'pass', playerName: 'Новичок 1' })
+    })).json();
+
+    // 1. HR gets pending list
+    const pendingRes = await fetch(`${baseUrl}/api/users/pending`, {
+      headers: { Authorization: `Bearer ${hrLogin.token}` }
+    });
+    assert.equal(pendingRes.status, 200);
+    const pendingList = await pendingRes.json();
+    assert(pendingList.some(u => u.id === recruit1.userId));
+
+    // 2. HR attempts to approve recruit into R4 -> 403 Forbidden!
+    const badRankApprove = await fetch(`${baseUrl}/api/users/${recruit1.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${hrLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r4' })
+    });
+    assert.equal(badRankApprove.status, 403);
+
+    // 3. HR approves recruit into R3 -> 200 OK
+    const okApprove = await fetch(`${baseUrl}/api/users/${recruit1.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${hrLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    assert.equal(okApprove.status, 200);
+
+    // Register recruit 2
+    const recruit2 = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'spammer_recruit', password: 'pass', playerName: 'Спамер' })
+    })).json();
+
+    // 4. HR rejects recruit 2 -> 200 OK
+    const rejectRes = await fetch(`${baseUrl}/api/users/${recruit2.userId}/reject`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${hrLogin.token}` }
+    });
+    assert.equal(rejectRes.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API delegated permissions: manage_catalog and R5-only permissions management', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register quartermaster (R3) with manage_catalog
+    const qmReg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'qm_r3', password: 'pass', playerName: 'Завгар' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${qmReg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    await fetch(`${baseUrl}/api/users/${qmReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['manage_catalog'] })
+    });
+    const qmLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'qm_r3', password: 'pass' })
+    })).json();
+
+    // 1. Quartermaster creates catalog item
+    const addCatRes = await fetch(`${baseUrl}/api/catalog`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'new_test_off',
+        name: 'Новый Офицер',
+        type: 'Танк',
+        generation: 8
+      })
+    });
+    assert.equal(addCatRes.status, 200);
+
+    // Batch catalog
+    const batchRes = await fetch(`${baseUrl}/api/catalog/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ name: 'Батч Офицер 1', type: 'Пехота' }])
+    });
+    assert.equal(batchRes.status, 200);
+
+    // Update catalog item
+    const putCatRes = await fetch(`${baseUrl}/api/catalog/new_test_off`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Новый Офицер Обновлен' })
+    });
+    assert.equal(putCatRes.status, 200);
+
+    // Delete catalog item
+    const delCatRes = await fetch(`${baseUrl}/api/catalog/new_test_off`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${qmLogin.token}` }
+    });
+    assert.equal(delCatRes.status, 200);
+
+    // Event Types CRUD
+    const addEtRes = await fetch(`${baseUrl}/api/event-types`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Турнир Гильдии', color: '#123456' })
+    });
+    assert.equal(addEtRes.status, 200);
+    const createdEt = await addEtRes.json();
+
+    const putEtRes = await fetch(`${baseUrl}/api/event-types/${createdEt.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Турнир Гильдии 2' })
+    });
+    assert.equal(putEtRes.status, 200);
+
+    const bulkEtRes = await fetch(`${baseUrl}/api/event-types/bulk-rewards`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeIds: [createdEt.id],
+        places: [{ place: 1, coupons: 15000 }]
+      })
+    });
+    assert.equal(bulkEtRes.status, 200);
+
+    const delEtRes = await fetch(`${baseUrl}/api/event-types/${createdEt.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${qmLogin.token}` }
+    });
+    assert.equal(delEtRes.status, 200);
+
+    // VIP Tiers
+    const vipRes = await fetch(`${baseUrl}/api/vip-tiers`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ level: 1, points: 0, dailyCoupons: 10 }])
+    });
+    assert.equal(vipRes.status, 200);
+
+    // 2. Quartermaster (R3) CANNOT PATCH users
+    const badPatch = await fetch(`${baseUrl}/api/users/${qmReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${qmLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: [] })
+    });
+    assert.equal(badPatch.status, 403);
+  } finally {
+    await server.close();
+  }
+});
+
+
 async function run() {
   let passed = 0;
   let failed = 0;
