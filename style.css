@@ -182,7 +182,9 @@ tr:hover td { background: rgba(255,255,255,.02); }
 /* ── FORMS ── */
 .form-group { display: flex; flex-direction: column; gap: 5px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-row-3 { grid-template-columns: repeat(3, 1fr); }
+.form-row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: flex-end; }
+.form-row-3 .form-group { display: flex; flex-direction: column; justify-content: flex-end; }
+.form-row-3 .form-group label { white-space: nowrap; font-size: 11.5px; line-height: 1.2; margin-bottom: 5px; display: block; }
 .form-group label { font-size: 12px; font-weight: 500; color: var(--text2); }
 input[type="text"], input[type="number"], input[type="date"], select {
   background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
@@ -1713,19 +1715,22 @@ select option { background: var(--bg3); }
 }
 .retro-radio-group {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 .retro-radio-label {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
   font-size: 13px;
   color: var(--text1);
+  white-space: nowrap;
 }
 .retro-radio-label input[type="radio"] {
-  margin-top: 3px;
+  margin: 0;
   accent-color: var(--blue);
   cursor: pointer;
   width: auto;
@@ -1736,6 +1741,12 @@ select option { background: var(--bg3); }
 .retro-radio-hint {
   font-size: 11px;
   color: var(--text3);
+}
+
+#modal-my-officer,
+#modal-sector-officer,
+#modal-add-sector-officer {
+  width: min(560px, calc(100vw - 32px));
 }
 
 
