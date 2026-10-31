@@ -2241,6 +2241,50 @@ test('API officer endpoints support and sanitize personalPuzzles for player offi
   }
 });
 
+test('API officer endpoints support onlyPersonalPuzzles setting', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://localhost:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+    const adminToken = adminLogin.token;
+
+    const createOffRes = await fetch(`${baseUrl}/api/players/1/officers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        catalogId: 'angel',
+        name: 'Анхель',
+        stars: 4,
+        level: 102,
+        personalPuzzles: 169,
+        onlyPersonalPuzzles: true
+      })
+    });
+    assert.equal(createOffRes.status, 201);
+    const createdOff = await createOffRes.json();
+    assert.equal(createdOff.onlyPersonalPuzzles, true);
+
+    const updateOffRes = await fetch(`${baseUrl}/api/players/1/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        onlyPersonalPuzzles: false
+      })
+    });
+    assert.equal(updateOffRes.status, 200);
+    const updatedOff = await updateOffRes.json();
+    assert.equal(updatedOff.onlyPersonalPuzzles, false);
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

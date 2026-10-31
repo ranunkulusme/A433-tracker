@@ -869,6 +869,60 @@ VIP: 15`;
       recordTest('11.5', 'Режим «Ретроспектива» при добавлении офицеров (без списания со склада)', 'БЛОК 11', false, e.message);
     }
 
+    // 11.6. Настройка «Только личные медали» и изолированный расчет дефицита
+    try {
+      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      assert(indexHtml.includes('id="my-officer-only-personal"'), 'Чекбокс my-officer-only-personal в ЛК');
+      assert(indexHtml.includes('id="aso-only-personal"'), 'Чекбокс aso-only-personal в добавлении офицера сектора');
+      assert(indexHtml.includes('id="so-only-personal"'), 'Чекбокс so-only-personal в редактировании офицера сектора');
+      assert(appJs.includes('🧩 Только личные'), 'app.js содержит бейдж «🧩 Только личные»');
+
+      // Создание офицера с onlyPersonalPuzzles через API
+      const createRes = await fetch(`${baseUrl}/api/players/1/officers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({
+          catalogId: 'angel',
+          name: 'Анхель',
+          level: 102,
+          coupons: 0,
+          stars: 4,
+          personalPuzzles: 169,
+          onlyPersonalPuzzles: true
+        })
+      });
+      const offCreated = await createRes.json();
+      assert.strictEqual(offCreated.onlyPersonalPuzzles, true, 'onlyPersonalPuzzles сохраняется в БД');
+
+      // Проверка изолированного дефицита
+      const playerWithStock = {
+        sector: 10,
+        stock: { coupons: 1000000, puzzles: 5000 }
+      };
+      const defIsolated = logic.calculateOfficerDeficit({
+        officer: { level: 102, coupons: 0, personalPuzzles: 169, onlyPersonalPuzzles: true },
+        catalogItem: { couponPerPuzzle: 500, generation: 7 },
+        player: playerWithStock,
+        targetLevel: 180
+      });
+      assert.strictEqual(defIsolated.deficitPuzzles, 221, 'Дефицит составляет ровно 221 личный пазл без поглощения складом');
+      assert.strictEqual(defIsolated.isOnlyPersonalPuzzles, true);
+      assert.strictEqual(defIsolated.stockPuzzles, 0);
+
+      const fc = logic.forecastOfficer({
+        today: '2026-10-31',
+        officer: { catalogId: 'angel', level: 102, coupons: 0, personalPuzzles: 169, onlyPersonalPuzzles: true },
+        player: playerWithStock,
+        officerCatalog: [{ id: 'angel', couponPerPuzzle: 500, generation: 7 }]
+      });
+      assert.strictEqual(fc.isOnlyPersonal, true);
+
+      recordTest('11.6', 'Настройка «Только личные медали» и изолированный расчет дефицита', 'БЛОК 11', true, 'Успешно изолирует дефицит от склада (221 пазл), бейдж и чекбоксы проверены');
+    } catch (e) {
+      recordTest('11.6', 'Настройка «Только личные медали» и изолированный расчет дефицита', 'БЛОК 11', false, e.message);
+    }
+
   } finally {
     await server.close();
     try {

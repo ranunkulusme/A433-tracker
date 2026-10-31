@@ -568,6 +568,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
             o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
           }
+          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
+            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
+          }
           if (o.id) {
             const updatedOff = db.updatePlayerOfficer(req.user.playerId, o.id, o);
             if (!updatedOff) {
@@ -600,6 +603,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
         body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
       }
+      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
+        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
+      }
       const off = db.addPlayerOfficer(req.user.playerId, body);
       return sendJson(res, 200, off);
     }
@@ -619,6 +625,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
         body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
+      }
+      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
+        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
       }
       const off = db.updatePlayerOfficer(req.user.playerId, officerId, body);
       if (!off) {
@@ -666,6 +675,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           }
           if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
             o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
+          }
+          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
+            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
           }
         }
       }
@@ -737,6 +749,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
             o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
           }
+          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
+            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
+          }
           if (o.id) {
             const updatedOff = db.updatePlayerOfficer(targetPlayerId, o.id, o);
             if (!updatedOff) {
@@ -775,6 +790,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
         body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
       }
+      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
+        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
+      }
       const off = db.addPlayerOfficer(targetPlayerId, body);
       return sendJson(res, 201, off);
     }
@@ -794,6 +812,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
         body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
+      }
+      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
+        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
       }
       const off = db.updatePlayerOfficer(targetPlayerId, offId, body);
       if (!off) {

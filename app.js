@@ -2512,9 +2512,10 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <div class="cabinet-officer-header">
         <div>
           <div class="cabinet-officer-name">${escapeHtml(officerLabel(o))}</div>
-          <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
             ${troopBadge(cat.type)}
             <span class="cabinet-stat-pill">Ген. ${cat.generation}</span>
+            ${(o.onlyPersonalPuzzles || o.only_personal_puzzles) ? '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;font-size:10.5px;border:1px solid rgba(16,185,129,0.3)">🧩 Только личные</span>' : ''}
           </div>
         </div>
         <div style="display:flex;gap:4px">
@@ -2562,11 +2563,11 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--text3)">Дефицит до 180:</span>
-          <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} пазл. ${def.costPerPuzzle > 0 ? `(${fmtNum(def.deficitCoupons)} куп.)` : '(только пазлы)'}</strong>
+          <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} ${def.isOnlyPersonalPuzzles ? 'личных пазл.' : (def.costPerPuzzle > 0 ? `пазл. (${fmtNum(def.deficitCoupons)} куп.)` : 'пазл. (только пазлы)')}</strong>
         </div>
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--text3)">Прогноз без ивентов:</span>
-          <span style="color:var(--text2)">${def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—'}</span>
+          <span style="color:var(--text2)">${def.isOnlyPersonalPuzzles ? '🧩 Только личные медали' : (def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—')}</span>
         </div>
       </div>
     </div>
@@ -2632,6 +2633,8 @@ function openAddMyOfficerModal() {
   document.getElementById('my-officer-coupons').value = 0;
   const puzEl = document.getElementById('my-officer-personal-puzzles');
   if (puzEl) puzEl.value = 0;
+  const onlyPersonalEl = document.getElementById('my-officer-only-personal');
+  if (onlyPersonalEl) onlyPersonalEl.checked = false;
   document.getElementById('my-officer-stars').value = 0;
   const retroRadioOn = document.getElementById('my-officer-retro-on');
   if (retroRadioOn) retroRadioOn.checked = true;
@@ -2654,6 +2657,8 @@ function openEditMyOfficerModal(officerId) {
   document.getElementById('my-officer-coupons').value = off.coupons || 0;
   const editPuzEl = document.getElementById('my-officer-personal-puzzles');
   if (editPuzEl) editPuzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
+  const editOnlyPersonalEl = document.getElementById('my-officer-only-personal');
+  if (editOnlyPersonalEl) editOnlyPersonalEl.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
   document.getElementById('my-officer-stars').value = off.stars || 0;
   const editRetroRadioOn = document.getElementById('my-officer-retro-on');
   if (editRetroRadioOn) editRetroRadioOn.checked = true;
@@ -2667,6 +2672,7 @@ async function saveMyOfficerSubmit() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('my-officer-level').value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('my-officer-coupons').value) || 0);
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('my-officer-personal-puzzles')?.value) || 0);
+  const onlyPersonalPuzzles = Boolean(document.getElementById('my-officer-only-personal')?.checked);
   const stars = Math.max(0, Math.min(6, parseInt(document.getElementById('my-officer-stars').value) || 0));
   const skills = Array.isArray(myOfficerModalSkills) && myOfficerModalSkills.length === 4
     ? myOfficerModalSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
@@ -2705,7 +2711,7 @@ async function saveMyOfficerSubmit() {
     if (myOfficerEditId) {
       const updatedOffData = await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
         method: 'PUT',
-        body: { level, coupons, stars, skills, personalPuzzles }
+        body: { level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles }
       });
       if (newStock) {
         await apiFetch('/api/my-profile', {
@@ -2729,6 +2735,7 @@ async function saveMyOfficerSubmit() {
           off.stars = stars;
           off.skills = skills;
           off.personalPuzzles = personalPuzzles;
+          off.onlyPersonalPuzzles = onlyPersonalPuzzles;
         }
       }
       if (state.players) {
@@ -2743,6 +2750,7 @@ async function saveMyOfficerSubmit() {
                 po.stars = stars;
                 po.skills = skills;
                 po.personalPuzzles = personalPuzzles;
+                po.onlyPersonalPuzzles = onlyPersonalPuzzles;
               }
             }
           }
@@ -2778,7 +2786,7 @@ async function saveMyOfficerSubmit() {
       const cat = getCatalogOfficer(catalogId);
       await apiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: { catalogId, name: cat?.name || '', level, coupons, stars, skills, personalPuzzles }
+        body: { catalogId, name: cat?.name || '', level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles }
       });
       closeAllModals();
       toast('Офицер добавлен в профиль');
@@ -4006,6 +4014,10 @@ function renderPlayerDetail(playerId) {
             return sorted.map(o => {
             const cat = getCatalogOfficer(o.catalogId);
             const forecast = forecastOfficer({ today: new Date().toISOString().slice(0, 10), officer: o, player: p, officerCatalog: state.officerCatalog, events: state.events, eventTypes: state.eventTypes });
+            const isOnlyPersonal = Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles);
+            const maxLabel = isOnlyPersonal
+              ? (forecast.date ? 'Готов (180 ур.)' : 'Только личные медали')
+              : (forecast.date || 'за пределами прогноза');
             const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
             const skillsBadge = `<span class="badge badge-info" style="font-family:var(--mono);font-size:11px">[${skills.join('-')}]</span>`;
             const starsHtml = canEditSector ? renderSectorOfficerStars(p.id, o.id, o.stars) : renderStars(o.stars);
@@ -4016,13 +4028,16 @@ function renderPlayerDetail(playerId) {
               </div>
             ` : '—';
             return `<tr>
-              <td><strong>${officerLink(o)}</strong></td>
+              <td>
+                <strong>${officerLink(o)}</strong>
+                ${isOnlyPersonal ? '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;font-size:10px;margin-left:4px" title="Прокачка строго за личные медали">🧩 Только личные</span>' : ''}
+              </td>
               <td>${cat ? troopBadge(cat.type) : '—'}</td>
               <td style="font-family:var(--mono)">${cat ? fmtNum(cat.generation) : '—'}</td>
               <td style="font-family:var(--mono)">${fmtNum(o.level)}</td>
               <td id="sector-officer-stars-cell-${o.id}">${starsHtml}</td>
               <td>${skillsBadge}</td>
-              <td>${forecast.date || 'за пределами прогноза'}</td>
+              <td>${maxLabel}</td>
               <td>${actionsHtml}</td>
             </tr>`;
           }).join('');
@@ -4554,6 +4569,8 @@ function openAddSectorOfficerModal(playerId) {
   if (coupEl) coupEl.value = 0;
   const puzEl = document.getElementById('aso-personal-puzzles');
   if (puzEl) puzEl.value = 0;
+  const asoOnlyPersonal = document.getElementById('aso-only-personal');
+  if (asoOnlyPersonal) asoOnlyPersonal.checked = false;
   const asoRetroOn = document.getElementById('aso-retro-on');
   if (asoRetroOn) asoRetroOn.checked = true;
 
@@ -4629,6 +4646,7 @@ async function submitAddSectorOfficer() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('aso-level')?.value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('aso-coupons')?.value) || 0);
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('aso-personal-puzzles')?.value) || 0);
+  const onlyPersonalPuzzles = Boolean(document.getElementById('aso-only-personal')?.checked);
   const isRetro = document.getElementById('aso-retro-on')?.checked ?? true;
   const stars = Math.max(0, Math.min(6, parseInt(asoSelectedStars) || 0));
   const skills = Array.isArray(asoSelectedSkills) && asoSelectedSkills.length === 4
@@ -4642,7 +4660,8 @@ async function submitAddSectorOfficer() {
     coupons,
     stars,
     skills,
-    personalPuzzles
+    personalPuzzles,
+    onlyPersonalPuzzles
   };
 
   try {
@@ -4684,6 +4703,8 @@ function openEditSectorOfficerModal(playerId, officerId) {
   if (coupEl) coupEl.value = off.coupons || 0;
   const puzEl = document.getElementById('so-personal-puzzles');
   if (puzEl) puzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
+  const soOnlyPersonal = document.getElementById('so-only-personal');
+  if (soOnlyPersonal) soOnlyPersonal.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
   const soRetroOn = document.getElementById('so-retro-on');
   if (soRetroOn) soRetroOn.checked = true;
   soSelectedStars = off.stars || 0;
@@ -4754,13 +4775,14 @@ async function submitEditSectorOfficer() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('so-level')?.value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('so-coupons')?.value) || 0);
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('so-personal-puzzles')?.value) || 0);
+  const onlyPersonalPuzzles = Boolean(document.getElementById('so-only-personal')?.checked);
   const isRetro = document.getElementById('so-retro-on')?.checked ?? true;
   const stars = Math.max(0, Math.min(6, parseInt(soSelectedStars) || 0));
   const skills = Array.isArray(soSelectedSkills) && soSelectedSkills.length === 4
     ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
 
-  const payload = { level, coupons, stars, skills, personalPuzzles };
+  const payload = { level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles };
   try {
     const res = await apiFetch(`/api/players/${editSectorOfficerPlayerId}/officers/${editSectorOfficerId}`, {
       method: 'PUT',

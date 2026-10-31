@@ -1829,6 +1829,59 @@ test('calculateRetrospectiveOfficerStock prevents stock deduction in retrospecti
   assert.strictEqual(normalResult.deductStock, true);
 });
 
+test('calculateOfficerDeficit respects onlyPersonalPuzzles and ignores warehouse universal coupons/puzzles', () => {
+  const { calculateOfficerDeficit } = require('./logic.js');
+
+  const playerWithRichStock = {
+    stock: { coupons: 500000, puzzles: 1000 },
+    sector: { vip: 14 }
+  };
+  const catalogItem = { couponPerPuzzle: 500, generation: 1 };
+
+  // Анхель: уровень 102, 169 личных пазлов. Дефицит до 180: (180 - 102) * 5 - 169 = 221 пазл.
+  // 1) Стандартный режим (onlyPersonalPuzzles = false): склад поглощает дефицит -> 0 пазлов.
+  const normalDef = calculateOfficerDeficit({
+    officer: { level: 102, coupons: 0, personalPuzzles: 169, onlyPersonalPuzzles: false },
+    catalogItem,
+    player: playerWithRichStock,
+    targetLevel: 180
+  });
+  assert.strictEqual(normalDef.deficitPuzzles, 0, 'В стандартном режиме богатый склад обнуляет дефицит');
+
+  // 2) Режим «Только личные медали» (onlyPersonalPuzzles = true): склад игнорируется, дефицит = 221 пазл!
+  const onlyPersonalDef = calculateOfficerDeficit({
+    officer: { level: 102, coupons: 0, personalPuzzles: 169, onlyPersonalPuzzles: true },
+    catalogItem,
+    player: playerWithRichStock,
+    targetLevel: 180
+  });
+  assert.strictEqual(onlyPersonalDef.deficitPuzzles, 221, 'В режиме только личные медали склад игнорируется, дефицит ровно 221');
+  assert.strictEqual(onlyPersonalDef.isOnlyPersonalPuzzles, true);
+  assert.strictEqual(onlyPersonalDef.stockPuzzles, 0, 'Запасы склада не списываются на этого офицера');
+  assert.strictEqual(onlyPersonalDef.daysWithoutEvents, null, 'Без авто-прогноза ежедневных универсальных наград');
+
+  // 3) forecastOfficer изолирует офицера от ежедневных наград сектора и общего склада
+  const fc = forecastOfficer({
+    today: '2026-10-31',
+    officer: { catalogId: 'angel', level: 102, coupons: 0, personalPuzzles: 169, onlyPersonalPuzzles: true },
+    player: playerWithRichStock,
+    officerCatalog: [catalogItem]
+  });
+  assert.strictEqual(fc.date, null);
+  assert.strictEqual(fc.days, null);
+  assert.strictEqual(fc.isOnlyPersonal, true);
+
+  // Если личных пазлов достаточно до 180 (например, 180 ур.), прогноз возвращает готовность
+  const fcMax = forecastOfficer({
+    today: '2026-10-31',
+    officer: { catalogId: 'angel', level: 180, coupons: 0, personalPuzzles: 0, onlyPersonalPuzzles: true },
+    player: playerWithRichStock,
+    officerCatalog: [catalogItem]
+  });
+  assert.strictEqual(fcMax.date, '2026-10-31');
+  assert.strictEqual(fcMax.days, 0);
+});
+
 
 
 
