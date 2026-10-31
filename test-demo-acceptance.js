@@ -756,6 +756,102 @@ VIP: 15`;
       recordTest('10.4', 'Адаптивность кнопок длительности и карточек событий на узких экранах (320–480px)', 'БЛОК 10', false, e.message);
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // БЛОК 11: ГИБКИЕ ТИПЫ ИВЕНТОВ, МАССОВЫЕ НАГРАДЫ И ЛИЧНЫЕ ПАЗЛЫ
+    // ══════════════════════════════════════════════════════════════════
+
+    // 11.1. Гибкая настройка расписания типов событий (День начала, День конца, переход через выходные)
+    try {
+      const typesRes = await fetch(`${baseUrl}/api/event-types`);
+      const allTypes = await typesRes.json();
+      const mf = allTypes.find(t => t.name === 'Мощные Силы');
+      assert(mf, 'Тип события Мощные Силы найден');
+      assert.equal(mf.startDayOfWeek, 6, 'День старта Мощных Сил = 6 (Суббота)');
+      assert.equal(mf.endDayOfWeek, 1, 'День окончания Мощных Сил = 1 (Понедельник)');
+      const duration = logic.calculateDurationDays(mf.startDayOfWeek, mf.endDayOfWeek);
+      assert.equal(duration, 3, 'Длительность Сб–Пн составляет 3 дня');
+      const formatted = logic.formatDayRange(mf.startDayOfWeek, mf.endDayOfWeek);
+      assert.equal(formatted, 'Сб–Пн (3 дня)');
+      recordTest('11.1', 'Гибкая настройка расписания типов событий (День начала и окончания с переходом через выходные)', 'БЛОК 11', true, `Расписание Сб–Пн (3 дня) валидно`);
+    } catch (e) {
+      recordTest('11.1', 'Гибкая настройка расписания типов событий (День начала и окончания с переходом через выходные)', 'БЛОК 11', false, e.message);
+    }
+
+    // 11.2. Механизм массового обновления наград во всех ивентах за 1 раз строго в купонах
+    try {
+      const bulkRes = await fetch(`${baseUrl}/api/event-types/bulk-rewards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({
+          typeIds: [1, 2, 3],
+          places: [
+            { place: 1, label: '🥇 1 место', coupons: 30000 },
+            { place: 2, label: '🥈 2 место', coupons: 15000 },
+            { place: 3, label: '🥉 3 место', coupons: 8000 }
+          ]
+        })
+      });
+      assert.equal(bulkRes.status, 200, 'POST /api/event-types/bulk-rewards вернул 200');
+      const bulkData = await bulkRes.json();
+      assert.equal(bulkData.ok, true);
+      assert.equal(bulkData.updatedCount, 3);
+      const verifyRes = await fetch(`${baseUrl}/api/event-types`);
+      const updatedTypes = await verifyRes.json();
+      for (const id of [1, 2, 3]) {
+        const item = updatedTypes.find(t => t.id === id);
+        assert.equal(item.places[0].coupons, 30000);
+        assert.equal(item.places[1].coupons, 15000);
+      }
+      recordTest('11.2', 'Массовое обновление наград во всех ивентах за 1 раз в купонах', 'БЛОК 11', true, 'Награды успешно обновлены в 3 событиях за 1 запрос');
+    } catch (e) {
+      recordTest('11.2', 'Массовое обновление наград во всех ивентах за 1 раз в купонах', 'БЛОК 11', false, e.message);
+    }
+
+    // 11.3. Параметр «Личные пазлы» командира в карточках и расчете дефицита
+    try {
+      const createdOff = await (await fetch(`${baseUrl}/api/players/1/officers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({
+          catalogId: 'admiral-nathon',
+          name: 'Адмирал Нейтон',
+          level: 100,
+          coupons: 0,
+          stars: 4,
+          personalPuzzles: 150
+        })
+      })).json();
+      assert.equal(createdOff.personalPuzzles, 150, 'Офицер сохранил 150 личных пазлов');
+
+      const defWithoutPersonal = logic.calculateOfficerDeficit({
+        officer: { level: 100, coupons: 0, personalPuzzles: 0 },
+        catalogItem: { couponPerPuzzle: 500, generation: 7 },
+        targetLevel: 180
+      });
+      const defWithPersonal = logic.calculateOfficerDeficit({
+        officer: { level: 100, coupons: 0, personalPuzzles: 150 },
+        catalogItem: { couponPerPuzzle: 500, generation: 7 },
+        targetLevel: 180
+      });
+      assert.equal(defWithoutPersonal.deficitPuzzles - defWithPersonal.deficitPuzzles, 150, 'Личные пазлы уменьшили дефицит ровно на 150');
+      recordTest('11.3', 'Параметр «Личные пазлы» командира и их учет в дефиците до 180 уровня', 'БЛОК 11', true, 'Личные пазлы (150 шт.) снижают дефицит командира');
+    } catch (e) {
+      recordTest('11.3', 'Параметр «Личные пазлы» командира и их учет в дефиците до 180 уровня', 'БЛОК 11', false, e.message);
+    }
+
+    // 11.4. Динамический конструктор сезонов на основе periodic типов событий
+    try {
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      assert(appJs.includes('function renderSeasonEventCards()'), 'app.js содержит renderSeasonEventCards()');
+      assert(appJs.includes('onSeasonCardDayChange'), 'app.js содержит onSeasonCardDayChange()');
+      assert(indexHtml.includes('id="modal-bulk-rewards"'), 'index.html содержит модальное окно #modal-bulk-rewards');
+      assert(appJs.includes('btn-bulk-rewards'), 'app.js содержит кнопку #btn-bulk-rewards');
+      recordTest('11.4', 'Динамический конструктор сезонов и элементы интерфейса', 'БЛОК 11', true, 'Динамический рендеринг карточек и разметка массовых наград подтверждены');
+    } catch (e) {
+      recordTest('11.4', 'Динамический конструктор сезонов и элементы интерфейса', 'БЛОК 11', false, e.message);
+    }
+
   } finally {
     await server.close();
     try {

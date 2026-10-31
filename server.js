@@ -6,7 +6,7 @@ const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
 
-let APP_VERSION = '3.17.2';
+let APP_VERSION = '3.18.0';
 try {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   if (pkg.version) APP_VERSION = pkg.version;
@@ -133,6 +133,45 @@ function sanitizeStock(stock) {
     stock.chests = Math.max(0, parseInt(stock.chests, 10) || 0);
   }
   return stock;
+}
+
+function sanitizePersonalPuzzles(val) {
+  const num = parseInt(val, 10);
+  return isNaN(num) || num < 0 ? 0 : num;
+}
+
+function sanitizeEventTypePlaces(places) {
+  if (!Array.isArray(places)) return [];
+  return places.map((p, idx) => ({
+    place: Math.max(1, parseInt(p.place) || (idx + 1)),
+    label: String(p.label || `${p.place || (idx + 1)} место`).trim(),
+    coupons: Math.max(0, parseInt(p.coupons) || 0)
+  }));
+}
+
+function sanitizeEventType(data) {
+  if (!data || typeof data !== 'object') return {};
+  const isPeriodic = data.isPeriodic !== undefined ? (data.isPeriodic ? 1 : 0) : (data.is_periodic !== undefined ? (data.is_periodic ? 1 : 0) : 1);
+  const startDayOfWeek = Math.max(1, Math.min(7, parseInt(data.startDayOfWeek ?? data.start_day_of_week) || 2));
+  const endDayOfWeek = Math.max(1, Math.min(7, parseInt(data.endDayOfWeek ?? data.end_day_of_week) || 3));
+  const activeWeeks = Math.max(1, parseInt(data.activeWeeks ?? data.active_weeks) || 1);
+  const breakWeeks = Math.max(0, parseInt(data.breakWeeks ?? data.break_weeks) || 1);
+  const weekOffset = Math.max(0, parseInt(data.weekOffset ?? data.week_offset) || 0);
+  const places = data.places !== undefined ? sanitizeEventTypePlaces(data.places) : undefined;
+
+  const result = {
+    ...data,
+    isPeriodic,
+    startDayOfWeek,
+    endDayOfWeek,
+    activeWeeks,
+    breakWeeks,
+    weekOffset
+  };
+  if (places !== undefined) {
+    result.places = places;
+  }
+  return result;
 }
 
 function requireAuth(req, res) {
@@ -526,6 +565,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           if (o.invested !== undefined) {
             o.invested = sanitizeInvested(o.invested);
           }
+          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
+            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
+          }
           if (o.id) {
             const updatedOff = db.updatePlayerOfficer(req.user.playerId, o.id, o);
             if (!updatedOff) {
@@ -555,6 +597,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.invested !== undefined) {
         body.invested = sanitizeInvested(body.invested);
       }
+      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
+        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
+      }
       const off = db.addPlayerOfficer(req.user.playerId, body);
       return sendJson(res, 200, off);
     }
@@ -571,6 +616,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       if (body.invested !== undefined) {
         body.invested = sanitizeInvested(body.invested);
+      }
+      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
+        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
       }
       const off = db.updatePlayerOfficer(req.user.playerId, officerId, body);
       if (!off) {
@@ -615,6 +663,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           }
           if (o.invested !== undefined) {
             o.invested = sanitizeInvested(o.invested);
+          }
+          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
+            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
           }
         }
       }
@@ -683,6 +734,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           if (o.invested !== undefined) {
             o.invested = sanitizeInvested(o.invested);
           }
+          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
+            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
+          }
           if (o.id) {
             const updatedOff = db.updatePlayerOfficer(targetPlayerId, o.id, o);
             if (!updatedOff) {
@@ -718,6 +772,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.invested !== undefined) {
         body.invested = sanitizeInvested(body.invested);
       }
+      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
+        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
+      }
       const off = db.addPlayerOfficer(targetPlayerId, body);
       return sendJson(res, 201, off);
     }
@@ -734,6 +791,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       if (body.invested !== undefined) {
         body.invested = sanitizeInvested(body.invested);
+      }
+      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
+        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
       }
       const off = db.updatePlayerOfficer(targetPlayerId, offId, body);
       if (!off) {
@@ -884,16 +944,32 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, db.getEventTypes());
     }
 
+    if (pathname === '/api/event-types/bulk-rewards' && req.method === 'POST') {
+      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      const typeIds = Array.isArray(body?.typeIds) ? body.typeIds.map(Number).filter(n => !isNaN(n) && n > 0) : [];
+      if (!typeIds.length) {
+        return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается непустой массив ID типов событий (typeIds)');
+      }
+      if (!Array.isArray(body?.places)) {
+        return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается массив наград (places)');
+      }
+      const places = sanitizeEventTypePlaces(body.places);
+      const updatedCount = db.updateBulkEventTypeRewards(typeIds, places);
+      return sendJson(res, 200, { ok: true, success: true, updatedCount, places });
+    }
+
     if (pathname === '/api/event-types' && req.method === 'POST') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
-      const saved = db.saveEventType(body);
+      const sanitized = sanitizeEventType(body);
+      const saved = db.saveEventType(sanitized);
       return sendJson(res, 200, saved);
     }
 
     const etMatch = pathname.match(/^\/api\/event-types\/(\d+)$/);
     if (etMatch && req.method === 'PUT') {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
-      const saved = db.saveEventType({ ...body, id: Number(etMatch[1]) });
+      const sanitized = sanitizeEventType({ ...body, id: Number(etMatch[1]) });
+      const saved = db.saveEventType(sanitized);
       return sendJson(res, 200, saved);
     }
 
@@ -958,6 +1034,12 @@ function createRequestHandler(staticDir, s3Manager = null) {
           found = db.saveEventType({
             name: typeName,
             color: color || '#8b5cf6',
+            isPeriodic: 1,
+            startDayOfWeek: preset?.startDayOfWeek || 2,
+            endDayOfWeek: preset?.endDayOfWeek || 3,
+            activeWeeks: preset?.activeWeeks || 1,
+            breakWeeks: preset?.breakWeeks || 1,
+            weekOffset: preset?.weekOffset || 0,
             places: [
               { place: 1, label: '🥇 1 место', coupons: 12500 },
               { place: 2, label: '🥈 2 место', coupons: 6500 },

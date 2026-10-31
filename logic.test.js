@@ -1700,6 +1700,113 @@ test('calculateSkillStockDelta and calculateLevelStockDelta track invested and d
   assert.strictEqual(untrackedLvl.delta.puzzles, 0);
 });
 
+test('calculateDurationDays and formatDayRange correctly handle same-week and weekend-crossing days', () => {
+  const { calculateDurationDays, formatDayRange } = require('./logic.js');
+
+  assert.strictEqual(typeof calculateDurationDays, 'function');
+  assert.strictEqual(calculateDurationDays(2, 3), 2, 'Вт(2) -> Ср(3) = 2 дня');
+  assert.strictEqual(calculateDurationDays(2, 4), 3, 'Вт(2) -> Чт(4) = 3 дня');
+  assert.strictEqual(calculateDurationDays(6, 1), 3, 'Сб(6) -> Пн(1) = 3 дня (Сб, Вс, Пн)');
+  assert.strictEqual(calculateDurationDays(5, 7), 3, 'Пт(5) -> Вс(7) = 3 дня (Пт, Сб, Вс)');
+  assert.strictEqual(calculateDurationDays(1, 1), 1, 'Пн(1) -> Пн(1) = 1 день');
+  assert.strictEqual(calculateDurationDays(7, 2), 3, 'Вс(7) -> Вт(2) = 3 дня (Вс, Пн, Вт)');
+
+  assert.strictEqual(typeof formatDayRange, 'function');
+  assert.strictEqual(formatDayRange(2, 3), 'Вт–Ср (2 дня)');
+  assert.strictEqual(formatDayRange(6, 1), 'Сб–Пн (3 дня)');
+  assert.strictEqual(formatDayRange(2, 4), 'Вт–Чт (3 дня)');
+  assert.strictEqual(formatDayRange(1, 1), 'Пн (1 день)');
+});
+
+test('generateSeasonSchedule accurately calculates durationDays and dateTo from startDayOfWeek and endDayOfWeek', () => {
+  const { generateSeasonSchedule } = require('./logic.js');
+
+  const rules = [
+    {
+      id: 'custom-weekend',
+      name: 'Битва Выходных',
+      color: '#ec4899',
+      startDayOfWeek: 6, // Суббота
+      endDayOfWeek: 1,   // Понедельник
+      activeWeeks: 1,
+      breakWeeks: 1,
+      weekOffset: 0
+    },
+    {
+      id: 'custom-midweek',
+      name: 'Штурм Ресурсов',
+      color: '#3b82f6',
+      startDayOfWeek: 2, // Вторник
+      endDayOfWeek: 3,   // Среда
+      activeWeeks: 1,
+      breakWeeks: 1,
+      weekOffset: 0
+    }
+  ];
+
+  const items = generateSeasonSchedule({
+    startDate: '2026-11-02', // Понедельник
+    totalWeeks: 4,
+    rules
+  });
+
+  const weekendEvents = items.filter(ev => ev.typeId === 'custom-weekend');
+  assert.ok(weekendEvents.length >= 2, 'Должно быть минимум 2 события выходных');
+  assert.strictEqual(weekendEvents[0].durationDays, 3, 'Сб-Пн длится 3 дня');
+  assert.strictEqual(weekendEvents[0].dayFromStr, 'Сб');
+  assert.strictEqual(weekendEvents[0].dayToStr, 'Пн');
+  assert.strictEqual(weekendEvents[0].dateFrom, '2026-11-07'); // Первая суббота
+  assert.strictEqual(weekendEvents[0].dateTo, '2026-11-09');   // Следующий понедельник
+
+  const midweekEvents = items.filter(ev => ev.typeId === 'custom-midweek');
+  assert.strictEqual(midweekEvents[0].durationDays, 2, 'Вт-Ср длится 2 дня');
+  assert.strictEqual(midweekEvents[0].dayFromStr, 'Вт');
+  assert.strictEqual(midweekEvents[0].dayToStr, 'Ср');
+  assert.strictEqual(midweekEvents[0].dateFrom, '2026-11-03');
+  assert.strictEqual(midweekEvents[0].dateTo, '2026-11-04');
+});
+
+test('calculateOfficerDeficit respects personalPuzzles and subtracts them from deficit', () => {
+  const { calculateOfficerDeficit } = require('./logic.js');
+
+  const catalogItem = { couponPerPuzzle: 500, generation: 7 };
+  const player = { stock: { puzzles: 0, coupons: 0 }, sector: { vipLevel: 10 } };
+
+  // Офицер без личных пазлов: 0 ур., цель 180 ур. (900 пазлов)
+  const defWithout = calculateOfficerDeficit({
+    officer: { level: 0, coupons: 0, personalPuzzles: 0 },
+    catalogItem,
+    player,
+    targetLevel: 180
+  });
+  assert.strictEqual(defWithout.currentPuzzles, 0);
+  assert.strictEqual(defWithout.deficitPuzzles, 900);
+  assert.strictEqual(defWithout.deficitCoupons, 450000);
+
+  // Офицер с 150 личными пазлами:
+  const defWith = calculateOfficerDeficit({
+    officer: { level: 0, coupons: 0, personalPuzzles: 150 },
+    catalogItem,
+    player,
+    targetLevel: 180
+  });
+  assert.strictEqual(defWith.currentPuzzles, 150, 'currentPuzzles включает личные пазлы');
+  assert.strictEqual(defWith.deficitPuzzles, 750, 'deficitPuzzles уменьшен на 150 личных пазлов');
+  assert.strictEqual(defWith.deficitCoupons, 375000, 'deficitCoupons уменьшен на 75 000 купонов');
+
+  // Офицер с частичными купонами и личными пазлами:
+  // 10 ур. (50 пазлов) + 1000 купонов (2 пазла) + 20 личных пазлов = 72 пазла
+  const defPartial = calculateOfficerDeficit({
+    officer: { level: 10, coupons: 1000, personal_puzzles: 20 },
+    catalogItem,
+    player,
+    targetLevel: 180
+  });
+  assert.strictEqual(defPartial.currentPuzzles, 72);
+  assert.strictEqual(defPartial.deficitPuzzles, 828);
+});
+
+
 
 
 

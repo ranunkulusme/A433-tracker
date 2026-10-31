@@ -2027,6 +2027,220 @@ test('API serves application version via GET /api/version', async () => {
   }
 });
 
+test('API POST /api/event-types/bulk-rewards updates prizes across multiple event types and enforces R4/R5 RBAC', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Unauthorized -> 401
+    const unauth = await fetch(`${baseUrl}/api/event-types/bulk-rewards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ typeIds: [1, 2], places: [] })
+    });
+    assert.equal(unauth.status, 401);
+
+    // 2. Login as admin (r5)
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const adminToken = (await adminLoginRes.json()).token;
+
+    // 3. Register and approve r3 user
+    await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'bulkR3', password: 'password123' })
+    });
+    const usersRes = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    const users = await usersRes.json();
+    const r3Target = users.find(u => u.username === 'bulkR3');
+    await fetch(`${baseUrl}/api/users/${r3Target.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ is_approved: 1, rank: 'r3' })
+    });
+    const r3LoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'bulkR3', password: 'password123' })
+    });
+    const r3Token = (await r3LoginRes.json()).token;
+
+    // 4. R3 forbidden -> 403
+    const r3Res = await fetch(`${baseUrl}/api/event-types/bulk-rewards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${r3Token}` },
+      body: JSON.stringify({ typeIds: [1, 2], places: [{ place: 1, label: '1 место', coupons: 15000 }] })
+    });
+    assert.equal(r3Res.status, 403);
+
+    // 5. Validation error (empty typeIds) -> 400
+    const badReq = await fetch(`${baseUrl}/api/event-types/bulk-rewards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ typeIds: [], places: [{ place: 1, label: '1 место', coupons: 15000 }] })
+    });
+    assert.equal(badReq.status, 400);
+
+    // 6. Admin updates event types 1 and 2
+    const okRes = await fetch(`${baseUrl}/api/event-types/bulk-rewards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        typeIds: [1, 2],
+        places: [
+          { place: 1, label: '🥇 1 место', coupons: 25000 },
+          { place: 2, label: '🥈 2 место', coupons: 13000 }
+        ]
+      })
+    });
+    assert.equal(okRes.status, 200);
+    const okData = await okRes.json();
+    assert.equal(okData.ok, true);
+    assert.equal(okData.updatedCount, 2);
+
+    // 7. Verify via GET /api/event-types
+    const getRes = await fetch(`${baseUrl}/api/event-types`);
+    assert.equal(getRes.status, 200);
+    const allTypes = await getRes.json();
+    const t1 = allTypes.find(t => t.id === 1);
+    const t2 = allTypes.find(t => t.id === 2);
+    assert.ok(t1 && t2);
+    assert.equal(t1.places.length, 2);
+    assert.equal(t1.places[0].coupons, 25000);
+    assert.equal(t2.places[1].coupons, 13000);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API event-types endpoints sanitize and store schedule cadence fields', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const adminToken = (await adminLoginRes.json()).token;
+
+    // POST /api/event-types
+    const postRes = await fetch(`${baseUrl}/api/event-types`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        name: 'Осада Базы',
+        color: '#ef4444',
+        isPeriodic: 1,
+        startDayOfWeek: 6,
+        endDayOfWeek: 1, // Сб-Пн
+        activeWeeks: 2,
+        breakWeeks: 1,
+        weekOffset: 0,
+        places: [{ place: 1, label: '1 место', coupons: 18000 }]
+      })
+    });
+    assert.equal(postRes.status, 200);
+    const created = await postRes.json();
+    assert.ok(created.id);
+    assert.equal(created.startDayOfWeek, 6);
+    assert.equal(created.endDayOfWeek, 1);
+    assert.equal(created.activeWeeks, 2);
+
+    // PUT /api/event-types/:id
+    const putRes = await fetch(`${baseUrl}/api/event-types/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        name: 'Осада Базы (Обновлено)',
+        color: '#dc2626',
+        isPeriodic: 1,
+        startDayOfWeek: 5,
+        endDayOfWeek: 7,
+        activeWeeks: 1,
+        breakWeeks: 2,
+        weekOffset: 1,
+        places: [{ place: 1, label: '1 место', coupons: 19000 }]
+      })
+    });
+    assert.equal(putRes.status, 200);
+    const updated = await putRes.json();
+    assert.equal(updated.name, 'Осада Базы (Обновлено)');
+    assert.equal(updated.startDayOfWeek, 5);
+    assert.equal(updated.endDayOfWeek, 7);
+    assert.equal(updated.breakWeeks, 2);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API officer endpoints support and sanitize personalPuzzles for player officers', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const adminToken = (await adminLoginRes.json()).token;
+
+    // 1. Add officer to player 1 with personalPuzzles
+    const addOffRes = await fetch(`${baseUrl}/api/players/1/officers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        catalogId: 'admiral-nathon',
+        name: 'Адмирал Нейтон',
+        level: 50,
+        coupons: 1000,
+        stars: 3,
+        personalPuzzles: 85
+      })
+    });
+    assert.equal(addOffRes.status, 201);
+    const addedOff = await addOffRes.json();
+    assert.equal(addedOff.personalPuzzles, 85);
+
+    // 2. Update officer with personalPuzzles
+    const updateOffRes = await fetch(`${baseUrl}/api/players/1/officers/${addedOff.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        personalPuzzles: 120
+      })
+    });
+    assert.equal(updateOffRes.status, 200);
+    const updatedOff = await updateOffRes.json();
+    assert.equal(updatedOff.personalPuzzles, 120);
+
+    // 3. Test negative value sanitization to 0
+    const negOffRes = await fetch(`${baseUrl}/api/players/1/officers/${addedOff.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        personalPuzzles: -25
+      })
+    });
+    assert.equal(negOffRes.status, 200);
+    const negOff = await negOffRes.json();
+    assert.equal(negOff.personalPuzzles, 0);
+  } finally {
+    await server.close();
+  }
+});
+
 async function run() {
   let passed = 0;
   let failed = 0;

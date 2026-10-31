@@ -71,7 +71,7 @@
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(event)">
       <div class="sidebar-version-wrap">
         <span class="sidebar-version-dot"></span>
-        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.17.2</span>
+        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.18.0</span>
       </div>
     </div>
   </aside>
@@ -227,7 +227,7 @@
       <label for="aso-catalog-select">Выберите офицера из каталога *</label>
       <select id="aso-catalog-select" onchange="onAsoCatalogChange(this.value)"></select>
     </div>
-    <div class="form-row">
+    <div class="form-row form-row-3">
       <div class="form-group">
         <label for="aso-level">Уровень (0-179)</label>
         <input type="number" id="aso-level" min="0" max="179" value="0">
@@ -235,6 +235,10 @@
       <div class="form-group">
         <label for="aso-coupons">Вложено купонов</label>
         <input type="number" id="aso-coupons" min="0" step="500" value="0">
+      </div>
+      <div class="form-group">
+        <label for="aso-personal-puzzles">Личные пазлы 🧩</label>
+        <input type="number" id="aso-personal-puzzles" min="0" value="0" placeholder="0">
       </div>
     </div>
     <div class="form-group">
@@ -259,7 +263,7 @@
     <button class="modal-close" onclick="closeAllModals()">✕</button>
   </div>
   <div class="modal-body">
-    <div class="form-row">
+    <div class="form-row form-row-3">
       <div class="form-group">
         <label for="so-level">Уровень (0-179)</label>
         <input type="number" id="so-level" min="0" max="179" value="0">
@@ -267,6 +271,10 @@
       <div class="form-group">
         <label for="so-coupons">Вложено купонов</label>
         <input type="number" id="so-coupons" min="0" step="500" value="0">
+      </div>
+      <div class="form-group">
+        <label for="so-personal-puzzles">Личные пазлы 🧩</label>
+        <input type="number" id="so-personal-puzzles" min="0" value="0" placeholder="0">
       </div>
     </div>
     <div class="form-group">
@@ -473,26 +481,82 @@
 </div>
 
 <!-- Modal: Event Type -->
-<div class="modal" id="modal-et">
+<div class="modal modal-wide" id="modal-et">
   <div class="modal-header">
     <h3 id="modal-et-title">Тип ивента</h3>
     <button class="modal-close" onclick="closeAllModals()">✕</button>
   </div>
   <div class="modal-body">
     <div class="form-row">
-      <div class="form-group">
-        <label>Название *</label>
+      <div class="form-group" style="flex:2">
+        <label for="fet-name">Название *</label>
         <input type="text" id="fet-name" placeholder="Король Войны">
       </div>
-      <div class="form-group">
-        <label>Цвет</label>
+      <div class="form-group" style="flex:1">
+        <label for="fet-color">Цвет</label>
         <input type="color" id="fet-color" value="#8b5cf6" style="height:38px;padding:2px 4px;cursor:pointer">
       </div>
     </div>
+
+    <!-- Настройки периодичности и расписания -->
+    <div class="et-schedule-box" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;margin:0">
+          <input type="checkbox" id="fet-is-periodic" checked onchange="toggleEtScheduleFields()">
+          <span>Периодический ивент (участвует в сезонах)</span>
+        </label>
+        <span class="badge" id="fet-duration-badge" style="background:var(--accent-glow);color:var(--accent);font-weight:600">Вт–Ср (2 дня)</span>
+      </div>
+
+      <div id="fet-schedule-fields">
+        <div class="form-row" style="margin-bottom:10px">
+          <div class="form-group">
+            <label for="fet-start-day">День начала</label>
+            <select id="fet-start-day" onchange="onEtDaysChange()">
+              <option value="1">Понедельник (Пн)</option>
+              <option value="2" selected>Вторник (Вт)</option>
+              <option value="3">Среда (Ср)</option>
+              <option value="4">Четверг (Чт)</option>
+              <option value="5">Пятница (Пт)</option>
+              <option value="6">Суббота (Сб)</option>
+              <option value="7">Воскресенье (Вс)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="fet-end-day">День окончания</label>
+            <select id="fet-end-day" onchange="onEtDaysChange()">
+              <option value="1">Понедельник (Пн)</option>
+              <option value="2">Вторник (Вт)</option>
+              <option value="3" selected>Среда (Ср)</option>
+              <option value="4">Четверг (Чт)</option>
+              <option value="5">Пятница (Пт)</option>
+              <option value="6">Суббота (Сб)</option>
+              <option value="7">Воскресенье (Вс)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row form-row-3">
+          <div class="form-group">
+            <label for="fet-active-weeks">Недель активности</label>
+            <input type="number" id="fet-active-weeks" min="1" max="10" value="1">
+          </div>
+          <div class="form-group">
+            <label for="fet-break-weeks">Недель перерыва</label>
+            <input type="number" id="fet-break-weeks" min="0" max="10" value="1">
+          </div>
+          <div class="form-group">
+            <label for="fet-week-offset">Смещение (недель)</label>
+            <input type="number" id="fet-week-offset" min="0" max="10" value="0">
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="form-group">
-      <label>Призовые места</label>
+      <label>Призовые места (награды строго в купонах)</label>
       <div class="officer-row-header">
-        <span style="width:60px">Место</span><span>Название</span><span style="width:110px">Купонов</span><span></span>
+        <span style="width:60px">Место</span><span>Название</span><span style="width:140px">Купонов</span><span></span>
       </div>
       <div id="fet-places-list"></div>
       <button class="btn-outline btn-sm" onclick="addEtPlaceRow()" style="margin-top:8px">+ Добавить место</button>
@@ -501,6 +565,44 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
     <button class="btn-primary" onclick="saveEventType()">Сохранить</button>
+  </div>
+</div>
+
+<!-- Modal: Bulk Event Rewards -->
+<div class="modal modal-wide" id="modal-bulk-rewards">
+  <div class="modal-header">
+    <h3>⚡ Массовое обновление наград событий</h3>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
+  </div>
+  <div class="modal-body">
+    <p style="color:var(--text2);font-size:13px;margin-bottom:14px">
+      Позволяет в один клик обновить награды во всех выбранных ивентах (например, при выходе нового поколения офицеров). Награды задаются строго в <strong>купонах</strong>.
+    </p>
+
+    <div class="form-group" style="margin-bottom:14px">
+      <label style="display:flex;align-items:center;justify-content:space-between;font-weight:600;margin-bottom:6px">
+        <span>Выберите события для обновления:</span>
+        <label style="font-weight:normal;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="bulk-rewards-select-all" checked onchange="toggleBulkSelectAll(this.checked)"> Выбрать все
+        </label>
+      </label>
+      <div id="bulk-rewards-types-list" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:8px;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+        <!-- Чекбоксы событий -->
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label style="font-weight:600;margin-bottom:6px">Награды за места (купоны):</label>
+      <div class="officer-row-header">
+        <span style="width:60px">Место</span><span>Название</span><span style="width:140px">Купонов</span><span></span>
+      </div>
+      <div id="bulk-places-list"></div>
+      <button class="btn-outline btn-sm" onclick="addBulkPlaceRow()" style="margin-top:8px">+ Добавить место</button>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
+    <button class="btn-primary" id="btn-submit-bulk-rewards" onclick="submitBulkRewards()">⚡ Применить награды</button>
   </div>
 </div>
 
@@ -579,163 +681,15 @@
       </div>
     </div>
 
-    <!-- Карточки правил событий (Король Войны, Мощные Силы, Сила Времени) -->
-    <div style="margin-bottom:8px;font-size:13px;font-weight:600;color:var(--text2)">
-      Настройка событий и ритма активности:
+    <!-- Карточки правил событий -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:600;color:var(--text2)">
+        Настройка событий и ритма активности:
+      </div>
+      <button type="button" class="btn-outline btn-sm" onclick="openEventTypeModal()">+ Добавить тип события</button>
     </div>
     <div class="season-config-grid" id="season-event-cards">
-      <!-- Card 1: Король Войны -->
-      <div class="season-event-card card-kow">
-        <div class="season-card-header">
-          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#c084fc">
-            <input type="checkbox" id="season-enable-kow" checked onchange="updateSeasonSchedulePreview()">
-            ⚔️ Король Войны
-          </label>
-          <span class="badge" style="background:rgba(139,92,246,0.15);color:#c084fc;font-size:11px">Сила сектора</span>
-        </div>
-        <div class="season-card-body">
-          <div class="season-input-row">
-            <label>День старта:</label>
-            <select id="season-startday-kow" onchange="updateSeasonSchedulePreview()">
-              <option value="1">Понедельник</option>
-              <option value="2" selected>Вторник</option>
-              <option value="3">Среда</option>
-              <option value="4">Четверг</option>
-              <option value="5">Пятница</option>
-              <option value="6">Суббота</option>
-              <option value="7">Воскресенье</option>
-            </select>
-          </div>
-          <div class="season-input-row">
-            <label>Длительность:</label>
-            <select id="season-duration-kow" onchange="updateSeasonSchedulePreview()">
-              <option value="1">1 день</option>
-              <option value="2" selected>2 дня (Вт–Ср)</option>
-              <option value="3">3 дня</option>
-              <option value="4">4 дня</option>
-              <option value="7">7 дней</option>
-            </select>
-          </div>
-          <div class="season-input-row">
-            <label>Ритм активности:</label>
-            <div style="display:flex;gap:4px;align-items:center">
-              <input type="number" id="season-active-kow" min="1" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
-              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
-              <input type="number" id="season-break-kow" min="0" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
-              <span style="font-size:11px;color:var(--text3)">перерыв</span>
-            </div>
-          </div>
-          <div class="season-input-row">
-            <label>Смещение нед.:</label>
-            <select id="season-offset-kow" onchange="updateSeasonSchedulePreview()">
-              <option value="0" selected>Неделя 1 (без смещения)</option>
-              <option value="1">Неделя 2 (со 2-й недели)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- Card 2: Мощные Силы -->
-      <div class="season-event-card card-mf">
-        <div class="season-card-header">
-          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#34d399">
-            <input type="checkbox" id="season-enable-mf" checked onchange="updateSeasonSchedulePreview()">
-            🛡️ Мощные Силы
-          </label>
-          <span class="badge" style="background:rgba(16,185,129,0.15);color:#34d399;font-size:11px">Войска</span>
-        </div>
-        <div class="season-card-body">
-          <div class="season-input-row">
-            <label>День старта:</label>
-            <select id="season-startday-mf" onchange="updateSeasonSchedulePreview()">
-              <option value="1">Понедельник</option>
-              <option value="2">Вторник</option>
-              <option value="3">Среда</option>
-              <option value="4">Четверг</option>
-              <option value="5">Пятница</option>
-              <option value="6" selected>Суббота</option>
-              <option value="7">Воскресенье</option>
-            </select>
-          </div>
-          <div class="season-input-row">
-            <label>Длительность:</label>
-            <select id="season-duration-mf" onchange="updateSeasonSchedulePreview()">
-              <option value="1">1 день</option>
-              <option value="2">2 дня</option>
-              <option value="3" selected>3 дня (Сб–Пн)</option>
-              <option value="4">4 дня</option>
-              <option value="7">7 дней</option>
-            </select>
-          </div>
-          <div class="season-input-row">
-            <label>Ритм активности:</label>
-            <div style="display:flex;gap:4px;align-items:center">
-              <input type="number" id="season-active-mf" min="1" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
-              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
-              <input type="number" id="season-break-mf" min="0" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
-              <span style="font-size:11px;color:var(--text3)">перерыв</span>
-            </div>
-          </div>
-          <div class="season-input-row">
-            <label>Смещение нед.:</label>
-            <select id="season-offset-mf" onchange="updateSeasonSchedulePreview()">
-              <option value="0" selected>Неделя 1 (без смещения)</option>
-              <option value="1">Неделя 2 (со 2-й недели)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- Card 3: Сила Времени -->
-      <div class="season-event-card card-pot">
-        <div class="season-card-header">
-          <label class="season-card-title" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#fbbf24">
-            <input type="checkbox" id="season-enable-pot" checked onchange="updateSeasonSchedulePreview()">
-            ⏳ Сила Времени
-          </label>
-          <span class="badge" style="background:rgba(245,158,11,0.15);color:#fbbf24;font-size:11px">Ускорители</span>
-        </div>
-        <div class="season-card-body">
-          <div class="season-input-row">
-            <label>День старта:</label>
-            <select id="season-startday-pot" onchange="updateSeasonSchedulePreview()">
-              <option value="1">Понедельник</option>
-              <option value="2" selected>Вторник</option>
-              <option value="3">Среда</option>
-              <option value="4">Четверг</option>
-              <option value="5">Пятница</option>
-              <option value="6">Суббота</option>
-              <option value="7">Воскресенье</option>
-            </select>
-          </div>
-          <div class="season-input-row">
-            <label>Длительность:</label>
-            <select id="season-duration-pot" onchange="updateSeasonSchedulePreview()">
-              <option value="1">1 день</option>
-              <option value="2">2 дня</option>
-              <option value="3" selected>3 дня (Вт–Чт)</option>
-              <option value="4">4 дня</option>
-              <option value="7">7 дней</option>
-            </select>
-          </div>
-          <div class="season-input-row">
-            <label>Ритм активности:</label>
-            <div style="display:flex;gap:4px;align-items:center">
-              <input type="number" id="season-active-pot" min="1" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
-              <span style="font-size:11px;color:var(--text3)">нед. акт. /</span>
-              <input type="number" id="season-break-pot" min="0" max="12" value="1" style="width:48px" onchange="updateSeasonSchedulePreview()">
-              <span style="font-size:11px;color:var(--text3)">перерыв</span>
-            </div>
-          </div>
-          <div class="season-input-row">
-            <label>Смещение нед.:</label>
-            <select id="season-offset-pot" onchange="updateSeasonSchedulePreview()">
-              <option value="0">Неделя 1 (без смещения)</option>
-              <option value="1" selected>Неделя 2 (чередование)</option>
-            </select>
-          </div>
-        </div>
-      </div>
+      <!-- Динамические карточки периодических типов событий -->
     </div>
 
     <!-- Интерактивный предпросмотр -->
@@ -851,7 +805,7 @@
       <label for="my-officer-catalog-select">Офицер из каталога *</label>
       <select id="my-officer-catalog-select"></select>
     </div>
-    <div class="form-row">
+    <div class="form-row form-row-3">
       <div class="form-group">
         <label for="my-officer-level">Уровень подготовки (0-180)</label>
         <input type="number" id="my-officer-level" min="0" max="180" value="0">
@@ -859,6 +813,10 @@
       <div class="form-group">
         <label for="my-officer-coupons">Купоны на уровне</label>
         <input type="number" id="my-officer-coupons" min="0" value="0">
+      </div>
+      <div class="form-group">
+        <label for="my-officer-personal-puzzles">Личные пазлы 🧩</label>
+        <input type="number" id="my-officer-personal-puzzles" min="0" value="0" placeholder="0">
       </div>
     </div>
     <div class="form-group">

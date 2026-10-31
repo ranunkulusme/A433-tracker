@@ -298,6 +298,7 @@ function getPlayers() {
       level: o.level,
       coupons: o.coupons,
       stars: o.stars,
+      personalPuzzles: Number(o.personal_puzzles) || 0,
       skills: parseSkills(o.skills_json),
       invested: parseInvested(o.invested_json)
     });
@@ -374,6 +375,7 @@ function getPlayerById(id) {
       level: o.level,
       coupons: o.coupons,
       stars: o.stars,
+      personalPuzzles: Number(o.personal_puzzles) || 0,
       skills: parseSkills(o.skills_json),
       invested: parseInvested(o.invested_json)
     }))
@@ -410,6 +412,7 @@ function getPlayersByUserId(userId) {
       level: o.level,
       coupons: o.coupons,
       stars: o.stars,
+      personalPuzzles: Number(o.personal_puzzles) || 0,
       skills: parseSkills(o.skills_json),
       invested: parseInvested(o.invested_json)
     });
@@ -595,25 +598,27 @@ function addPlayerOfficer(playerId, officerData) {
   const level = Number(officerData.level) || 0;
   const coupons = Number(officerData.coupons) || 0;
   const stars = Number(officerData.stars) || 0;
+  const personalPuzzles = Number(officerData.personalPuzzles ?? officerData.personal_puzzles) || 0;
   const skills = parseSkills(officerData.skills ?? officerData.skills_json);
   const skillsJson = JSON.stringify(skills);
   const invested = parseInvested(officerData.invested ?? officerData.invested_json);
   const investedJson = JSON.stringify(invested);
 
   db.prepare(`
-    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, skills_json, invested_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, personal_puzzles, skills_json, invested_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       catalog_id = excluded.catalog_id,
       name = excluded.name,
       level = excluded.level,
       coupons = excluded.coupons,
       stars = excluded.stars,
+      personal_puzzles = excluded.personal_puzzles,
       skills_json = excluded.skills_json,
       invested_json = excluded.invested_json
-  `).run(id, playerId, catalogId, name, level, coupons, stars, skillsJson, investedJson);
+  `).run(id, playerId, catalogId, name, level, coupons, stars, personalPuzzles, skillsJson, investedJson);
 
-  return { id, playerId, catalogId, name, level, coupons, stars, skills, invested };
+  return { id, playerId, catalogId, name, level, coupons, stars, personalPuzzles, skills, invested };
 }
 
 function updatePlayerOfficer(playerId, officerId, updates) {
@@ -624,6 +629,9 @@ function updatePlayerOfficer(playerId, officerId, updates) {
   const level = updates.level !== undefined ? Number(updates.level) : existing.level;
   const coupons = updates.coupons !== undefined ? Number(updates.coupons) : existing.coupons;
   const stars = updates.stars !== undefined ? Number(updates.stars) : existing.stars;
+  const personalPuzzles = updates.personalPuzzles !== undefined
+    ? Number(updates.personalPuzzles) || 0
+    : (updates.personal_puzzles !== undefined ? Number(updates.personal_puzzles) || 0 : (existing.personal_puzzles || 0));
   const name = updates.name !== undefined ? updates.name : existing.name;
 
   let skills;
@@ -644,9 +652,9 @@ function updatePlayerOfficer(playerId, officerId, updates) {
 
   db.prepare(`
     UPDATE player_officers
-    SET level = ?, coupons = ?, stars = ?, name = ?, skills_json = ?, invested_json = ?
+    SET level = ?, coupons = ?, stars = ?, personal_puzzles = ?, name = ?, skills_json = ?, invested_json = ?
     WHERE id = ? AND player_id = ?
-  `).run(level, coupons, stars, name, skillsJson, investedJson, officerId, playerId);
+  `).run(level, coupons, stars, personalPuzzles, name, skillsJson, investedJson, officerId, playerId);
 
   return {
     id: officerId,
@@ -655,6 +663,7 @@ function updatePlayerOfficer(playerId, officerId, updates) {
     level,
     coupons,
     stars,
+    personalPuzzles,
     skills,
     invested
   };
@@ -826,6 +835,12 @@ function getEventTypes() {
     id: r.id,
     name: r.name,
     color: r.color,
+    isPeriodic: r.is_periodic !== undefined && r.is_periodic !== null ? Number(r.is_periodic) : 1,
+    startDayOfWeek: r.start_day_of_week !== undefined && r.start_day_of_week !== null ? Number(r.start_day_of_week) : 2,
+    endDayOfWeek: r.end_day_of_week !== undefined && r.end_day_of_week !== null ? Number(r.end_day_of_week) : 3,
+    activeWeeks: r.active_weeks !== undefined && r.active_weeks !== null ? Number(r.active_weeks) : 1,
+    breakWeeks: r.break_weeks !== undefined && r.break_weeks !== null ? Number(r.break_weeks) : 1,
+    weekOffset: r.week_offset !== undefined && r.week_offset !== null ? Number(r.week_offset) : 0,
     places: JSON.parse(r.places_json || '[]')
   }));
 }
@@ -833,23 +848,78 @@ function getEventTypes() {
 function saveEventType(data) {
   const db = getDb();
   const placesJson = JSON.stringify(data.places || []);
+  const isPeriodic = data.isPeriodic !== undefined ? (data.isPeriodic ? 1 : 0) : (data.is_periodic !== undefined ? (data.is_periodic ? 1 : 0) : 1);
+  const startDayOfWeek = data.startDayOfWeek !== undefined ? Number(data.startDayOfWeek) : (data.start_day_of_week !== undefined ? Number(data.start_day_of_week) : 2);
+  const endDayOfWeek = data.endDayOfWeek !== undefined ? Number(data.endDayOfWeek) : (data.end_day_of_week !== undefined ? Number(data.end_day_of_week) : 3);
+  const activeWeeks = data.activeWeeks !== undefined ? Number(data.activeWeeks) : (data.active_weeks !== undefined ? Number(data.active_weeks) : 1);
+  const breakWeeks = data.breakWeeks !== undefined ? Number(data.breakWeeks) : (data.break_weeks !== undefined ? Number(data.break_weeks) : 1);
+  const weekOffset = data.weekOffset !== undefined ? Number(data.weekOffset) : (data.week_offset !== undefined ? Number(data.week_offset) : 0);
+
   if (data.id) {
     db.prepare(`
-      INSERT INTO event_types (id, name, color, places_json)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO event_types (id, name, color, places_json, is_periodic, start_day_of_week, end_day_of_week, active_weeks, break_weeks, week_offset)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         color = excluded.color,
-        places_json = excluded.places_json
-    `).run(data.id, data.name, data.color || '#8b5cf6', placesJson);
-    return data;
+        places_json = excluded.places_json,
+        is_periodic = excluded.is_periodic,
+        start_day_of_week = excluded.start_day_of_week,
+        end_day_of_week = excluded.end_day_of_week,
+        active_weeks = excluded.active_weeks,
+        break_weeks = excluded.break_weeks,
+        week_offset = excluded.week_offset
+    `).run(data.id, data.name, data.color || '#8b5cf6', placesJson, isPeriodic, startDayOfWeek, endDayOfWeek, activeWeeks, breakWeeks, weekOffset);
+    return {
+      ...data,
+      isPeriodic,
+      startDayOfWeek,
+      endDayOfWeek,
+      activeWeeks,
+      breakWeeks,
+      weekOffset
+    };
   } else {
     const res = db.prepare(`
-      INSERT INTO event_types (name, color, places_json)
-      VALUES (?, ?, ?)
-    `).run(data.name, data.color || '#8b5cf6', placesJson);
-    return { ...data, id: Number(res.lastInsertRowid) };
+      INSERT INTO event_types (name, color, places_json, is_periodic, start_day_of_week, end_day_of_week, active_weeks, break_weeks, week_offset)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(data.name, data.color || '#8b5cf6', placesJson, isPeriodic, startDayOfWeek, endDayOfWeek, activeWeeks, breakWeeks, weekOffset);
+    return {
+      ...data,
+      id: Number(res.lastInsertRowid),
+      isPeriodic,
+      startDayOfWeek,
+      endDayOfWeek,
+      activeWeeks,
+      breakWeeks,
+      weekOffset
+    };
   }
+}
+
+function updateBulkEventTypeRewards(typeIds, places) {
+  if (!Array.isArray(typeIds) || typeIds.length === 0) return 0;
+  if (!Array.isArray(places)) return 0;
+  const db = getDb();
+  const placesJson = JSON.stringify(places);
+  let updatedCount = 0;
+
+  db.exec('BEGIN TRANSACTION');
+  try {
+    const stmt = db.prepare('UPDATE event_types SET places_json = ? WHERE id = ?');
+    for (const tid of typeIds) {
+      const res = stmt.run(placesJson, Number(tid));
+      if (res.changes > 0) {
+        updatedCount += res.changes;
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+
+  return updatedCount;
 }
 
 function deleteEventType(id) {
@@ -1102,6 +1172,9 @@ function importKowJson(rawJson) {
         for (const o of p.officers) {
           const rawOfficer = rawOfficersByPlayerAndId.get(`${p.id}:${o.id}`);
           if (rawOfficer) {
+            if (rawOfficer.personalPuzzles !== undefined || rawOfficer.personal_puzzles !== undefined) {
+              o.personalPuzzles = rawOfficer.personalPuzzles ?? rawOfficer.personal_puzzles;
+            }
             if (rawOfficer.skills !== undefined) {
               o.skills = rawOfficer.skills;
             } else if (rawOfficer.skills_json !== undefined) {
@@ -1147,6 +1220,12 @@ function seedDemoData(db) {
     id: 1,
     name: 'Король Войны',
     color: '#8b5cf6',
+    isPeriodic: 1,
+    startDayOfWeek: 2,
+    endDayOfWeek: 3,
+    activeWeeks: 1,
+    breakWeeks: 1,
+    weekOffset: 0,
     places: [
       { place: 1, label: '🥇 1 место', coupons: 12500 },
       { place: 2, label: '🥈 2 место', coupons: 6500 },
@@ -1159,6 +1238,30 @@ function seedDemoData(db) {
     id: 2,
     name: 'Мощные Силы',
     color: '#10b981',
+    isPeriodic: 1,
+    startDayOfWeek: 6,
+    endDayOfWeek: 1,
+    activeWeeks: 1,
+    breakWeeks: 1,
+    weekOffset: 0,
+    places: [
+      { place: 1, label: '🥇 1 место', coupons: 12500 },
+      { place: 2, label: '🥈 2 место', coupons: 6500 },
+      { place: 3, label: '🥉 3 место', coupons: 3500 },
+      { place: 4, label: '4–10 место', coupons: 2750 },
+    ]
+  });
+
+  const potType = saveEventType({
+    id: 3,
+    name: 'Сила Времени',
+    color: '#f59e0b',
+    isPeriodic: 1,
+    startDayOfWeek: 2,
+    endDayOfWeek: 4,
+    activeWeeks: 1,
+    breakWeeks: 1,
+    weekOffset: 1,
     places: [
       { place: 1, label: '🥇 1 место', coupons: 12500 },
       { place: 2, label: '🥈 2 место', coupons: 6500 },
@@ -1310,6 +1413,31 @@ function migrateSchema(db) {
     if (!officerCols.includes('invested_json')) {
       db.exec("ALTER TABLE player_officers ADD COLUMN invested_json TEXT NOT NULL DEFAULT '{}';");
     }
+    if (!officerCols.includes('personal_puzzles')) {
+      db.exec("ALTER TABLE player_officers ADD COLUMN personal_puzzles INTEGER NOT NULL DEFAULT 0;");
+    }
+  }
+
+  const eventTypeCols = getColumns('event_types');
+  if (eventTypeCols.length > 0) {
+    if (!eventTypeCols.includes('is_periodic')) {
+      db.exec("ALTER TABLE event_types ADD COLUMN is_periodic INTEGER NOT NULL DEFAULT 1;");
+    }
+    if (!eventTypeCols.includes('start_day_of_week')) {
+      db.exec("ALTER TABLE event_types ADD COLUMN start_day_of_week INTEGER NOT NULL DEFAULT 2;");
+    }
+    if (!eventTypeCols.includes('end_day_of_week')) {
+      db.exec("ALTER TABLE event_types ADD COLUMN end_day_of_week INTEGER NOT NULL DEFAULT 3;");
+    }
+    if (!eventTypeCols.includes('active_weeks')) {
+      db.exec("ALTER TABLE event_types ADD COLUMN active_weeks INTEGER NOT NULL DEFAULT 1;");
+    }
+    if (!eventTypeCols.includes('break_weeks')) {
+      db.exec("ALTER TABLE event_types ADD COLUMN break_weeks INTEGER NOT NULL DEFAULT 1;");
+    }
+    if (!eventTypeCols.includes('week_offset')) {
+      db.exec("ALTER TABLE event_types ADD COLUMN week_offset INTEGER NOT NULL DEFAULT 0;");
+    }
   }
 
   const catalogCols = getColumns('officer_catalog');
@@ -1406,6 +1534,7 @@ function initDb(filePath) {
       level INTEGER NOT NULL DEFAULT 0,
       coupons INTEGER NOT NULL DEFAULT 0,
       stars INTEGER NOT NULL DEFAULT 0,
+      personal_puzzles INTEGER NOT NULL DEFAULT 0,
       skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]',
       invested_json TEXT NOT NULL DEFAULT '{}'
     );
@@ -1434,7 +1563,13 @@ function initDb(filePath) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       color TEXT NOT NULL DEFAULT '#8b5cf6',
-      places_json TEXT NOT NULL
+      places_json TEXT NOT NULL,
+      is_periodic INTEGER NOT NULL DEFAULT 1,
+      start_day_of_week INTEGER NOT NULL DEFAULT 2,
+      end_day_of_week INTEGER NOT NULL DEFAULT 3,
+      active_weeks INTEGER NOT NULL DEFAULT 1,
+      break_weeks INTEGER NOT NULL DEFAULT 1,
+      week_offset INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -1533,6 +1668,7 @@ module.exports = {
   getEventTypes,
   saveEventType,
   deleteEventType,
+  updateBulkEventTypeRewards,
   getEvents,
   getEventById,
   saveEvent,

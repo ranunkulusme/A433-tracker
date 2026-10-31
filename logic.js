@@ -768,6 +768,28 @@
     return OFFICER_PAIRINGS[String(officerId)] || [];
   }
 
+  const DAY_SHORT_NAMES = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+  function calculateDurationDays(startDay, endDay) {
+    const s = Math.max(1, Math.min(7, Number(startDay) || 1));
+    const e = Math.max(1, Math.min(7, Number(endDay) || 1));
+    if (e >= s) {
+      return e - s + 1;
+    }
+    return (7 - s) + e + 1;
+  }
+
+  function formatDayRange(startDay, endDay) {
+    const s = Math.max(1, Math.min(7, Number(startDay) || 1));
+    const e = Math.max(1, Math.min(7, Number(endDay) || 1));
+    const dur = calculateDurationDays(s, e);
+    const dayLabel = dur === 1 ? '1 день' : (dur >= 2 && dur <= 4 ? `${dur} дня` : `${dur} дней`);
+    if (s === e) {
+      return `${DAY_SHORT_NAMES[s]} (${dayLabel})`;
+    }
+    return `${DAY_SHORT_NAMES[s]}–${DAY_SHORT_NAMES[e]} (${dayLabel})`;
+  }
+
   function generateSeasonSchedule(options = {}) {
     const {
       startDate,
@@ -838,7 +860,12 @@
         if (relWeek >= activeWeeks) continue;
 
         const startDayOfWeek = Math.max(1, Math.min(7, Number(rule.startDayOfWeek) || 1));
-        const durationDays = Math.max(1, Number(rule.durationDays) || 1);
+        const endDayOfWeek = (rule.endDayOfWeek !== undefined && rule.endDayOfWeek !== null)
+          ? Math.max(1, Math.min(7, Number(rule.endDayOfWeek) || 1))
+          : null;
+        const durationDays = endDayOfWeek !== null
+          ? calculateDurationDays(startDayOfWeek, endDayOfWeek)
+          : Math.max(1, Number(rule.durationDays) || 1);
 
         // Date of startDayOfWeek in week w:
         // Week w starts at baseMondayIso + w * 7 days (Monday = offset 0).
@@ -994,7 +1021,10 @@
 
     const officerCoupons = Math.max(0, Number(officer?.coupons) || 0);
     const officerLevel = Math.max(0, Number(officer?.level) || 0);
-    const currentPuzzles = officerLevel * PUZZLES_PER_LEVEL + (costPerPuzzle > 0 ? Math.floor(officerCoupons / costPerPuzzle) : 0);
+    const personalPuzzles = Math.max(0, Number(officer?.personalPuzzles ?? officer?.personal_puzzles) || 0);
+    const currentPuzzles = officerLevel * PUZZLES_PER_LEVEL
+      + (costPerPuzzle > 0 ? Math.floor(officerCoupons / costPerPuzzle) : 0)
+      + personalPuzzles;
 
     let stockPuzzles = 0;
     if (includeStock) {
@@ -2073,5 +2103,7 @@
     OFFICER_TYPES,
     calculateTotalMedals,
     parseExchangeShopScreenshotText,
+    calculateDurationDays,
+    formatDayRange,
   };
 });

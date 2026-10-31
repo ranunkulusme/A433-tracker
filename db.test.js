@@ -1180,5 +1180,116 @@ test('player officers store and retrieve invested resources across CRUD and expo
   assert.strictEqual(importedOff.invested.starCoupons, 9999);
 });
 
+test('event_types supports schedule cadence fields and migration', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const types = dbModule.getEventTypes();
+  assert.ok(types.length >= 3);
+
+  const kow = types.find(t => t.name === 'Король Войны');
+  assert.ok(kow);
+  assert.strictEqual(kow.startDayOfWeek, 2);
+  assert.strictEqual(kow.endDayOfWeek, 3);
+  assert.strictEqual(kow.isPeriodic, 1);
+
+  const mf = types.find(t => t.name === 'Мощные Силы');
+  assert.ok(mf);
+  assert.strictEqual(mf.startDayOfWeek, 6);
+  assert.strictEqual(mf.endDayOfWeek, 1); // Переход через выходные
+
+  const pot = types.find(t => t.name === 'Сила Времени');
+  assert.ok(pot);
+  assert.strictEqual(pot.startDayOfWeek, 2);
+  assert.strictEqual(pot.endDayOfWeek, 4);
+  assert.strictEqual(pot.weekOffset, 1);
+
+  // Сохранение нового типа ивента с полями расписания
+  const created = dbModule.saveEventType({
+    name: 'Битва Альянсов',
+    color: '#3b82f6',
+    isPeriodic: 1,
+    startDayOfWeek: 5,
+    endDayOfWeek: 7,
+    activeWeeks: 2,
+    breakWeeks: 1,
+    weekOffset: 0,
+    places: [{ place: 1, label: '1 место', coupons: 15000 }]
+  });
+
+  assert.ok(created.id);
+  const allUpdated = dbModule.getEventTypes();
+  const found = allUpdated.find(t => t.id === created.id);
+  assert.ok(found);
+  assert.strictEqual(found.startDayOfWeek, 5);
+  assert.strictEqual(found.endDayOfWeek, 7);
+  assert.strictEqual(found.activeWeeks, 2);
+  assert.strictEqual(found.breakWeeks, 1);
+});
+
+test('updateBulkEventTypeRewards updates prizes across selected event types', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const types = dbModule.getEventTypes();
+  const typeIds = types.slice(0, 2).map(t => t.id);
+
+  const newPlaces = [
+    { place: 1, label: '🥇 1 место', coupons: 20000 },
+    { place: 2, label: '🥈 2 место', coupons: 10000 }
+  ];
+
+  const updatedCount = dbModule.updateBulkEventTypeRewards(typeIds, newPlaces);
+  assert.strictEqual(updatedCount, 2);
+
+  const refreshed = dbModule.getEventTypes();
+  for (const tid of typeIds) {
+    const et = refreshed.find(t => t.id === tid);
+    assert.ok(et);
+    assert.strictEqual(et.places.length, 2);
+    assert.strictEqual(et.places[0].coupons, 20000);
+    assert.strictEqual(et.places[1].coupons, 10000);
+  }
+});
+
+test('player_officers stores, updates and exports personal_puzzles', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const p = dbModule.createPlayer({ name: 'Командир Танков' });
+  const off = dbModule.addPlayerOfficer(p.id, {
+    catalogId: 'admiral-nathon',
+    name: 'Адмирал Нейтон',
+    stars: 3,
+    level: 40,
+    coupons: 1200,
+    personalPuzzles: 45
+  });
+
+  assert.strictEqual(off.personalPuzzles, 45);
+
+  const pLoaded = dbModule.getPlayerById(p.id);
+  const offLoaded = pLoaded.officers.find(o => o.id === off.id);
+  assert.ok(offLoaded);
+  assert.strictEqual(offLoaded.personalPuzzles, 45);
+
+  // Обновление
+  const updated = dbModule.updatePlayerOfficer(p.id, off.id, {
+    personalPuzzles: 60
+  });
+  assert.strictEqual(updated.personalPuzzles, 60);
+
+  // Экспорт / импорт
+  const exported = dbModule.exportKowJson();
+  dbModule.initDb(':memory:');
+  dbModule.importKowJson(exported);
+
+  const importedPlayer = dbModule.getPlayerById(p.id);
+  const importedOff = importedPlayer.officers.find(o => o.id === off.id);
+  assert.ok(importedOff);
+  assert.strictEqual(importedOff.personalPuzzles, 60);
+});
+
+
 
 
