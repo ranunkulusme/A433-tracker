@@ -2361,6 +2361,8 @@ test('API delegated permissions: R3 view_sectors and zero-trust stock masking', 
       headers: { Authorization: `Bearer ${analystLogin.token}` }
     });
     assert.equal(noPermRes.status, 403);
+    const noPermData = await noPermRes.json();
+    assert.equal(noPermData.message, 'Требуется разрешение на просмотр секторов или матрицы');
 
     // 4. Admin delegates view_sectors to analyst
     const patchRes = await fetch(`${baseUrl}/api/users/${analystReg.userId}`, {
@@ -2422,6 +2424,27 @@ test('API delegated permissions: R3 view_sectors and zero-trust stock masking', 
     assert.notEqual(otherUnmasked.stock.masked, true);
     assert.equal(otherUnmasked.stock.coupons, 9500);
     assert.equal(otherUnmasked.stock.starCoupons, 340);
+
+    // 7. User with only view_matrix (without view_sectors or view_stocks) can call GET /api/players with masked stocks
+    await fetch(`${baseUrl}/api/users/${analystReg.userId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['view_matrix'] })
+    });
+
+    const matrixPlayersRes = await fetch(`${baseUrl}/api/players`, {
+      headers: { Authorization: `Bearer ${analystLogin.token}` }
+    });
+    assert.equal(matrixPlayersRes.status, 200);
+    const matrixPlayers = await matrixPlayersRes.json();
+    assert(matrixPlayers.length >= 2);
+    const matrixSoldier = matrixPlayers.find(p => p.userId === soldierReg.userId);
+    assert(matrixSoldier, 'Soldier sector should be present');
+    assert.equal(matrixSoldier.stock.masked, true);
+    assert.equal(matrixSoldier.stock.coupons, 0);
+    const matrixSelf = matrixPlayers.find(p => p.userId === analystReg.userId);
+    assert.notEqual(matrixSelf.stock.masked, true);
+    assert.equal(matrixSelf.stock.coupons, 1200);
   } finally {
     await server.close();
   }
@@ -2713,6 +2736,8 @@ test('API delegated permissions: approve_users allows pending approvals restrict
       body: JSON.stringify({ rank: 'r4' })
     });
     assert.equal(badRankApprove.status, 403);
+    const badRankData = await badRankApprove.json();
+    assert.equal(badRankData.error, 'Только глава альянса (Р5) может назначать ранг выше Р3');
 
     // 3. HR approves recruit into R3 -> 200 OK
     const okApprove = await fetch(`${baseUrl}/api/users/${recruit1.userId}/approve`, {

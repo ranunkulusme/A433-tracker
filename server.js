@@ -472,7 +472,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const targetUserId = Number(approveMatch[1]);
       let rank = body.rank === 'r4' ? 'r4' : 'r3';
       if (req.user.rank !== 'r5' && body.rank && body.rank !== 'r3') {
-        return sendJson(res, 403, { error: 'Чиновник (Р4) может одобрять только в ранге Р3' });
+        return sendJson(res, 403, { error: 'Только глава альянса (Р5) может назначать ранг выше Р3' });
       }
       if (req.user.rank === 'r5' && ['r3', 'r4'].includes(body.rank)) {
         rank = body.rank;
@@ -697,7 +697,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // PLAYERS MANAGEMENT (R4, R5)
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/players' && req.method === 'GET') {
-      if (!requirePermission(req, res, 'view_sectors')) return;
+      if (!requireAuth(req, res)) return;
+      const canViewPlayers = logic.hasUserPermission(req.user, 'view_sectors') || logic.hasUserPermission(req.user, 'view_matrix');
+      if (!canViewPlayers) {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуется разрешение на просмотр секторов или матрицы');
+      }
       const players = db.getPlayers().map(p => maskPlayerStockIfNeeded(p, req.user));
       return sendJson(res, 200, players);
     }

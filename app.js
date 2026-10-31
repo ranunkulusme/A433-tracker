@@ -556,7 +556,7 @@ async function loadDataFromServer() {
     if (Array.isArray(evs)) state.events = evs;
     if (Array.isArray(vTiers)) state.vipTiers = vTiers;
 
-    if (canManage() || hasPermission('view_sectors')) {
+    if (canManage() || hasPermission('view_sectors') || hasPermission('view_matrix')) {
       const pl = await apiFetch('/api/players').catch(() => null);
       if (Array.isArray(pl)) state.players = pl;
     }
@@ -566,6 +566,10 @@ async function loadDataFromServer() {
     if (currentUser) {
       const myPl = await apiFetch('/api/my-profile').catch(() => null);
       if (myPl) {
+        if (myPl.user && Array.isArray(myPl.user.permissions)) {
+          currentUser.permissions = myPl.user.permissions;
+          try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (e) {}
+        }
         if (Array.isArray(myPl.sectors)) {
           myCabinetSectors = myPl.sectors;
           myPl.sectors.forEach(s => {
