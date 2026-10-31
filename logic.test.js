@@ -1882,6 +1882,75 @@ test('calculateOfficerDeficit respects onlyPersonalPuzzles and ignores warehouse
   assert.strictEqual(fcMax.days, 0);
 });
 
+test('filterPlayersByOfficers filters sectors by single officer or multi-modal officer pair', () => {
+  const { filterPlayersByOfficers, prioritizeFilteredOfficers } = require('./logic.js');
+  assert.strictEqual(typeof filterPlayersByOfficers, 'function', 'filterPlayersByOfficers must be a function');
+  assert.strictEqual(typeof prioritizeFilteredOfficers, 'function', 'prioritizeFilteredOfficers must be a function');
+
+  const p1 = {
+    id: 1,
+    name: 'Sector 1 (Angel + Charlotte)',
+    officers: [
+      { id: 'o1', catalogId: 'angel', level: 100, stars: 4 },
+      { id: 'o2', catalogId: 'charlotte', level: 120, stars: 5 },
+      { id: 'o3', catalogId: 'valkyrie', level: 80, stars: 2 }
+    ]
+  };
+
+  const p2 = {
+    id: 2,
+    name: 'Sector 2 (Angel only)',
+    officers: [
+      { id: 'o4', catalogId: 'angel', level: 90, stars: 3 },
+      { id: 'o5', catalogId: 'valkyrie', level: 100, stars: 4 }
+    ]
+  };
+
+  const p3 = {
+    id: 3,
+    name: 'Sector 3 (Charlotte only)',
+    officers: [
+      { id: 'o6', catalogId: 'charlotte', level: 150, stars: 6 }
+    ]
+  };
+
+  const p4 = {
+    id: 4,
+    name: 'Sector 4 (No officers)',
+    officers: []
+  };
+
+  const allPlayers = [p1, p2, p3, p4];
+
+  // 1. Пустой фильтр
+  assert.deepStrictEqual(filterPlayersByOfficers(allPlayers, []), allPlayers);
+  assert.deepStrictEqual(filterPlayersByOfficers(allPlayers, null), allPlayers);
+
+  // 2. Фильтр по одному офицеру (Анхель)
+  const angelMatches = filterPlayersByOfficers(allPlayers, ['angel']);
+  assert.strictEqual(angelMatches.length, 2);
+  assert.deepStrictEqual(angelMatches.map(p => p.id), [1, 2]);
+
+  // 3. Мульти-модальный фильтр по паре офицеров: Анхель + Шарлотта
+  const pairMatches = filterPlayersByOfficers(allPlayers, ['angel', 'charlotte']);
+  assert.strictEqual(pairMatches.length, 1, 'Только Sector 1 имеет связку Анхель + Шарлотта');
+  assert.strictEqual(pairMatches[0].id, 1);
+
+  // 4. Пара, которой ни у кого нет вместе: Анхель + Несуществующий
+  const noMatches = filterPlayersByOfficers(allPlayers, ['angel', 'unknown-officer']);
+  assert.strictEqual(noMatches.length, 0);
+
+  // 5. prioritizeFilteredOfficers поднимает выбранную пару офицеров на первые места
+  const prioritized = prioritizeFilteredOfficers(p1.officers, ['charlotte', 'angel']);
+  assert.strictEqual(prioritized.length, 3);
+  assert.strictEqual(prioritized[0].catalogId, 'charlotte');
+  assert.strictEqual(prioritized[0].isMatched, true);
+  assert.strictEqual(prioritized[1].catalogId, 'angel');
+  assert.strictEqual(prioritized[1].isMatched, true);
+  assert.strictEqual(prioritized[2].catalogId, 'valkyrie');
+  assert.strictEqual(prioritized[2].isMatched, false);
+});
+
 
 
 

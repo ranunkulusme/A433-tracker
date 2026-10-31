@@ -2079,6 +2079,66 @@
     };
   }
 
+  function filterPlayersByOfficers(players, selectedCatalogIds) {
+    if (!Array.isArray(players)) return [];
+    if (!Array.isArray(selectedCatalogIds) || !selectedCatalogIds.length) {
+      return players;
+    }
+    const cleanIds = selectedCatalogIds.map(id => String(id || '').trim()).filter(Boolean);
+    if (!cleanIds.length) return players;
+
+    return players.filter(player => {
+      const officers = Array.isArray(player?.officers) ? player.officers : [];
+      if (!officers.length) return false;
+      return cleanIds.every(reqId => {
+        return officers.some(o => {
+          const catId = String(o.catalogId || o.id || '');
+          return catId === reqId;
+        });
+      });
+    });
+  }
+
+  function prioritizeFilteredOfficers(officers, selectedCatalogIds, catalog) {
+    const list = Array.isArray(officers) ? officers : [];
+    if (!list.length) return [];
+    const cleanIds = Array.isArray(selectedCatalogIds)
+      ? selectedCatalogIds.map(id => String(id || '').trim()).filter(Boolean)
+      : [];
+
+    const sortFn = typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null;
+    const baseSorted = sortFn ? sortFn(list, catalog) : [...list];
+
+    if (!cleanIds.length) {
+      return baseSorted.map(o => ({ ...o, isMatched: false }));
+    }
+
+    const matched = [];
+    const matchedKeys = new Set();
+
+    for (const reqId of cleanIds) {
+      const found = baseSorted.find(o => String(o.catalogId || o.id || '') === reqId);
+      if (found) {
+        const key = found.id ? `id:${found.id}` : `cat:${found.catalogId}`;
+        if (!matchedKeys.has(key)) {
+          matched.push({ ...found, isMatched: true });
+          matchedKeys.add(key);
+        }
+      }
+    }
+
+    const others = [];
+    for (const o of baseSorted) {
+      const key = o.id ? `id:${o.id}` : `cat:${o.catalogId}`;
+      if (!matchedKeys.has(key)) {
+        const isMatched = cleanIds.includes(String(o.catalogId || o.id || ''));
+        others.push({ ...o, isMatched });
+      }
+    }
+
+    return [...matched, ...others];
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -2141,5 +2201,7 @@
     parseExchangeShopScreenshotText,
     calculateDurationDays,
     formatDayRange,
+    filterPlayersByOfficers,
+    prioritizeFilteredOfficers,
   };
 });

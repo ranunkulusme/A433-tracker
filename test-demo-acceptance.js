@@ -923,6 +923,44 @@ VIP: 15`;
       recordTest('11.6', 'Настройка «Только личные медали» и изолированный расчет дефицита', 'БЛОК 11', false, e.message);
     }
 
+    // 11.7. Мультимодальный фильтр секторов по связкам и парам офицеров
+    try {
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+      assert(appJs.includes('sectors-filter-bar'), 'app.js содержит панель sectors-filter-bar');
+      assert(appJs.includes('id="filter-officer-1"'), 'app.js содержит селектор filter-officer-1');
+      assert(appJs.includes('id="filter-officer-2"'), 'app.js содержит селектор filter-officer-2');
+      assert(appJs.includes('onSectorOfficerFilterChange'), 'app.js содержит обработчик onSectorOfficerFilterChange');
+      assert(appJs.includes('clearSectorOfficerFilter'), 'app.js содержит сброс clearSectorOfficerFilter');
+      assert(styleCss.includes('.sectors-filter-bar'), 'style.css содержит стили панели фильтрации');
+      assert(styleCss.includes('.badge-matched-pair'), 'style.css содержит стили бейджа совпадения пары');
+
+      // Тест логики фильтрации секторов по парам
+      const mockSectors = [
+        { id: 1, name: 'База Альфа', officers: [{ catalogId: 'angel' }, { catalogId: 'charlotte' }] },
+        { id: 2, name: 'База Бета', officers: [{ catalogId: 'angel' }] },
+        { id: 3, name: 'База Гамма', officers: [{ catalogId: 'charlotte' }] },
+        { id: 4, name: 'База Дельта', officers: [] }
+      ];
+
+      const singleFilter = logic.filterPlayersByOfficers(mockSectors, ['angel']);
+      assert.strictEqual(singleFilter.length, 2, 'Фильтр по 1 офицеру находит 2 сектора');
+
+      const pairFilter = logic.filterPlayersByOfficers(mockSectors, ['angel', 'charlotte']);
+      assert.strictEqual(pairFilter.length, 1, 'Мульти-выбор пары находит только сектор с обоими офицерами');
+      assert.strictEqual(pairFilter[0].id, 1, 'Сектор с парой Анхель+Шарлотта найден верно');
+
+      const prioritized = logic.prioritizeFilteredOfficers(mockSectors[0].officers, ['charlotte', 'angel']);
+      assert.strictEqual(prioritized[0].catalogId, 'charlotte');
+      assert.strictEqual(prioritized[0].isMatched, true);
+      assert.strictEqual(prioritized[1].catalogId, 'angel');
+      assert.strictEqual(prioritized[1].isMatched, true);
+
+      recordTest('11.7', 'Мультимодальный фильтр секторов по связкам и парам офицеров', 'БЛОК 11', true, 'Фильтрация по связкам, слоты Офицер 1/2 и подсветка пары подтверждены');
+    } catch (e) {
+      recordTest('11.7', 'Мультимодальный фильтр секторов по связкам и парам офицеров', 'БЛОК 11', false, e.message);
+    }
+
   } finally {
     await server.close();
     try {
