@@ -2633,6 +2633,8 @@ function openAddMyOfficerModal() {
   const puzEl = document.getElementById('my-officer-personal-puzzles');
   if (puzEl) puzEl.value = 0;
   document.getElementById('my-officer-stars').value = 0;
+  const retroRadioOn = document.getElementById('my-officer-retro-on');
+  if (retroRadioOn) retroRadioOn.checked = true;
   myOfficerModalSkills = [1, 1, 1, 1];
   renderMyOfficerModalSkills();
 
@@ -2653,6 +2655,8 @@ function openEditMyOfficerModal(officerId) {
   const editPuzEl = document.getElementById('my-officer-personal-puzzles');
   if (editPuzEl) editPuzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
   document.getElementById('my-officer-stars').value = off.stars || 0;
+  const editRetroRadioOn = document.getElementById('my-officer-retro-on');
+  if (editRetroRadioOn) editRetroRadioOn.checked = true;
   myOfficerModalSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
   renderMyOfficerModalSkills();
 
@@ -2667,30 +2671,33 @@ async function saveMyOfficerSubmit() {
   const skills = Array.isArray(myOfficerModalSkills) && myOfficerModalSkills.length === 4
     ? myOfficerModalSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
+  const isRetro = document.getElementById('my-officer-retro-on')?.checked ?? true;
 
   let newStock = null;
   let levelStockDelta = null;
 
-  if (myOfficerEditId && myCabinetProfile?.stock) {
-    const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(myOfficerEditId));
-    if (oldOff && oldOff.level !== level) {
-      const cat = getCatalogOfficer(oldOff.catalogId);
-      const rawCost = Number(cat?.couponPerPuzzle);
-      const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
-      const upgradeType = cat?.upgradeType || 'standard';
-      const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-      levelStockDelta = deltaFn(oldOff.level, level, myCabinetProfile.stock, costPerPuzzle, upgradeType);
+  if (!isRetro && myCabinetProfile?.stock) {
+    if (myOfficerEditId) {
+      const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(myOfficerEditId));
+      if (oldOff && oldOff.level !== level) {
+        const cat = getCatalogOfficer(oldOff.catalogId);
+        const rawCost = Number(cat?.couponPerPuzzle);
+        const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
+        const upgradeType = cat?.upgradeType || 'standard';
+        const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
+        levelStockDelta = deltaFn(oldOff.level, level, myCabinetProfile.stock, costPerPuzzle, upgradeType);
 
-      if (!levelStockDelta.canAfford) {
-        toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
-        return;
+        if (!levelStockDelta.canAfford) {
+          toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
+          return;
+        }
+
+        newStock = {
+          ...myCabinetProfile.stock,
+          coupons: Math.max(0, (myCabinetProfile.stock.coupons || 0) + levelStockDelta.delta.coupons),
+          puzzles: Math.max(0, (myCabinetProfile.stock.puzzles || 0) + levelStockDelta.delta.puzzles),
+        };
       }
-
-      newStock = {
-        ...myCabinetProfile.stock,
-        coupons: Math.max(0, (myCabinetProfile.stock.coupons || 0) + levelStockDelta.delta.coupons),
-        puzzles: Math.max(0, (myCabinetProfile.stock.puzzles || 0) + levelStockDelta.delta.puzzles),
-      };
     }
   }
 
@@ -4547,6 +4554,8 @@ function openAddSectorOfficerModal(playerId) {
   if (coupEl) coupEl.value = 0;
   const puzEl = document.getElementById('aso-personal-puzzles');
   if (puzEl) puzEl.value = 0;
+  const asoRetroOn = document.getElementById('aso-retro-on');
+  if (asoRetroOn) asoRetroOn.checked = true;
 
   renderAsoStarsPicker(asoSelectedStars);
   renderAsoSkillsPicker(asoSelectedSkills);
@@ -4620,6 +4629,7 @@ async function submitAddSectorOfficer() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('aso-level')?.value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('aso-coupons')?.value) || 0);
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('aso-personal-puzzles')?.value) || 0);
+  const isRetro = document.getElementById('aso-retro-on')?.checked ?? true;
   const stars = Math.max(0, Math.min(6, parseInt(asoSelectedStars) || 0));
   const skills = Array.isArray(asoSelectedSkills) && asoSelectedSkills.length === 4
     ? asoSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
@@ -4674,6 +4684,8 @@ function openEditSectorOfficerModal(playerId, officerId) {
   if (coupEl) coupEl.value = off.coupons || 0;
   const puzEl = document.getElementById('so-personal-puzzles');
   if (puzEl) puzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
+  const soRetroOn = document.getElementById('so-retro-on');
+  if (soRetroOn) soRetroOn.checked = true;
   soSelectedStars = off.stars || 0;
   soSelectedSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
 
@@ -4742,6 +4754,7 @@ async function submitEditSectorOfficer() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('so-level')?.value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('so-coupons')?.value) || 0);
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('so-personal-puzzles')?.value) || 0);
+  const isRetro = document.getElementById('so-retro-on')?.checked ?? true;
   const stars = Math.max(0, Math.min(6, parseInt(soSelectedStars) || 0));
   const skills = Array.isArray(soSelectedSkills) && soSelectedSkills.length === 4
     ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))

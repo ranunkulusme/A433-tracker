@@ -1696,5 +1696,48 @@ select option { background: var(--bg3); }
   background: rgba(255, 255, 255, 0.25) !important;
 }
 
+/* ── RETROSPECTIVE STOCK MODE ── */
+.retro-mode-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.retro-mode-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text1);
+  margin-bottom: 6px;
+  display: block;
+}
+.retro-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.retro-radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text1);
+}
+.retro-radio-label input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--blue);
+  cursor: pointer;
+  width: auto;
+}
+.retro-radio-text {
+  line-height: 1.35;
+}
+.retro-radio-hint {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+
 
 

@@ -1806,6 +1806,29 @@ test('calculateOfficerDeficit respects personalPuzzles and subtracts them from d
   assert.strictEqual(defPartial.deficitPuzzles, 828);
 });
 
+test('calculateRetrospectiveOfficerStock prevents stock deduction in retrospective mode', () => {
+  const { calculateRetrospectiveOfficerStock, INVESTED_ZERO } = require('./logic.js');
+  assert.strictEqual(typeof calculateRetrospectiveOfficerStock, 'function');
+
+  const retroResult = calculateRetrospectiveOfficerStock({ isRetrospective: true });
+  assert.strictEqual(retroResult.isRetrospective, true);
+  assert.strictEqual(retroResult.canAfford, true);
+  assert.strictEqual(retroResult.deductStock, false);
+  assert.deepStrictEqual(retroResult.delta, {
+    coupons: 0,
+    puzzles: 0,
+    starCoupons: 0,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 0
+  });
+  assert.deepStrictEqual(retroResult.newInvested, INVESTED_ZERO);
+
+  const normalResult = calculateRetrospectiveOfficerStock({ isRetrospective: false });
+  assert.strictEqual(normalResult.isRetrospective, false);
+  assert.strictEqual(normalResult.deductStock, true);
+});
+
 
 
 
