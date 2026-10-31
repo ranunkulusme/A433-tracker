@@ -961,6 +961,36 @@ VIP: 15`;
       recordTest('11.7', 'Мультимодальный фильтр секторов по связкам и парам офицеров', 'БЛОК 11', false, e.message);
     }
 
+    // 11.8. Допуск к симулятору только офицеров, качающихся за купоны и универсальные пазлы
+    try {
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      assert(appJs.includes('getSimulatorEligibleOfficers'), 'app.js использует getSimulatorEligibleOfficers');
+
+      const mockCatalog = [
+        { id: 'angel', name: 'Анхель', couponPerPuzzle: 600, generation: 7, upgradeType: 'standard' },
+        { id: 'bella', name: 'Белла', couponPerPuzzle: 0, generation: 6, upgradeType: 'special' }
+      ];
+
+      // Офицер со стандартной прокачкой (купоны + универсальные пазлы)
+      const validOff = { id: 'o1', catalogId: 'angel', level: 100, onlyPersonalPuzzles: false };
+      // Офицер только на личных медалях
+      const personalOnlyOff = { id: 'o2', catalogId: 'angel', level: 100, onlyPersonalPuzzles: true };
+      // Офицер только на универсальных пазлах (special / couponPerPuzzle === 0)
+      const specialOff = { id: 'o3', catalogId: 'bella', level: 50 };
+
+      assert.strictEqual(logic.isOfficerEligibleForSimulator(validOff, mockCatalog), true, 'Стандартный офицер допущен к симулятору');
+      assert.strictEqual(logic.isOfficerEligibleForSimulator(personalOnlyOff, mockCatalog), false, 'Офицер только на личных медалях исключен из симулятора');
+      assert.strictEqual(logic.isOfficerEligibleForSimulator(specialOff, mockCatalog), false, 'Специальный офицер без купонов исключен из симулятора');
+
+      const filtered = logic.getSimulatorEligibleOfficers([validOff, personalOnlyOff, specialOff], mockCatalog);
+      assert.strictEqual(filtered.length, 1, 'В симуляторе остался ровно 1 офицер');
+      assert.strictEqual(filtered[0].id, 'o1');
+
+      recordTest('11.8', 'Допуск к симулятору только офицеров, качающихся за купоны и универсальные пазлы', 'БЛОК 11', true, 'Исключены офицеры только на личных или специальных пазлах');
+    } catch (e) {
+      recordTest('11.8', 'Допуск к симулятору только офицеров, качающихся за купоны и универсальные пазлы', 'БЛОК 11', false, e.message);
+    }
+
   } finally {
     await server.close();
     try {

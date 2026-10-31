@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.20.0';
+const APP_VERSION = 'v3.21.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -1698,9 +1698,26 @@ function renderCabinetSimulatorHtml() {
     return `<div class="empty-state" style="padding:24px"><p>Добавьте офицера в кабинет, чтобы рассчитать прокачку.</p></div>`;
   }
 
-  let selectedOfficer = myCabinetProfile.officers.find(o => o.id === myCabinetSim.officerId);
+  const eligibleFn = (typeof logic !== 'undefined' && logic.getSimulatorEligibleOfficers)
+    ? logic.getSimulatorEligibleOfficers
+    : (typeof getSimulatorEligibleOfficers === 'function' ? getSimulatorEligibleOfficers : null);
+  const eligibleOfficers = eligibleFn ? eligibleFn(myCabinetProfile.officers, state.officerCatalog) : myCabinetProfile.officers;
+
+  if (!eligibleOfficers.length) {
+    return `
+      <div class="empty-state" style="padding:24px">
+        <p style="font-weight:600;margin-bottom:6px">Нет офицеров для симулятора купонов</p>
+        <p style="font-size:12.5px;color:var(--text2)">
+          В симуляторе рассчитываются только офицеры, прокачиваемые <strong>и за купоны, и за универсальные пазлы</strong>.<br>
+          Все текущие офицеры настроены «Только личные медали» или прокачиваются только специальными пазлами.
+        </p>
+      </div>
+    `;
+  }
+
+  let selectedOfficer = eligibleOfficers.find(o => o.id === myCabinetSim.officerId);
   if (!selectedOfficer) {
-    selectedOfficer = myCabinetProfile.officers[0];
+    selectedOfficer = eligibleOfficers[0];
     myCabinetSim.officerId = selectedOfficer.id;
   }
 
@@ -1766,7 +1783,7 @@ function renderCabinetSimulatorHtml() {
               const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
                 ? logic.sortOfficersByGeneration
                 : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
-              const sorted = sortFn ? sortFn(myCabinetProfile.officers, state.officerCatalog) : myCabinetProfile.officers;
+              const sorted = sortFn ? sortFn(eligibleOfficers, state.officerCatalog) : eligibleOfficers;
               return sorted.map(o => `<option value="${o.id}" ${o.id===selectedOfficer.id?'selected':''}>${escapeHtml(officerLabel(o))} (ур. ${o.level})</option>`).join('');
             })()}
           </select>
@@ -5259,7 +5276,13 @@ function renderCalculator() {
 function renderPersonalSimulator() {
   const player = getPlayer(calcPlayerId);
   if (!player) return `<div class="empty-state"><p>Нет игроков для расчета</p></div>`;
-  const officer = player.officers.find(o => o.id === calcOfficerId) || player.officers[0];
+
+  const eligibleFn = (typeof logic !== 'undefined' && logic.getSimulatorEligibleOfficers)
+    ? logic.getSimulatorEligibleOfficers
+    : (typeof getSimulatorEligibleOfficers === 'function' ? getSimulatorEligibleOfficers : null);
+  const eligibleOfficers = eligibleFn ? eligibleFn(player.officers, state.officerCatalog) : (player.officers || []);
+
+  const officer = eligibleOfficers.find(o => o.id === calcOfficerId) || eligibleOfficers[0];
   const cat = officer ? getCatalogOfficer(officer.catalogId) : null;
 
   if (!officer || !cat) {
@@ -5272,7 +5295,13 @@ function renderPersonalSimulator() {
           </select>
         </div>
       </div>
-      <div class="empty-state"><p>У игрока нет офицеров</p></div>
+      <div class="empty-state" style="padding:24px">
+        <p style="font-weight:600;margin-bottom:6px">У игрока нет офицеров для симулятора купонов</p>
+        <p style="font-size:12.5px;color:var(--text2)">
+          В симуляторе рассчитываются только офицеры, прокачиваемые <strong>и за купоны, и за универсальные пазлы</strong>.<br>
+          Все офицеры этого игрока настроены «Только личные медали» или прокачиваются только специальными пазлами.
+        </p>
+      </div>
     `;
   }
 
@@ -5322,7 +5351,7 @@ function renderPersonalSimulator() {
         <div class="form-group">
           <label>Офицер</label>
           <select onchange="setCalcOfficer(this.value)">
-            ${player.officers.map(o => `<option value="${o.id}" ${o.id===officer.id?'selected':''}>${officerLabel(o)} (ур. ${o.level})</option>`).join('')}
+            ${eligibleOfficers.map(o => `<option value="${o.id}" ${o.id===officer.id?'selected':''}>${officerLabel(o)} (ур. ${o.level})</option>`).join('')}
           </select>
         </div>
         <div class="form-group">

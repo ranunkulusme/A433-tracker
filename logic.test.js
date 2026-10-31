@@ -1951,6 +1951,48 @@ test('filterPlayersByOfficers filters sectors by single officer or multi-modal o
   assert.strictEqual(prioritized[2].isMatched, false);
 });
 
+test('isOfficerEligibleForSimulator filters out personal-only and puzzle-only officers from leveling simulator', () => {
+  const { isOfficerEligibleForSimulator, getSimulatorEligibleOfficers } = require('./logic.js');
+  assert.strictEqual(typeof isOfficerEligibleForSimulator, 'function', 'isOfficerEligibleForSimulator must be a function');
+  assert.strictEqual(typeof getSimulatorEligibleOfficers, 'function', 'getSimulatorEligibleOfficers must be a function');
+
+  const catalog = [
+    { id: 'angel', name: 'Анхель', couponPerPuzzle: 600, generation: 7, upgradeType: 'standard' },
+    { id: 'charlotte', name: 'Шарлотта', couponPerPuzzle: 720, generation: 8, upgradeType: 'standard' },
+    { id: 'bella', name: 'Белла', couponPerPuzzle: 0, generation: 6, upgradeType: 'special' },
+    { id: 'special_hero', name: 'Спец Командир', couponPerPuzzle: 0, generation: 5, upgradeType: 'puzzle_only' }
+  ];
+
+  // 1. Стандартный офицер без флага личных пазлов — подходит
+  const standardOff = { id: 'o1', catalogId: 'angel', level: 100, onlyPersonalPuzzles: false };
+  assert.strictEqual(isOfficerEligibleForSimulator(standardOff, catalog), true, 'Стандартный офицер качается за купоны и пазлы');
+
+  // 2. Офицер с onlyPersonalPuzzles = true — НЕ подходит (качается только за личные медали)
+  const personalOff = { id: 'o2', catalogId: 'angel', level: 100, onlyPersonalPuzzles: true };
+  assert.strictEqual(isOfficerEligibleForSimulator(personalOff, catalog), false, 'Офицер только на личных медалях исключается');
+
+  const personalOffSnake = { id: 'o2b', catalogId: 'angel', level: 100, only_personal_puzzles: 1 };
+  assert.strictEqual(isOfficerEligibleForSimulator(personalOffSnake, catalog), false, 'Поддержка snake_case only_personal_puzzles');
+
+  // 3. Офицер special (upgradeType === special или couponPerPuzzle === 0) — НЕ подходит (качается только за универсальные пазлы)
+  const specialOff = { id: 'o3', catalogId: 'bella', level: 50 };
+  assert.strictEqual(isOfficerEligibleForSimulator(specialOff, catalog), false, 'Спец-офицер без купонов исключается');
+
+  const zeroCostOff = { id: 'o4', catalogId: 'special_hero', level: 40 };
+  assert.strictEqual(isOfficerEligibleForSimulator(zeroCostOff, catalog), false, 'Офицер с couponPerPuzzle=0 исключается');
+
+  // 4. getSimulatorEligibleOfficers оставляет только стандартных командиров
+  const playerOfficers = [standardOff, personalOff, specialOff, { id: 'o5', catalogId: 'charlotte', level: 80 }];
+  const eligible = getSimulatorEligibleOfficers(playerOfficers, catalog);
+  assert.strictEqual(eligible.length, 2, 'В симуляторе остаются только 2 стандартных офицера');
+  assert.deepStrictEqual(eligible.map(o => o.id), ['o1', 'o5']);
+
+  // Пустые и невалидные входные данные
+  assert.deepStrictEqual(getSimulatorEligibleOfficers(null, catalog), []);
+  assert.deepStrictEqual(getSimulatorEligibleOfficers([], catalog), []);
+  assert.strictEqual(isOfficerEligibleForSimulator(null, catalog), false);
+});
+
 
 
 

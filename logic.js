@@ -2139,6 +2139,29 @@
     return [...matched, ...others];
   }
 
+  function isOfficerEligibleForSimulator(officer, catalog) {
+    if (!officer) return false;
+    if (Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles)) {
+      return false;
+    }
+
+    const cat = Array.isArray(catalog) ? catalog.find(c => c.id === officer.catalogId) : null;
+    if (cat?.upgradeType === 'special') {
+      return false;
+    }
+    const rawCost = cat ? Number(cat.couponPerPuzzle) : (officer.couponPerPuzzle !== undefined ? Number(officer.couponPerPuzzle) : 500);
+    if (rawCost === 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function getSimulatorEligibleOfficers(officers, catalog) {
+    if (!Array.isArray(officers)) return [];
+    return officers.filter(o => isOfficerEligibleForSimulator(o, catalog));
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -2203,5 +2226,7 @@
     formatDayRange,
     filterPlayersByOfficers,
     prioritizeFilteredOfficers,
+    isOfficerEligibleForSimulator,
+    getSimulatorEligibleOfficers,
   };
 });
