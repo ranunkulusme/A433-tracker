@@ -1290,6 +1290,45 @@ test('player_officers stores, updates and exports personal_puzzles', () => {
   assert.strictEqual(importedOff.personalPuzzles, 60);
 });
 
+test('player_officers stores, updates and exports only_personal_puzzles setting', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const p = dbModule.createPlayer({ name: 'Генерал Базы' });
+  const off = dbModule.addPlayerOfficer(p.id, {
+    catalogId: 'angel',
+    name: 'Анхель',
+    stars: 5,
+    level: 102,
+    personalPuzzles: 169,
+    onlyPersonalPuzzles: true
+  });
+
+  assert.strictEqual(off.onlyPersonalPuzzles, true);
+
+  const pLoaded = dbModule.getPlayerById(p.id);
+  const offLoaded = pLoaded.officers.find(o => o.id === off.id);
+  assert.ok(offLoaded);
+  assert.strictEqual(offLoaded.onlyPersonalPuzzles, true);
+
+  // Обновление на false
+  const updated = dbModule.updatePlayerOfficer(p.id, off.id, {
+    onlyPersonalPuzzles: false
+  });
+  assert.strictEqual(updated.onlyPersonalPuzzles, false);
+
+  // Обратно на true и проверка экспорт/импорт
+  dbModule.updatePlayerOfficer(p.id, off.id, { onlyPersonalPuzzles: true });
+  const exported = dbModule.exportKowJson();
+  dbModule.initDb(':memory:');
+  dbModule.importKowJson(exported);
+
+  const importedPlayer = dbModule.getPlayerById(p.id);
+  const importedOff = importedPlayer.officers.find(o => o.id === off.id);
+  assert.ok(importedOff);
+  assert.strictEqual(importedOff.onlyPersonalPuzzles, true);
+});
+
 
 
 

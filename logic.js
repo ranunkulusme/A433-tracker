@@ -910,6 +910,12 @@
   function forecastOfficer({ today, officer, player, officerCatalog, maxDays = 3650 }) {
     const catalogItem = (officerCatalog || DEFAULT_OFFICERS).find(item => item.id === officer.catalogId) || DEFAULT_OFFICERS[0];
     const targetPuzzles = MAX_LEVEL * PUZZLES_PER_LEVEL;
+    const isOnlyPersonal = Boolean(officer?.onlyPersonalPuzzles || officer?.only_personal_puzzles);
+    if (isOnlyPersonal) {
+      const available = totalPuzzlesForOfficer(officer, catalogItem);
+      if (available >= targetPuzzles) return { date: today, days: 0, isOnlyPersonal: true };
+      return { date: null, days: null, isOnlyPersonal: true };
+    }
     const daily = dailyRewards(player?.sector).puzzlesPerDay;
     let available = totalPuzzlesForOfficer(officer, catalogItem) + (Number(player?.stock?.puzzles) || 0);
 
@@ -1014,6 +1020,7 @@
   }
 
   function calculateOfficerDeficit({ officer, catalogItem, player, targetLevel = 180, today, includeStock = true }) {
+    const isOnlyPersonalPuzzles = Boolean(officer?.onlyPersonalPuzzles || officer?.only_personal_puzzles);
     const rawCost = Number(catalogItem?.couponPerPuzzle);
     const costPerPuzzle = rawCost === 0 ? 0 : (rawCost || COUPON_PER_PUZZLE);
     const target = Math.max(1, Math.min(MAX_LEVEL, Number(targetLevel) || MAX_LEVEL));
@@ -1027,7 +1034,7 @@
       + personalPuzzles;
 
     let stockPuzzles = 0;
-    if (includeStock) {
+    if (includeStock && !isOnlyPersonalPuzzles) {
       const stockPuzzlesVal = Math.max(0, Number(player?.stock?.puzzles) || 0);
       const stockCouponsVal = Math.max(0, Number(player?.stock?.coupons) || 0);
       stockPuzzles = stockPuzzlesVal + (costPerPuzzle > 0 ? Math.floor(stockCouponsVal / costPerPuzzle) : 0);
@@ -1037,14 +1044,18 @@
     const deficitCoupons = costPerPuzzle > 0 ? deficitPuzzles * costPerPuzzle : 0;
 
     const daily = dailyRewards(player?.sector);
-    const dailyIncome = daily.puzzlesPerDay;
+    const dailyIncome = isOnlyPersonalPuzzles ? 0 : daily.puzzlesPerDay;
 
-    const daysWithoutEvents = deficitPuzzles === 0
-      ? 0
-      : (dailyIncome > 0 ? Math.ceil(deficitPuzzles / dailyIncome) : null);
+    const daysWithoutEvents = isOnlyPersonalPuzzles
+      ? null
+      : (deficitPuzzles === 0
+        ? 0
+        : (dailyIncome > 0 ? Math.ceil(deficitPuzzles / dailyIncome) : null));
 
     const baseToday = today || new Date().toISOString().slice(0, 10);
-    const dateWithoutEvents = daysWithoutEvents !== null ? dateAdd(baseToday, daysWithoutEvents) : null;
+    const dateWithoutEvents = (!isOnlyPersonalPuzzles && daysWithoutEvents !== null)
+      ? dateAdd(baseToday, daysWithoutEvents)
+      : null;
 
     const currentStars = Math.max(0, Math.min(6, Number(officer?.stars) || 0));
     const requiredStars = 6;
@@ -1061,6 +1072,7 @@
       dailyIncome,
       daysWithoutEvents,
       dateWithoutEvents,
+      isOnlyPersonalPuzzles,
       starRequirement: {
         currentStars,
         requiredStars,

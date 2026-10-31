@@ -299,6 +299,7 @@ function getPlayers() {
       coupons: o.coupons,
       stars: o.stars,
       personalPuzzles: Number(o.personal_puzzles) || 0,
+      onlyPersonalPuzzles: Boolean(o.only_personal_puzzles),
       skills: parseSkills(o.skills_json),
       invested: parseInvested(o.invested_json)
     });
@@ -376,6 +377,7 @@ function getPlayerById(id) {
       coupons: o.coupons,
       stars: o.stars,
       personalPuzzles: Number(o.personal_puzzles) || 0,
+      onlyPersonalPuzzles: Boolean(o.only_personal_puzzles),
       skills: parseSkills(o.skills_json),
       invested: parseInvested(o.invested_json)
     }))
@@ -413,6 +415,7 @@ function getPlayersByUserId(userId) {
       coupons: o.coupons,
       stars: o.stars,
       personalPuzzles: Number(o.personal_puzzles) || 0,
+      onlyPersonalPuzzles: Boolean(o.only_personal_puzzles),
       skills: parseSkills(o.skills_json),
       invested: parseInvested(o.invested_json)
     });
@@ -599,14 +602,15 @@ function addPlayerOfficer(playerId, officerData) {
   const coupons = Number(officerData.coupons) || 0;
   const stars = Number(officerData.stars) || 0;
   const personalPuzzles = Number(officerData.personalPuzzles ?? officerData.personal_puzzles) || 0;
+  const onlyPersonalPuzzles = Boolean(officerData.onlyPersonalPuzzles ?? officerData.only_personal_puzzles) ? 1 : 0;
   const skills = parseSkills(officerData.skills ?? officerData.skills_json);
   const skillsJson = JSON.stringify(skills);
   const invested = parseInvested(officerData.invested ?? officerData.invested_json);
   const investedJson = JSON.stringify(invested);
 
   db.prepare(`
-    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, personal_puzzles, skills_json, invested_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars, personal_puzzles, only_personal_puzzles, skills_json, invested_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       catalog_id = excluded.catalog_id,
       name = excluded.name,
@@ -614,11 +618,12 @@ function addPlayerOfficer(playerId, officerData) {
       coupons = excluded.coupons,
       stars = excluded.stars,
       personal_puzzles = excluded.personal_puzzles,
+      only_personal_puzzles = excluded.only_personal_puzzles,
       skills_json = excluded.skills_json,
       invested_json = excluded.invested_json
-  `).run(id, playerId, catalogId, name, level, coupons, stars, personalPuzzles, skillsJson, investedJson);
+  `).run(id, playerId, catalogId, name, level, coupons, stars, personalPuzzles, onlyPersonalPuzzles, skillsJson, investedJson);
 
-  return { id, playerId, catalogId, name, level, coupons, stars, personalPuzzles, skills, invested };
+  return { id, playerId, catalogId, name, level, coupons, stars, personalPuzzles, onlyPersonalPuzzles: Boolean(onlyPersonalPuzzles), skills, invested };
 }
 
 function updatePlayerOfficer(playerId, officerId, updates) {
@@ -632,6 +637,9 @@ function updatePlayerOfficer(playerId, officerId, updates) {
   const personalPuzzles = updates.personalPuzzles !== undefined
     ? Number(updates.personalPuzzles) || 0
     : (updates.personal_puzzles !== undefined ? Number(updates.personal_puzzles) || 0 : (existing.personal_puzzles || 0));
+  const onlyPersonalPuzzles = updates.onlyPersonalPuzzles !== undefined
+    ? (Boolean(updates.onlyPersonalPuzzles) ? 1 : 0)
+    : (updates.only_personal_puzzles !== undefined ? (Boolean(updates.only_personal_puzzles) ? 1 : 0) : (existing.only_personal_puzzles ? 1 : 0));
   const name = updates.name !== undefined ? updates.name : existing.name;
 
   let skills;
@@ -652,9 +660,9 @@ function updatePlayerOfficer(playerId, officerId, updates) {
 
   db.prepare(`
     UPDATE player_officers
-    SET level = ?, coupons = ?, stars = ?, personal_puzzles = ?, name = ?, skills_json = ?, invested_json = ?
+    SET level = ?, coupons = ?, stars = ?, personal_puzzles = ?, only_personal_puzzles = ?, name = ?, skills_json = ?, invested_json = ?
     WHERE id = ? AND player_id = ?
-  `).run(level, coupons, stars, personalPuzzles, name, skillsJson, investedJson, officerId, playerId);
+  `).run(level, coupons, stars, personalPuzzles, onlyPersonalPuzzles, name, skillsJson, investedJson, officerId, playerId);
 
   return {
     id: officerId,
@@ -664,6 +672,7 @@ function updatePlayerOfficer(playerId, officerId, updates) {
     coupons,
     stars,
     personalPuzzles,
+    onlyPersonalPuzzles: Boolean(onlyPersonalPuzzles),
     skills,
     invested
   };
@@ -1175,6 +1184,9 @@ function importKowJson(rawJson) {
             if (rawOfficer.personalPuzzles !== undefined || rawOfficer.personal_puzzles !== undefined) {
               o.personalPuzzles = rawOfficer.personalPuzzles ?? rawOfficer.personal_puzzles;
             }
+            if (rawOfficer.onlyPersonalPuzzles !== undefined || rawOfficer.only_personal_puzzles !== undefined) {
+              o.onlyPersonalPuzzles = Boolean(rawOfficer.onlyPersonalPuzzles ?? rawOfficer.only_personal_puzzles);
+            }
             if (rawOfficer.skills !== undefined) {
               o.skills = rawOfficer.skills;
             } else if (rawOfficer.skills_json !== undefined) {
@@ -1416,6 +1428,9 @@ function migrateSchema(db) {
     if (!officerCols.includes('personal_puzzles')) {
       db.exec("ALTER TABLE player_officers ADD COLUMN personal_puzzles INTEGER NOT NULL DEFAULT 0;");
     }
+    if (!officerCols.includes('only_personal_puzzles')) {
+      db.exec("ALTER TABLE player_officers ADD COLUMN only_personal_puzzles INTEGER NOT NULL DEFAULT 0;");
+    }
   }
 
   const eventTypeCols = getColumns('event_types');
@@ -1535,6 +1550,7 @@ function initDb(filePath) {
       coupons INTEGER NOT NULL DEFAULT 0,
       stars INTEGER NOT NULL DEFAULT 0,
       personal_puzzles INTEGER NOT NULL DEFAULT 0,
+      only_personal_puzzles INTEGER NOT NULL DEFAULT 0,
       skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]',
       invested_json TEXT NOT NULL DEFAULT '{}'
     );
