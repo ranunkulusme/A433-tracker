@@ -48,6 +48,10 @@ const {
   parseWarehouseScreenshotText,
   mergeScanResults,
   normalizeStock,
+  USER_PERMISSIONS,
+  PERMISSION_PRESETS,
+  hasUserPermission,
+  applyPermissionPreset,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -1992,6 +1996,109 @@ test('isOfficerEligibleForSimulator filters out personal-only and puzzle-only of
   assert.deepStrictEqual(getSimulatorEligibleOfficers([], catalog), []);
   assert.strictEqual(isOfficerEligibleForSimulator(null, catalog), false);
 });
+
+test('USER_PERMISSIONS and PERMISSION_PRESETS define correct permissions and presets', () => {
+  assert.ok(USER_PERMISSIONS, 'USER_PERMISSIONS should be defined');
+  assert.strictEqual(USER_PERMISSIONS.VIEW_SECTORS, 'view_sectors');
+  assert.strictEqual(USER_PERMISSIONS.VIEW_STOCKS, 'view_stocks');
+  assert.strictEqual(USER_PERMISSIONS.VIEW_MATRIX, 'view_matrix');
+  assert.strictEqual(USER_PERMISSIONS.MANAGE_EVENTS, 'manage_events');
+  assert.strictEqual(USER_PERMISSIONS.MANAGE_CATALOG, 'manage_catalog');
+  assert.strictEqual(USER_PERMISSIONS.APPROVE_USERS, 'approve_users');
+
+  assert.ok(PERMISSION_PRESETS, 'PERMISSION_PRESETS should be defined');
+  assert.strictEqual(PERMISSION_PRESETS.ALL.id, 'all');
+  assert.deepStrictEqual(PERMISSION_PRESETS.ALL.permissions, [
+    'view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'
+  ]);
+  assert.strictEqual(PERMISSION_PRESETS.ANALYTICS.id, 'analytics');
+  assert.deepStrictEqual(PERMISSION_PRESETS.ANALYTICS.permissions, [
+    'view_sectors', 'view_stocks', 'view_matrix'
+  ]);
+  assert.strictEqual(PERMISSION_PRESETS.TACTICIAN.id, 'tactician');
+  assert.deepStrictEqual(PERMISSION_PRESETS.TACTICIAN.permissions, [
+    'view_sectors', 'manage_events'
+  ]);
+  assert.strictEqual(PERMISSION_PRESETS.HR.id, 'hr');
+  assert.deepStrictEqual(PERMISSION_PRESETS.HR.permissions, [
+    'view_sectors', 'approve_users'
+  ]);
+  assert.strictEqual(PERMISSION_PRESETS.RESET.id, 'reset');
+  assert.deepStrictEqual(PERMISSION_PRESETS.RESET.permissions, []);
+});
+
+test('hasUserPermission correctly checks permissions based on rank and permissions array', () => {
+  // Edge cases
+  assert.strictEqual(hasUserPermission(null, USER_PERMISSIONS.VIEW_SECTORS), false);
+  assert.strictEqual(hasUserPermission(undefined, USER_PERMISSIONS.VIEW_SECTORS), false);
+
+  // R5 имеет все права независимо от содержимого permissions
+  const leaderR5 = { id: 1, rank: 'r5', permissions: [] };
+  assert.strictEqual(hasUserPermission(leaderR5, USER_PERMISSIONS.VIEW_SECTORS), true);
+  assert.strictEqual(hasUserPermission(leaderR5, USER_PERMISSIONS.VIEW_STOCKS), true);
+  assert.strictEqual(hasUserPermission(leaderR5, USER_PERMISSIONS.VIEW_MATRIX), true);
+  assert.strictEqual(hasUserPermission(leaderR5, USER_PERMISSIONS.MANAGE_EVENTS), true);
+  assert.strictEqual(hasUserPermission(leaderR5, USER_PERMISSIONS.MANAGE_CATALOG), true);
+  assert.strictEqual(hasUserPermission(leaderR5, USER_PERMISSIONS.APPROVE_USERS), true);
+  assert.strictEqual(hasUserPermission({ id: 2, rank: 'r5' }, 'any_custom_permission'), true);
+
+  // R4 имеет все права по умолчанию
+  const officerR4 = { id: 3, rank: 'r4', permissions: null };
+  assert.strictEqual(hasUserPermission(officerR4, USER_PERMISSIONS.VIEW_SECTORS), true);
+  assert.strictEqual(hasUserPermission(officerR4, USER_PERMISSIONS.VIEW_STOCKS), true);
+  assert.strictEqual(hasUserPermission(officerR4, USER_PERMISSIONS.VIEW_MATRIX), true);
+  assert.strictEqual(hasUserPermission(officerR4, USER_PERMISSIONS.MANAGE_EVENTS), true);
+  assert.strictEqual(hasUserPermission(officerR4, USER_PERMISSIONS.MANAGE_CATALOG), true);
+  assert.strictEqual(hasUserPermission(officerR4, USER_PERMISSIONS.APPROVE_USERS), true);
+
+  // R3 без permissions возвращает false для любого права
+  const memberR3NoPerms = { id: 4, rank: 'r3' };
+  assert.strictEqual(hasUserPermission(memberR3NoPerms, USER_PERMISSIONS.VIEW_SECTORS), false);
+  assert.strictEqual(hasUserPermission(memberR3NoPerms, USER_PERMISSIONS.VIEW_STOCKS), false);
+  assert.strictEqual(hasUserPermission({ id: 5, rank: 'r3', permissions: [] }, USER_PERMISSIONS.VIEW_SECTORS), false);
+  assert.strictEqual(hasUserPermission({ id: 6, rank: 'r3', permissions: 'not_an_array' }, USER_PERMISSIONS.VIEW_SECTORS), false);
+
+  // R3 с конкретным правом в массиве permissions возвращает true только для него
+  const memberR3Tactician = { id: 7, rank: 'r3', permissions: ['view_sectors', 'manage_events'] };
+  assert.strictEqual(hasUserPermission(memberR3Tactician, USER_PERMISSIONS.VIEW_SECTORS), true);
+  assert.strictEqual(hasUserPermission(memberR3Tactician, USER_PERMISSIONS.MANAGE_EVENTS), true);
+  assert.strictEqual(hasUserPermission(memberR3Tactician, USER_PERMISSIONS.VIEW_STOCKS), false);
+  assert.strictEqual(hasUserPermission(memberR3Tactician, USER_PERMISSIONS.VIEW_MATRIX), false);
+  assert.strictEqual(hasUserPermission(memberR3Tactician, USER_PERMISSIONS.MANAGE_CATALOG), false);
+  assert.strictEqual(hasUserPermission(memberR3Tactician, USER_PERMISSIONS.APPROVE_USERS), false);
+});
+
+test('applyPermissionPreset returns correct permission list for presets and handles unknown IDs', () => {
+  assert.deepStrictEqual(applyPermissionPreset('all'), [
+    'view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'
+  ]);
+  assert.deepStrictEqual(applyPermissionPreset('analytics'), [
+    'view_sectors', 'view_stocks', 'view_matrix'
+  ]);
+  assert.deepStrictEqual(applyPermissionPreset('tactician'), [
+    'view_sectors', 'manage_events'
+  ]);
+  assert.deepStrictEqual(applyPermissionPreset('hr'), [
+    'view_sectors', 'approve_users'
+  ]);
+  assert.deepStrictEqual(applyPermissionPreset('reset'), []);
+
+  // Case insensitivity and whitespace handling
+  assert.deepStrictEqual(applyPermissionPreset('ALL'), applyPermissionPreset('all'));
+  assert.deepStrictEqual(applyPermissionPreset('  Analytics  '), applyPermissionPreset('analytics'));
+
+  // Unknown or invalid preset returns empty array
+  assert.deepStrictEqual(applyPermissionPreset('unknown_preset'), []);
+  assert.deepStrictEqual(applyPermissionPreset(null), []);
+  assert.deepStrictEqual(applyPermissionPreset(undefined), []);
+  assert.deepStrictEqual(applyPermissionPreset(123), []);
+
+  // Returns new copy, not mutated reference
+  const firstCall = applyPermissionPreset('analytics');
+  firstCall.push('dummy');
+  assert.deepStrictEqual(applyPermissionPreset('analytics'), ['view_sectors', 'view_stocks', 'view_matrix']);
+});
+
 
 
 
