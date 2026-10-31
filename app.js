@@ -556,9 +556,11 @@ async function loadDataFromServer() {
     if (Array.isArray(evs)) state.events = evs;
     if (Array.isArray(vTiers)) state.vipTiers = vTiers;
 
-    if (canManage()) {
+    if (canManage() || hasPermission('view_sectors')) {
       const pl = await apiFetch('/api/players').catch(() => null);
       if (Array.isArray(pl)) state.players = pl;
+    }
+    if (canManage() || hasPermission('approve_users')) {
       await updatePendingCount();
     }
     if (currentUser) {
@@ -797,9 +799,21 @@ function canManage() {
   const role = currentUser?.rank || state.currentRole;
   return role === 'r4' || role === 'r5';
 }
+function hasPermission(permission) {
+  if (!currentUser) return false;
+  if (typeof logic !== 'undefined' && typeof logic.hasUserPermission === 'function') {
+    return logic.hasUserPermission(currentUser, permission);
+  }
+  if (typeof hasUserPermission === 'function') {
+    return hasUserPermission(currentUser, permission);
+  }
+  if (currentUser.rank === 'r5' || currentUser.rank === 'r4') return true;
+  if (!Array.isArray(currentUser.permissions)) return false;
+  return currentUser.permissions.includes(permission);
+}
 function canSeeStock(playerId) {
   const myId = currentUser?.playerId ?? state.currentPlayerId;
-  return canManage() || myId === playerId;
+  return canManage() || myId === playerId || hasPermission('view_stocks');
 }
 function placeInfo(eventType, place, eventDate=null) {
   if (!eventType) return null;
@@ -1325,7 +1339,7 @@ async function checkAuth() {
 
 // ─── PENDING REQUESTS & BADGES ───────────────────────────────
 async function updatePendingCount() {
-  if (!canManage()) {
+  if (!canManage() && !hasPermission('approve_users')) {
     pendingRequestsCount = 0;
     renderPendingBadge();
     return 0;
@@ -1351,8 +1365,9 @@ function pluralizeRequests(count) {
 
 function renderPendingBadge() {
   const topbarBadge = document.getElementById('topbar-pending-badge');
+  const canApprove = canManage() || hasPermission('approve_users');
   if (topbarBadge) {
-    if (pendingRequestsCount > 0 && canManage()) {
+    if (pendingRequestsCount > 0 && canApprove) {
       topbarBadge.style.display = 'inline-flex';
       topbarBadge.innerHTML = `<span class="badge-alert">🔔 ${pendingRequestsCount} <span class="badge-alert-label">${pluralizeRequests(pendingRequestsCount)}</span></span>`;
     } else {
@@ -1363,7 +1378,7 @@ function renderPendingBadge() {
   const navItem = document.querySelector('.nav-item[data-page="pending_registrations"]');
   if (navItem) {
     let pill = navItem.querySelector('.nav-pill');
-    if (pendingRequestsCount > 0 && canManage()) {
+    if (pendingRequestsCount > 0 && canApprove) {
       if (pill) {
         pill.textContent = pendingRequestsCount;
       } else {
@@ -1391,7 +1406,7 @@ function renderTopbarProfile() {
 
   const role = (currentUser.rank || 'r3').toUpperCase();
   const name = currentUser.playerName || (currentUser.player && currentUser.player.name) || currentUser.username || 'Пользователь';
-  const showPending = canManage() && pendingRequestsCount > 0;
+  const showPending = (canManage() || hasPermission('approve_users')) && pendingRequestsCount > 0;
 
   container.innerHTML = `
     <button id="topbar-pending-badge" class="badge-alert-btn" style="display:${showPending ? 'inline-flex' : 'none'}" onclick="navigate('pending_registrations')" title="Ожидают одобрения">
@@ -1412,32 +1427,63 @@ function renderSidebarNav() {
   if (!nav) return;
 
   const role = currentUser?.rank || state.currentRole || 'r3';
-  let items = [];
+  const items = [];
 
-  if (role === 'r3') {
-    items = [
-      { page: 'my_cabinet', label: 'Мой кабинет', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` },
-      { page: 'calendar', label: 'Календарь ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="8" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
-      { page: 'calculator', label: 'Персональный калькулятор', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` }
-    ];
-  } else {
-    // R4 / R5
-    items = [
-      { page: 'my_cabinet', label: 'Мой кабинет', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>` },
-      { page: 'calendar', label: 'Календарь', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>` },
-      { page: 'players', label: 'Секторы', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>` },
-      { page: 'officers', label: 'Офицеры', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>` },
-      { page: 'event_types', label: 'Типы ивентов', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>` },
-      { page: 'calculator', label: 'Калькулятор и Аналитика', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>` },
-      { page: 'pending_registrations', label: 'Заявки на регистрацию', icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`, pill: pendingRequestsCount }
-    ];
-    if (role === 'r5') {
-      items.push({
-        page: 'users',
-        label: 'Пользователи',
-        icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
-      });
-    }
+  items.push({
+    page: 'my_cabinet',
+    label: 'Мой кабинет',
+    icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
+  });
+
+  items.push({
+    page: 'calendar',
+    label: role === 'r3' && !hasPermission('manage_events') ? 'Календарь ивентов' : 'Календарь',
+    icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="8" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`
+  });
+
+  if (canManage() || hasPermission('view_sectors')) {
+    items.push({
+      page: 'players',
+      label: 'Секторы',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
+    });
+  }
+
+  if (canManage() || hasPermission('manage_catalog')) {
+    items.push({
+      page: 'officers',
+      label: 'Офицеры',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>`
+    });
+    items.push({
+      page: 'event_types',
+      label: 'Типы ивентов',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>`
+    });
+  }
+
+  const showMatrixInCalc = canManage() || hasPermission('view_matrix');
+  items.push({
+    page: 'calculator',
+    label: showMatrixInCalc ? 'Калькулятор и Аналитика' : 'Персональный калькулятор',
+    icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>`
+  });
+
+  if (canManage() || hasPermission('approve_users')) {
+    items.push({
+      page: 'pending_registrations',
+      label: 'Заявки на регистрацию',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
+      pill: pendingRequestsCount
+    });
+  }
+
+  if (role === 'r5') {
+    items.push({
+      page: 'users',
+      label: 'Пользователи',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
+    });
   }
 
   nav.innerHTML = items.map(item => `
@@ -3094,6 +3140,8 @@ async function handleRejectUser(userId, username) {
 }
 
 // ─── PAGE: USERS (R5) ────────────────────────────────────────
+let usersListCache = [];
+
 async function renderUsers() {
   const c = document.getElementById('content');
   c.innerHTML = `
@@ -3108,6 +3156,7 @@ async function renderUsers() {
 
   try {
     const users = await apiFetch('/api/users');
+    usersListCache = Array.isArray(users) ? users : [];
     const container = document.getElementById('users-table-container');
     if (!container) return;
 
@@ -3115,6 +3164,15 @@ async function renderUsers() {
       container.innerHTML = `<div class="empty-state"><p>Пользователей не найдено</p></div>`;
       return;
     }
+
+    const permBadgesMap = {
+      view_sectors: { label: 'Секторы', icon: '📦' },
+      view_stocks: { label: 'Склады', icon: '🔒' },
+      view_matrix: { label: 'Матрица', icon: '📊' },
+      manage_events: { label: 'Ивенты', icon: '🎯' },
+      manage_catalog: { label: 'Каталог', icon: '📚' },
+      approve_users: { label: 'Кадры', icon: '👥' }
+    };
 
     container.innerHTML = `
       <div class="table-wrap">
@@ -3125,31 +3183,69 @@ async function renderUsers() {
               <th>Логин</th>
               <th>Персонаж</th>
               <th>Ранг</th>
+              <th>Права доступа</th>
               <th>Статус</th>
               <th>Регистрация</th>
               <th style="text-align:right">Действия</th>
             </tr>
           </thead>
           <tbody>
-            ${users.map(u => `
-              <tr>
-                <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
-                <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
-                <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
-                <td>
-                  <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
-                    <option value="r3" ${u.rank === 'r3' ? 'selected' : ''}>Р3 (Боец)</option>
-                    <option value="r4" ${u.rank === 'r4' ? 'selected' : ''}>Р4 (Чиновник)</option>
-                    <option value="r5" ${u.rank === 'r5' ? 'selected' : ''}>Р5 (Глава)</option>
-                  </select>
-                </td>
-                <td>${u.is_approved ? '<span class="badge badge-success">✓ Активен</span>' : '<span class="badge badge-pending">⏳ Ожидает</span>'}</td>
-                <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
-                <td style="text-align:right">
-                  <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">🔑 Пароль</button>
-                </td>
-              </tr>
-            `).join('')}
+            ${users.map(u => {
+              const rank = u.rank || 'r3';
+              const isFull = rank === 'r4' || rank === 'r5';
+              const uPerms = Array.isArray(u.permissions) ? u.permissions : [];
+
+              let permsHtml = '';
+              if (isFull) {
+                permsHtml = `
+                  <div class="permissions-cell">
+                    <span class="badge badge-perm badge-perm-all" title="Р4/Р5 имеют полный доступ ко всем разделам">⚡ Полный доступ</span>
+                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
+                  </div>
+                `;
+              } else if (uPerms.length > 0) {
+                const tags = uPerms.map(p => {
+                  const info = permBadgesMap[p] || { label: p, icon: '🔑' };
+                  return `<span class="badge badge-perm badge-perm-${p}" title="${escapeHtml(info.label)}">${info.icon} ${escapeHtml(info.label)}</span>`;
+                }).join('');
+                permsHtml = `
+                  <div class="permissions-cell">
+                    <div class="permissions-tags">
+                      ${tags}
+                    </div>
+                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
+                  </div>
+                `;
+              } else {
+                permsHtml = `
+                  <div class="permissions-cell">
+                    <span class="badge-perm-none">Базовые (Р3)</span>
+                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
+                  </div>
+                `;
+              }
+
+              return `
+                <tr>
+                  <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
+                  <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
+                  <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
+                  <td>
+                    <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
+                      <option value="r3" ${rank === 'r3' ? 'selected' : ''}>Р3 (Боец)</option>
+                      <option value="r4" ${rank === 'r4' ? 'selected' : ''}>Р4 (Чиновник)</option>
+                      <option value="r5" ${rank === 'r5' ? 'selected' : ''}>Р5 (Глава)</option>
+                    </select>
+                  </td>
+                  <td>${permsHtml}</td>
+                  <td>${u.is_approved ? '<span class="badge badge-success">✓ Активен</span>' : '<span class="badge badge-pending">⏳ Ожидает</span>'}</td>
+                  <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
+                  <td style="text-align:right">
+                    <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">🔑 Пароль</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -3160,6 +3256,121 @@ async function renderUsers() {
       container.innerHTML = `<div class="empty-state"><p style="color:var(--red)">Ошибка: ${escapeHtml(err.message)}</p></div>`;
     }
   }
+}
+
+const renderUsersTable = renderUsers;
+
+function openUserPermissionsModal(userId) {
+  const user = usersListCache.find(u => Number(u.id) === Number(userId));
+  if (!user) {
+    toast('Пользователь не найден', 'error');
+    return;
+  }
+  const idInput = document.getElementById('mup-user-id');
+  if (idInput) idInput.value = user.id;
+
+  const targetName = document.getElementById('mup-target-name');
+  if (targetName) targetName.textContent = `@${user.username}`;
+
+  const targetRank = document.getElementById('mup-target-rank');
+  if (targetRank) {
+    const rank = (user.rank || 'r3').toUpperCase();
+    targetRank.textContent = `[${rank}]`;
+    targetRank.className = `badge badge-rank badge-rank-${user.rank || 'r3'}`;
+  }
+
+  const userPerms = Array.isArray(user.permissions) ? user.permissions : [];
+  const allPermKeys = ['view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'];
+  allPermKeys.forEach(p => {
+    const cb = document.getElementById(`perm-${p}`);
+    if (cb) {
+      cb.checked = userPerms.includes(p);
+    }
+  });
+
+  openModal('modal-user-permissions');
+}
+
+function applyModalPreset(presetId) {
+  let perms = [];
+  if (typeof logic !== 'undefined' && typeof logic.applyPermissionPreset === 'function') {
+    perms = logic.applyPermissionPreset(presetId);
+  } else if (typeof applyPermissionPreset === 'function') {
+    perms = applyPermissionPreset(presetId);
+  } else {
+    const presets = {
+      all: ['view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'],
+      analytics: ['view_sectors', 'view_stocks', 'view_matrix'],
+      tactician: ['view_sectors', 'manage_events'],
+      hr: ['view_sectors', 'approve_users'],
+      reset: []
+    };
+    perms = presets[presetId] || [];
+  }
+  const allPermKeys = ['view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'];
+  allPermKeys.forEach(p => {
+    const cb = document.getElementById(`perm-${p}`);
+    if (cb) {
+      cb.checked = perms.includes(p);
+    }
+  });
+}
+
+async function submitUserPermissions() {
+  const idInput = document.getElementById('mup-user-id');
+  const userId = idInput ? parseInt(idInput.value, 10) : null;
+  if (!userId) {
+    toast('Не выбран пользователь для сохранения', 'error');
+    return;
+  }
+
+  const allPermKeys = ['view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'];
+  const selected = [];
+  allPermKeys.forEach(p => {
+    const cb = document.getElementById(`perm-${p}`);
+    if (cb && cb.checked) {
+      selected.push(p);
+    }
+  });
+
+  const saveBtn = document.getElementById('btn-save-permissions');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Сохранение...';
+  }
+
+  try {
+    await apiFetch(`/api/users/${userId}`, {
+      method: 'PATCH',
+      body: { permissions: selected }
+    });
+    toast('Права доступа успешно сохранены');
+    const userInCache = usersListCache.find(u => Number(u.id) === Number(userId));
+    if (userInCache) {
+      userInCache.permissions = selected;
+    }
+    if (currentUser && Number(currentUser.id) === Number(userId)) {
+      currentUser.permissions = selected;
+      try {
+        localStorage.setItem('kow_user', JSON.stringify(currentUser));
+      } catch (e) {}
+      renderTopbarProfile();
+      renderSidebarNav();
+    }
+    closeUserPermissionsModal();
+    await renderUsers();
+  } catch (err) {
+    toast(`Ошибка сохранения прав: ${err.message}`, 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Сохранить права';
+    }
+  }
+}
+
+function closeUserPermissionsModal() {
+  closeModal('modal-user-permissions');
 }
 
 async function handleChangeUserRank(userId, newRank) {
@@ -3242,6 +3453,15 @@ function navigate(page, params={}) {
   // Role permissions check
   if (role === 'r3') {
     const allowedR3 = ['my_cabinet', 'calendar', 'calculator', 'officer_detail', 'event_detail'];
+    if (hasPermission('view_sectors')) {
+      allowedR3.push('players', 'player_detail');
+    }
+    if (hasPermission('manage_catalog')) {
+      allowedR3.push('officers', 'event_types');
+    }
+    if (hasPermission('approve_users')) {
+      allowedR3.push('pending_registrations');
+    }
     if (!allowedR3.includes(page)) {
       page = 'my_cabinet';
     }
@@ -3319,7 +3539,7 @@ function renderCalendar() {
   c.innerHTML = `
     <div class="section-header">
       <div class="section-title">Ивенты</div>
-      ${canManage() ? `
+      ${(canManage() || hasPermission('manage_events')) ? `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-outline" onclick="openSeasonSchedulerModal()">⚡ Создать сезон</button>
           <button class="btn-primary" onclick="openEventModal()">+ Создать ивент</button>
@@ -3437,7 +3657,7 @@ function calCard(ev, status) {
     <div class="cal-card-footer">
       <span style="font-size:12px;color:var(--text3)">${ev.note || ''}</span>
       <div style="display:flex;gap:6px">
-        ${canManage() ? `<button class="action-btn" onclick="event.stopPropagation();openEventModal(${ev.id})">✏️</button><button class="action-btn danger" onclick="event.stopPropagation();confirmDeleteEvent(${ev.id})">🗑</button>` : ''}
+        ${(canManage() || hasPermission('manage_events')) ? `<button class="action-btn" onclick="event.stopPropagation();openEventModal(${ev.id})">✏️</button><button class="action-btn danger" onclick="event.stopPropagation();confirmDeleteEvent(${ev.id})">🗑</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -3576,9 +3796,9 @@ function renderEventDetail(eventId) {
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
       <div style="display:flex;gap:8px">
-        ${canManage() && isEventPast(ev) && !ev.accrued ? `<button class="btn-primary btn-sm" onclick="accrueEventRewards(${ev.id})">Начислить награды</button>` : ''}
+        ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) && !ev.accrued ? `<button class="btn-primary btn-sm" onclick="accrueEventRewards(${ev.id})">Начислить награды</button>` : ''}
         ${ev.accrued ? `<span class="badge badge-none">Начислено</span>` : ''}
-        ${canManage() ? `<button class="btn-primary btn-sm" onclick="openEventModal(${ev.id})">✏️ Редактировать ивент</button>` : ''}
+        ${(canManage() || hasPermission('manage_events')) ? `<button class="btn-primary btn-sm" onclick="openEventModal(${ev.id})">✏️ Редактировать ивент</button>` : ''}
       </div>
     </div>
 
@@ -5026,7 +5246,7 @@ function renderOfficers() {
         <div class="section-title">🎖️ Каталог офицеров (${state.officerCatalog.length})</div>
         <div style="font-size:12px;color:var(--text2);margin-top:2px">Реестр командиров альянса, параметры доподготовки, подготовки и курсы обмена</div>
       </div>
-      ${canManage() ? `
+      ${(canManage() || hasPermission('manage_catalog')) ? `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
           <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
@@ -5039,7 +5259,7 @@ function renderOfficers() {
         <div style="font-size:42px;margin-bottom:12px">🎖️</div>
         <h3 style="margin:0 0 8px;font-size:18px">Каталог офицеров пуст</h3>
         <p style="color:var(--text2);margin:0 0 16px;max-width:440px;margin-inline:auto">Добавьте офицеров вручную или загрузите скриншот из игрового магазина обмена медалей.</p>
-        ${canManage() ? `
+        ${(canManage() || hasPermission('manage_catalog')) ? `
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
             <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
             <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
@@ -5084,7 +5304,7 @@ function renderOfficers() {
               <td style="font-family:var(--mono);font-weight:700;color:var(--primary)">${fmtNum(total)}</td>
               <td>
                 <div style="display:flex;gap:4px">
-                  ${canManage() ? `<button class="action-btn" title="Редактировать" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" title="Удалить" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑️</button>` : '—'}
+                  ${(canManage() || hasPermission('manage_catalog')) ? `<button class="action-btn" title="Редактировать" onclick="openOfficerCatalogModal('${o.id}')">✏️</button><button class="action-btn danger" title="Удалить" onclick="confirmDeleteOfficerCatalog('${o.id}')">🗑️</button>` : '—'}
                 </div>
               </td>
             </tr>`;
@@ -5134,7 +5354,7 @@ function renderOfficerDetail(catalogId) {
           <span style="color:var(--text3);font-size:12px">поколение ${fmtNum(officer.generation)} · ${officer.couponPerPuzzle === 0 ? 'только пазлы' : `${fmtNum(officer.couponPerPuzzle)} купонов за пазл`}</span>
         </div>
       </div>
-      ${canManage()?`<div style="display:flex;gap:8px"><button class="btn-primary btn-sm" onclick="openOfficerCatalogModal('${officer.id}')">Редактировать</button><button class="btn-danger btn-sm" onclick="confirmDeleteOfficerCatalog('${officer.id}')">Удалить</button></div>`:''}
+      ${(canManage() || hasPermission('manage_catalog'))?`<div style="display:flex;gap:8px"><button class="btn-primary btn-sm" onclick="openOfficerCatalogModal('${officer.id}')">Редактировать</button><button class="btn-danger btn-sm" onclick="confirmDeleteOfficerCatalog('${officer.id}')">Удалить</button></div>`:''}
     </div>
     <div class="stock-grid">
       <div class="stock-card"><div class="label">Медали до подготовки</div><div class="value">${fmtNum(officer.medalsBeforeTraining)}</div></div>
@@ -5198,7 +5418,11 @@ let matrixSortCol = 'deficit';
 let matrixSortDir = 'asc';
 
 function setCalcTab(tab) {
-  calcActiveTab = tab;
+  if (tab === 'matrix' && !canManage() && !hasPermission('view_matrix')) {
+    calcActiveTab = 'personal';
+  } else {
+    calcActiveTab = tab;
+  }
   renderCalculator();
 }
 
@@ -5263,13 +5487,18 @@ function renderCalculator() {
     calcOfficerId = player.officers[0].id;
   }
 
+  const canViewMatrix = canManage() || hasPermission('view_matrix');
+  if (!canViewMatrix && calcActiveTab === 'matrix') {
+    calcActiveTab = 'personal';
+  }
+
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="subnav">
       <button class="subnav-btn ${calcActiveTab==='personal'?'active':''}" onclick="setCalcTab('personal')">🎯 Персональный симулятор</button>
-      <button class="subnav-btn ${calcActiveTab==='matrix'?'active':''}" onclick="setCalcTab('matrix')">📊 Сводная матрица гильдии</button>
+      ${canViewMatrix ? `<button class="subnav-btn ${calcActiveTab==='matrix'?'active':''}" onclick="setCalcTab('matrix')">📊 Сводная матрица гильдии</button>` : ''}
     </div>
-    ${calcActiveTab === 'personal' ? renderPersonalSimulator() : renderGuildMatrix()}
+    ${calcActiveTab === 'personal' || !canViewMatrix ? renderPersonalSimulator() : renderGuildMatrix()}
   `;
 }
 
@@ -5628,7 +5857,7 @@ function renderEventTypes() {
     <div class="section-header">
       <div class="section-title">Типы ивентов</div>
       <div style="display:flex;gap:8px">
-        ${canManage() ? `
+        ${(canManage() || hasPermission('manage_catalog')) ? `
           <button class="btn-secondary" id="btn-bulk-rewards" onclick="openBulkRewardsModal()">⚡ Массовое обновление наград</button>
           <button class="btn-primary" onclick="openEventTypeModal()">+ Добавить тип</button>
         ` : ''}
@@ -5660,7 +5889,7 @@ function renderEventTypeCard(et) {
         ${scheduleBadge}
       </div>
       <div style="display:flex;gap:6px">
-        ${canManage() ? `<button class="action-btn" onclick="openEventTypeModal(${et.id})">✏️ Редактировать</button><button class="action-btn danger" onclick="confirmDeleteEventType(${et.id})">🗑</button>` : ''}
+        ${(canManage() || hasPermission('manage_catalog')) ? `<button class="action-btn" onclick="openEventTypeModal(${et.id})">✏️ Редактировать</button><button class="action-btn danger" onclick="confirmDeleteEventType(${et.id})">🗑</button>` : ''}
       </div>
     </div>
     <table style="margin:0;font-size:13px">
@@ -6120,7 +6349,7 @@ let isExchangeOcrRunning = false;
 let exchangeOcrOfficers = [];
 
 function openExchangeOcrModal() {
-  if (!canManage()) {
+  if (!canManage() && !hasPermission('manage_catalog')) {
     toast('Недостаточно прав для управления каталогом', 'error');
     return;
   }
@@ -7989,4 +8218,13 @@ if (typeof window !== 'undefined') {
   window.onSectorOfficerFilterChange = onSectorOfficerFilterChange;
   window.removeSectorOfficerFilter = removeSectorOfficerFilter;
   window.clearSectorOfficerFilter = clearSectorOfficerFilter;
+
+  window.hasPermission = hasPermission;
+  window.canSeeStock = canSeeStock;
+  window.renderUsers = renderUsers;
+  window.renderUsersTable = renderUsersTable;
+  window.openUserPermissionsModal = openUserPermissionsModal;
+  window.applyModalPreset = applyModalPreset;
+  window.submitUserPermissions = submitUserPermissions;
+  window.closeUserPermissionsModal = closeUserPermissionsModal;
 }
