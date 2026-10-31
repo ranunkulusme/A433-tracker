@@ -2146,6 +2146,30 @@ select option { background: var(--bg3); }
   color: #fff;
 }
 
+.btn-perm-edit-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  transition: all .15s ease;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.btn-perm-edit-inline:hover {
+  background: var(--bg4);
+  border-color: var(--blue);
+  color: #fff;
+}
+
 
 
 
