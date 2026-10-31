@@ -1485,8 +1485,8 @@ function renderSidebarNav() {
   if (role === 'r5') {
     items.push({
       page: 'users',
-      label: 'Пользователи',
-      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
+      label: 'Пользователи и права',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`
     });
   }
 
@@ -3244,7 +3244,8 @@ async function renderUsers() {
                   <td>${permsHtml}</td>
                   <td>${u.is_approved ? '<span class="badge badge-success">✓ Активен</span>' : '<span class="badge badge-pending">⏳ Ожидает</span>'}</td>
                   <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
-                  <td style="text-align:right">
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="action-btn" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
                     <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">🔑 Пароль</button>
                   </td>
                 </tr>
@@ -3264,8 +3265,17 @@ async function renderUsers() {
 
 const renderUsersTable = renderUsers;
 
-function openUserPermissionsModal(userId) {
-  const user = usersListCache.find(u => Number(u.id) === Number(userId));
+async function openUserPermissionsModal(userId) {
+  let user = usersListCache.find(u => Number(u.id) === Number(userId));
+  if (!user) {
+    try {
+      const uList = await apiFetch('/api/users');
+      if (Array.isArray(uList)) {
+        usersListCache = uList;
+        user = usersListCache.find(u => Number(u.id) === Number(userId));
+      }
+    } catch (_) {}
+  }
   if (!user) {
     toast('Пользователь не найден', 'error');
     return;
@@ -4256,8 +4266,12 @@ function renderPlayers() {
           ${filteredPlayers.map(p=>{
             const rewards = dailyRewards(p.sector);
             const stock = canSeeStock(p.id) ? `${fmtNum(p.stock.coupons)} куп. · ${fmtNum(p.stock.puzzles)} пазл. · ${fmtNum(p.stock.chests)} сун.` : 'Скрыто';
+            const isR5 = (currentUser?.rank || state.currentRole) === 'r5';
+            const ownerPermsBtn = (isR5 && p.userId)
+              ? ` <button class="btn-perm-edit-inline" title="Настроить права доступа @${escapeHtml(p.username)}" onclick="event.stopPropagation();openUserPermissionsModal(${p.userId})">🛡️</button>`
+              : '';
             const ownerHtml = p.username
-              ? `<span class="badge badge-owner" title="Владелец: @${escapeHtml(p.username)}">👤 @${escapeHtml(p.username)}</span>`
+              ? `<span class="badge badge-owner" title="Владелец: @${escapeHtml(p.username)}">👤 @${escapeHtml(p.username)}</span>${ownerPermsBtn}`
               : `<span class="badge badge-no-owner">Без владельца</span>`;
             const allOfficers = Array.isArray(p.officers) ? p.officers : [];
             const prioritizeFn = (typeof logic !== 'undefined' && logic.prioritizeFilteredOfficers)
@@ -4307,6 +4321,7 @@ function renderPlayers() {
               <td style="font-family:var(--mono);font-size:12px">${stock}</td>
               <td>
                 <div style="display:flex;gap:4px">
+                  ${isR5 && p.userId ? `<button class="action-btn" title="Права доступа владельца @${escapeHtml(p.username || '')}" onclick="event.stopPropagation();openUserPermissionsModal(${p.userId})">🛡️</button>` : ''}
                   ${canManage() || state.currentPlayerId === p.id ? `<button class="action-btn" onclick="openPlayerModal(${p.id})">✏️</button>` : ''}
                   ${canManage() ? `<button class="action-btn danger" onclick="confirmDeletePlayer(${p.id})">🗑</button>` : ''}
                 </div>
@@ -4344,6 +4359,10 @@ function renderPlayerDetail(playerId) {
   const changeOwnerBtn = canManage()
     ? `<button class="btn btn-secondary btn-sm" onclick="openChangeSectorOwnerModal(${p.id})">Изменить владельца</button>`
     : '';
+  const isR5 = (currentUser?.rank || state.currentRole) === 'r5';
+  const permissionsBtn = (isR5 && p.userId)
+    ? `<button class="btn btn-secondary btn-sm" onclick="openUserPermissionsModal(${p.userId})" title="Настроить права доступа пользователя @${escapeHtml(p.username || '')}">🛡️ Права доступа</button>`
+    : '';
 
   const c = document.getElementById('content');
   c.innerHTML = `
@@ -4357,6 +4376,7 @@ function renderPlayerDetail(playerId) {
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
           ${ownerBadge}
           ${changeOwnerBtn}
+          ${permissionsBtn}
         </div>
       </div>
       ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openPlayerModal(${p.id})">Редактировать</button>` : ''}
