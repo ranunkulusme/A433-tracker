@@ -196,6 +196,48 @@ function requireRole(roles) {
   };
 }
 
+function requirePermission(reqOrPerm, res, permission) {
+  if (typeof reqOrPerm === 'string') {
+    const perm = reqOrPerm;
+    return (req, res) => requirePermission(req, res, perm);
+  }
+  const req = reqOrPerm;
+  if (!req.user) {
+    authenticate(req);
+  }
+  if (!req.user) {
+    sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+    return false;
+  }
+  if (logic.hasUserPermission(req.user, permission)) {
+    return true;
+  }
+  sendError(res, 403, 'FORBIDDEN', `Недостаточно прав: требуется разрешение ${permission}`);
+  return false;
+}
+
+function maskPlayerStockIfNeeded(player, user) {
+  if (!player) return player;
+  const isOwner = user && player.userId === user.id;
+  const canViewStocks = user && logic.hasUserPermission(user, 'view_stocks');
+  if (isOwner || canViewStocks) {
+    return player;
+  }
+  return {
+    ...player,
+    stock: {
+      coupons: 0,
+      puzzles: 0,
+      chests: 0,
+      starCoupons: 0,
+      legendaryStars1: 0,
+      legendaryStars2: 0,
+      legendaryStars3: 0,
+      masked: true
+    }
+  };
+}
+
 const FORBIDDEN_FILES = new Set([
   'package.json',
   'package-lock.json',
@@ -420,17 +462,17 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // USER APPROVALS & USERS (R4, R5)
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/users/pending' && req.method === 'GET') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'approve_users')) return;
       return sendJson(res, 200, db.getPendingUsers());
     }
 
     const approveMatch = pathname.match(/^\/api\/users\/(\d+)\/approve$/);
     if (approveMatch && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'approve_users')) return;
       const targetUserId = Number(approveMatch[1]);
       let rank = body.rank === 'r4' ? 'r4' : 'r3';
-      if (req.user.rank === 'r4' && body.rank && body.rank !== 'r3') {
-        return sendJson(res, 403, { error: 'Чиновник (Р4) может одобрять только в ранге Р3' });
+      if (req.user.rank !== 'r5' && body.rank && body.rank !== 'r3') {
+        return sendJson(res, 403, { error: 'Только глава альянса (Р5) может назначать ранг выше Р3' });
       }
       if (req.user.rank === 'r5' && ['r3', 'r4'].includes(body.rank)) {
         rank = body.rank;
@@ -441,7 +483,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const rejectMatch = pathname.match(/^\/api\/users\/(\d+)\/reject$/);
     if (rejectMatch && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'approve_users')) return;
       const targetUserId = Number(rejectMatch[1]);
       db.rejectUser(targetUserId);
       return sendJson(res, 200, { success: true });
@@ -487,7 +529,12 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       return sendJson(res, 200, {
         ...(activeSector ? activeSector : {}),
-        user: { id: req.user.id, username: req.user.username, rank: req.user.rank },
+        user: {
+          id: req.user.id,
+          username: req.user.username,
+          rank: req.user.rank,
+          permissions: Array.isArray(req.user.permissions) ? req.user.permissions : []
+        },
         sectors,
         activeSectorId: activeSector ? activeSector.id : null,
         sector: activeSector ? activeSector.sector : null,
@@ -650,8 +697,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // PLAYERS MANAGEMENT (R4, R5)
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/players' && req.method === 'GET') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
-      return sendJson(res, 200, db.getPlayers());
+      if (!requireAuth(req, res)) return;
+      const canViewPlayers = logic.hasUserPermission(req.user, 'view_sectors') || logic.hasUserPermission(req.user, 'view_matrix');
+      if (!canViewPlayers) {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуется разрешение на просмотр секторов или матрицы');
+      }
+      const players = db.getPlayers().map(p => maskPlayerStockIfNeeded(p, req.user));
+      return sendJson(res, 200, players);
     }
 
     if (pathname === '/api/players' && req.method === 'POST') {
@@ -685,7 +737,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, created);
     }
 
-    function checkSectorAccess(targetPlayerId) {
+    function checkSectorAccess(targetPlayerId, isRead = false) {
       if (!req.user) {
         return { ok: false, status: 401, error: 'UNAUTHORIZED', message: 'Требуется авторизация' };
       }
@@ -695,6 +747,14 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
       const isOwner = player.userId === req.user.id;
+      if (isRead) {
+        const canRead = isLeader || isOwner || logic.hasUserPermission(req.user, 'view_sectors');
+        if (!canRead) {
+          return { ok: false, status: 403, error: 'FORBIDDEN', message: 'Вы не являетесь владельцем этого сектора' };
+        }
+        const maskedPlayer = maskPlayerStockIfNeeded(player, req.user);
+        return { ok: true, player: maskedPlayer, isLeader, isOwner };
+      }
       if (!isLeader && !isOwner) {
         return { ok: false, status: 403, error: 'FORBIDDEN', message: 'Вы не являетесь владельцем этого сектора' };
       }
@@ -704,7 +764,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     const playerMatch = pathname.match(/^\/api\/players\/(\d+)$/);
     if (playerMatch && req.method === 'GET') {
       const targetPlayerId = Number(playerMatch[1]);
-      const check = checkSectorAccess(targetPlayerId);
+      const check = checkSectorAccess(targetPlayerId, true);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
       return sendJson(res, 200, check.player);
     }
@@ -842,7 +902,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/vip-tiers' && req.method === 'PUT') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const tiersInput = Array.isArray(body) ? body : (Array.isArray(body?.tiers) ? body.tiers : null);
       if (!tiersInput) {
         return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается массив уровней VIP');
@@ -859,7 +919,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/catalog' && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const upgradeType = body.upgradeType === 'special' ? 'special' : 'standard';
       const medalsBeforeTraining = Math.max(0, parseInt(body.medalsBeforeTraining ?? body.medals_before_training) || 480);
       const medalsTraining = Math.max(0, parseInt(body.medalsTraining ?? body.medals_training) || 900);
@@ -886,7 +946,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/catalog/batch' && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const officers = Array.isArray(body) ? body : (Array.isArray(body?.officers) ? body.officers : null);
       if (!officers) {
         return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается массив офицеров');
@@ -923,7 +983,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const catMatch = pathname.match(/^\/api\/catalog\/([^/]+)$/);
     if (catMatch && req.method === 'PUT') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const upgradeType = body.upgradeType === 'special' ? 'special' : (body.upgradeType || 'standard');
       const medalsBeforeTraining = Math.max(0, parseInt(body.medalsBeforeTraining ?? body.medals_before_training) || 480);
       const medalsTraining = Math.max(0, parseInt(body.medalsTraining ?? body.medals_training) || 900);
@@ -949,7 +1009,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (catMatch && req.method === 'DELETE') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const id = catMatch[1];
       if (!logic.canDeleteOfficer(id, db.getPlayers()).ok) {
         return sendError(res, 400, 'OFFICER_IN_USE', 'Офицер используется игроками');
@@ -966,7 +1026,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/event-types/bulk-rewards' && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const typeIds = Array.isArray(body?.typeIds) ? body.typeIds.map(Number).filter(n => !isNaN(n) && n > 0) : [];
       if (!typeIds.length) {
         return sendError(res, 400, 'INVALID_PAYLOAD', 'Ожидается непустой массив ID типов событий (typeIds)');
@@ -980,7 +1040,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/event-types' && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const sanitized = sanitizeEventType(body);
       const saved = db.saveEventType(sanitized);
       return sendJson(res, 200, saved);
@@ -988,14 +1048,14 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const etMatch = pathname.match(/^\/api\/event-types\/(\d+)$/);
     if (etMatch && req.method === 'PUT') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       const sanitized = sanitizeEventType({ ...body, id: Number(etMatch[1]) });
       const saved = db.saveEventType(sanitized);
       return sendJson(res, 200, saved);
     }
 
     if (etMatch && req.method === 'DELETE') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_catalog')) return;
       db.deleteEventType(Number(etMatch[1]));
       return sendJson(res, 200, { success: true });
     }
@@ -1005,15 +1065,15 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/events' && req.method === 'GET') {
       const events = db.getEvents();
-      const isLeader = req.user && (req.user.rank === 'r4' || req.user.rank === 'r5');
+      const canManageEvents = Boolean(req.user && logic.hasUserPermission(req.user, 'manage_events'));
       const userSectors = req.user ? db.getPlayersByUserId(req.user.id) : [];
       const userSectorIds = new Set(userSectors.map(s => s.id));
       const activeSectorId = req.user?.playerId;
 
       const enriched = events.map(ev => {
         const item = { ...ev };
-        const eventRegs = (isLeader || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
-        if (isLeader) {
+        const eventRegs = (canManageEvents || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
+        if (canManageEvents) {
           item.registrations = eventRegs;
         }
         if (req.user) {
@@ -1027,13 +1087,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/events' && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_events')) return;
       const saved = db.saveEvent(body);
       return sendJson(res, 200, saved);
     }
 
     if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_events')) return;
 
       let cachedEventTypes = db.getEventTypes();
       function ensureEventType(identifier, defaultColor) {
@@ -1209,7 +1269,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const autopickMatch = pathname.match(/^\/api\/events\/(\d+)\/autopick$/);
     if (autopickMatch && req.method === 'POST') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_events')) return;
       const eventId = Number(autopickMatch[1]);
       const ev = db.getEventById(eventId);
       if (!ev) {
@@ -1249,11 +1309,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (eventMatch && req.method === 'GET') {
       const ev = db.getEventById(Number(eventMatch[1]));
       if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND');
-      const isLeader = req.user && (req.user.rank === 'r4' || req.user.rank === 'r5');
+      const canManageEvents = Boolean(req.user && logic.hasUserPermission(req.user, 'manage_events'));
       const userSectors = req.user ? db.getPlayersByUserId(req.user.id) : [];
       const userSectorIds = new Set(userSectors.map(s => s.id));
-      const eventRegs = (isLeader || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
-      if (isLeader) {
+      const eventRegs = (canManageEvents || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
+      if (canManageEvents) {
         ev.registrations = eventRegs;
       }
       if (req.user) {
@@ -1264,13 +1324,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (eventMatch && req.method === 'PUT') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_events')) return;
       const saved = db.saveEvent({ ...body, id: Number(eventMatch[1]) });
       return sendJson(res, 200, saved);
     }
 
     if (eventMatch && req.method === 'DELETE') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requirePermission(req, res, 'manage_events')) return;
       db.deleteEvent(Number(eventMatch[1]));
       return sendJson(res, 200, { success: true });
     }

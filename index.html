@@ -71,7 +71,7 @@
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(event)">
       <div class="sidebar-version-wrap">
         <span class="sidebar-version-dot"></span>
-        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.21.0</span>
+        <span class="sidebar-version-text" id="sidebar-app-version">Версия 3.22.0</span>
       </div>
     </div>
   </aside>
@@ -1090,6 +1090,88 @@
         <button type="submit" class="btn-primary" id="btn-save-new-password">Сохранить пароль</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Modal: User Permissions (R5) -->
+<div class="modal modal-permissions" id="modal-user-permissions">
+  <div class="modal-header">
+    <div class="permissions-modal-header-content">
+      <h3 style="margin:0;font-size:16px">🛡️ Права доступа</h3>
+      <div class="permissions-user-target" id="mup-user-info">
+        <span class="user-target-name" id="mup-target-name">@username</span>
+        <span class="badge badge-rank" id="mup-target-rank">[Р3]</span>
+      </div>
+    </div>
+    <button class="modal-close" onclick="closeUserPermissionsModal()">✕</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="mup-user-id" value="">
+    
+    <div class="permissions-presets-panel">
+      <div class="permissions-presets-title">Быстрые шаблоны:</div>
+      <div class="permissions-presets-buttons">
+        <button type="button" class="btn-preset" onclick="applyModalPreset('all')">⚡ Все</button>
+        <button type="button" class="btn-preset" onclick="applyModalPreset('analytics')">📊 Аналитика</button>
+        <button type="button" class="btn-preset" onclick="applyModalPreset('tactician')">🎯 Тактик</button>
+        <button type="button" class="btn-preset" onclick="applyModalPreset('hr')">👥 Кадры</button>
+        <button type="button" class="btn-preset btn-preset-reset" onclick="applyModalPreset('reset')">✕ Сбросить</button>
+      </div>
+    </div>
+
+    <div class="permissions-grid" id="mup-permissions-grid">
+      <label class="permission-card" for="perm-view_sectors">
+        <input type="checkbox" id="perm-view_sectors" name="permissions" value="view_sectors">
+        <div class="permission-card-body">
+          <div class="permission-card-title">📦 Секторы альянса</div>
+          <div class="permission-card-desc">Просмотр всех баз и командиров альянса</div>
+        </div>
+      </label>
+
+      <label class="permission-card" for="perm-view_stocks">
+        <input type="checkbox" id="perm-view_stocks" name="permissions" value="view_stocks">
+        <div class="permission-card-body">
+          <div class="permission-card-title">🔒 Чужие склады</div>
+          <div class="permission-card-desc">Просмотр точных остатков ресурсов и звезд других игроков</div>
+        </div>
+      </label>
+
+      <label class="permission-card" for="perm-view_matrix">
+        <input type="checkbox" id="perm-view_matrix" name="permissions" value="view_matrix">
+        <div class="permission-card-body">
+          <div class="permission-card-title">📊 Сводная матрица</div>
+          <div class="permission-card-desc">Доступ к сводной матрице гильдии в калькуляторе</div>
+        </div>
+      </label>
+
+      <label class="permission-card" for="perm-manage_events">
+        <input type="checkbox" id="perm-manage_events" name="permissions" value="manage_events">
+        <div class="permission-card-body">
+          <div class="permission-card-title">🎯 Управление ивентами</div>
+          <div class="permission-card-desc">Создание ивентов, конструктор сезонов, Smart AutoPick</div>
+        </div>
+      </label>
+
+      <label class="permission-card" for="perm-manage_catalog">
+        <input type="checkbox" id="perm-manage_catalog" name="permissions" value="manage_catalog">
+        <div class="permission-card-body">
+          <div class="permission-card-title">📚 Каталог и типы ивентов</div>
+          <div class="permission-card-desc">Редактирование каталога офицеров, типов ивентов, VIP-тиров</div>
+        </div>
+      </label>
+
+      <label class="permission-card" for="perm-approve_users">
+        <input type="checkbox" id="perm-approve_users" name="permissions" value="approve_users">
+        <div class="permission-card-body">
+          <div class="permission-card-title">👥 Одобрение новичков</div>
+          <div class="permission-card-desc">Одобрение и отклонение входящих заявок на регистрацию</div>
+        </div>
+      </label>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeUserPermissionsModal()">Отмена</button>
+    <button type="button" class="btn-primary" id="btn-save-permissions" onclick="submitUserPermissions()">Сохранить права</button>
   </div>
 </div>
 

@@ -2162,6 +2162,60 @@
     return officers.filter(o => isOfficerEligibleForSimulator(o, catalog));
   }
 
+  const USER_PERMISSIONS = Object.freeze({
+    VIEW_SECTORS: 'view_sectors',     // Просмотр всех секторов и командиров альянса
+    VIEW_STOCKS: 'view_stocks',       // Просмотр точных остатков складов других игроков
+    VIEW_MATRIX: 'view_matrix',       // Доступ к сводной матрице гильдии в калькуляторе
+    MANAGE_EVENTS: 'manage_events',   // Создание ивентов, конструктор сезонов, Smart AutoPick, все заявки
+    MANAGE_CATALOG: 'manage_catalog', // Редактирование каталога офицеров, типов ивентов, VIP-тиров
+    APPROVE_USERS: 'approve_users'    // Одобрение и отклонение заявок новичков на регистрацию
+  });
+
+  const PERMISSION_PRESETS = Object.freeze({
+    ALL: Object.freeze({
+      id: 'all',
+      label: '⚡ Все права',
+      permissions: Object.freeze(['view_sectors', 'view_stocks', 'view_matrix', 'manage_events', 'manage_catalog', 'approve_users'])
+    }),
+    ANALYTICS: Object.freeze({
+      id: 'analytics',
+      label: '📊 Аналитика',
+      permissions: Object.freeze(['view_sectors', 'view_stocks', 'view_matrix'])
+    }),
+    TACTICIAN: Object.freeze({
+      id: 'tactician',
+      label: '🎯 Военный тактик',
+      permissions: Object.freeze(['view_sectors', 'manage_events'])
+    }),
+    HR: Object.freeze({
+      id: 'hr',
+      label: '👥 Кадровик',
+      permissions: Object.freeze(['view_sectors', 'approve_users'])
+    }),
+    RESET: Object.freeze({
+      id: 'reset',
+      label: '✕ Сбросить',
+      permissions: Object.freeze([])
+    })
+  });
+
+  function hasUserPermission(user, permission) {
+    if (!user) return false;
+    if (user.rank === 'r5') return true;
+    if (user.rank === 'r4') return true;
+    if (!Array.isArray(user.permissions)) return false;
+    return user.permissions.includes(permission);
+  }
+
+  function applyPermissionPreset(presetId) {
+    if (!presetId || typeof presetId !== 'string') return [];
+    const normalized = presetId.toLowerCase().trim();
+    const preset = Object.values(PERMISSION_PRESETS).find(p => p.id === normalized)
+      || PERMISSION_PRESETS[presetId.toUpperCase()];
+    if (!preset) return [];
+    return [...preset.permissions];
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -2228,5 +2282,9 @@
     prioritizeFilteredOfficers,
     isOfficerEligibleForSimulator,
     getSimulatorEligibleOfficers,
+    USER_PERMISSIONS,
+    PERMISSION_PRESETS,
+    hasUserPermission,
+    applyPermissionPreset,
   };
 });

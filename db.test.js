@@ -1329,6 +1329,176 @@ test('player_officers stores, updates and exports only_personal_puzzles setting'
   assert.strictEqual(importedOff.onlyPersonalPuzzles, true);
 });
 
+test('users table migration adds permissions column with default [] in legacy database', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const testDbDir = path.join('/tmp', 'kow-permissions-' + Date.now());
+  const testDbPath = path.join(testDbDir, 'permissions_legacy.db');
+  fs.mkdirSync(testDbDir, { recursive: true });
+
+  try {
+    const legacyDb = new DatabaseSync(testDbPath);
+    legacyDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        is_approved INTEGER NOT NULL DEFAULT 0,
+        player_id INTEGER NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO users (username, password_hash, rank, is_approved, created_at)
+      VALUES ('legacy_admin', 'hash123', 'r5', 1, '2026-01-01');
+    `);
+    legacyDb.close();
+
+    const dbModule = require('./db.js');
+    dbModule.initDb(testDbPath);
+
+    const userCols = dbModule.getDb().prepare("PRAGMA table_info(users)").all().map(c => c.name);
+    assert.ok(userCols.includes('permissions'), 'users table must have permissions column');
+
+    const user = dbModule.findUserByUsername('legacy_admin');
+    assert.ok(user, 'user should be found');
+    assert.deepStrictEqual(user.permissions, [], 'legacy user should have default empty permissions array');
+  } finally {
+    try { fs.rmSync(testDbDir, { recursive: true, force: true }); } catch (e) {}
+  }
+});
+
+test('updateUser saves, persists and returns parsed permissions', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'tactician_r3', password: 'password123', playerName: 'Тактик' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  const initial = dbModule.findUserById(reg.userId);
+  assert.deepStrictEqual(initial.permissions, []);
+
+  // Обновление прав
+  const permsToSet = ['view_sectors', 'manage_events'];
+  const updated = dbModule.updateUser(reg.userId, { permissions: permsToSet });
+  assert.deepStrictEqual(updated.permissions, permsToSet);
+
+  // Проверка из findUserById
+  const reFetched = dbModule.findUserById(reg.userId);
+  assert.deepStrictEqual(reFetched.permissions, permsToSet);
+
+  // Проверка прямого чтения из базы (сохранено как JSON-строка)
+  const rawRow = dbModule.getDb().prepare('SELECT permissions FROM users WHERE id = ?').get(reg.userId);
+  assert.strictEqual(rawRow.permissions, JSON.stringify(permsToSet));
+
+  // Очистка прав
+  const cleared = dbModule.updateUser(reg.userId, { permissions: [] });
+  assert.deepStrictEqual(cleared.permissions, []);
+  assert.deepStrictEqual(dbModule.findUserById(reg.userId).permissions, []);
+});
+
+test('verifySession returns parsed permissions of authenticated user', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'analyst_r3', password: 'password123', playerName: 'Аналитик' });
+  dbModule.approveUser(reg.userId, 'r3');
+  dbModule.updateUser(reg.userId, { permissions: ['view_sectors', 'view_stocks', 'view_matrix'] });
+
+  const token = dbModule.createSession(reg.userId);
+  const sessionUser = dbModule.verifySession(token);
+  assert.ok(sessionUser);
+  assert.strictEqual(sessionUser.username, 'analyst_r3');
+  assert.deepStrictEqual(sessionUser.permissions, ['view_sectors', 'view_stocks', 'view_matrix']);
+});
+
+test('getUsers and getPendingUsers return permissions as parsed array', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // Pending user
+  const regPending = dbModule.registerUser({ username: 'pending_user', password: 'pwd', playerName: 'Новичок' });
+  const pendingUsers = dbModule.getPendingUsers();
+  const foundPending = pendingUsers.find(u => u.username === 'pending_user');
+  assert.ok(foundPending);
+  assert.deepStrictEqual(foundPending.permissions, []);
+
+  // Approved user with permissions
+  dbModule.approveUser(regPending.userId, 'r3');
+  dbModule.updateUser(regPending.userId, { permissions: ['approve_users'] });
+
+  const allUsers = dbModule.getUsers();
+  const foundApproved = allUsers.find(u => u.username === 'pending_user');
+  assert.ok(foundApproved);
+  assert.deepStrictEqual(foundApproved.permissions, ['approve_users']);
+});
+
+test('exportKowJson includes userPermissions and importKowJson safely restores them without touching passwords', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'hr_specialist', password: 'original_password', playerName: 'Кадровик' });
+  dbModule.approveUser(reg.userId, 'r3');
+  dbModule.updateUser(reg.userId, { permissions: ['view_sectors', 'approve_users'] });
+
+  // 1. Export check
+  const exported = dbModule.exportKowJson();
+  assert.ok(exported.userPermissions, 'export must include userPermissions');
+  assert.deepStrictEqual(exported.userPermissions['hr_specialist'], ['view_sectors', 'approve_users']);
+  // Safe export: no passwords
+  assert.strictEqual(JSON.stringify(exported).includes('original_password'), false);
+  assert.strictEqual(JSON.stringify(exported).includes('password_hash'), false);
+
+  // 2. Re-import into a DB where hr_specialist exists but has different permissions
+  dbModule.updateUser(reg.userId, { permissions: [] });
+  assert.deepStrictEqual(dbModule.findUserById(reg.userId).permissions, []);
+
+  // Import should restore permissions
+  dbModule.importKowJson(exported);
+  const reloadedUser = dbModule.findUserById(reg.userId);
+  assert.deepStrictEqual(reloadedUser.permissions, ['view_sectors', 'approve_users']);
+
+  // Password still works
+  const loginResult = dbModule.loginUser('hr_specialist', 'original_password');
+  assert.ok(loginResult.token, 'login must succeed with original password after import');
+
+  // 3. Import with unknown users should not create new users
+  const countBefore = dbModule.getUsers().length;
+  dbModule.importKowJson({
+    ...exported,
+    userPermissions: {
+      hr_specialist: ['view_sectors'],
+      phantom_user: ['all']
+    }
+  });
+  const countAfter = dbModule.getUsers().length;
+  assert.strictEqual(countAfter, countBefore, 'unknown users in userPermissions must not create new accounts');
+  assert.strictEqual(dbModule.findUserByUsername('phantom_user'), null);
+});
+
+test('importKowJson handles legacy dumps without userPermissions gracefully', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'custom_user', password: 'pwd', playerName: 'Игрок' });
+  dbModule.approveUser(reg.userId, 'r3');
+  dbModule.updateUser(reg.userId, { permissions: ['view_stocks'] });
+
+  // Legacy backup payload without userPermissions
+  const legacyDump = {
+    version: 2,
+    players: [],
+    officerCatalog: [],
+    eventTypes: [],
+    events: [],
+    stockHistory: []
+  };
+
+  dbModule.importKowJson(legacyDump);
+
+  // Existing user permissions must not be erased
+  const user = dbModule.findUserById(reg.userId);
+  assert.deepStrictEqual(user.permissions, ['view_stocks']);
+});
+
 
 
 

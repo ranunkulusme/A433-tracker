@@ -1903,6 +1903,249 @@ select option { background: var(--bg3); }
   }
 }
 
+/* ── USER PERMISSIONS MODAL & BADGES (R5 DELEGATED PERMISSIONS) ── */
+.modal.modal-permissions {
+  width: min(580px, calc(100vw - 32px));
+}
+
+.permissions-modal-header-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.permissions-user-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg3);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.user-target-name {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.permissions-presets-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg3);
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.permissions-presets-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.permissions-presets-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-preset {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+
+.btn-preset:hover {
+  background: var(--bg4);
+  border-color: var(--blue-dim);
+  color: #fff;
+}
+
+.btn-preset-reset {
+  color: #ff7b72;
+  border-color: rgba(218, 54, 51, 0.3);
+}
+
+.btn-preset-reset:hover {
+  background: rgba(218, 54, 51, 0.15);
+  border-color: var(--red);
+  color: #ffa198;
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.permission-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all .15s ease;
+  user-select: none;
+}
+
+.permission-card:hover {
+  background: var(--bg4);
+  border-color: var(--border2);
+}
+
+.permission-card input[type="checkbox"] {
+  margin-top: 3px;
+  accent-color: var(--blue);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.permission-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.permission-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.permission-card-desc {
+  font-size: 11.5px;
+  color: var(--text2);
+  line-height: 1.35;
+}
+
+/* Permissions Badges in Users Table */
+.permissions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.permissions-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.badge-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: rgba(26, 110, 245, 0.12);
+  color: #58a6ff;
+  border: 1px solid rgba(26, 110, 245, 0.3);
+}
+
+.badge-perm-all {
+  background: rgba(139, 92, 246, 0.15);
+  color: #c084fc;
+  border-color: rgba(139, 92, 246, 0.35);
+  font-weight: 600;
+}
+
+.badge-perm-none {
+  color: var(--text3);
+  font-size: 12px;
+}
+
+.badge-perm-count {
+  font-weight: 700;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  background: var(--bg3);
+  color: var(--text2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.badge-perm-view_sectors {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.badge-perm-view_stocks {
+  background: rgba(210, 153, 34, 0.12);
+  color: #d29922;
+  border-color: rgba(210, 153, 34, 0.3);
+}
+
+.badge-perm-view_matrix {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.badge-perm-manage_events {
+  background: rgba(251, 146, 60, 0.12);
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.3);
+}
+
+.badge-perm-manage_catalog {
+  background: rgba(46, 160, 67, 0.12);
+  color: #3fb950;
+  border-color: rgba(46, 160, 67, 0.3);
+}
+
+.badge-perm-approve_users {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+.btn-perm-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+
+.btn-perm-edit:hover {
+  background: var(--bg4);
+  border-color: var(--blue);
+  color: #fff;
+}
+
 
 
 

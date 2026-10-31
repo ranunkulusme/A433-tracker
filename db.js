@@ -39,11 +39,22 @@ function createSession(userId, token = null) {
   return sessionToken;
 }
 
+function parsePermissions(raw) {
+  if (Array.isArray(raw)) return raw.filter(p => typeof p === 'string');
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter(p => typeof p === 'string');
+    } catch (e) {}
+  }
+  return [];
+}
+
 function verifySession(token) {
   if (!token) return null;
   const row = getDb().prepare(`
     SELECT s.token, s.user_id, s.created_at, s.expires_at,
-           u.id, u.username, u.rank, u.is_approved, u.player_id,
+           u.id, u.username, u.rank, u.is_approved, u.player_id, u.permissions,
            p.name as player_name
     FROM sessions s
     JOIN users u ON s.user_id = u.id
@@ -58,7 +69,8 @@ function verifySession(token) {
     is_approved: row.is_approved,
     playerId: row.player_id,
     player_id: row.player_id,
-    playerName: row.player_name || ''
+    playerName: row.player_name || '',
+    permissions: parsePermissions(row.permissions)
   };
 }
 
@@ -75,12 +87,20 @@ function clearUserSessions(userId) {
 function findUserByUsername(username) {
   if (!username) return null;
   const user = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
-  return user || null;
+  if (!user) return null;
+  return {
+    ...user,
+    permissions: parsePermissions(user.permissions)
+  };
 }
 
 function findUserById(id) {
   const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id);
-  return user || null;
+  if (!user) return null;
+  return {
+    ...user,
+    permissions: parsePermissions(user.permissions)
+  };
 }
 
 function registerUser({ username, password, playerId, playerName }) {
@@ -137,7 +157,8 @@ function registerUser({ username, password, playerId, playerName }) {
     is_approved: isApproved,
     playerId: assignedPlayerId,
     player_id: assignedPlayerId,
-    pendingApproval: isApproved === 0
+    pendingApproval: isApproved === 0,
+    permissions: []
   };
 }
 
@@ -167,7 +188,8 @@ function loginUser(username, password) {
       is_approved: user.is_approved,
       playerId: user.player_id,
       player_id: user.player_id,
-      playerName
+      playerName,
+      permissions: parsePermissions(user.permissions)
     }
   };
 }
@@ -190,8 +212,9 @@ function rejectUser(userId) {
 
 function getPendingUsers() {
   const db = getDb();
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
+           u.permissions,
            u.created_at as createdAt, u.created_at,
            p.name as playerName
     FROM users u
@@ -199,18 +222,27 @@ function getPendingUsers() {
     WHERE u.is_approved = 0
     ORDER BY u.id ASC
   `).all();
+  return rows.map(r => ({
+    ...r,
+    permissions: parsePermissions(r.permissions)
+  }));
 }
 
 function getUsers() {
   const db = getDb();
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
+           u.permissions,
            u.created_at as createdAt, u.created_at,
            p.name as playerName
     FROM users u
     LEFT JOIN players p ON u.player_id = p.id
     ORDER BY u.id ASC
   `).all();
+  return rows.map(r => ({
+    ...r,
+    permissions: parsePermissions(r.permissions)
+  }));
 }
 
 function updateUser(userId, updates = {}) {
@@ -220,10 +252,13 @@ function updateUser(userId, updates = {}) {
   const rank = updates.rank !== undefined ? updates.rank : existing.rank;
   const isApproved = updates.is_approved !== undefined ? updates.is_approved : existing.is_approved;
   const playerId = updates.player_id !== undefined ? updates.player_id : (updates.playerId !== undefined ? updates.playerId : existing.player_id);
+  const permissionsStr = updates.permissions !== undefined
+    ? JSON.stringify(parsePermissions(updates.permissions))
+    : JSON.stringify(parsePermissions(existing.permissions));
 
   db.prepare(`
-    UPDATE users SET rank = ?, is_approved = ?, player_id = ? WHERE id = ?
-  `).run(rank, isApproved, playerId, userId);
+    UPDATE users SET rank = ?, is_approved = ?, player_id = ?, permissions = ? WHERE id = ?
+  `).run(rank, isApproved, playerId, permissionsStr, userId);
 
   return findUserById(userId);
 }
@@ -1101,6 +1136,13 @@ function exportKowJson() {
   const eventTypes = getEventTypes();
   const events = getEvents();
   const stockHistory = getStockHistory();
+  const users = getUsers();
+  const userPermissions = {};
+  for (const u of users) {
+    if (u && u.username) {
+      userPermissions[u.username] = Array.isArray(u.permissions) ? u.permissions : [];
+    }
+  }
 
   const maxId = Math.max(
     0,
@@ -1116,6 +1158,7 @@ function exportKowJson() {
     eventTypes,
     events,
     stockHistory,
+    userPermissions,
     currentRole: 'r5',
     currentPlayerId: players[0]?.id || null,
     nextId: maxId + 1
@@ -1211,6 +1254,15 @@ function importKowJson(rawJson) {
         puzzles: sh.puzzles,
         chests: sh.chests
       }, sh.date);
+    }
+    if (raw && raw.userPermissions && typeof raw.userPermissions === 'object' && !Array.isArray(raw.userPermissions)) {
+      for (const [uname, perms] of Object.entries(raw.userPermissions)) {
+        if (!uname || !Array.isArray(perms)) continue;
+        const existingUser = findUserByUsername(uname);
+        if (existingUser) {
+          updateUser(existingUser.id, { permissions: perms });
+        }
+      }
     }
     db.exec('COMMIT');
   } catch (err) {
@@ -1395,6 +1447,13 @@ function migrateSchema(db) {
     }
   }
 
+  const userCols = getColumns('users');
+  if (userCols.length > 0) {
+    if (!userCols.includes('permissions')) {
+      db.exec("ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]';");
+    }
+  }
+
   const playerCols = getColumns('players');
   if (playerCols.length > 0) {
     if (!playerCols.includes('user_id')) {
@@ -1516,6 +1575,7 @@ function initDb(filePath) {
       rank TEXT NOT NULL DEFAULT 'r3',
       is_approved INTEGER NOT NULL DEFAULT 0,
       player_id INTEGER NULL REFERENCES players(id) ON DELETE SET NULL,
+      permissions TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
 
@@ -1698,4 +1758,5 @@ module.exports = {
   recordStockHistory,
   exportKowJson,
   importKowJson,
+  parsePermissions,
 };
