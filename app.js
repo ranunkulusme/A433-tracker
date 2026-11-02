@@ -1507,14 +1507,14 @@ function renderSidebarNav() {
 
   const footer = document.querySelector('.sidebar-footer');
   if (footer) {
-    if (role === 'r3') {
-      footer.style.display = 'none';
-    } else {
+    if (role === 'r5') {
       footer.style.display = 'flex';
       const importBtn = document.getElementById('btn-import-json');
       if (importBtn) {
-        importBtn.style.display = role === 'r5' ? 'flex' : 'none';
+        importBtn.style.display = 'flex';
       }
+    } else {
+      footer.style.display = 'none';
     }
   }
 }
@@ -7625,6 +7625,7 @@ function accrueEventRewards(id) {
 
 // ─── EXPORT / IMPORT ─────────────────────────────────────────
 function exportExcel() {
+  if (currentUser?.rank !== 'r5') { toast('Экспорт доступен только для главы альянса (Р5)', 'error'); return; }
   if (typeof XLSX === 'undefined') { toast('XLSX не загружен','error'); return; }
   const wb = XLSX.utils.book_new();
 
@@ -7672,8 +7673,12 @@ function exportExcel() {
   toast('Excel экспортирован!');
 }
 
-function importData() { document.getElementById('import-file').click(); }
+function importData() {
+  if (currentUser?.rank !== 'r5') { toast('Импорт доступен только для главы альянса (Р5)', 'error'); return; }
+  document.getElementById('import-file').click();
+}
 function exportJson() {
+  if (currentUser?.rank !== 'r5') { toast('Экспорт доступен только для главы альянса (Р5)', 'error'); return; }
   const blob = new Blob([JSON.stringify({ ...state, version: 3 }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -7683,6 +7688,7 @@ function exportJson() {
   toast('JSON экспортирован');
 }
 function handleImport(e) {
+  if (currentUser?.rank !== 'r5') { toast('Импорт доступен только для главы альянса (Р5)', 'error'); return; }
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {

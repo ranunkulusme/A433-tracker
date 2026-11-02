@@ -1339,7 +1339,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ADMIN EXPORT & IMPORT
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/admin/export' && req.method === 'GET') {
-      if (!requireRole(['r4', 'r5'])(req, res)) return;
+      if (!requireRole(['r5'])(req, res)) return;
       const backup = db.exportKowJson();
       return sendJson(res, 200, backup);
     }
