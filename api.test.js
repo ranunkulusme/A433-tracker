@@ -762,6 +762,29 @@ test('API Admin export and import with RBAC', async () => {
     });
     assert.equal(r3Export.status, 403);
 
+    // Register and approve R4 officer user
+    const r4Reg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r4officer', password: 'pass', playerName: 'Офицер' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${r4Reg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r4' })
+    });
+    const r4Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r4officer', password: 'pass' })
+    })).json();
+
+    // R4 tries /api/admin/export -> 403 (strictly R5 only)
+    const r4Export = await fetch(`${baseUrl}/api/admin/export`, {
+      headers: { Authorization: `Bearer ${r4Login.token}` }
+    });
+    assert.equal(r4Export.status, 403);
+
     // R5 calls /api/admin/export -> 200
     const exportRes = await fetch(`${baseUrl}/api/admin/export`, {
       headers: { Authorization: `Bearer ${adminLogin.token}` }
@@ -779,6 +802,14 @@ test('API Admin export and import with RBAC', async () => {
       body: JSON.stringify(backup)
     });
     assert.equal(r3Import.status, 403);
+
+    // R4 tries /api/admin/import -> 403 (strictly R5 only)
+    const r4Import = await fetch(`${baseUrl}/api/admin/import`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r4Login.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(backup)
+    });
+    assert.equal(r4Import.status, 403);
 
     // R5 calls /api/admin/import -> 200
     const r5Import = await fetch(`${baseUrl}/api/admin/import`, {
