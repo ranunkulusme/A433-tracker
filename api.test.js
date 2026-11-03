@@ -3851,6 +3851,87 @@ test('API Notification Triggers: stale stock reminders and staff summary', async
   }
 });
 
+test('API Mieru Tunnel Settings, RBAC & Connection Test', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const r3Reg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_mieru_tester', password: 'password123' })
+    })).json();
+    const db = require('./db.js');
+    db.approveUser(r3Reg.userId, 'r3');
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_mieru_tester', password: 'password123' })
+    })).json();
+
+    // 1. Initial settings for R5
+    const initRes = await fetch(`${baseUrl}/api/mieru/settings`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(initRes.status, 200);
+    const initData = await initRes.json();
+    assert.equal(initData.enabled, false);
+    assert.equal(initData.socks5Port, 1080);
+
+    // 2. R3 is forbidden
+    const r3Get = await fetch(`${baseUrl}/api/mieru/settings`, {
+      headers: { Authorization: `Bearer ${r3Login.token}` }
+    });
+    assert.equal(r3Get.status, 403);
+
+    const r3Put = await fetch(`${baseUrl}/api/mieru/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${r3Login.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true })
+    });
+    assert.equal(r3Put.status, 403);
+
+    // 3. R5 updates settings
+    const putRes = await fetch(`${baseUrl}/api/mieru/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: true,
+        server: '194.87.100.200',
+        portRange: '10000-10050',
+        user: 'mieru_user',
+        password: 'secret_mieru_password_123',
+        transport: 'TCP',
+        socks5Port: 1080
+      })
+    });
+    assert.equal(putRes.status, 200);
+    const putData = await putRes.json();
+    assert.equal(putData.success, true);
+    assert.equal(putData.enabled, true);
+    assert.equal(putData.server, '194.87.100.200');
+    assert.equal(putData.user, 'mieru_user');
+    assert.ok(putData.passwordMasked.includes('***'));
+
+    // 4. Test connection endpoint
+    const testRes = await fetch(`${baseUrl}/api/mieru/test`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(testRes.status, 200);
+    const testData = await testRes.json();
+    assert.ok(typeof testData.ok === 'boolean');
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 async function run() {

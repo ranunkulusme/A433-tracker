@@ -2025,6 +2025,47 @@ function setAppSetting(key, value) {
   return strVal;
 }
 
+function getMieruSettings() {
+  return {
+    enabled: getAppSetting('mieru_enabled') === 'true',
+    server: getAppSetting('mieru_server') || '',
+    portRange: getAppSetting('mieru_port_range') || '10000-10050',
+    user: getAppSetting('mieru_user') || '',
+    password: getAppSetting('mieru_password') || '',
+    transport: getAppSetting('mieru_transport') || 'TCP',
+    socks5Port: parseInt(getAppSetting('mieru_socks5_port'), 10) || 1080,
+    configJson: getAppSetting('mieru_config_json') || ''
+  };
+}
+
+function saveMieruSettings(settings = {}) {
+  if (settings.enabled !== undefined) {
+    setAppSetting('mieru_enabled', settings.enabled ? 'true' : 'false');
+  }
+  if (settings.server !== undefined) {
+    setAppSetting('mieru_server', String(settings.server).trim());
+  }
+  if (settings.portRange !== undefined) {
+    setAppSetting('mieru_port_range', String(settings.portRange).trim());
+  }
+  if (settings.user !== undefined) {
+    setAppSetting('mieru_user', String(settings.user).trim());
+  }
+  if (settings.password !== undefined && !String(settings.password).includes('***')) {
+    setAppSetting('mieru_password', String(settings.password).trim());
+  }
+  if (settings.transport !== undefined) {
+    setAppSetting('mieru_transport', String(settings.transport).trim().toUpperCase());
+  }
+  if (settings.socks5Port !== undefined) {
+    setAppSetting('mieru_socks5_port', String(parseInt(settings.socks5Port, 10) || 1080));
+  }
+  if (settings.configJson !== undefined) {
+    setAppSetting('mieru_config_json', String(settings.configJson).trim());
+  }
+  return getMieruSettings();
+}
+
 // ─── NOTIFICATION TEMPLATES ──────────────────────────────────
 function getNotificationTemplates() {
   return getDb().prepare('SELECT * FROM notification_templates ORDER BY channel, key').all();
@@ -2233,4 +2274,6 @@ module.exports = {
   toggleTelegramNotifications,
   createStaffBindToken,
   verifyAndBindStaffChat,
+  getMieruSettings,
+  saveMieruSettings,
 };

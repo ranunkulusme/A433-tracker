@@ -187,6 +187,102 @@ async function runTests() {
     assert.equal(res.errorCode, 400);
   })();
 
+  // 8. Native SOCKS5 proxy test (without auth)
+  await (async () => {
+    const net = require('node:net');
+    let socksGreetingReceived = false;
+    let socksConnectReceived = false;
+
+    const mockSocksServer = net.createServer(socket => {
+      socket.once('data', data => {
+        if (data[0] === 5 && data[1] >= 1) {
+          socksGreetingReceived = true;
+          // Reply NO_AUTH (0x05, 0x00)
+          socket.write(Buffer.from([5, 0]));
+
+          socket.once('data', reqData => {
+            if (reqData[0] === 5 && reqData[1] === 1) { // CONNECT command
+              socksConnectReceived = true;
+              // Reply success (0x05, 0x00, 0x00, 0x01, 127.0.0.1:port)
+              socket.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 80]));
+
+              // Wait for HTTP request, then send simulated HTTP response
+              socket.once('data', () => {
+                const httpResp = 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"ok":true,"result":{"id":999,"username":"proxied_bot"}}';
+                socket.end(httpResp);
+              });
+            }
+          });
+        }
+      });
+    });
+
+    await new Promise(r => mockSocksServer.listen(0, '127.0.0.1', r));
+    const proxyPort = mockSocksServer.address().port;
+
+    try {
+      const res = await telegram.callTelegramApi('12345', 'getMe', null, {
+        baseUrl: 'http://api.telegram.org', // plain HTTP for mock socket
+        proxyUrl: `socks5://127.0.0.1:${proxyPort}`,
+        skipTls: true
+      });
+
+      assert.equal(socksGreetingReceived, true, 'SOCKS5 greeting should be received');
+      assert.equal(socksConnectReceived, true, 'SOCKS5 connect should be received');
+      assert.equal(res.ok, true);
+      assert.equal(res.result.username, 'proxied_bot');
+    } finally {
+      mockSocksServer.close();
+    }
+  })();
+
+  // 9. Native HTTP CONNECT proxy test
+  await (async () => {
+    const net = require('node:net');
+    let connectReceived = false;
+
+    const mockHttpProxy = net.createServer(socket => {
+      socket.once('data', data => {
+        const text = data.toString('utf8');
+        if (text.startsWith('CONNECT')) {
+          connectReceived = true;
+          socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+          socket.once('data', reqData => {
+            const httpResp = 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"ok":true,"result":{"id":888,"username":"http_proxy_bot"}}';
+            socket.end(httpResp);
+          });
+        }
+      });
+    });
+
+    await new Promise(r => mockHttpProxy.listen(0, '127.0.0.1', r));
+    const proxyPort = mockHttpProxy.address().port;
+
+    try {
+      const res = await telegram.callTelegramApi('12345', 'getMe', null, {
+        baseUrl: 'http://api.telegram.org',
+        proxyUrl: `http://127.0.0.1:${proxyPort}`,
+        skipTls: true
+      });
+
+      assert.equal(connectReceived, true, 'HTTP CONNECT should be received');
+      assert.equal(res.ok, true);
+      assert.equal(res.result.username, 'http_proxy_bot');
+    } finally {
+      mockHttpProxy.close();
+    }
+  })();
+
+  // 10. SOCKS5 Proxy unreachable error handling
+  await (async () => {
+    const res = await telegram.callTelegramApi('12345', 'getMe', null, {
+      proxyUrl: 'socks5://127.0.0.1:59999',
+      timeoutMs: 500
+    });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /ECONNREFUSED|connect|timeout/i);
+  })();
+
   console.log('ok - all telegram.js unit tests passed');
 }
 

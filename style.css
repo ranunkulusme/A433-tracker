@@ -3070,6 +3070,156 @@ select option { background: var(--bg3); }
   font-size: 11px;
 }
 
+/* Mieru Tunnel Card & Editor Styles */
+.mieru-settings-card {
+  margin-top: 20px;
+}
+
+.mieru-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mieru-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+}
+
+.mieru-status-badge.running {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: rgba(63, 185, 80, 0.4);
+  color: #3fb950;
+}
+
+.mieru-status-badge.stopped {
+  background: rgba(139, 148, 158, 0.15);
+  border-color: rgba(139, 148, 158, 0.4);
+  color: #8b949e;
+}
+
+.mieru-status-badge.error {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: rgba(248, 81, 73, 0.4);
+  color: #f85149;
+}
+
+.mieru-nav-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.mieru-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text2);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mieru-tab-btn:hover {
+  color: var(--text);
+  background: var(--bg3);
+}
+
+.mieru-tab-btn.active {
+  color: var(--gold, #f0883e);
+  background: rgba(240, 136, 62, 0.12);
+  border-color: rgba(240, 136, 62, 0.35);
+}
+
+.mieru-json-textarea {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: var(--bg3);
+  color: #c9d1d9;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.mieru-json-help {
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: rgba(56, 139, 253, 0.08);
+  border: 1px solid rgba(56, 139, 253, 0.25);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+.mieru-json-help pre {
+  margin: 6px 0 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: #58a6ff;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.mieru-toggle-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mieru-toggle-wrap input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #2ea043;
+  cursor: pointer;
+}
+
+.mieru-test-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.mieru-test-result.success {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.mieru-test-result.error {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+
 
 
 

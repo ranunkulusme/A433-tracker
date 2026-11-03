@@ -3943,6 +3943,7 @@ function isEventPast(ev) { return !isEventActive(ev) && !isEventUpcoming(ev); }
 let notificationTemplatesCache = [];
 let currentSelectedTemplateKey = 'staff_new_user_pending';
 let telegramSettingsCache = null;
+let mieruSettingsCache = null;
 
 async function renderNotificationsPage() {
   const c = document.getElementById('content');
@@ -3966,7 +3967,7 @@ async function renderNotificationsPage() {
   `;
 
   try {
-    const [settingsRes, templatesRes] = await Promise.all([
+    const [settingsRes, templatesRes, mieruRes] = await Promise.all([
       apiFetch('/api/telegram/settings').catch(err => {
         console.warn('Failed to load telegram settings:', err);
         return null;
@@ -3974,11 +3975,16 @@ async function renderNotificationsPage() {
       apiFetch('/api/notification-templates').catch(err => {
         console.warn('Failed to load templates:', err);
         return [];
+      }),
+      apiFetch('/api/mieru/settings').catch(err => {
+        console.warn('Failed to load mieru settings:', err);
+        return null;
       })
     ]);
 
     telegramSettingsCache = settingsRes;
     notificationTemplatesCache = Array.isArray(templatesRes) ? templatesRes : [];
+    mieruSettingsCache = mieruRes;
 
     const pageContent = document.getElementById('notifications-page-content');
     const pageLoading = document.getElementById('notifications-page-loading');
@@ -4022,6 +4028,117 @@ async function renderNotificationsPage() {
               <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-staff-pin" onclick="generateStaffPinCode()">
                 ${typeof t === 'function' ? t('telegram.btn_generate_staff_pin') : '🔑 Сгенерировать код привязки штаба'}
               </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mieru Tunnel Settings (R5) -->
+        <div class="settings-card mieru-settings-card" id="card-mieru-settings">
+          <div class="settings-card-title mieru-card-header">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">🛡️</span>
+              <h3>${typeof t === 'function' ? t('mieru.card_title') : 'Туннель Mieru (обход блокировок Telegram)'}</h3>
+            </div>
+            <div id="mieru-status-badge" class="mieru-status-badge stopped">
+              <span id="mieru-status-text">${typeof t === 'function' ? t('mieru.status_stopped') : '⚪ Туннель выключен'}</span>
+            </div>
+          </div>
+          <div class="settings-card-body">
+            <!-- Enabled toggle -->
+            <label class="mieru-toggle-wrap">
+              <input type="checkbox" id="mieru-setting-enabled" onchange="onMieruToggleChange(this.checked)">
+              <span style="font-weight:600">${typeof t === 'function' ? t('mieru.toggle_enable') : 'Использовать туннель Mieru для Telegram'}</span>
+            </label>
+
+            <!-- Mode Switcher Tabs -->
+            <div class="mieru-nav-tabs">
+              <button type="button" class="mieru-tab-btn active" id="mieru-tab-btn-form" onclick="switchMieruTab('form')">
+                ${typeof t === 'function' ? t('mieru.tab_form') : '📝 По полям'}
+              </button>
+              <button type="button" class="mieru-tab-btn" id="mieru-tab-btn-json" onclick="switchMieruTab('json')">
+                ${typeof t === 'function' ? t('mieru.tab_json') : '📋 Код JSON'}
+              </button>
+            </div>
+
+            <!-- Tab 1: Form Fields -->
+            <div id="mieru-tab-form">
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="mieru-setting-server">${typeof t === 'function' ? t('mieru.server_address') : 'Адрес сервера (IP или домен)'}</label>
+                  <input type="text" id="mieru-setting-server" placeholder="123.45.67.89 или vpn.example.com" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+                <div class="form-group">
+                  <label for="mieru-setting-port-range">
+                    <span>${typeof t === 'function' ? t('mieru.port_range') : 'Порт или диапазон портов'}</span>
+                    <small style="color:var(--text2);margin-left:4px">${typeof t === 'function' ? t('mieru.port_range_hint') : '(например: 10000-10050 или 443)'}</small>
+                  </label>
+                  <input type="text" id="mieru-setting-port-range" placeholder="10000-10050" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+              </div>
+
+              <div class="form-row form-row-3" style="margin-top:10px">
+                <div class="form-group">
+                  <label for="mieru-setting-username">${typeof t === 'function' ? t('mieru.username') : 'Пользователь (User / UUID)'}</label>
+                  <input type="text" id="mieru-setting-username" placeholder="user1" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+                <div class="form-group">
+                  <label for="mieru-setting-password">${typeof t === 'function' ? t('mieru.password') : 'Пароль (Password)'}</label>
+                  <input type="password" id="mieru-setting-password" placeholder="******" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+                <div class="form-group">
+                  <label for="mieru-setting-transport">${typeof t === 'function' ? t('mieru.transport') : 'Протокол передачи'}</label>
+                  <select id="mieru-setting-transport" class="form-control" onchange="syncMieruFormToJson()">
+                    <option value="TCP">TCP</option>
+                    <option value="UDP">UDP</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row form-row-2" style="margin-top:10px">
+                <div class="form-group">
+                  <label for="mieru-setting-socks5-port">${typeof t === 'function' ? t('mieru.socks5_port') : 'Локальный SOCKS5 порт'}</label>
+                  <input type="number" id="mieru-setting-socks5-port" value="1080" placeholder="1080" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 2: Raw JSON -->
+            <div id="mieru-tab-json" style="display:none">
+              <div class="form-group">
+                <label for="mieru-setting-json">${typeof t === 'function' ? t('mieru.json_label') : 'Конфигурация Mieru (JSON)'}</label>
+                <textarea id="mieru-setting-json" class="mieru-json-textarea" rows="10" spellcheck="false" placeholder="${typeof t === 'function' ? t('mieru.json_placeholder') : 'Вставьте сюда JSON-конфигурацию клиента Mieru...'}" oninput="syncMieruJsonToForm()"></textarea>
+              </div>
+              <div class="mieru-json-help">
+                <strong>💡 Пример структуры JSON (client.json):</strong>
+                <pre>{
+  "profiles": [
+    {
+      "profileName": "kow_profile",
+      "serverAddress": "1.2.3.4",
+      "portRanges": ["10000-10050"],
+      "user": "username",
+      "password": "password",
+      "transport": "TCP",
+      "multiplexing": "MULTIPLEXING_LOW"
+    }
+  ],
+  "activeProfile": "kow_profile",
+  "socks5Port": 1080,
+  "httpPort": 0,
+  "logging": { "level": "INFO" }
+}</pre>
+              </div>
+            </div>
+
+            <!-- Actions & Test Result -->
+            <div class="form-actions" style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-mieru-settings" onclick="saveMieruSettings()">
+                ${typeof t === 'function' ? t('mieru.btn_save') : '💾 Сохранить настройки Mieru'}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-test-mieru-tunnel" onclick="testMieruConnection()">
+                ${typeof t === 'function' ? t('mieru.btn_test') : '⚡ Проверить туннель Mieru'}
+              </button>
+              <span id="mieru-test-result" style="display:none"></span>
             </div>
           </div>
         </div>
@@ -4102,6 +4219,40 @@ async function renderNotificationsPage() {
         </div>
       </div>
     `;
+
+    if (isR5 && mieruSettingsCache) {
+      const enabledBox = document.getElementById('mieru-setting-enabled');
+      if (enabledBox) enabledBox.checked = !!mieruSettingsCache.enabled;
+      
+      const serverInput = document.getElementById('mieru-setting-server');
+      if (serverInput) serverInput.value = mieruSettingsCache.serverAddress || '';
+
+      const portInput = document.getElementById('mieru-setting-port-range');
+      if (portInput) portInput.value = mieruSettingsCache.portRange || '10000-10050';
+
+      const userInput = document.getElementById('mieru-setting-username');
+      if (userInput) userInput.value = mieruSettingsCache.username || '';
+
+      const passInput = document.getElementById('mieru-setting-password');
+      if (passInput) passInput.value = mieruSettingsCache.passwordMasked || '';
+
+      const transportInput = document.getElementById('mieru-setting-transport');
+      if (transportInput) transportInput.value = mieruSettingsCache.transport || 'TCP';
+
+      const socks5Input = document.getElementById('mieru-setting-socks5-port');
+      if (socks5Input) socks5Input.value = mieruSettingsCache.socks5Port || 1080;
+
+      const jsonTextarea = document.getElementById('mieru-setting-json');
+      if (jsonTextarea) {
+        if (mieruSettingsCache.rawJson) {
+          jsonTextarea.value = mieruSettingsCache.rawJson;
+        } else {
+          syncMieruFormToJson();
+        }
+      }
+
+      updateMieruStatusBadge(mieruSettingsCache.status, mieruSettingsCache.enabled);
+    }
 
     const initialKey = notificationTemplatesCache.some(tpl => tpl.key === currentSelectedTemplateKey)
       ? currentSelectedTemplateKey
@@ -4371,6 +4522,256 @@ async function saveTelegramSettings() {
     }
   } catch (err) {
     showToast(err.message || 'Ошибка сохранения настроек бота', 'error');
+  }
+}
+
+// ─── MIERU TUNNEL INTEGRATION (R5) ───────────────────────────
+let currentMieruTab = 'form';
+
+function switchMieruTab(tab) {
+  currentMieruTab = tab;
+  const btnForm = document.getElementById('mieru-tab-btn-form');
+  const btnJson = document.getElementById('mieru-tab-btn-json');
+  const tabForm = document.getElementById('mieru-tab-form');
+  const tabJson = document.getElementById('mieru-tab-json');
+
+  if (tab === 'form') {
+    if (btnForm) btnForm.classList.add('active');
+    if (btnJson) btnJson.classList.remove('active');
+    if (tabForm) tabForm.style.display = 'block';
+    if (tabJson) tabJson.style.display = 'none';
+    syncMieruJsonToForm();
+  } else {
+    if (btnForm) btnForm.classList.remove('active');
+    if (btnJson) btnJson.classList.add('active');
+    if (tabForm) tabForm.style.display = 'none';
+    if (tabJson) tabJson.style.display = 'block';
+    syncMieruFormToJson();
+  }
+}
+
+function syncMieruFormToJson() {
+  const serverInput = document.getElementById('mieru-setting-server');
+  const portInput = document.getElementById('mieru-setting-port-range');
+  const userInput = document.getElementById('mieru-setting-username');
+  const passInput = document.getElementById('mieru-setting-password');
+  const transportInput = document.getElementById('mieru-setting-transport');
+  const socks5Input = document.getElementById('mieru-setting-socks5-port');
+  const jsonTextarea = document.getElementById('mieru-setting-json');
+
+  if (!jsonTextarea) return;
+
+  const serverAddress = serverInput ? serverInput.value.trim() : '';
+  const portRange = portInput ? portInput.value.trim() : '10000-10050';
+  const username = userInput ? userInput.value.trim() : '';
+  const password = passInput ? passInput.value.trim() : '';
+  const transport = transportInput ? transportInput.value : 'TCP';
+  const socks5Port = socks5Input ? parseInt(socks5Input.value, 10) || 1080 : 1080;
+
+  let actualPassword = password;
+  if (actualPassword && actualPassword.includes('***') && mieruSettingsCache && mieruSettingsCache.passwordMasked === actualPassword) {
+    actualPassword = mieruSettingsCache.passwordMasked;
+  }
+
+  const portRanges = portRange ? [portRange] : ['10000-10050'];
+
+  const configObj = {
+    profiles: [
+      {
+        profileName: 'kow_profile',
+        serverAddress: serverAddress,
+        portRanges: portRanges,
+        user: username,
+        password: actualPassword,
+        transport: transport || 'TCP',
+        multiplexing: 'MULTIPLEXING_LOW'
+      }
+    ],
+    activeProfile: 'kow_profile',
+    socks5Port: socks5Port,
+    httpPort: 0,
+    logging: {
+      level: 'INFO'
+    }
+  };
+
+  jsonTextarea.value = JSON.stringify(configObj, null, 2);
+}
+
+function syncMieruJsonToForm() {
+  const jsonTextarea = document.getElementById('mieru-setting-json');
+  if (!jsonTextarea) return;
+
+  const raw = jsonTextarea.value.trim();
+  if (!raw) return;
+
+  try {
+    const parsed = JSON.parse(raw);
+    const profile = (parsed.profiles && parsed.profiles[0]) || {};
+
+    const serverInput = document.getElementById('mieru-setting-server');
+    const portInput = document.getElementById('mieru-setting-port-range');
+    const userInput = document.getElementById('mieru-setting-username');
+    const passInput = document.getElementById('mieru-setting-password');
+    const transportInput = document.getElementById('mieru-setting-transport');
+    const socks5Input = document.getElementById('mieru-setting-socks5-port');
+
+    if (serverInput && profile.serverAddress !== undefined && document.activeElement !== serverInput) {
+      serverInput.value = profile.serverAddress;
+    }
+    if (portInput && Array.isArray(profile.portRanges) && document.activeElement !== portInput) {
+      portInput.value = profile.portRanges.join(', ');
+    }
+    if (userInput && profile.user !== undefined && document.activeElement !== userInput) {
+      userInput.value = profile.user;
+    }
+    if (passInput && profile.password !== undefined && document.activeElement !== passInput) {
+      passInput.value = profile.password;
+    }
+    if (transportInput && profile.transport && document.activeElement !== transportInput) {
+      transportInput.value = (profile.transport || '').toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
+    }
+    if (socks5Input && parsed.socks5Port && document.activeElement !== socks5Input) {
+      socks5Input.value = parsed.socks5Port;
+    }
+  } catch (e) {
+    // ignore invalid JSON while typing
+  }
+}
+
+function updateMieruStatusBadge(status, isEnabled) {
+  const badge = document.getElementById('mieru-status-badge');
+  const text = document.getElementById('mieru-status-text');
+  if (!badge || !text) return;
+
+  badge.className = 'mieru-status-badge';
+  if (!isEnabled) {
+    badge.classList.add('stopped');
+    text.textContent = typeof t === 'function' ? t('mieru.status_stopped') : '⚪ Туннель выключен';
+  } else if (status && status.running) {
+    badge.classList.add('running');
+    text.textContent = typeof t === 'function' ? t('mieru.status_running') : '🟢 Туннель активен';
+  } else if (status && status.error) {
+    badge.classList.add('error');
+    text.textContent = typeof t === 'function' ? t('mieru.status_error') : '🔴 Ошибка туннеля';
+  } else {
+    badge.classList.add('stopped');
+    text.textContent = typeof t === 'function' ? t('mieru.status_stopped') : '⚪ Туннель выключен';
+  }
+}
+
+function onMieruToggleChange(checked) {
+  const status = (mieruSettingsCache && mieruSettingsCache.status) || {};
+  updateMieruStatusBadge(status, checked);
+}
+
+async function saveMieruSettings() {
+  const enabledInput = document.getElementById('mieru-setting-enabled');
+  const serverInput = document.getElementById('mieru-setting-server');
+  const portInput = document.getElementById('mieru-setting-port-range');
+  const userInput = document.getElementById('mieru-setting-username');
+  const passInput = document.getElementById('mieru-setting-password');
+  const transportInput = document.getElementById('mieru-setting-transport');
+  const socks5Input = document.getElementById('mieru-setting-socks5-port');
+  const jsonTextarea = document.getElementById('mieru-setting-json');
+
+  const enabled = enabledInput ? enabledInput.checked : false;
+  const serverAddress = serverInput ? serverInput.value.trim() : '';
+  const portRange = portInput ? portInput.value.trim() : '10000-10050';
+  const username = userInput ? userInput.value.trim() : '';
+  const password = passInput ? passInput.value.trim() : '';
+  const transport = transportInput ? transportInput.value : 'TCP';
+  const socks5Port = socks5Input ? parseInt(socks5Input.value, 10) || 1080 : 1080;
+  const rawJson = jsonTextarea ? jsonTextarea.value.trim() : '';
+
+  const payload = {
+    enabled,
+    serverAddress,
+    portRange,
+    username,
+    transport,
+    socks5Port,
+    rawJson
+  };
+
+  if (password && !password.includes('***')) {
+    payload.password = password;
+  }
+
+  const saveBtn = document.getElementById('btn-save-mieru-settings');
+  const origText = saveBtn ? saveBtn.textContent : '';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ Сохранение...';
+  }
+
+  try {
+    const res = await apiFetch('/api/mieru/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+    if (res && res.success) {
+      mieruSettingsCache = res;
+      showToast(typeof t === 'function' ? t('mieru.settings_saved') : 'Настройки Mieru успешно сохранены', 'success');
+      updateMieruStatusBadge(res.status, res.enabled);
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения настроек Mieru', 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = origText;
+    }
+  }
+}
+
+async function testMieruConnection() {
+  const testBtn = document.getElementById('btn-test-mieru-tunnel');
+  const resultSpan = document.getElementById('mieru-test-result');
+  const origText = testBtn ? testBtn.textContent : '';
+
+  if (testBtn) {
+    testBtn.disabled = true;
+    testBtn.textContent = '⏳ Проверка туннеля...';
+  }
+  if (resultSpan) {
+    resultSpan.style.display = 'inline-flex';
+    resultSpan.className = 'mieru-test-result';
+    resultSpan.textContent = '⏳ Подключение к Telegram через Mieru...';
+  }
+
+  try {
+    const res = await apiFetch('/api/mieru/test', {
+      method: 'POST'
+    });
+    if (res && res.success) {
+      const ms = res.latencyMs || 0;
+      const successMsg = typeof t === 'function' ? t('mieru.test_success', { ms }) : `Туннель Mieru работает! Telegram ответил за ${ms}мс`;
+      showToast(successMsg, 'success');
+      if (resultSpan) {
+        resultSpan.className = 'mieru-test-result success';
+        resultSpan.textContent = `✅ Доступно (${ms}мс)`;
+      }
+    } else {
+      const errMsg = (res && res.error) || 'Не удалось подключиться к Telegram через туннель';
+      showToast(typeof t === 'function' ? t('mieru.test_error', { error: errMsg }) : `Ошибка проверки: ${errMsg}`, 'error');
+      if (resultSpan) {
+        resultSpan.className = 'mieru-test-result error';
+        resultSpan.textContent = `❌ Ошибка: ${errMsg}`;
+      }
+    }
+  } catch (err) {
+    const errMsg = err.message || 'Сетевая ошибка';
+    showToast(typeof t === 'function' ? t('mieru.test_error', { error: errMsg }) : `Ошибка проверки: ${errMsg}`, 'error');
+    if (resultSpan) {
+      resultSpan.className = 'mieru-test-result error';
+      resultSpan.textContent = `❌ ${errMsg}`;
+    }
+  } finally {
+    if (testBtn) {
+      testBtn.disabled = false;
+      testBtn.textContent = origText;
+    }
   }
 }
 
@@ -9803,4 +10204,12 @@ if (typeof window !== 'undefined') {
   window.closeStaffPinModal = closeStaffPinModal;
   window.copyStaffPinCommand = copyStaffPinCommand;
   window.saveTelegramSettings = saveTelegramSettings;
+
+  window.switchMieruTab = switchMieruTab;
+  window.syncMieruFormToJson = syncMieruFormToJson;
+  window.syncMieruJsonToForm = syncMieruJsonToForm;
+  window.onMieruToggleChange = onMieruToggleChange;
+  window.saveMieruSettings = saveMieruSettings;
+  window.testMieruConnection = testMieruConnection;
+  window.updateMieruStatusBadge = updateMieruStatusBadge;
 }

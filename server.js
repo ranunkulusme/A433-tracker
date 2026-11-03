@@ -7,6 +7,7 @@ const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
 const telegram = require('./telegram.js');
+const mieru = require('./mieru.js');
 
 let APP_VERSION = '3.21.0';
 try {
@@ -268,6 +269,10 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
     const parseMode = template.parse_mode || 'HTML';
     const replyMarkup = options.replyMarkup || undefined;
 
+    const mieruSettings = db.getMieruSettings();
+    const proxyUrl = options.proxyUrl || (mieruSettings.enabled ? `socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}` : undefined);
+    const sendOpts = proxyUrl ? { proxyUrl } : {};
+
     if (template.channel === 'staff') {
       let staffChatId = db.getAppSetting('telegram_staff_chat_id');
       if (!staffChatId) {
@@ -282,7 +287,7 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
         text: renderedText,
         parseMode,
         replyMarkup
-      });
+      }, sendOpts);
       return { sent: res.ok, result: res };
     }
 
@@ -301,7 +306,7 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
           text: renderedText,
           parseMode,
           replyMarkup
-        });
+        }, sendOpts);
         return { sent: res.ok, result: res };
       }
 
@@ -2122,6 +2127,112 @@ function createRequestHandler(staticDir, s3Manager = null) {
       });
     }
 
+    // ─────────────────────────────────────────────────────────
+    // MIERU TUNNEL SETTINGS & TEST ENDPOINTS
+    // ─────────────────────────────────────────────────────────
+
+    if (pathname === '/api/mieru/settings' && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const settings = db.getMieruSettings();
+      const status = mieru.getMieruStatus();
+
+      return sendJson(res, 200, {
+        enabled: settings.enabled,
+        server: settings.server,
+        portRange: settings.portRange,
+        user: settings.user,
+        passwordMasked: mieru.maskSecret(settings.password),
+        hasPassword: Boolean(settings.password),
+        transport: settings.transport,
+        socks5Port: settings.socks5Port,
+        configJson: settings.configJson,
+        isRunning: status.running,
+        status
+      });
+    }
+
+    if (pathname === '/api/mieru/settings' && req.method === 'PUT') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки туннеля Mieru');
+      }
+
+      let configToApply = null;
+      if (body.configJson && String(body.configJson).trim()) {
+        const parsed = mieru.parseMieruConfig(body.configJson);
+        if (!parsed.ok) {
+          return sendError(res, 400, 'INVALID_MIERU_JSON', parsed.message);
+        }
+        configToApply = parsed.config;
+        db.saveMieruSettings({
+          ...parsed.fields,
+          enabled: body.enabled !== undefined ? Boolean(body.enabled) : true,
+          configJson: body.configJson
+        });
+      } else {
+        const saved = db.saveMieruSettings({
+          enabled: body.enabled !== undefined ? Boolean(body.enabled) : undefined,
+          server: body.server,
+          portRange: body.portRange,
+          user: body.user,
+          password: body.password,
+          transport: body.transport,
+          socks5Port: body.socks5Port,
+          configJson: body.configJson || ''
+        });
+        configToApply = mieru.formatMieruConfig(saved);
+      }
+
+      const updated = db.getMieruSettings();
+      if (updated.enabled && (updated.server || updated.configJson)) {
+        const dataDir = path.join(__dirname, 'data');
+        mieru.startMieruProcess(configToApply, dataDir);
+      } else {
+        mieru.stopMieruProcess();
+      }
+
+      const status = mieru.getMieruStatus();
+      return sendJson(res, 200, {
+        success: true,
+        enabled: updated.enabled,
+        server: updated.server,
+        portRange: updated.portRange,
+        user: updated.user,
+        passwordMasked: mieru.maskSecret(updated.password),
+        hasPassword: Boolean(updated.password),
+        transport: updated.transport,
+        socks5Port: updated.socks5Port,
+        configJson: updated.configJson,
+        isRunning: status.running,
+        status
+      });
+    }
+
+    if (pathname === '/api/mieru/test' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const settings = db.getMieruSettings();
+      const botToken = db.getAppSetting('telegram_bot_token');
+      const socksPort = settings.socks5Port || 1080;
+      const proxyUrl = `socks5://127.0.0.1:${socksPort}`;
+
+      const testResult = await mieru.testMieruConnection(proxyUrl, botToken);
+      return sendJson(res, 200, testResult);
+    }
+
     if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
       if (!authenticate(req)) {
         return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
@@ -2358,6 +2469,19 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   }, 24 * 60 * 60 * 1000);
   if (staleReminderInterval.unref) staleReminderInterval.unref();
 
+  // Auto-start Mieru tunnel client if enabled
+  try {
+    const mieruSettings = db.getMieruSettings();
+    if (mieruSettings.enabled && (mieruSettings.server || mieruSettings.configJson)) {
+      const fullConfig = mieruSettings.configJson
+        ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
+        : mieru.formatMieruConfig(mieruSettings);
+      mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+    }
+  } catch (mErr) {
+    console.warn('[Mieru] Auto-start on boot warning:', mErr.message);
+  }
+
   const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
   server.s3Manager = activeS3Manager;
 
@@ -2366,6 +2490,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   server.close = function (callback) {
     clearInterval(retentionInterval);
     clearInterval(staleReminderInterval);
+    mieru.stopMieruProcess();
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);

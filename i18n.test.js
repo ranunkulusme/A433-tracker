@@ -393,6 +393,28 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('mieru dictionary provides required keys across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('mieru.card_title'), 'Туннель Mieru (обход блокировок Telegram)');
+    assert.equal(t('mieru.toggle_enable'), 'Использовать туннель Mieru для Telegram');
+    assert.equal(t('mieru.btn_save'), '💾 Сохранить настройки Mieru');
+    assert.equal(t('mieru.btn_test'), '⚡ Проверить туннель Mieru');
+
+    await setAppLanguage('en');
+    assert.equal(t('mieru.card_title'), 'Mieru Tunnel (Telegram Anti-Censorship)');
+    assert.equal(t('mieru.toggle_enable'), 'Use Mieru tunnel for Telegram');
+    assert.equal(t('mieru.btn_save'), '💾 Save Mieru Settings');
+    assert.equal(t('mieru.btn_test'), '⚡ Test Mieru Tunnel');
+
+    await setAppLanguage('de');
+    assert.equal(t('mieru.card_title'), 'Mieru-Tunnel (Telegram-Zensurumgehung)');
+    assert.equal(t('mieru.toggle_enable'), 'Mieru-Tunnel für Telegram verwenden');
+    assert.equal(t('mieru.btn_save'), '💾 Mieru-Einstellungen speichern');
+    assert.equal(t('mieru.btn_test'), '⚡ Mieru-Tunnel testen');
+
+    await setAppLanguage('ru');
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);
