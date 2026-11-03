@@ -13,6 +13,8 @@ const STATIC_ASSETS = [
   '/app.js',
   '/logic.js',
   '/ocr.js',
+  '/vendor/i18next.min.js',
+  '/i18n.js',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
