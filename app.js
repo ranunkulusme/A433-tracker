@@ -105,23 +105,25 @@ function updateNetworkStatusUI() {
 
   if (isFlushingOutbox) {
     badge.className = 'network-badge syncing';
-    badge.innerHTML = '🔄 <span class="badge-text">Синхронизация...</span>';
-    badge.title = 'Отправка сохраненных оффлайн-изменений на сервер';
+    badge.innerHTML = `🔄 <span class="badge-text">${typeof t === 'function' ? t('common.syncing') : 'Синхронизация...'}</span>`;
+    badge.title = typeof t === 'function' ? t('common.syncing_title') : 'Отправка сохраненных оффлайн-изменений на сервер';
   } else if (!isOnline) {
     badge.className = 'network-badge offline';
     const queueText = queue.length > 0 ? ` (${queue.length})` : '';
-    badge.innerHTML = `🟡 <span class="badge-text">Оффлайн${queueText}</span>`;
+    const offlineWord = typeof t === 'function' ? t('common.offline') : 'Оффлайн';
+    const offlineModeWord = typeof t === 'function' ? t('common.offline_mode') : 'Оффлайн-режим';
+    badge.innerHTML = `🟡 <span class="badge-text">${offlineWord}${queueText}</span>`;
     badge.title = queue.length > 0
-      ? `Оффлайн-режим. В очереди на синхронизацию: ${queue.length}`
-      : 'Оффлайн-режим';
+      ? `${offlineModeWord}. ${typeof t === 'function' ? t('common.in_queue', { count: queue.length }) : `В очереди на синхронизацию: ${queue.length}`}`
+      : offlineModeWord;
   } else if (queue.length > 0) {
     badge.className = 'network-badge pending';
-    badge.innerHTML = `🟡 <span class="badge-text">В очереди: ${queue.length}</span>`;
-    badge.title = `В очереди на синхронизацию: ${queue.length}`;
+    badge.innerHTML = `🟡 <span class="badge-text">${typeof t === 'function' ? t('common.in_queue', { count: queue.length }) : `В очереди: ${queue.length}`}</span>`;
+    badge.title = `${typeof t === 'function' ? t('common.sync_queue') : 'В очереди на синхронизацию'}: ${queue.length}`;
   } else {
     badge.className = 'network-badge online';
-    badge.innerHTML = '🟢 <span class="badge-text">Онлайн</span>';
-    badge.title = 'Подключено к серверу, все данные сохранены';
+    badge.innerHTML = `🟢 <span class="badge-text">${typeof t === 'function' ? t('common.online') : 'Онлайн'}</span>`;
+    badge.title = typeof t === 'function' ? t('common.connected_title') : 'Подключено к серверу, все данные сохранены';
   }
 }
 
@@ -895,6 +897,9 @@ async function changeAppLanguage(lang) {
   if (typeof updateStaticDOMTranslations === 'function') {
     updateStaticDOMTranslations();
   }
+  if (typeof updateNetworkStatusBadge === 'function') {
+    updateNetworkStatusBadge();
+  }
 
   if (typeof document !== 'undefined') {
     const switcher = document.getElementById('lang-switcher');
@@ -1444,12 +1449,19 @@ async function updatePendingCount() {
 }
 
 function pluralizeRequests(count) {
+  const lang = typeof getAppLanguage === 'function' ? getAppLanguage() : 'ru';
+  if (lang === 'en') {
+    return count === 1 ? (typeof t === 'function' ? t('common.requests_one') : 'request') : (typeof t === 'function' ? t('common.requests_other') : 'requests');
+  }
+  if (lang === 'de') {
+    return count === 1 ? (typeof t === 'function' ? t('common.requests_one') : 'Antrag') : (typeof t === 'function' ? t('common.requests_other') : 'Anträge');
+  }
   const mod10 = count % 10;
   const mod100 = count % 100;
-  if (mod100 >= 11 && mod100 <= 19) return 'заявок';
-  if (mod10 === 1) return 'заявка';
-  if (mod10 >= 2 && mod10 <= 4) return 'заявки';
-  return 'заявок';
+  if (mod100 >= 11 && mod100 <= 19) return typeof t === 'function' ? t('common.requests_many') : 'заявок';
+  if (mod10 === 1) return typeof t === 'function' ? t('common.requests_one') : 'заявка';
+  if (mod10 >= 2 && mod10 <= 4) return typeof t === 'function' ? t('common.requests_few') : 'заявки';
+  return typeof t === 'function' ? t('common.requests_many') : 'заявок';
 }
 
 function renderPendingBadge() {
@@ -1488,25 +1500,29 @@ function renderTopbarProfile() {
 
   if (!currentUser) {
     container.innerHTML = `
-      <button class="btn-primary btn-sm" onclick="openAuthModal('login')">Войти</button>
+      <button class="btn-primary btn-sm" onclick="openAuthModal('login')">${typeof t === 'function' ? t('auth.login') : 'Войти'}</button>
     `;
     return;
   }
 
   const role = (currentUser.rank || 'r3').toUpperCase();
-  const name = currentUser.playerName || (currentUser.player && currentUser.player.name) || currentUser.username || 'Пользователь';
+  const name = currentUser.playerName || (currentUser.player && currentUser.player.name) || currentUser.username || (typeof t === 'function' ? t('common.user') : 'Пользователь');
   const showPending = (canManage() || hasPermission('approve_users')) && pendingRequestsCount > 0;
 
+  const pendingTitle = typeof t === 'function' ? t('common.pending_approval') : 'Ожидают одобрения';
+  const logoutTitle = typeof t === 'function' ? t('common.logout_title') : 'Выйти из аккаунта';
+  const logoutText = typeof t === 'function' ? t('common.logout') : 'Выйти';
+
   container.innerHTML = `
-    <button id="topbar-pending-badge" class="badge-alert-btn" style="display:${showPending ? 'inline-flex' : 'none'}" onclick="navigate('pending_registrations')" title="Ожидают одобрения">
+    <button id="topbar-pending-badge" class="badge-alert-btn" style="display:${showPending ? 'inline-flex' : 'none'}" onclick="navigate('pending_registrations')" title="${pendingTitle}">
       <span class="badge-alert">🔔 ${pendingRequestsCount} <span class="badge-alert-label">${pluralizeRequests(pendingRequestsCount)}</span></span>
     </button>
     <div class="user-profile-badge">
       <span class="badge badge-rank badge-rank-${currentUser.rank || 'r3'}">[${role}]</span>
       <span class="user-profile-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
     </div>
-    <button class="btn-ghost btn-sm btn-logout" onclick="logout()" title="Выйти из аккаунта">
-      🚪 <span class="btn-logout-text">Выйти</span>
+    <button class="btn-ghost btn-sm btn-logout" onclick="logout()" title="${logoutTitle}">
+      🚪 <span class="btn-logout-text">${logoutText}</span>
     </button>
   `;
 }
@@ -1618,19 +1634,19 @@ async function renderMyCabinet() {
   if (!currentUser) {
     c.innerHTML = `
       <div class="section-header">
-        <div class="section-title">👤 Мой кабинет</div>
+        <div class="section-title">👤 ${typeof t === 'function' ? t('cabinet.title') : 'Личный кабинет'}</div>
       </div>
       <div class="sim-box">
         <div class="auth-alert info" style="display:block;margin-bottom:12px">
-          Для доступа в личный кабинет войдите в свой аккаунт.
+          ${typeof t === 'function' ? t('cabinet.login_required_desc') : 'Для доступа в личный кабинет войдите в свой аккаунт.'}
         </div>
-        <button class="btn-primary" onclick="openAuthModal('login')">Войти в систему</button>
+        <button class="btn-primary" onclick="openAuthModal('login')">${typeof t === 'function' ? t('cabinet.login_btn') : 'Войти в систему'}</button>
       </div>
     `;
     return;
   }
 
-  c.innerHTML = `<div class="empty-state"><p>Загрузка данных личного кабинета...</p></div>`;
+  c.innerHTML = `<div class="empty-state"><p>${typeof t === 'function' ? t('cabinet.loading') : 'Загрузка данных личного кабинета...'}</p></div>`;
 
   let profile = null;
   try {
@@ -1641,15 +1657,15 @@ async function renderMyCabinet() {
       myCabinetSectors = [];
       c.innerHTML = `
         <div class="section-header">
-          <div class="section-title">👤 Мой кабинет</div>
+          <div class="section-title">👤 ${typeof t === 'function' ? t('cabinet.title') : 'Личный кабинет'}</div>
         </div>
         <div class="sim-box cabinet-empty-card">
           <div style="font-size:36px;margin-bottom:12px">🏰</div>
-          <h3 style="margin-bottom:8px">У вас пока нет секторов</h3>
+          <h3 style="margin-bottom:8px">${typeof t === 'function' ? t('cabinet.no_sectors_title') : 'У вас пока нет секторов'}</h3>
           <p style="color:var(--text2);font-size:13px;max-width:440px;margin-bottom:20px;text-align:center">
-            Добавьте свою первую базу для отслеживания прокачки офицеров, запасов и участия в ивентах альянса!
+            ${typeof t === 'function' ? t('cabinet.no_sectors_desc') : 'Добавьте свою первую базу для отслеживания прокачки офицеров, запасов и участия в ивентах альянса!'}
           </p>
-          <button type="button" class="btn-primary" onclick="openAddSectorModal()">+ Создать свой первый сектор</button>
+          <button type="button" class="btn-primary" onclick="openAddSectorModal()">${typeof t === 'function' ? t('cabinet.btn_create_first_sector') : '+ Создать свой первый сектор'}</button>
         </div>
       `;
       return;
@@ -1663,15 +1679,15 @@ async function renderMyCabinet() {
     myCabinetSectors = [];
     c.innerHTML = `
       <div class="section-header">
-        <div class="section-title">👤 Мой кабинет</div>
+        <div class="section-title">👤 ${typeof t === 'function' ? t('cabinet.title') : 'Личный кабинет'}</div>
       </div>
       <div class="sim-box cabinet-empty-card">
         <div style="font-size:36px;margin-bottom:12px">🏰</div>
-        <h3 style="margin-bottom:8px">У вас пока нет секторов</h3>
+        <h3 style="margin-bottom:8px">${typeof t === 'function' ? t('cabinet.no_sectors_title') : 'У вас пока нет секторов'}</h3>
         <p style="color:var(--text2);font-size:13px;max-width:440px;margin-bottom:20px;text-align:center">
-          Добавьте свою первую базу для отслеживания прокачки офицеров, запасов и участия в ивентах альянса!
+          ${typeof t === 'function' ? t('cabinet.no_sectors_desc') : 'Добавьте свою первую базу для отслеживания прокачки офицеров, запасов и участия в ивентах альянса!'}
         </p>
-        <button type="button" class="btn-primary" onclick="openAddSectorModal()">+ Создать свой первый сектор</button>
+        <button type="button" class="btn-primary" onclick="openAddSectorModal()">${typeof t === 'function' ? t('cabinet.btn_create_first_sector') : '+ Создать свой первый сектор'}</button>
       </div>
     `;
     return;
@@ -1704,24 +1720,32 @@ async function renderMyCabinet() {
   const rawNotif = profileUser.telegramNotificationsEnabled ?? profileUser.telegram_notifications_enabled ?? currentUser?.telegramNotificationsEnabled ?? currentUser?.telegram_notifications_enabled;
   const isTgNotificationsEnabled = rawNotif !== false && rawNotif !== 0;
 
+  const statsLine = typeof t === 'function'
+    ? t('cabinet.stats_line', { vip: profile.sector.vipLevel, conf: profile.sector.confidentialityLevel, power: fmtNum(profile.sector.power), kills: fmtNum(profile.sector.kills), points: fmtOne(profile.sector.killPoints) })
+    : `VIP ${profile.sector.vipLevel} · Секретность ${profile.sector.confidentialityLevel} · Сила ${fmtNum(profile.sector.power)} · Киллы ${fmtNum(profile.sector.kills)} · Очки ${fmtOne(profile.sector.killPoints)}`;
+
+  const dailyIncomeDesc = typeof t === 'function'
+    ? t('cabinet.daily_income_hint', { count: fmtNum(rewards.puzzlesPerDay, 2), vip: profile.sector.vipLevel > 10 ? Math.min(20, Math.max(2, profile.sector.vipLevel - 9)) : 0, conf: profile.sector.confidentialityLevel >= 25 ? '0.67' : profile.sector.confidentialityLevel > 24 ? '0.5' : '0' })
+    : `Ежедневный доход: +${fmtNum(rewards.puzzlesPerDay, 2)} пазлов/день (VIP: ${profile.sector.vipLevel > 10 ? Math.min(20, Math.max(2, profile.sector.vipLevel - 9)) : 0}, Секретность: ${profile.sector.confidentialityLevel >= 25 ? '0.67' : profile.sector.confidentialityLevel > 24 ? '0.5' : '0'}) + 1 сундук/день.`;
+
   c.innerHTML = `
     <div id="page-my-cabinet" class="cabinet-page-wrap">
     <div class="section-header">
       <div>
         <div class="section-title">
-          👤 Личный кабинет: ${escapeHtml(profile.name)}
+          👤 ${typeof t === 'function' ? t('cabinet.title') : 'Личный кабинет'}: ${escapeHtml(profile.name)}
           ${profile.realName ? `<span style="color:var(--text3);font-size:13px"> · ${escapeHtml(profile.realName)}</span>` : ''}
           <span class="badge badge-rank badge-rank-${profile.rank || 'r3'}">[${rankLabel}]</span>
         </div>
         <div style="color:var(--text3);font-size:12px;margin-top:4px">
-          VIP ${profile.sector.vipLevel} · Секретность ${profile.sector.confidentialityLevel} · Сила ${fmtNum(profile.sector.power)} · Киллы ${fmtNum(profile.sector.kills)} · Очки ${fmtOne(profile.sector.killPoints)}
+          ${statsLine}
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button type="button" class="btn btn-secondary btn-sm btn-history-trigger" onclick="openStockHistoryModal(${profile.id})">📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}</button>
         <button type="button" class="btn btn-secondary btn-scanner" onclick="openSmartScannerModal('my_cabinet')">📷 Smart Scanner</button>
-        <button type="button" class="btn-ghost btn-sm" onclick="openChangePasswordModal()">🔑 Сменить пароль</button>
-        <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 Обновить</button>
+        <button type="button" class="btn-ghost btn-sm" onclick="openChangePasswordModal()">🔑 ${typeof t === 'function' ? t('common.change_password') : 'Сменить пароль'}</button>
+        <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 ${typeof t === 'function' ? t('common.refresh') : 'Обновить'}</button>
       </div>
     </div>
 
@@ -1739,7 +1763,7 @@ async function renderMyCabinet() {
     <!-- SECTORS BAR -->
     <div class="cabinet-sectors-bar">
       <div class="csb-left">
-        <span class="csb-label">🏰 Активный сектор:</span>
+        <span class="csb-label">🏰 ${typeof t === 'function' ? t('cabinet.active_sector') : 'Активный сектор:'}</span>
         <select id="cabinet-sector-select" class="csb-select" onchange="switchCabinetSector(this.value)">
           ${profileSectors.map(s => {
             const title = (typeof logic !== 'undefined' && logic.formatSectorTitle)
@@ -1749,7 +1773,7 @@ async function renderMyCabinet() {
           }).join('')}
         </select>
       </div>
-      <button type="button" class="btn btn-secondary btn-sm" onclick="openAddSectorModal()">+ Добавить сектор</button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openAddSectorModal()">${typeof t === 'function' ? t('cabinet.btn_add_sector') : '+ Добавить сектор'}</button>
     </div>
 
     <!-- SECTOR & STOCK -->
@@ -1757,43 +1781,43 @@ async function renderMyCabinet() {
       <!-- Sector Card -->
       <div class="cabinet-card">
         <div class="cabinet-card-title">
-          <span>⚙️ Параметры сектора</span>
-          <span class="badge badge-none">+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день</span>
+          <span>⚙️ ${typeof t === 'function' ? t('cabinet.sector_params') : 'Параметры сектора'}</span>
+          <span class="badge badge-none">${typeof t === 'function' ? t('cabinet.puzzles_per_day', { count: fmtNum(rewards.puzzlesPerDay, 2) }) : `+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день`}</span>
         </div>
         <div class="form-row form-row-3">
           <div class="form-group">
-            <label for="my-sector-vip">Уровень VIP (0-30)</label>
+            <label for="my-sector-vip">${typeof t === 'function' ? t('cabinet.vip_level_label') : 'Уровень VIP (0-30)'}</label>
             <input type="number" id="my-sector-vip" min="0" max="30" value="${profile.sector.vipLevel}" oninput="updateCabinetVipProgressHint()">
           </div>
           <div class="form-group">
-            <label for="my-sector-vip-points">Очки VIP</label>
+            <label for="my-sector-vip-points">${typeof t === 'function' ? t('cabinet.vip_points_label') : 'Очки VIP'}</label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="my-sector-vip-points" value="${formatInputNumber(profile.sector.vipPoints || 0)}" oninput="updateCabinetVipProgressHint()">
           </div>
           <div class="form-group">
-            <label for="my-sector-conf">Конфиденциальность</label>
+            <label for="my-sector-conf">${typeof t === 'function' ? t('cabinet.confidentiality_label') : 'Конфиденциальность'}</label>
             <input type="number" id="my-sector-conf" min="0" value="${profile.sector.confidentialityLevel}">
           </div>
         </div>
         <div id="my-cabinet-vip-progress-hint" class="vip-progress-hint" style="margin-bottom:12px"></div>
         <div class="form-row form-row-3">
           <div class="form-group">
-            <label for="my-sector-power">Мощь / Сила</label>
+            <label for="my-sector-power">${typeof t === 'function' ? t('cabinet.power_label') : 'Мощь / Сила'}</label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="my-sector-power" value="${formatInputNumber(profile.sector.power)}">
           </div>
           <div class="form-group">
-            <label for="my-sector-kills">Убито</label>
+            <label for="my-sector-kills">${typeof t === 'function' ? t('cabinet.kills_label') : 'Убито'}</label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="my-sector-kills" value="${formatInputNumber(profile.sector.kills)}">
           </div>
           <div class="form-group">
-            <label for="my-sector-kill-points">Очки за убийство</label>
+            <label for="my-sector-kill-points">${typeof t === 'function' ? t('cabinet.kill_points_label') : 'Очки за убийство'}</label>
             <input type="text" inputmode="decimal" autocomplete="off" id="my-sector-kill-points" value="${formatInputNumber(profile.sector.killPoints, true)}">
           </div>
         </div>
         <div style="font-size:11.5px;color:var(--text3)">
-          💡 Ежедневный доход: <strong>+${fmtNum(rewards.puzzlesPerDay, 2)}</strong> пазлов/день (VIP: ${profile.sector.vipLevel > 10 ? Math.min(20, Math.max(2, profile.sector.vipLevel - 9)) : 0}, Секретность: ${profile.sector.confidentialityLevel >= 25 ? '0.67' : profile.sector.confidentialityLevel > 24 ? '0.5' : '0'}) + 1 сундук/день.
+          💡 ${dailyIncomeDesc}
         </div>
         <div>
-          <button type="button" class="btn-primary btn-sm" onclick="saveMySector()">💾 Сохранить параметры сектора</button>
+          <button type="button" class="btn-primary btn-sm" onclick="saveMySector()">${typeof t === 'function' ? t('cabinet.btn_save_sector') : '💾 Сохранить параметры сектора'}</button>
         </div>
       </div>
 
@@ -1801,14 +1825,14 @@ async function renderMyCabinet() {
       <div class="cabinet-card">
         <div class="cabinet-card-title">
           <div style="display:flex;align-items:center;gap:8px">
-            <span>📦 Запасы гильдейца</span>
+            <span>📦 ${typeof t === 'function' ? t('cabinet.stocks_title') : 'Запасы гильдейца'}</span>
             ${renderStockFreshnessBadge(profile.stockUpdatedAt || profile.stock_updated_at)}
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <button type="button" class="btn-ghost btn-xs btn-history-trigger" onclick="openStockHistoryModal(${profile.id})" title="${escapeHtml(typeof t === 'function' ? t('audit.btn_history') : 'История склада')}">
               📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}
             </button>
-            <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
+            <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 ${typeof t === 'function' ? t('cabinet.stocks_click_hint') : 'Кликните на плашку для быстрого изменения'}</span>
           </div>
         </div>
         <div class="stock-grid stock-grid-3x2" id="cabinet-stock-grid-wrap" style="margin-bottom:0">
@@ -1860,8 +1884,8 @@ async function renderMyCabinet() {
 
     <!-- OFFICERS LIST -->
     <div class="section-header" style="margin-top:20px">
-      <div class="section-title">🎖️ Мои офицеры (${profile.officers.length})</div>
-      <button class="btn-primary btn-sm" onclick="openAddMyOfficerModal()">+ Добавить офицера</button>
+      <div class="section-title">🎖️ ${typeof t === 'function' ? t('cabinet.my_officers') : 'Мои офицеры'} (${profile.officers.length})</div>
+      <button class="btn-primary btn-sm" onclick="openAddMyOfficerModal()">${typeof t === 'function' ? t('cabinet.btn_add_officer') : '+ Добавить офицера'}</button>
     </div>
 
     ${profile.officers.length ? `
@@ -1876,13 +1900,13 @@ async function renderMyCabinet() {
       </div>
     ` : `
       <div class="empty-state" style="padding:24px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:24px">
-        <p>У вас пока нет офицеров в профиле. Нажмите «+ Добавить офицера», чтобы добавить первого офицера!</p>
+        <p>${typeof t === 'function' ? t('cabinet.no_officers_desc') : 'У вас пока нет офицеров в профиле. Нажмите «+ Добавить офицера», чтобы добавить первого офицера!'}</p>
       </div>
     `}
 
     <!-- PERSONAL LEVELING SIMULATOR -->
     <div class="section-header" style="margin-top:28px">
-      <div class="section-title">🚀 Персональный симулятор прокачки до 180 уровня</div>
+      <div class="section-title">🚀 ${typeof t === 'function' ? t('cabinet.simulator_title') : 'Персональный симулятор прокачки до 180 уровня'}</div>
     </div>
     <div id="cabinet-sim-container">
       ${renderCabinetSimulatorHtml()}
@@ -2204,14 +2228,14 @@ function renderCabinetSimulatorHtml() {
     }).join('');
 
     middleSectionHtml = `
-      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 Хронология прокачки по событиям календаря:</div>
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 ${typeof t === 'function' ? t('cabinet.timeline_header') : 'Хронология прокачки по событиям календаря:'}</div>
       <div class="sim-timeline">
         ${timelineItemsHtml}
       </div>
     `;
   } else if (def.deficitPuzzles === 0) {
     middleSectionHtml = `
-      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 Хронология прокачки по событиям календаря:</div>
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 ${typeof t === 'function' ? t('cabinet.timeline_header') : 'Хронология прокачки по событиям календаря:'}</div>
       <div class="sim-timeline">
         <div class="sim-timeline-item finish">
           <div class="sim-timeline-badge"></div>
@@ -2242,7 +2266,7 @@ function renderCabinetSimulatorHtml() {
       <div class="sim-empty-events">
         <div class="sim-empty-events-icon">${emptyIcon}</div>
         <div class="sim-empty-events-text">${emptyMsg}</div>
-        <button type="button" class="btn-primary btn-sm" onclick="navigate('calendar')">📅 Открыть календарь событий</button>
+        <button type="button" class="btn-primary btn-sm" onclick="navigate('calendar')">${typeof t === 'function' ? t('cabinet.btn_open_calendar') : '📅 Открыть календарь событий'}</button>
       </div>
     `;
   }
@@ -2265,7 +2289,7 @@ function renderCabinetSimulatorHtml() {
   }
 
   const forecastDaysText = sim.simulatedDays !== null
-    ? `<span style="font-size:12px;color:var(--text3)"> (через ${fmtNum(sim.simulatedDays)} дн.)</span>`
+    ? `<span style="font-size:12px;color:var(--text3)"> (${typeof t === 'function' ? t('cabinet.in_days', { days: fmtNum(sim.simulatedDays) }) : `через ${fmtNum(sim.simulatedDays)} дн.`})</span>`
     : '';
 
   const savedBadge = sim.savedDays > 0
@@ -2288,7 +2312,7 @@ function renderCabinetSimulatorHtml() {
 
       <div class="form-row" style="margin-bottom:16px">
         <div class="form-group">
-          <label>Офицер для расчета</label>
+          <label>${typeof t === 'function' ? t('cabinet.officer_for_calc') : 'Офицер для расчета'}</label>
           <select onchange="onCabinetSimOfficerChange(this.value)">
             ${(() => {
               const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
@@ -2300,7 +2324,7 @@ function renderCabinetSimulatorHtml() {
           </select>
         </div>
         <div class="form-group">
-          <label>Целевой уровень прокачки</label>
+          <label>${typeof t === 'function' ? t('cabinet.target_level_label') : 'Целевой уровень прокачки'}</label>
           <div style="display:flex;gap:6px;align-items:center">
             <input type="number" min="1" max="180" value="${targetLevel}" onchange="setCabinetSimTargetLevel(this.value)" style="width:80px">
             <button type="button" class="btn-ghost btn-sm ${targetLevel===60?'btn-primary':''}" onclick="setCabinetSimTargetLevel(60)">60</button>
@@ -2312,7 +2336,7 @@ function renderCabinetSimulatorHtml() {
 
       <div class="stock-grid" style="margin-bottom:16px">
         <div class="stock-card">
-          <div class="label">Текущий прогресс</div>
+          <div class="label">${typeof t === 'function' ? t('game.sim.current_progress') : 'Текущий прогресс'}</div>
           <div class="value" style="display:flex;align-items:center;gap:8px">
             <span>Ур. ${fmtNum(selectedOfficer.level)} <span style="font-size:12px;color:var(--text3)">/ ${targetLevel}</span></span>
             ${troopBadge(cat.type)}
@@ -2323,14 +2347,14 @@ function renderCabinetSimulatorHtml() {
           </div>
         </div>
         <div class="stock-card">
-          <div class="label">Оставшийся дефицит</div>
+          <div class="label">${typeof t === 'function' ? t('game.sim.deficit') : 'Оставшийся дефицит'}</div>
           <div class="value">${fmtNum(sim.remainingDeficitPuzzles)} <span style="font-size:12px;color:var(--text3)">пазлов</span></div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
             ${costPerPuzzle > 0 ? `${fmtNum(sim.remainingDeficitCoupons)} купонов` : 'Только пазлы'}
           </div>
         </div>
         <div class="stock-card">
-          <div class="label">Ежедневный доход сектора</div>
+          <div class="label">${typeof t === 'function' ? t('game.sim.daily_income') : 'Ежедневный доход сектора'}</div>
           <div class="value">+${fmtNum(def.dailyIncome, 2)} <span style="font-size:12px;color:var(--text3)">пазл/день</span></div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px">VIP ${myCabinetProfile.sector.vipLevel} · Конф. ${myCabinetProfile.sector.confidentialityLevel} · 1 сундук/день</div>
         </div>
@@ -2345,7 +2369,7 @@ function renderCabinetSimulatorHtml() {
           <div class="progress-fill green" style="width:${simProgressPct}%"></div>
         </div>
         <div class="sim-stock-surplus-note">
-          📦 Доступно на складе для Ген. ${cat.generation || '?'}: <strong>${fmtNum(totalStockPuzzlesForOfficer)} пазл.</strong>
+          📦 ${typeof t === 'function' ? t('cabinet.available_in_stock', { gen: cat.generation || '?' }) : `Доступно на складе для Ген. ${cat.generation || '?'}:`} <strong>${fmtNum(totalStockPuzzlesForOfficer)} пазл.</strong>
           ${sim.remainingDeficitPuzzles === 0
             ? `<span class="text-muted">(избыток +${fmtNum(totalStockPuzzlesForOfficer)} пазл. сверх цели)</span>`
             : `<span class="text-muted">(покрывает ${fmtNum(Math.min(Math.max(0, targetPuz - def.currentPuzzles), totalStockPuzzlesForOfficer))} пазл. дефицита)</span>`
@@ -2359,7 +2383,7 @@ function renderCabinetSimulatorHtml() {
       <div class="sim-result-banner">
         <div>
           <div class="sim-result-title">
-            Прогноз достижения цели: <strong>${sim.simulatedDate ? formatDate(sim.simulatedDate) : 'Не достижимо'}</strong>${forecastDaysText}
+            ${typeof t === 'function' ? t('cabinet.forecast_goal') : 'Прогноз достижения цели:'} <strong>${sim.simulatedDate ? formatDate(sim.simulatedDate) : (typeof t === 'function' ? t('cabinet.unreachable') : 'Не достижимо')}</strong>${forecastDaysText}
           </div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
             ${subtitleParts.join(' · ')}
@@ -2612,16 +2636,26 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
 
   const cards = [];
 
+  const officerCouponLabel = typeof t === 'function' ? t('cabinet.officer_coupon') : 'Купон офицера';
+  const officerMedalLabel = typeof t === 'function' ? t('cabinet.officer_medal') : 'Медаль офицера';
+  const choiceChestLabel = typeof t === 'function' ? t('cabinet.choice_chest') : 'Сундук выбора';
+  const starCouponLabel = typeof t === 'function' ? t('cabinet.star_coupon') : 'Купон звезды';
+  const starsLabel = typeof t === 'function' ? t('cabinet.stars_123') : 'Звезды I / II / III';
+  const starsRatesLabel = typeof t === 'function' ? t('cabinet.stars_123_rates') : 'Звезды I (110) / II (420) / III (960)';
+  const starPointsLabel = typeof t === 'function' ? t('cabinet.star_points') : 'Очки звезд';
+  const saveLabel = typeof t === 'function' ? t('common.save') : 'Сохранить';
+  const cancelLabel = typeof t === 'function' ? t('common.cancel') : 'Отмена';
+
   // 1. Coupons
   if (cabinetInlineEditingKey === 'coupons') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-coupons" onclick="event.stopPropagation()">
-        <div class="label">🎟️ Купон офицера</div>
+        <div class="label">🎟️ ${officerCouponLabel}</div>
         <div class="stock-inline-edit-wrap">
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" class="stock-inline-input" id="input-cabinet-coupons" value="${formatInputNumber(st.coupons || 0)}" onkeydown="handleCabinetInlineKey(event, 'coupons')">
           <div class="stock-inline-actions">
-            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('coupons')" title="Сохранить (Enter)">✓</button>
-            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('coupons')" title="${saveLabel} (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="${cancelLabel} (Esc)">✕</button>
           </div>
         </div>
       </div>
@@ -2630,7 +2664,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-coupons" onclick="openCabinetInline('coupons')" title="Нажмите, чтобы изменить количество купонов">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">🎟️ Купон офицера</div>
+        <div class="label">🎟️ ${officerCouponLabel}</div>
         <div class="value" style="font-size:17px">${fmtNum(st.coupons)}</div>
       </div>
     `);
@@ -2640,12 +2674,12 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   if (cabinetInlineEditingKey === 'puzzles') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-puzzles" onclick="event.stopPropagation()">
-        <div class="label">🧩 Медаль офицера</div>
+        <div class="label">🧩 ${officerMedalLabel}</div>
         <div class="stock-inline-edit-wrap">
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" class="stock-inline-input" id="input-cabinet-puzzles" value="${formatInputNumber(st.puzzles || 0)}" onkeydown="handleCabinetInlineKey(event, 'puzzles')">
           <div class="stock-inline-actions">
-            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('puzzles')" title="Сохранить (Enter)">✓</button>
-            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('puzzles')" title="${saveLabel} (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="${cancelLabel} (Esc)">✕</button>
           </div>
         </div>
       </div>
@@ -2654,7 +2688,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-puzzles" onclick="openCabinetInline('puzzles')" title="Нажмите, чтобы изменить количество медалей">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">🧩 Медаль офицера</div>
+        <div class="label">🧩 ${officerMedalLabel}</div>
         <div class="value" style="font-size:17px">${fmtNum(st.puzzles)}</div>
       </div>
     `);
@@ -2664,12 +2698,12 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   if (cabinetInlineEditingKey === 'chests') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-chests" onclick="event.stopPropagation()">
-        <div class="label">📦 Сундук выбора</div>
+        <div class="label">📦 ${choiceChestLabel}</div>
         <div class="stock-inline-edit-wrap">
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" class="stock-inline-input" id="input-cabinet-chests" value="${formatInputNumber(st.chests || 0)}" onkeydown="handleCabinetInlineKey(event, 'chests')">
           <div class="stock-inline-actions">
-            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('chests')" title="Сохранить (Enter)">✓</button>
-            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('chests')" title="${saveLabel} (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="${cancelLabel} (Esc)">✕</button>
           </div>
         </div>
       </div>
@@ -2678,7 +2712,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-chests" onclick="openCabinetInline('chests')" title="Нажмите, чтобы изменить количество сундуков">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">📦 Сундук выбора</div>
+        <div class="label">📦 ${choiceChestLabel}</div>
         <div class="value" style="font-size:17px">${fmtNum(st.chests)}</div>
       </div>
     `);
@@ -2688,12 +2722,12 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   if (cabinetInlineEditingKey === 'starCoupons') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-star-coupons" onclick="event.stopPropagation()">
-        <div class="label">⭐ Купон звезды</div>
+        <div class="label">⭐ ${starCouponLabel}</div>
         <div class="stock-inline-edit-wrap">
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" class="stock-inline-input" id="input-cabinet-star-coupons" value="${formatInputNumber(st.starCoupons || 0)}" onkeydown="handleCabinetInlineKey(event, 'starCoupons')">
           <div class="stock-inline-actions">
-            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('starCoupons')" title="Сохранить (Enter)">✓</button>
-            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕</button>
+            <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('starCoupons')" title="${saveLabel} (Enter)">✓</button>
+            <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="${cancelLabel} (Esc)">✕</button>
           </div>
         </div>
       </div>
@@ -2702,7 +2736,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-star-coupons" onclick="openCabinetInline('starCoupons')" title="Нажмите, чтобы изменить купоны звезды">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">⭐ Купон звезды</div>
+        <div class="label">⭐ ${starCouponLabel}</div>
         <div class="value" style="font-size:17px">${fmtNum(st.starCoupons || 0)}</div>
       </div>
     `);
@@ -2712,7 +2746,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   if (cabinetInlineEditingKey === 'stars') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-stars" onclick="event.stopPropagation()">
-        <div class="label">🌟 Звезды I (110) / II (420) / III (960)</div>
+        <div class="label">🌟 ${starsRatesLabel}</div>
         <div class="stock-inline-stars-row">
           <div class="stock-inline-star-col">
             <span class="stock-star-sublabel">I (110):</span>
@@ -2728,8 +2762,8 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
           </div>
         </div>
         <div class="stock-inline-actions" style="margin-top:8px">
-          <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('stars')" title="Сохранить звёзды (Enter)">✓ Сохранить</button>
-          <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="Отмена (Esc)">✕ Отмена</button>
+          <button type="button" class="btn-primary btn-xs" onclick="saveCabinetInline('stars')" title="${saveLabel} (Enter)">✓ ${saveLabel}</button>
+          <button type="button" class="btn-ghost btn-xs" onclick="closeCabinetInline()" title="${cancelLabel} (Esc)">✕ ${cancelLabel}</button>
         </div>
       </div>
     `);
@@ -2737,7 +2771,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-stars" onclick="openCabinetInline('stars')" title="Нажмите, чтобы изменить количество звёзд">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">🌟 Звезды I / II / III</div>
+        <div class="label">🌟 ${starsLabel}</div>
         <div class="value" style="font-size:14px;font-family:var(--mono)">
           ${fmtNum(st.legendaryStars1 || 0)} / ${fmtNum(st.legendaryStars2 || 0)} / ${fmtNum(st.legendaryStars3 || 0)}
         </div>
@@ -2749,7 +2783,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   cards.push(`
     <div class="stock-card stock-card-clickable" id="card-cabinet-star-points" onclick="openCabinetInline('stars')" title="Нажмите для перехода к звёздам">
       <span class="stock-card-edit-hint">✏️</span>
-      <div class="label">✨ Очки звезд</div>
+      <div class="label">✨ ${starPointsLabel}</div>
       <div class="value" id="val-cabinet-star-points" style="font-size:17px;color:#f1e05a">${fmtNum(starPts)}</div>
     </div>
   `);
@@ -2945,23 +2979,21 @@ async function submitAddSector() {
 }
 
 function renderOfficerStarHintText(currentStars) {
-  if (typeof logic !== 'undefined' && logic.formatOfficerStarHint) {
-    return logic.formatOfficerStarHint(currentStars);
-  }
   const count = Math.max(0, Math.min(6, Number(currentStars) || 0));
   if (count >= 6) {
-    return '6★ Максимум (98 000 звёзд)';
+    return typeof t === 'function' ? t('cabinet.star_max') : '6★ Максимум (98 000 звёзд)';
   }
   const next = count + 1;
   const cost = typeof starCostFor === 'function' ? starCostFor(next) : 0;
-  return `До ${next}★: ${fmtNum(cost)} звёзд`;
+  return typeof t === 'function' ? t('cabinet.star_to_next', { next, cost: fmtNum(cost) }) : `До ${next}★: ${fmtNum(cost)} звёзд`;
 }
 
 function onCabinetStarHover(officerId, star) {
   const el = document.getElementById(`cabinet-star-hint-${officerId}`);
   if (!el) return;
   const cost = typeof starCostFor === 'function' ? starCostFor(star) : 0;
-  el.innerHTML = `<span class="star-hint-badge hover">✨ До <strong>${star}★</strong>: <strong>${fmtNum(cost)}</strong> звёзд (клик для выбора)</span>`;
+  const toStarText = typeof t === 'function' ? t('cabinet.star_to_next', { next: star, cost: fmtNum(cost) }) : `До ${star}★: ${fmtNum(cost)} звёзд`;
+  el.innerHTML = `<span class="star-hint-badge hover">✨ <strong>${toStarText}</strong></span>`;
 }
 
 function onCabinetStarLeave(officerId, currentStars) {
@@ -2976,8 +3008,8 @@ function renderInteractiveStars(officer) {
     const star = i + 1;
     const cost = starCostFor(star);
     const tooltipText = star < 6
-      ? `До ${star}★: ${fmtNum(cost)} звёзд`
-      : `Итого ${fmtNum(cost)} звёзд (6★ макс)`;
+      ? (typeof t === 'function' ? t('cabinet.star_to_next', { next: star, cost: fmtNum(cost) }) : `До ${star}★: ${fmtNum(cost)} звёзд`)
+      : (typeof t === 'function' ? t('cabinet.star_max') : `Итого ${fmtNum(cost)} звёзд (6★ макс)`);
     const newStars = star === count ? star - 1 : star;
     return `<button type="button" class="star-btn ${count>=star?'active':''}" data-tooltip="${tooltipText}" title="${tooltipText}" aria-label="${tooltipText}" onmouseenter="onCabinetStarHover('${officer.id}', ${star})" onmouseleave="onCabinetStarLeave('${officer.id}', ${count})" onclick="setMyOfficerStars('${officer.id}', ${newStars})">${count>=star?'★':'☆'}</button>`;
   }).join('')}</span>`;
@@ -2990,6 +3022,18 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
   const currPuz = def.currentPuzzles;
   const pctVal = Math.min(100, Math.round((currPuz / targetPuz) * 100));
 
+  const genBadgeText = typeof t === 'function' ? t('cabinet.gen_short', { gen: cat.generation }) : `Ген. ${cat.generation}`;
+  const onlyPersonalBadge = typeof t === 'function' ? t('cabinet.only_personal') : 'Только личные';
+  const starsLabel = typeof t === 'function' ? t('cabinet.stars_label') : 'Звёзды:';
+  const starReadyBadge = typeof t === 'function' ? t('cabinet.star_ready') : '6★ Готово';
+  const starNeededBadge = typeof t === 'function' ? t('cabinet.star_needed') : 'Нужно 6★';
+  const levelLabel = typeof t === 'function' ? t('cabinet.level_label') : 'Уровень:';
+  const puzzlesLabel = typeof t === 'function' ? t('cabinet.puzzles_label') : 'Пазлы:';
+  const couponsLabel = typeof t === 'function' ? t('cabinet.coupons_label') : 'Купоны:';
+  const deficitLabel = typeof t === 'function' ? t('cabinet.deficit_to_180') : 'Дефицит до 180:';
+  const forecastLabel = typeof t === 'function' ? t('cabinet.forecast_without_events') : 'Прогноз без ивентов:';
+  const onlyPersonalForecast = typeof t === 'function' ? t('cabinet.only_personal_medals') : 'Только личные медали';
+
   return `
     <div class="cabinet-officer-card" id="cabinet-officer-card-${o.id}">
       <div class="cabinet-officer-header">
@@ -2997,8 +3041,8 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
           <div class="cabinet-officer-name">${escapeHtml(officerLabel(o))}</div>
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
             ${troopBadge(cat.type)}
-            <span class="cabinet-stat-pill">Ген. ${cat.generation}</span>
-            ${(o.onlyPersonalPuzzles || o.only_personal_puzzles) ? '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;font-size:10.5px;border:1px solid rgba(16,185,129,0.3)">🧩 Только личные</span>' : ''}
+            <span class="cabinet-stat-pill">${genBadgeText}</span>
+            ${(o.onlyPersonalPuzzles || o.only_personal_puzzles) ? `<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;font-size:10.5px;border:1px solid rgba(16,185,129,0.3)">🧩 ${onlyPersonalBadge}</span>` : ''}
           </div>
         </div>
         <div style="display:flex;gap:4px">
@@ -3011,13 +3055,13 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <div class="cabinet-officer-stars-box">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:12px;color:var(--text2)">Звёзды:</span>
+            <span style="font-size:12px;color:var(--text2)">${starsLabel}</span>
             ${renderInteractiveStars(o)}
           </div>
           <div>
             ${def.starRequirement.isStarReady
-              ? `<span class="badge badge-success" style="font-size:10px">6★ Готово</span>`
-              : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 6★">Нужно 6★</span>`}
+              ? `<span class="badge badge-success" style="font-size:10px">${starReadyBadge}</span>`
+              : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 6★">${starNeededBadge}</span>`}
           </div>
         </div>
         <div class="cabinet-star-hint" id="cabinet-star-hint-${o.id}">
@@ -3033,9 +3077,9 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <!-- Level and Progress -->
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:3px;flex-wrap:wrap;gap:4px">
-          <span>Уровень: <strong>${o.level} / 180</strong></span>
-          <span style="color:var(--accent);font-weight:600">🧩 Пазлы: <strong>${fmtNum(o.personalPuzzles || o.personal_puzzles || 0)}</strong></span>
-          <span style="color:var(--text2)">Купоны: <strong>${fmtNum(o.coupons)}</strong></span>
+          <span>${levelLabel} <strong>${o.level} / 180</strong></span>
+          <span style="color:var(--accent);font-weight:600">🧩 ${puzzlesLabel} <strong>${fmtNum(o.personalPuzzles || o.personal_puzzles || 0)}</strong></span>
+          <span style="color:var(--text2)">${couponsLabel} <strong>${fmtNum(o.coupons)}</strong></span>
         </div>
         <div class="progress-container">
           <div class="progress-fill" style="width:${pctVal}%"></div>
@@ -3045,12 +3089,12 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <!-- Deficit & Forecast -->
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
         <div style="display:flex;justify-content:space-between">
-          <span style="color:var(--text3)">Дефицит до 180:</span>
+          <span style="color:var(--text3)">${deficitLabel}</span>
           <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} ${def.isOnlyPersonalPuzzles ? 'личных пазл.' : (def.costPerPuzzle > 0 ? `пазл. (${fmtNum(def.deficitCoupons)} куп.)` : 'пазл. (только пазлы)')}</strong>
         </div>
         <div style="display:flex;justify-content:space-between">
-          <span style="color:var(--text3)">Прогноз без ивентов:</span>
-          <span style="color:var(--text2)">${def.isOnlyPersonalPuzzles ? '🧩 Только личные медали' : (def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—')}</span>
+          <span style="color:var(--text3)">${forecastLabel}</span>
+          <span style="color:var(--text2)">${def.isOnlyPersonalPuzzles ? `🧩 ${onlyPersonalForecast}` : (def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${def.daysWithoutEvents} дн.)` : '—')}</span>
         </div>
       </div>
     </div>
@@ -3468,11 +3512,11 @@ async function renderPendingRegistrations() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-header">
-      <div class="section-title">Заявки на регистрацию участников</div>
-      <button class="btn-ghost btn-sm" onclick="renderPendingRegistrations()">🔄 Обновить</button>
+      <div class="section-title">${typeof t === 'function' ? t('pending.title') : 'Заявки на регистрацию участников'}</div>
+      <button class="btn-ghost btn-sm" onclick="renderPendingRegistrations()">🔄 ${typeof t === 'function' ? t('common.refresh') : 'Обновить'}</button>
     </div>
     <div id="pending-users-container">
-      <div class="empty-state"><p>Загрузка заявок...</p></div>
+      <div class="empty-state"><p>${typeof t === 'function' ? t('pending.loading') : 'Загрузка заявок...'}</p></div>
     </div>
   `;
 
@@ -3487,8 +3531,8 @@ async function renderPendingRegistrations() {
       container.innerHTML = `
         <div class="empty-state">
           <div style="font-size:32px;margin-bottom:8px">🎉</div>
-          <p style="font-weight:600;font-size:15px;color:var(--text)">Нет активных заявок на регистрацию</p>
-          <p style="color:var(--text3);font-size:13px;margin-top:4px">Все поступившие заявки обработаны руководствами гильдии.</p>
+          <p style="font-weight:600;font-size:15px;color:var(--text)">${typeof t === 'function' ? t('pending.empty') : 'Нет активных заявок на регистрацию'}</p>
+          <p style="color:var(--text3);font-size:13px;margin-top:4px">${typeof t === 'function' ? t('pending.empty_desc') : 'Все поступившие заявки обработаны руководствами гильдии.'}</p>
         </div>
       `;
       return;
@@ -3501,12 +3545,12 @@ async function renderPendingRegistrations() {
         <table>
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Логин</th>
-              <th>Персонаж в гильдии</th>
-              <th>Дата заявки</th>
-              <th>Статус</th>
-              <th style="text-align:right">Действия</th>
+              <th>${typeof t === 'function' ? t('pending.th_id') : 'ID'}</th>
+              <th>${typeof t === 'function' ? t('pending.th_login') : 'Логин'}</th>
+              <th>${typeof t === 'function' ? t('pending.th_character') : 'Персонаж в гильдии'}</th>
+              <th>${typeof t === 'function' ? t('pending.th_date') : 'Дата заявки'}</th>
+              <th>${typeof t === 'function' ? t('pending.th_status') : 'Статус'}</th>
+              <th style="text-align:right">${typeof t === 'function' ? t('common.actions') : 'Действия'}</th>
             </tr>
           </thead>
           <tbody>
@@ -3514,14 +3558,14 @@ async function renderPendingRegistrations() {
               <tr>
                 <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
                 <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
-                <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">Новый персонаж</span>'}</td>
+                <td>${u.playerName ? escapeHtml(u.playerName) : `<span style="color:var(--text3)">${typeof t === 'function' ? t('pending.new_character') : 'Новый персонаж'}</span>`}</td>
                 <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
-                <td><span class="badge badge-pending">⏳ Ожидает</span></td>
+                <td><span class="badge badge-pending">${typeof t === 'function' ? t('pending.status_pending') : '⏳ Ожидает'}</span></td>
                 <td style="text-align:right">
                   <div style="display:inline-flex;gap:6px;justify-content:flex-end">
-                    <button class="btn-primary btn-sm" onclick="handleApproveUser(${u.id}, 'r3')">Одобрить (Р3)</button>
-                    ${isR5 ? `<button class="btn-primary btn-sm" style="background:#8b5cf6" onclick="handleApproveUser(${u.id}, 'r4')">Одобрить (Р4)</button>` : ''}
-                    <button class="btn-danger btn-sm" onclick="handleRejectUser(${u.id}, '${escapeHtml(u.username)}')">Отклонить</button>
+                    <button class="btn-primary btn-sm" onclick="handleApproveUser(${u.id}, 'r3')">${typeof t === 'function' ? t('pending.btn_approve_r3') : 'Одобрить (Р3)'}</button>
+                    ${isR5 ? `<button class="btn-primary btn-sm" style="background:#8b5cf6" onclick="handleApproveUser(${u.id}, 'r4')">${typeof t === 'function' ? t('pending.btn_approve_r4') : 'Одобрить (Р4)'}</button>` : ''}
+                    <button class="btn-danger btn-sm" onclick="handleRejectUser(${u.id}, '${escapeHtml(u.username)}')">${typeof t === 'function' ? t('pending.btn_reject') : 'Отклонить'}</button>
                   </div>
                 </td>
               </tr>
@@ -3573,11 +3617,11 @@ async function renderUsers() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-header">
-      <div class="section-title">🔐 Управление пользователями гильдии</div>
-      <button class="btn-ghost btn-sm" onclick="renderUsers()">🔄 Обновить</button>
+      <div class="section-title">🔐 ${typeof t === 'function' ? t('users.title') : 'Управление пользователями гильдии'}</div>
+      <button class="btn-ghost btn-sm" onclick="renderUsers()">🔄 ${typeof t === 'function' ? t('common.refresh') : 'Обновить'}</button>
     </div>
     <div id="users-table-container">
-      <div class="empty-state"><p>Загрузка пользователей...</p></div>
+      <div class="empty-state"><p>${typeof t === 'function' ? t('users.loading') : 'Загрузка пользователей...'}</p></div>
     </div>
   `;
 
@@ -3588,7 +3632,7 @@ async function renderUsers() {
     if (!container) return;
 
     if (!users || users.length === 0) {
-      container.innerHTML = `<div class="empty-state"><p>Пользователей не найдено</p></div>`;
+      container.innerHTML = `<div class="empty-state"><p>${typeof t === 'function' ? t('users.empty') : 'Пользователей не найдено'}</p></div>`;
       return;
     }
 
@@ -3607,13 +3651,13 @@ async function renderUsers() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Логин</th>
-              <th>Персонаж</th>
-              <th>Ранг</th>
-              <th>Права доступа</th>
-              <th>Статус</th>
-              <th>Регистрация</th>
-              <th style="text-align:right">Действия</th>
+              <th>${typeof t === 'function' ? t('users.th_login') : 'Логин'}</th>
+              <th>${typeof t === 'function' ? t('users.th_character') : 'Персонаж'}</th>
+              <th>${typeof t === 'function' ? t('users.th_rank') : 'Ранг'}</th>
+              <th>${typeof t === 'function' ? t('users.th_permissions') : 'Права доступа'}</th>
+              <th>${typeof t === 'function' ? t('users.th_status') : 'Статус'}</th>
+              <th>${typeof t === 'function' ? t('users.th_registered') : 'Регистрация'}</th>
+              <th style="text-align:right">${typeof t === 'function' ? t('common.actions') : 'Действия'}</th>
             </tr>
           </thead>
           <tbody>
@@ -3626,8 +3670,8 @@ async function renderUsers() {
               if (isFull) {
                 permsHtml = `
                   <div class="permissions-cell">
-                    <span class="badge badge-perm badge-perm-all" title="Р4/Р5 имеют полный доступ ко всем разделам">⚡ Полный доступ</span>
-                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
+                    <span class="badge badge-perm badge-perm-all" title="Р4/Р5 имеют полный доступ ко всем разделам">${typeof t === 'function' ? t('users.full_access') : '⚡ Полный доступ'}</span>
+                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                   </div>
                 `;
               } else if (uPerms.length > 0) {
@@ -3640,14 +3684,14 @@ async function renderUsers() {
                     <div class="permissions-tags">
                       ${tags}
                     </div>
-                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
+                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                   </div>
                 `;
               } else {
                 permsHtml = `
                   <div class="permissions-cell">
-                    <span class="badge-perm-none">Базовые (Р3)</span>
-                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
+                    <span class="badge-perm-none">${typeof t === 'function' ? t('users.basic_r3') : 'Базовые (Р3)'}</span>
+                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                   </div>
                 `;
               }
@@ -3659,17 +3703,17 @@ async function renderUsers() {
                   <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
                   <td>
                     <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
-                      <option value="r3" ${rank === 'r3' ? 'selected' : ''}>Р3 (Боец)</option>
-                      <option value="r4" ${rank === 'r4' ? 'selected' : ''}>Р4 (Чиновник)</option>
-                      <option value="r5" ${rank === 'r5' ? 'selected' : ''}>Р5 (Глава)</option>
+                      <option value="r3" ${rank === 'r3' ? 'selected' : ''}>${typeof t === 'function' ? t('users.rank_r3') : 'Р3 (Боец)'}</option>
+                      <option value="r4" ${rank === 'r4' ? 'selected' : ''}>${typeof t === 'function' ? t('users.rank_r4') : 'Р4 (Чиновник)'}</option>
+                      <option value="r5" ${rank === 'r5' ? 'selected' : ''}>${typeof t === 'function' ? t('users.rank_r5') : 'Р5 (Глава)'}</option>
                     </select>
                   </td>
                   <td>${permsHtml}</td>
-                  <td>${u.is_approved ? '<span class="badge badge-success">✓ Активен</span>' : '<span class="badge badge-pending">⏳ Ожидает</span>'}</td>
+                  <td>${u.is_approved ? `<span class="badge badge-success">${typeof t === 'function' ? t('users.active') : '✓ Активен'}</span>` : `<span class="badge badge-pending">${typeof t === 'function' ? t('users.pending') : '⏳ Ожидает'}</span>`}</td>
                   <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
                   <td style="text-align:right;white-space:nowrap">
-                    <button class="action-btn" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">🛡️ Права</button>
-                    <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">🔑 Пароль</button>
+                    <button class="action-btn" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
+                    <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">${typeof t === 'function' ? t('users.btn_password') : '🔑 Пароль'}</button>
                   </td>
                 </tr>
               `;
@@ -4420,27 +4464,27 @@ function renderCalendar() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-header">
-      <div class="section-title">Ивенты</div>
+      <div class="section-title">${typeof t === 'function' ? t('events.title') : 'Ивенты'}</div>
       ${(canManage() || hasPermission('manage_events')) ? `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn-outline" onclick="openSeasonSchedulerModal()">⚡ Создать сезон</button>
-          <button class="btn-primary" onclick="openEventModal()">+ Создать ивент</button>
+          <button class="btn-outline" onclick="openSeasonSchedulerModal()">${typeof t === 'function' ? t('events.btn_create_season') : '⚡ Создать сезон'}</button>
+          <button class="btn-primary" onclick="openEventModal()">${typeof t === 'function' ? t('events.btn_create_event') : '+ Создать ивент'}</button>
         </div>` : ''}
     </div>
 
     ${active.length ? `
-    <div class="cal-section-label active-label">● Идут сейчас</div>
+    <div class="cal-section-label active-label">${typeof t === 'function' ? t('events.active_now') : '● Идут сейчас'}</div>
     <div class="cal-cards">${active.map(ev=>calCard(ev,'active')).join('')}</div>` : ''}
 
     ${upcoming.length ? `
-    <div class="cal-section-label upcoming-label">◎ Предстоящие</div>
+    <div class="cal-section-label upcoming-label">${typeof t === 'function' ? t('events.upcoming') : '◎ Предстоящие'}</div>
     <div class="cal-cards">${upcoming.map(ev=>calCard(ev,'upcoming')).join('')}</div>` : ''}
 
     ${past.length ? `
-    <div class="cal-section-label past-label">◌ Прошедшие</div>
+    <div class="cal-section-label past-label">${typeof t === 'function' ? t('events.past') : '◌ Прошедшие'}</div>
     <div class="cal-cards">${past.map(ev=>calCard(ev,'past')).join('')}</div>` : ''}
 
-    ${!sorted.length ? `<div class="empty-state"><p>Ивентов нет. Создайте первый!</p></div>` : ''}
+    ${!sorted.length ? `<div class="empty-state"><p>${typeof t === 'function' ? t('events.empty_events') : 'Ивентов нет. Создайте первый!'}</p></div>` : ''}
   `;
 }
 
@@ -4449,7 +4493,11 @@ function calCard(ev, status) {
   const color = et?.color || '#888';
   const assigned = ev.assignments.length;
   const totalPlaces = et ? et.places.length : 0;
-  const statusLabels = { active:'● Идёт', upcoming:'◎ Скоро', past:'◌ Завершён' };
+  const statusLabels = {
+    active: typeof t === 'function' ? t('events.status_active') : '● Идёт',
+    upcoming: typeof t === 'function' ? t('events.status_upcoming') : '◎ Скоро',
+    past: typeof t === 'function' ? t('events.status_past') : '◌ Завершён'
+  };
   const totalCoupons = ev.assignments.reduce((s,a)=>{
     const pi = placeInfo(et, a.place, ev.dateFrom);
     return s + (a.actualCoupons ?? pi?.coupons ?? 0);
@@ -4459,10 +4507,12 @@ function calCard(ev, status) {
   const top3 = ev.assignments.slice(0,3).map(a=>{
     const p = getPlayer(a.playerId);
     const pi = placeInfo(et, a.place, ev.dateFrom);
+    const placeTitle = pi?.label || (typeof t === 'function' ? t('events.place_num', { place: a.place }) : `Место ${a.place}`);
+    const couponStr = typeof t === 'function' ? t('events.coupons_count', { count: fmtNum(a.actualCoupons ?? pi?.coupons ?? 0) }) : `${fmtNum(a.actualCoupons ?? pi?.coupons ?? 0)} купонов`;
     return `<div class="cal-assign-row">
-      <span class="cal-place">${pi?.label || `Место ${a.place}`}</span>
+      <span class="cal-place">${placeTitle}</span>
       <span class="cal-pname">${p ? playerLink(p) : '—'}</span>
-      <span class="cal-pcoupons">${fmtNum(a.actualCoupons ?? pi?.coupons ?? 0)} купонов</span>
+      <span class="cal-pcoupons">${couponStr}</span>
     </div>`;
   }).join('');
 
@@ -4476,7 +4526,9 @@ function calCard(ev, status) {
     if (myRegs.length > 0) {
       const regItems = myRegs.map(reg => {
         const myPlace = Number(reg.desiredPlace) || 0;
-        const placeLabel = myPlace === 0 ? 'Любое' : (placeInfo(et, myPlace, ev.dateFrom)?.label || `Место ${myPlace}`);
+        const placeLabel = myPlace === 0
+          ? (typeof t === 'function' ? t('events.any_place') : 'Любое')
+          : (placeInfo(et, myPlace, ev.dateFrom)?.label || (typeof t === 'function' ? t('events.place_num', { place: myPlace }) : `Место ${myPlace}`));
         const sector = userSectors.find(s => Number(s.id) === Number(reg.playerId)) || getPlayer(reg.playerId) || { name: 'Сектор' };
         const regOff = (sector.officers || []).find(o => o.id === reg.officerId)
           || (state.players || []).flatMap(p => p.officers || []).find(o => o.id === reg.officerId)
@@ -4492,8 +4544,8 @@ function calCard(ev, status) {
               <span class="badge badge-none" style="margin-left:4px;font-size:11px">${escapeHtml(placeLabel)}</span>
             </div>
             <div style="display:flex;gap:4px;flex-shrink:0">
-              <button class="action-btn" title="Изменить" onclick="event.stopPropagation();openRegisterModal(${ev.id},${reg.playerId})">✏️</button>
-              <button class="action-btn danger" title="Отменить" onclick="event.stopPropagation();cancelRegistrationFromDetail(${ev.id},${reg.playerId})">✕</button>
+              <button class="action-btn" title="${typeof t === 'function' ? t('events.edit_registration') : 'Изменить'}" onclick="event.stopPropagation();openRegisterModal(${ev.id},${reg.playerId})">✏️</button>
+              <button class="action-btn danger" title="${typeof t === 'function' ? t('events.cancel_registration') : 'Отменить'}" onclick="event.stopPropagation();cancelRegistrationFromDetail(${ev.id},${reg.playerId})">✕</button>
             </div>
           </div>
         `;
@@ -4507,7 +4559,7 @@ function calCard(ev, status) {
           ${regItems}
           ${hasUnregisteredSectors ? `
             <button class="btn-ghost btn-sm btn-block" style="margin-top:6px;font-size:11px" onclick="event.stopPropagation();openRegisterModal(${ev.id})">
-              + Зарегистрировать сектор
+              ${typeof t === 'function' ? t('events.btn_register_sector') : '+ Зарегистрировать сектор'}
             </button>
           ` : ''}
         </div>
@@ -4516,12 +4568,17 @@ function calCard(ev, status) {
       regHtml = `
         <div style="margin-bottom:10px" onclick="event.stopPropagation()">
           <button class="btn-primary btn-sm btn-block" onclick="event.stopPropagation();openRegisterModal(${ev.id})">
-            📝 Зарегистрироваться на ивент
+            ${typeof t === 'function' ? t('events.btn_register') : '📝 Зарегистрироваться на ивент'}
           </button>
         </div>
       `;
     }
   }
+
+  const assignedStr = typeof t === 'function' ? t('events.assignments_count', { count: fmtNum(assigned) }) : `${fmtNum(assigned)} назначений`;
+  const couponsStr = typeof t === 'function' ? t('events.coupons_count', { count: fmtNum(totalCoupons) }) : `${fmtNum(totalCoupons)} купонов`;
+  const moreAssignedStr = typeof t === 'function' ? t('events.more_assignments', { count: fmtNum(ev.assignments.length - 3) }) : `+ ещё ${fmtNum(ev.assignments.length - 3)} назначений`;
+  const noAssignedStr = typeof t === 'function' ? t('events.no_assignments') : 'Назначений нет';
 
   return `<div class="cal-card" onclick="navigate('event_detail',{id:${ev.id}})" style="--ev-color:${color}">
     <div class="cal-card-header">
@@ -4531,10 +4588,10 @@ function calCard(ev, status) {
       </div>
       <div style="text-align:right">
         <span class="cal-status ${status}">${statusLabels[status]}</span>
-        <div class="cal-card-meta">${fmtNum(assigned)} назначений · ${fmtNum(totalCoupons)} купонов</div>
+        <div class="cal-card-meta">${assignedStr} · ${couponsStr}</div>
       </div>
     </div>
-    ${top3 ? `<div class="cal-assigns">${top3}${ev.assignments.length > 3 ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">+ ещё ${fmtNum(ev.assignments.length-3)} назначений</div>` : ''}</div>` : `<div class="slot-empty">Назначений нет</div>`}
+    ${top3 ? `<div class="cal-assigns">${top3}${ev.assignments.length > 3 ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">${moreAssignedStr}</div>` : ''}</div>` : `<div class="slot-empty">${noAssignedStr}</div>`}
     ${regHtml}
     <div class="cal-card-footer">
       <span style="font-size:12px;color:var(--text3)">${ev.note || ''}</span>
@@ -5048,26 +5105,26 @@ function renderPlayers() {
 
   c.innerHTML = `
     <div class="section-header">
-      <div class="section-title">Секторы альянса (${state.players.length})</div>
-      ${canManage() ? `<button class="btn-primary" onclick="openPlayerModal()">+ Добавить сектор</button>` : ''}
+      <div class="section-title">${typeof t === 'function' ? t('sectors.title') : 'Секторы альянса'} (${state.players.length})</div>
+      ${canManage() ? `<button class="btn-primary" onclick="openPlayerModal()">${typeof t === 'function' ? t('sectors.btn_add_sector') : '+ Добавить сектор'}</button>` : ''}
     </div>
 
     <!-- SECTORS OFFICERS PAIR FILTER -->
     <div class="sectors-filter-bar">
       <div class="sectors-filter-title">
-        <span>🔍 Фильтр по офицерам (связки и пары):</span>
+        <span>🔍 ${typeof t === 'function' ? t('sectors.filter_officers_title') : 'Фильтр по офицерам (связки и пары):'}</span>
         ${hasFilter ? `
-          <button type="button" class="btn-ghost btn-xs" onclick="clearSectorOfficerFilter()" title="Сбросить все фильтры">✕ Очистить фильтр</button>
+          <button type="button" class="btn-ghost btn-xs" onclick="clearSectorOfficerFilter()" title="${typeof t === 'function' ? t('sectors.clear_filter') : 'Сбросить все фильтры'}">${typeof t === 'function' ? t('sectors.clear_filter') : '✕ Очистить фильтр'}</button>
         ` : ''}
       </div>
       <div class="sectors-filter-controls">
         <div class="sectors-filter-slot">
-          <label for="filter-officer-1" class="sectors-filter-label">Офицер 1:</label>
+          <label for="filter-officer-1" class="sectors-filter-label">${typeof t === 'function' ? t('sectors.officer_1') : 'Офицер 1:'}</label>
           <select id="filter-officer-1" class="sectors-filter-select" onchange="onSectorOfficerFilterChange(0, this.value)">
-            <option value="">— Любой офицер —</option>
+            <option value="">${typeof t === 'function' ? t('sectors.any_officer') : '— Любой офицер —'}</option>
             ${catOfficers.map(co => `
               <option value="${co.id}" ${slot1Value === co.id ? 'selected' : ''}>
-                ${escapeHtml(co.name)} (${co.type}, Ген. ${co.generation})
+                ${escapeHtml(co.name)} (${troopBadge ? getLocalizedOfficerType(co.type) : co.type}, ${typeof t === 'function' ? t('common.generation_short', { gen: co.generation }) : `Ген. ${co.generation}`})
               </option>
             `).join('')}
           </select>
@@ -5076,12 +5133,12 @@ function renderPlayers() {
         <span class="sectors-filter-plus">+</span>
 
         <div class="sectors-filter-slot">
-          <label for="filter-officer-2" class="sectors-filter-label">Офицер 2 (в пару):</label>
+          <label for="filter-officer-2" class="sectors-filter-label">${typeof t === 'function' ? t('sectors.officer_2') : 'Офицер 2 (в пару):'}</label>
           <select id="filter-officer-2" class="sectors-filter-select" onchange="onSectorOfficerFilterChange(1, this.value)">
-            <option value="">— Любой в пару —</option>
+            <option value="">${typeof t === 'function' ? t('sectors.any_pair') : '— Любой в пару —'}</option>
             ${catOfficers.map(co => `
               <option value="${co.id}" ${slot2Value === co.id ? 'selected' : ''} ${slot1Value === co.id ? 'style="color:var(--text3)"' : ''}>
-                ${escapeHtml(co.name)} (${co.type}, Ген. ${co.generation})
+                ${escapeHtml(co.name)} (${troopBadge ? getLocalizedOfficerType(co.type) : co.type}, ${typeof t === 'function' ? t('common.generation_short', { gen: co.generation }) : `Ген. ${co.generation}`})
               </option>
             `).join('')}
           </select>
@@ -5090,11 +5147,11 @@ function renderPlayers() {
         <div class="sectors-filter-counter">
           ${hasFilter ? `
             <span class="badge ${filteredPlayers.length ? 'badge-success' : 'badge-warning'}">
-              Найдено: <strong>${filteredPlayers.length}</strong> из ${state.players.length}
+              ${typeof t === 'function' ? t('sectors.found_count', { count: filteredPlayers.length, total: state.players.length }) : `Найдено: <strong>${filteredPlayers.length}</strong> из ${state.players.length}`}
             </span>
           ` : `
             <span class="badge badge-none" style="color:var(--text3)">
-              Всего секторов: ${state.players.length}
+              ${typeof t === 'function' ? t('sectors.total_sectors', { count: state.players.length }) : `Всего секторов: ${state.players.length}`}
             </span>
           `}
         </div>
@@ -5102,12 +5159,12 @@ function renderPlayers() {
 
       ${selectedOfficers.length ? `
         <div class="sectors-filter-chips">
-          <span style="font-size:12px;color:var(--text3)">Связка для поиска:</span>
+          <span style="font-size:12px;color:var(--text3)">${typeof t === 'function' ? t('sectors.combo_search') : 'Связка для поиска:'}</span>
           ${selectedOfficers.map((co, idx) => `
             <span class="filter-officer-chip">
               ${troopBadge(co.type)}
               <strong>${escapeHtml(co.name)}</strong>
-              <span style="color:var(--text3);font-size:11px">Ген. ${co.generation}</span>
+              <span style="color:var(--text3);font-size:11px">${typeof t === 'function' ? t('common.generation_short', { gen: co.generation }) : `Ген. ${co.generation}`}</span>
               <button type="button" class="chip-remove-btn" onclick="removeSectorOfficerFilter(${idx})" title="Удалить из связки">✕</button>
             </span>
           `).join('')}
@@ -5117,7 +5174,7 @@ function renderPlayers() {
 
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Сектор (База)</th><th>Владелец</th><th>Ранг</th><th>Сектор (Статы)</th><th>Офицеры</th><th>Запасы</th><th></th></tr></thead>
+        <thead><tr><th>${typeof t === 'function' ? t('sectors.th_sector') : 'Сектор (База)'}</th><th>${typeof t === 'function' ? t('sectors.th_owner') : 'Владелец'}</th><th>${typeof t === 'function' ? t('sectors.th_rank') : 'Ранг'}</th><th>${typeof t === 'function' ? t('sectors.th_stats') : 'Сектор (Статы)'}</th><th>${typeof t === 'function' ? t('sectors.th_officers') : 'Офицеры'}</th><th>${typeof t === 'function' ? t('sectors.th_stocks') : 'Запасы'}</th><th></th></tr></thead>
         <tbody>
           ${!filteredPlayers.length ? (hasFilter ? `
             <tr>
@@ -6148,26 +6205,26 @@ function renderOfficers() {
   c.innerHTML = `
     <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px">
       <div>
-        <div class="section-title">🎖️ Каталог офицеров (${state.officerCatalog.length})</div>
-        <div style="font-size:12px;color:var(--text2);margin-top:2px">Реестр командиров альянса, параметры доподготовки, подготовки и курсы обмена</div>
+        <div class="section-title">🎖️ ${typeof t === 'function' ? t('catalog.title') : 'Каталог офицеров'} (${state.officerCatalog.length})</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">${typeof t === 'function' ? t('catalog.subtitle') : 'Реестр командиров альянса, параметры доподготовки, подготовки и курсы обмена'}</div>
       </div>
       ${(canManage() || hasPermission('manage_catalog')) ? `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
-          <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
-          <button class="btn-secondary" onclick="openVipTiersModal()">⭐ Настройка шкалы VIP</button>
+          <button class="btn-primary" onclick="openOfficerCatalogModal()">${typeof t === 'function' ? t('catalog.btn_add_officer') : '+ Добавить офицера'}</button>
+          <button class="btn-secondary" onclick="openExchangeOcrModal()">${typeof t === 'function' ? t('catalog.btn_ocr_store') : '📷 Распознать из магазина'}</button>
+          <button class="btn-secondary" onclick="openVipTiersModal()">${typeof t === 'function' ? t('catalog.btn_vip_scale') : '⭐ Настройка шкалы VIP'}</button>
         </div>
       ` : ''}
     </div>
     ${isEmpty ? `
       <div class="empty-state" style="padding:48px 20px;text-align:center;background:var(--bg2);border-radius:12px;border:1px dashed var(--border);margin-top:16px">
         <div style="font-size:42px;margin-bottom:12px">🎖️</div>
-        <h3 style="margin:0 0 8px;font-size:18px">Каталог офицеров пуст</h3>
+        <h3 style="margin:0 0 8px;font-size:18px">${typeof t === 'function' ? t('catalog.empty_catalog') : 'Каталог офицеров пуст'}</h3>
         <p style="color:var(--text2);margin:0 0 16px;max-width:440px;margin-inline:auto">Добавьте офицеров вручную или загрузите скриншот из игрового магазина обмена медалей.</p>
         ${(canManage() || hasPermission('manage_catalog')) ? `
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-            <button class="btn-primary" onclick="openOfficerCatalogModal()">+ Добавить офицера</button>
-            <button class="btn-secondary" onclick="openExchangeOcrModal()">📷 Распознать из магазина</button>
+            <button class="btn-primary" onclick="openOfficerCatalogModal()">${typeof t === 'function' ? t('catalog.btn_add_officer') : '+ Добавить офицера'}</button>
+            <button class="btn-secondary" onclick="openExchangeOcrModal()">${typeof t === 'function' ? t('catalog.btn_ocr_store') : '📷 Распознать из магазина'}</button>
           </div>
         ` : ''}
       </div>
@@ -6176,14 +6233,14 @@ function renderOfficers() {
         <table>
           <thead>
             <tr>
-              <th>Офицер</th>
-              <th>Тип войск</th>
-              <th>Сезон</th>
-              <th>Купонов на медаль</th>
-              <th>Купонов за 110★</th>
-              <th>До подготовки</th>
-              <th>Подготовка</th>
-              <th>Всего медалей</th>
+              <th>${typeof t === 'function' ? t('catalog.th_officer') : 'Офицер'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_type') : 'Тип войск'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_season') : 'Сезон'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_coupons_per_puzzle') : 'Купонов на медаль'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_star_cost') : 'Купонов за 110★'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_before_training') : 'До подготовки'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_training') : 'Подготовка'}</th>
+              <th>${typeof t === 'function' ? t('catalog.th_total_medals') : 'Всего медалей'}</th>
               <th></th>
             </tr>
           </thead>
@@ -6412,8 +6469,8 @@ function renderCalculator() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="subnav">
-      <button class="subnav-btn ${calcActiveTab==='personal'?'active':''}" onclick="setCalcTab('personal')">🎯 Персональный симулятор</button>
-      ${canViewMatrix ? `<button class="subnav-btn ${calcActiveTab==='matrix'?'active':''}" onclick="setCalcTab('matrix')">📊 Сводная матрица гильдии</button>` : ''}
+      <button class="subnav-btn ${calcActiveTab==='personal'?'active':''}" onclick="setCalcTab('personal')">${typeof t === 'function' ? t('calc.tab_personal') : '🎯 Персональный симулятор'}</button>
+      ${canViewMatrix ? `<button class="subnav-btn ${calcActiveTab==='matrix'?'active':''}" onclick="setCalcTab('matrix')">${typeof t === 'function' ? t('calc.tab_matrix') : '📊 Сводная матрица гильдии'}</button>` : ''}
     </div>
     ${calcActiveTab === 'personal' || !canViewMatrix ? renderPersonalSimulator() : renderGuildMatrix()}
   `;
@@ -6435,14 +6492,14 @@ function renderPersonalSimulator() {
     return `
       <div class="form-row" style="margin-bottom:20px">
         <div class="form-group">
-          <label>Игрок</label>
+          <label>${typeof t === 'function' ? t('calc.player_label') : 'Игрок'}</label>
           <select onchange="setCalcPlayer(this.value)">
             ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
           </select>
         </div>
       </div>
       <div class="empty-state" style="padding:24px">
-        <p style="font-weight:600;margin-bottom:6px">У игрока нет офицеров для симулятора купонов</p>
+        <p style="font-weight:600;margin-bottom:6px">${typeof t === 'function' ? t('calc.no_officers_player') : 'У игрока нет офицеров для симулятора купонов'}</p>
         <p style="font-size:12.5px;color:var(--text2)">
           В симуляторе рассчитываются только офицеры, прокачиваемые <strong>и за купоны, и за универсальные пазлы</strong>.<br>
           Все офицеры этого игрока настроены «Только личные медали» или прокачиваются только специальными пазлами.
@@ -6988,18 +7045,18 @@ function renderEventTypes() {
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="section-header">
-      <div class="section-title">Типы ивентов</div>
+      <div class="section-title">${typeof t === 'function' ? t('event_types.title') : 'Типы ивентов'}</div>
       <div style="display:flex;gap:8px">
         ${(canManage() || hasPermission('manage_catalog')) ? `
           <button class="btn-secondary" id="btn-bulk-rewards" onclick="openBulkRewardsModal()">⚡ Массовое обновление наград</button>
-          <button class="btn-primary" onclick="openEventTypeModal()">+ Добавить тип</button>
+          <button class="btn-primary" onclick="openEventTypeModal()">${typeof t === 'function' ? t('event_types.btn_create_type') : '+ Добавить тип'}</button>
         ` : ''}
       </div>
     </div>
     <div id="et-list">
       ${state.eventTypes.map(et=>renderEventTypeCard(et)).join('')}
     </div>
-    ${!state.eventTypes.length ? `<div class="empty-state"><p>Нет типов ивентов</p></div>` : ''}
+    ${!state.eventTypes.length ? `<div class="empty-state"><p>${typeof t === 'function' ? t('event_types.empty_types') : 'Нет типов ивентов'}</p></div>` : ''}
   `;
 }
 

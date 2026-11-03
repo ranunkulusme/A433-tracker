@@ -347,6 +347,52 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('UI namespaces (cabinet, events, sectors, catalog, pending, users) provide translations across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('cabinet.title'), 'Личный кабинет');
+    assert.equal(t('cabinet.sector_params'), 'Параметры сектора');
+    assert.equal(t('cabinet.stocks_title'), 'Запасы гильдейца');
+    assert.equal(t('cabinet.star_ready'), '6★ Готово');
+    assert.equal(t('cabinet.star_needed'), 'Нужно 6★');
+    assert.equal(t('events.title'), 'Ивенты');
+    assert.equal(t('events.btn_create_season'), '⚡ Создать сезон');
+    assert.equal(t('events.btn_create_event'), '+ Создать ивент');
+    assert.equal(t('sectors.title'), 'Секторы альянса');
+    assert.equal(t('catalog.title'), 'Каталог офицеров');
+    assert.equal(t('pending.title'), 'Заявки на регистрацию участников');
+    assert.equal(t('users.title'), 'Управление пользователями гильдии');
+
+    await setAppLanguage('en');
+    assert.equal(t('cabinet.title'), 'My Cabinet');
+    assert.equal(t('cabinet.sector_params'), 'Sector Parameters');
+    assert.equal(t('cabinet.stocks_title'), 'Member Stocks');
+    assert.equal(t('cabinet.star_ready'), '6★ Ready');
+    assert.equal(t('cabinet.star_needed'), 'Need 6★');
+    assert.equal(t('events.title'), 'Events');
+    assert.equal(t('events.btn_create_season'), '⚡ Create Season');
+    assert.equal(t('events.btn_create_event'), '+ Create Event');
+    assert.equal(t('sectors.title'), 'Alliance Sectors');
+    assert.equal(t('catalog.title'), 'Officer Catalog');
+    assert.equal(t('pending.title'), 'Member Registration Requests');
+    assert.equal(t('users.title'), 'Guild User Management');
+
+    await setAppLanguage('de');
+    assert.equal(t('cabinet.title'), 'Mein Kabinett');
+    assert.equal(t('cabinet.sector_params'), 'Sektor-Parameter');
+    assert.equal(t('cabinet.stocks_title'), 'Mitglieds-Vorräte');
+    assert.equal(t('cabinet.star_ready'), '6★ Bereit');
+    assert.equal(t('cabinet.star_needed'), '6★ Benötigt');
+    assert.equal(t('events.title'), 'Events');
+    assert.equal(t('events.btn_create_season'), '⚡ Saison erstellen');
+    assert.equal(t('events.btn_create_event'), '+ Event erstellen');
+    assert.equal(t('sectors.title'), 'Allianz-Sektoren');
+    assert.equal(t('catalog.title'), 'Offizierskatalog');
+    assert.equal(t('pending.title'), 'Mitglieder-Registrierungsanträge');
+    assert.equal(t('users.title'), 'Gilden-Benutzerverwaltung');
+
+    await setAppLanguage('ru');
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);
