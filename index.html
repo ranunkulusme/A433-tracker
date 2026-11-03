@@ -56,6 +56,10 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>
         <span data-i18n="nav.calculator">Калькулятор</span>
       </a>
+      <a href="#" class="nav-item" data-page="notifications" id="nav-item-notifications" style="display:none">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span data-i18n="telegram.admin_nav_title">Уведомления и шаблоны</span>
+      </a>
     </nav>
     <div class="sidebar-footer">
       <button class="btn-icon" onclick="exportExcel()">
@@ -104,7 +108,123 @@
         <div class="topbar-profile" id="topbar-profile"></div>
       </div>
     </header>
-    <div class="content" id="content"></div>
+    <div class="content" id="content">
+      <!-- Hidden initial structure for page-my-cabinet and page-notifications -->
+      <div id="page-my-cabinet" style="display:none">
+        <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
+          <div class="cabinet-card-title">
+            <span>📱 <span data-i18n="telegram.card_title">Интеграция с Telegram</span></span>
+            <span id="tg-status-badge" class="badge badge-none tg-badge-disconnected">⚪ <span data-i18n="telegram.status_not_connected">Не привязан</span></span>
+          </div>
+          <div class="tg-cabinet-content">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()" data-i18n="telegram.btn_connect">📱 Подключить Telegram</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()" style="display:none" data-i18n="telegram.btn_disconnect">Отключить</button>
+            <label class="switch-toggle" style="display:none">
+              <input type="checkbox" id="tg-notifications-toggle" onchange="toggleTelegramNotifications(this.checked)">
+              <span data-i18n="telegram.notifications_enabled">Уведомления в Telegram</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-notifications" style="display:none">
+        <!-- Bot Settings Block (R5) -->
+        <div class="settings-card bot-settings-card" id="bot-settings-block">
+          <div class="settings-card-title">
+            <span style="font-size:18px">⚙️</span>
+            <h3 data-i18n="telegram.bot_settings_title">Настройки Telegram-бота</h3>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-row form-row-3">
+              <div class="form-group">
+                <label for="tg-setting-token" data-i18n="telegram.bot_token">Токен бота (BotFather)</label>
+                <input type="password" id="tg-setting-token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-username" data-i18n="telegram.bot_username">Имя бота (@username)</label>
+                <input type="text" id="tg-setting-username" placeholder="KoWTrackerBot" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-chat-id" data-i18n="telegram.staff_chat_id">ID чата штаба</label>
+                <input type="text" id="tg-setting-chat-id" placeholder="-1001234567890" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-actions" style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-tg-settings" onclick="saveTelegramSettings()" data-i18n="telegram.save_settings">💾 Сохранить настройки бота</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-staff-pin" onclick="generateStaffPinCode()" data-i18n="telegram.btn_generate_staff_pin">🔑 Сгенерировать код привязки штаба</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Template Editor Block -->
+        <div class="settings-card template-editor-card" id="template-editor-block" style="margin-top:20px">
+          <div class="settings-card-title">
+            <span style="font-size:18px">📝</span>
+            <h3 data-i18n="templates.editor_title">Редактор шаблонов сообщений</h3>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-group" style="margin-bottom:16px">
+              <label for="template-event-select" data-i18n="templates.select_template">Выберите событие</label>
+              <select id="template-event-select" class="form-control" onchange="onSelectNotificationTemplate(this.value)">
+                <option value="event_place_assigned">[👤 Личное] Назначение призового места (event_place_assigned)</option>
+                <option value="event_registration_opened">[👤 Личное] Открытие подачи заявок (event_registration_opened)</option>
+                <option value="stock_reminder_personal">[👤 Личное] Напоминание обновить склад (stock_reminder_personal)</option>
+                <option value="staff_new_user_pending">[💬 Штаб] Новая заявка на регистрацию (staff_new_user_pending)</option>
+                <option value="staff_event_deadline_24h">[💬 Штаб] 24 часа до старта ивента (staff_event_deadline_24h)</option>
+                <option value="staff_event_autopick_summary">[💬 Штаб] Сводка автоподбора мест (staff_event_autopick_summary)</option>
+                <option value="staff_stale_stocks_alert">[💬 Штаб] Сводка устаревших складов (staff_stale_stocks_alert)</option>
+              </select>
+            </div>
+
+            <!-- Placeholders Palette -->
+            <div class="template-placeholders-wrap" style="margin-bottom:16px">
+              <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px" data-i18n="templates.available_placeholders">
+                Доступные переменные (кликните для вставки):
+              </div>
+              <div class="template-chips-palette" id="template-placeholders-palette"></div>
+            </div>
+
+            <div class="template-editor-columns">
+              <!-- Left: Textarea -->
+              <div class="template-editor-col">
+                <label for="template-editor-textarea" data-i18n="templates.template_text" style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block">
+                  Текст шаблона (HTML)
+                </label>
+                <textarea id="template-editor-textarea" class="template-textarea" rows="12" oninput="updateTemplateLivePreview()"></textarea>
+              </div>
+
+              <!-- Right: Live Preview in Telegram Style -->
+              <div class="template-preview-col">
+                <label style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block" data-i18n="templates.live_preview">
+                  Предпросмотр (стиль Telegram)
+                </label>
+                <div class="tg-preview-container" id="template-live-preview-container">
+                  <div class="tg-preview-bubble">
+                    <div class="tg-preview-header">
+                      <span class="tg-bot-avatar">🤖</span>
+                      <span class="tg-bot-name" id="tg-preview-bot-name">KoW Tracker Bot</span>
+                      <span class="tg-bot-tag">bot</span>
+                    </div>
+                    <div class="tg-preview-body" id="template-live-preview-body"></div>
+                    <div class="tg-preview-meta">
+                      <span class="tg-preview-time" id="tg-preview-time">12:00</span>
+                      <span class="tg-preview-ticks">✓✓</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="template-actions" style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary" id="btn-save-template" onclick="saveCurrentTemplate()" data-i18n="templates.btn_save">💾 Сохранить шаблон</button>
+              <button type="button" class="btn btn-secondary" id="btn-reset-template" onclick="resetCurrentTemplate()" data-i18n="templates.btn_reset">↩️ Сбросить к базовому</button>
+              <button type="button" class="btn btn-secondary" id="btn-test-template" onclick="sendTestTemplateNotification()" data-i18n="templates.btn_test">🚀 Отправить тест в Telegram</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -1231,6 +1351,33 @@
   <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
     <span id="zoom-screenshot-info" style="font-size:12px;color:var(--text3)"></span>
     <button type="button" class="btn-ghost" onclick="closeScreenshotZoom()" data-i18n="common.close">Закрыть</button>
+  </div>
+</div>
+
+<!-- Modal: Staff PIN Code -->
+<div class="modal modal-sm" id="modal-staff-pin" style="max-width:520px">
+  <div class="modal-header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">🔑</span>
+      <h3 id="modal-staff-pin-title" data-i18n="telegram.staff_pin_modal_title">Код привязки чата штаба</h3>
+    </div>
+    <button class="modal-close" onclick="closeStaffPinModal()" title="Закрыть">✕</button>
+  </div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px" data-i18n="telegram.staff_pin_hint">
+      Добавьте бота в чат штаба и отправьте команду:
+    </p>
+    <div class="staff-pin-display-wrapper">
+      <div class="staff-pin-display" id="staff-pin-code-text">KOW-STAFF-XXXX</div>
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-staff-pin" onclick="copyStaffPinCommand()">📋 Копировать команду</button>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text3);display:flex;align-items:center;gap:6px">
+      <span>⏱️</span>
+      <span id="staff-pin-expires-hint" data-i18n="telegram.pin_expires">Код действителен 15 минут</span>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeStaffPinModal()" data-i18n="common.close">Закрыть</button>
   </div>
 </div>
 

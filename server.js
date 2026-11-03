@@ -535,7 +535,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
           id: req.user.id,
           username: req.user.username,
           rank: req.user.rank,
-          permissions: Array.isArray(req.user.permissions) ? req.user.permissions : []
+          permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+          telegram_chat_id: req.user.telegram_chat_id,
+          telegram_username: req.user.telegram_username,
+          telegram_notifications_enabled: req.user.telegram_notifications_enabled !== 0,
+          telegramChatId: req.user.telegram_chat_id,
+          telegramUsername: req.user.telegram_username,
+          telegramNotificationsEnabled: req.user.telegram_notifications_enabled !== 0
         },
         sectors,
         activeSectorId: activeSector ? activeSector.id : null,
@@ -604,6 +610,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       if (body.stock) {
         sanitizeStock(body.stock);
+      }
+
+      if (body.telegramNotificationsEnabled !== undefined || body.telegram_notifications_enabled !== undefined) {
+        const en = (body.telegramNotificationsEnabled ?? body.telegram_notifications_enabled) !== false;
+        db.toggleTelegramNotifications(req.user.id, en);
       }
 
       if (Array.isArray(body.officers)) {
@@ -1777,6 +1788,15 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       db.unbindUserTelegram(req.user.id);
       return sendJson(res, 200, { success: true });
+    }
+
+    if (pathname === '/api/telegram/notifications' && (req.method === 'PUT' || req.method === 'POST')) {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const enabled = body.enabled !== false && body.enabled !== 0 && body.enabled !== '0';
+      db.toggleTelegramNotifications(req.user.id, enabled);
+      return sendJson(res, 200, { success: true, enabled });
     }
 
     if (pathname === '/api/telegram/staff-bind-token' && req.method === 'POST') {

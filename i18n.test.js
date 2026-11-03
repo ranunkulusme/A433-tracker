@@ -303,6 +303,50 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('telegram and templates dictionaries provide required keys across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('telegram.card_title'), 'Интеграция с Telegram');
+    assert.equal(t('telegram.status_connected'), 'Подключен');
+    assert.equal(t('telegram.status_not_connected'), 'Не привязан');
+    assert.equal(t('telegram.btn_connect'), '📱 Подключить Telegram');
+    assert.equal(t('telegram.btn_disconnect'), 'Отключить');
+    assert.equal(t('telegram.notifications_enabled'), 'Уведомления в Telegram');
+    assert.equal(t('telegram.admin_nav_title'), 'Уведомления и шаблоны');
+    assert.equal(t('telegram.bot_settings_title'), 'Настройки Telegram-бота');
+    assert.equal(t('telegram.bot_token'), 'Токен бота (BotFather)');
+    assert.equal(t('telegram.staff_chat_id'), 'ID чата штаба');
+    assert.equal(t('telegram.btn_generate_staff_pin'), '🔑 Сгенерировать код привязки штаба');
+    assert.equal(t('telegram.staff_pin_modal_title'), 'Код привязки чата штаба');
+    assert.equal(t('telegram.staff_pin_hint'), 'Добавьте бота в чат штаба и отправьте команду:');
+    assert.equal(t('templates.editor_title'), 'Редактор шаблонов сообщений');
+    assert.equal(t('templates.select_template'), 'Выберите событие');
+    assert.equal(t('templates.available_placeholders'), 'Доступные переменные (кликните для вставки)');
+    assert.equal(t('templates.template_text'), 'Текст шаблона (HTML)');
+    assert.equal(t('templates.live_preview'), 'Предпросмотр (стиль Telegram)');
+    assert.equal(t('templates.btn_save'), '💾 Сохранить шаблон');
+    assert.equal(t('templates.btn_reset'), '↩️ Сбросить к базовому');
+    assert.equal(t('templates.btn_test'), '🚀 Отправить тест в Telegram');
+    assert.equal(t('templates.save_success'), 'Шаблон успешно сохранен');
+    assert.equal(t('templates.reset_success'), 'Шаблон сброшен к базовому');
+    assert.equal(t('templates.test_success'), 'Тестовое сообщение отправлено в Telegram');
+
+    await setAppLanguage('en');
+    assert.equal(t('telegram.card_title'), 'Telegram Integration');
+    assert.equal(t('telegram.status_connected'), 'Connected');
+    assert.equal(t('telegram.btn_connect'), '📱 Connect Telegram');
+    assert.equal(t('templates.editor_title'), 'Notification Template Editor');
+    assert.equal(t('templates.btn_save'), '💾 Save Template');
+
+    await setAppLanguage('de');
+    assert.equal(t('telegram.card_title'), 'Telegram-Integration');
+    assert.equal(t('telegram.status_connected'), 'Verbunden');
+    assert.equal(t('telegram.btn_connect'), '📱 Telegram verbinden');
+    assert.equal(t('templates.editor_title'), 'Benachrichtigungsvorlagen-Editor');
+    assert.equal(t('templates.btn_save'), '💾 Vorlage speichern');
+
+    await setAppLanguage('ru');
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);

@@ -1575,6 +1575,14 @@ function renderSidebarNav() {
     });
   }
 
+  if (canManage() || role === 'r4' || role === 'r5') {
+    items.push({
+      page: 'notifications',
+      label: typeof t === 'function' ? t('telegram.admin_nav_title') : 'Уведомления и шаблоны',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`
+    });
+  }
+
   nav.innerHTML = items.map(item => `
     <a href="#" class="nav-item ${currentPage === item.page ? 'active' : ''}" data-page="${item.page}">
       ${item.icon}
@@ -1691,7 +1699,13 @@ async function renderMyCabinet() {
     ? logic.calculateTotalStarPoints(profile.stock)
     : (((profile.stock?.legendaryStars1 || 0) * 110) + ((profile.stock?.legendaryStars2 || 0) * 420) + ((profile.stock?.legendaryStars3 || 0) * 960));
 
+  const profileUser = profile.user || currentUser || {};
+  const isTgConnected = Boolean(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id || currentUser?.telegramChatId);
+  const rawNotif = profileUser.telegramNotificationsEnabled ?? profileUser.telegram_notifications_enabled ?? currentUser?.telegramNotificationsEnabled ?? currentUser?.telegram_notifications_enabled;
+  const isTgNotificationsEnabled = rawNotif !== false && rawNotif !== 0;
+
   c.innerHTML = `
+    <div id="page-my-cabinet" class="cabinet-page-wrap">
     <div class="section-header">
       <div>
         <div class="section-title">
@@ -1803,6 +1817,47 @@ async function renderMyCabinet() {
       </div>
     </div>
 
+    <!-- TELEGRAM INTEGRATION CARD -->
+    <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
+      <div class="cabinet-card-title">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span>📱 ${typeof t === 'function' ? t('telegram.card_title') : 'Интеграция с Telegram'}</span>
+          <span id="tg-status-badge" class="badge ${isTgConnected ? 'badge-success tg-badge-connected' : 'badge-none tg-badge-disconnected'}">
+            ${isTgConnected ? '🟢 ' + (typeof t === 'function' ? t('telegram.status_connected') : 'Подключен') : '⚪ ' + (typeof t === 'function' ? t('telegram.status_not_connected') : 'Не привязан')}
+          </span>
+        </div>
+      </div>
+      <div class="tg-cabinet-content">
+        ${isTgConnected ? `
+          <div class="tg-connected-info">
+            <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+              ${(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)
+                ? (typeof t === 'function' ? t('telegram.connected_as', { username: (profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username) }) : `Привязан как @${escapeHtml(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)}`)
+                : (typeof t === 'function' ? t('telegram.connected_id', { chatId: (profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id) }) : `Chat ID: ${(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id)}`)}
+            </p>
+            <div class="tg-toggle-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+              <label class="switch-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="tg-notifications-toggle" ${isTgNotificationsEnabled ? 'checked' : ''} onchange="toggleTelegramNotifications(this.checked)">
+                <span style="font-size:13px">${typeof t === 'function' ? t('telegram.notifications_enabled') : 'Уведомления в Telegram'}</span>
+              </label>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()">
+              ${typeof t === 'function' ? t('telegram.btn_disconnect') : 'Отключить'}
+            </button>
+          </div>
+        ` : `
+          <div class="tg-disconnected-info">
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+              Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
+            </p>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
+              ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
+            </button>
+          </div>
+        `}
+      </div>
+    </div>
+
     <!-- OFFICERS LIST -->
     <div class="section-header" style="margin-top:20px">
       <div class="section-title">🎖️ Мои офицеры (${profile.officers.length})</div>
@@ -1832,9 +1887,66 @@ async function renderMyCabinet() {
     <div id="cabinet-sim-container">
       ${renderCabinetSimulatorHtml()}
     </div>
+    </div> <!-- #page-my-cabinet -->
   `;
   bindAllNumericInputs(c);
   updateCabinetVipProgressHint();
+}
+
+async function connectUserTelegram() {
+  try {
+    const data = await apiFetch('/api/telegram/bind-token', { method: 'POST' });
+    if (data && data.deepLink) {
+      window.open(data.deepLink, '_blank');
+      showToast(typeof t === 'function' ? t('telegram.open_telegram') : 'Откройте бота в Telegram и нажмите Start', 'info');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка генерации ссылки подключения', 'error');
+  }
+}
+
+async function disconnectUserTelegram() {
+  const msg = typeof t === 'function' ? t('telegram.disconnect_confirm') : 'Вы действительно хотите отключить Telegram-уведомления?';
+  if (!confirm(msg)) return;
+  try {
+    await apiFetch('/api/telegram/bind', { method: 'DELETE' });
+    if (currentUser) {
+      currentUser.telegram_chat_id = null;
+      currentUser.telegramChatId = null;
+      currentUser.telegram_username = null;
+      currentUser.telegramUsername = null;
+    }
+    if (myCabinetProfile && myCabinetProfile.user) {
+      myCabinetProfile.user.telegram_chat_id = null;
+      myCabinetProfile.user.telegramChatId = null;
+      myCabinetProfile.user.telegram_username = null;
+      myCabinetProfile.user.telegramUsername = null;
+    }
+    showToast(typeof t === 'function' ? t('toasts.saved_success') : 'Telegram успешно отключен', 'success');
+    renderMyCabinet();
+  } catch (err) {
+    showToast(err.message || 'Ошибка отключения Telegram', 'error');
+  }
+}
+
+async function toggleTelegramNotifications(enabled) {
+  try {
+    await apiFetch('/api/telegram/notifications', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: Boolean(enabled) })
+    });
+    if (currentUser) {
+      currentUser.telegramNotificationsEnabled = Boolean(enabled);
+      currentUser.telegram_notifications_enabled = enabled ? 1 : 0;
+    }
+    if (myCabinetProfile && myCabinetProfile.user) {
+      myCabinetProfile.user.telegramNotificationsEnabled = Boolean(enabled);
+      myCabinetProfile.user.telegram_notifications_enabled = enabled ? 1 : 0;
+    }
+    showToast(typeof t === 'function' ? t('toasts.saved_success') : 'Настройки уведомлений сохранены', 'success');
+  } catch (err) {
+    showToast(err.message || 'Ошибка обновления настроек', 'error');
+  }
 }
 
 function renderCabinetSimulatorHtml() {
@@ -3776,6 +3888,393 @@ function isEventUpcoming(ev) {
 }
 function isEventPast(ev) { return !isEventActive(ev) && !isEventUpcoming(ev); }
 
+// ─── PAGE: NOTIFICATIONS & TEMPLATES (R4, R5) ────────────────
+let notificationTemplatesCache = [];
+let currentSelectedTemplateKey = 'event_place_assigned';
+let telegramSettingsCache = null;
+
+async function renderNotificationsPage() {
+  const c = document.getElementById('content');
+  if (!c) return;
+
+  const role = currentUser?.rank || state.currentRole || 'r3';
+  if (role !== 'r4' && role !== 'r5' && !canManage()) {
+    navigate('my_cabinet');
+    return;
+  }
+
+  c.innerHTML = `
+    <div id="page-notifications" class="notifications-page-wrap">
+      <div class="section-header">
+        <div class="section-title">💬 ${typeof t === 'function' ? t('telegram.admin_nav_title') : 'Уведомления и шаблоны'}</div>
+        <button class="btn-ghost btn-sm" onclick="renderNotificationsPage()">🔄 Обновить</button>
+      </div>
+      <div id="notifications-page-loading" class="empty-state"><p>${typeof t === 'function' ? t('common.loading') : 'Загрузка...'}</p></div>
+      <div id="notifications-page-content" style="display:none"></div>
+    </div>
+  `;
+
+  try {
+    const [settingsRes, templatesRes] = await Promise.all([
+      apiFetch('/api/telegram/settings').catch(err => {
+        console.warn('Failed to load telegram settings:', err);
+        return null;
+      }),
+      apiFetch('/api/notification-templates').catch(err => {
+        console.warn('Failed to load templates:', err);
+        return [];
+      })
+    ]);
+
+    telegramSettingsCache = settingsRes;
+    notificationTemplatesCache = Array.isArray(templatesRes) ? templatesRes : [];
+
+    const pageContent = document.getElementById('notifications-page-content');
+    const pageLoading = document.getElementById('notifications-page-loading');
+    if (!pageContent) return;
+
+    if (pageLoading) pageLoading.style.display = 'none';
+    pageContent.style.display = 'block';
+
+    const isR5 = role === 'r5';
+    const botTokenVal = (settingsRes && settingsRes.tokenMasked) ? settingsRes.tokenMasked : '';
+    const botUserVal = (settingsRes && settingsRes.botUsername) ? settingsRes.botUsername : '';
+    const staffChatVal = (settingsRes && settingsRes.staffChatId) ? settingsRes.staffChatId : '';
+
+    pageContent.innerHTML = `
+      ${isR5 ? `
+        <!-- Bot Settings (R5) -->
+        <div class="settings-card bot-settings-card" id="bot-settings-block">
+          <div class="settings-card-title">
+            <span style="font-size:18px">⚙️</span>
+            <h3>${typeof t === 'function' ? t('telegram.bot_settings_title') : 'Настройки Telegram-бота'}</h3>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-row form-row-3">
+              <div class="form-group">
+                <label for="tg-setting-token">${typeof t === 'function' ? t('telegram.bot_token') : 'Токен бота (BotFather)'}</label>
+                <input type="password" id="tg-setting-token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" value="${escapeHtml(botTokenVal)}" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-username">${typeof t === 'function' ? t('telegram.bot_username') : 'Имя бота (@username)'}</label>
+                <input type="text" id="tg-setting-username" placeholder="KoWTrackerBot" value="${escapeHtml(botUserVal)}" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-chat-id">${typeof t === 'function' ? t('telegram.staff_chat_id') : 'ID чата штаба'}</label>
+                <input type="text" id="tg-setting-chat-id" placeholder="-1001234567890" value="${escapeHtml(staffChatVal)}" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-actions" style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-tg-settings" onclick="saveTelegramSettings()">
+                ${typeof t === 'function' ? t('telegram.save_settings') : '💾 Сохранить настройки бота'}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-staff-pin" onclick="generateStaffPinCode()">
+                ${typeof t === 'function' ? t('telegram.btn_generate_staff_pin') : '🔑 Сгенерировать код привязки штаба'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Template Editor -->
+      <div class="settings-card template-editor-card" id="template-editor-block" style="margin-top:20px">
+        <div class="settings-card-title">
+          <span style="font-size:18px">📝</span>
+          <h3>${typeof t === 'function' ? t('templates.editor_title') : 'Редактор шаблонов сообщений'}</h3>
+        </div>
+        <div class="settings-card-body">
+          <div class="form-group" style="margin-bottom:16px">
+            <label for="template-event-select">${typeof t === 'function' ? t('templates.select_template') : 'Выберите событие'}</label>
+            <select id="template-event-select" class="form-control" onchange="onSelectNotificationTemplate(this.value)">
+              ${notificationTemplatesCache.map(tpl => {
+                const channelBadge = tpl.channel === 'staff'
+                  ? (typeof t === 'function' ? t('templates.channel_staff') : '[💬 Штаб]')
+                  : (typeof t === 'function' ? t('templates.channel_personal') : '[👤 Личное]');
+                const name = tpl.name || tpl.key;
+                const isSelected = tpl.key === currentSelectedTemplateKey ? 'selected' : '';
+                return `<option value="${escapeHtml(tpl.key)}" ${isSelected}>${channelBadge} ${escapeHtml(name)} (${escapeHtml(tpl.key)})</option>`;
+              }).join('')}
+            </select>
+          </div>
+
+          <!-- Placeholders Palette -->
+          <div class="template-placeholders-wrap" style="margin-bottom:16px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px">
+              ${typeof t === 'function' ? t('templates.available_placeholders') : 'Доступные переменные (кликните для вставки):'}
+            </div>
+            <div class="template-chips-palette" id="template-placeholders-palette"></div>
+          </div>
+
+          <div class="template-editor-columns">
+            <!-- Left: Textarea -->
+            <div class="template-editor-col">
+              <label for="template-editor-textarea" style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block">
+                ${typeof t === 'function' ? t('templates.template_text') : 'Текст шаблона (HTML)'}
+              </label>
+              <textarea id="template-editor-textarea" class="template-textarea" rows="12" oninput="updateTemplateLivePreview()"></textarea>
+            </div>
+
+            <!-- Right: Live Preview in Telegram Style -->
+            <div class="template-preview-col">
+              <label style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block">
+                ${typeof t === 'function' ? t('templates.live_preview') : 'Предпросмотр (стиль Telegram)'}
+              </label>
+              <div class="tg-preview-container" id="template-live-preview-container">
+                <div class="tg-preview-bubble">
+                  <div class="tg-preview-header">
+                    <span class="tg-bot-avatar">🤖</span>
+                    <span class="tg-bot-name" id="tg-preview-bot-name">${escapeHtml(botUserVal || 'KoW Tracker Bot')}</span>
+                    <span class="tg-bot-tag">bot</span>
+                  </div>
+                  <div class="tg-preview-body" id="template-live-preview-body"></div>
+                  <div class="tg-preview-meta">
+                    <span class="tg-preview-time" id="tg-preview-time">12:00</span>
+                    <span class="tg-preview-ticks">✓✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="template-actions" style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+            <button type="button" class="btn btn-primary" id="btn-save-template" onclick="saveCurrentTemplate()">
+              ${typeof t === 'function' ? t('templates.btn_save') : '💾 Сохранить шаблон'}
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-reset-template" onclick="resetCurrentTemplate()">
+              ${typeof t === 'function' ? t('templates.btn_reset') : '↩️ Сбросить к базовому'}
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-test-template" onclick="sendTestTemplateNotification()">
+              ${typeof t === 'function' ? t('templates.btn_test') : '🚀 Отправить тест в Telegram'}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const initialKey = notificationTemplatesCache.some(tpl => tpl.key === currentSelectedTemplateKey)
+      ? currentSelectedTemplateKey
+      : (notificationTemplatesCache[0]?.key || 'event_place_assigned');
+    onSelectNotificationTemplate(initialKey);
+
+  } catch (err) {
+    c.innerHTML = `<div class="empty-state"><p>Ошибка загрузки страницы уведомлений: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function onSelectNotificationTemplate(key) {
+  currentSelectedTemplateKey = key;
+  const select = document.getElementById('template-event-select');
+  if (select && select.value !== key) {
+    select.value = key;
+  }
+
+  const tpl = notificationTemplatesCache.find(t => t.key === key);
+  const textarea = document.getElementById('template-editor-textarea');
+  if (textarea && tpl) {
+    textarea.value = tpl.template || '';
+  }
+
+  const palette = document.getElementById('template-placeholders-palette');
+  if (palette) {
+    const sampleData = (typeof logic !== 'undefined' && logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA)
+      ? logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key]
+      : null;
+    const tags = sampleData ? Object.keys(sampleData) : [];
+    if (tags.length) {
+      palette.innerHTML = tags.map(tag => `
+        <button type="button" class="tag-chip" onclick="insertTemplateTag('{${tag}}')" title="Кликните для вставки {${tag}}">
+          + {${escapeHtml(tag)}}
+        </button>
+      `).join('');
+    } else {
+      palette.innerHTML = `<span style="font-size:12px;color:var(--text3)">Нет доступных переменных</span>`;
+    }
+  }
+
+  updateTemplateLivePreview();
+}
+
+function insertTemplateTag(tag) {
+  if (!tag) return;
+  const formattedTag = tag.startsWith('{') && tag.endsWith('}') ? tag : `{${tag}}`;
+  const textarea = document.getElementById('template-editor-textarea');
+  if (!textarea) return;
+
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  const val = textarea.value;
+
+  textarea.value = val.slice(0, start) + formattedTag + val.slice(end);
+  const newPos = start + formattedTag.length;
+  textarea.selectionStart = newPos;
+  textarea.selectionEnd = newPos;
+  textarea.focus();
+
+  updateTemplateLivePreview();
+}
+
+function updateTemplateLivePreview() {
+  const textarea = document.getElementById('template-editor-textarea');
+  const previewBody = document.getElementById('template-live-preview-body');
+  const timeEl = document.getElementById('tg-preview-time');
+  if (!previewBody) return;
+
+  const rawText = textarea ? textarea.value : '';
+  const key = currentSelectedTemplateKey;
+  const sampleData = (typeof logic !== 'undefined' && logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA)
+    ? (logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key] || {})
+    : {};
+
+  const rendered = (typeof logic !== 'undefined' && logic.renderTemplate)
+    ? logic.renderTemplate(rawText, sampleData)
+    : rawText;
+
+  previewBody.innerHTML = rendered;
+
+  if (timeEl) {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    timeEl.textContent = `${hh}:${mm}`;
+  }
+}
+
+async function saveCurrentTemplate() {
+  const textarea = document.getElementById('template-editor-textarea');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text) {
+    showToast(typeof t === 'function' ? t('templates.empty_text_error') : 'Текст шаблона не может быть пустым', 'error');
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/api/notification-templates/${currentSelectedTemplateKey}`, {
+      method: 'PUT',
+      body: JSON.stringify({ template: textarea.value })
+    });
+    if (res && res.template) {
+      const idx = notificationTemplatesCache.findIndex(t => t.key === currentSelectedTemplateKey);
+      if (idx >= 0) notificationTemplatesCache[idx] = res.template;
+    }
+    showToast(typeof t === 'function' ? t('templates.save_success') : 'Шаблон успешно сохранен', 'success');
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения шаблона', 'error');
+  }
+}
+
+async function resetCurrentTemplate() {
+  const confirmMsg = typeof t === 'function' ? t('templates.reset_confirm') : 'Вы уверены, что хотите сбросить этот шаблон к базовому?';
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch(`/api/notification-templates/${currentSelectedTemplateKey}/reset`, {
+      method: 'POST'
+    });
+    if (res && res.template) {
+      const idx = notificationTemplatesCache.findIndex(t => t.key === currentSelectedTemplateKey);
+      if (idx >= 0) notificationTemplatesCache[idx] = res.template;
+      const textarea = document.getElementById('template-editor-textarea');
+      if (textarea) textarea.value = res.template.template || '';
+      updateTemplateLivePreview();
+    }
+    showToast(typeof t === 'function' ? t('templates.reset_success') : 'Шаблон сброшен к базовому', 'success');
+  } catch (err) {
+    showToast(err.message || 'Ошибка сброса шаблона', 'error');
+  }
+}
+
+async function sendTestTemplateNotification() {
+  const textarea = document.getElementById('template-editor-textarea');
+  const templateText = textarea ? textarea.value : undefined;
+
+  try {
+    const res = await apiFetch(`/api/notification-templates/${currentSelectedTemplateKey}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ template: templateText })
+    });
+    if (res && res.success) {
+      showToast(typeof t === 'function' ? t('templates.test_success') : 'Тестовое сообщение отправлено в Telegram', 'success');
+    } else {
+      showToast(res.error || 'Ошибка отправки тестового сообщения', 'error');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка отправки тестового сообщения', 'error');
+  }
+}
+
+async function generateStaffPinCode() {
+  try {
+    const res = await apiFetch('/api/telegram/staff-bind-token', { method: 'POST' });
+    if (res && res.pin) {
+      const pinEl = document.getElementById('staff-pin-code-text');
+      if (pinEl) pinEl.textContent = res.pin;
+      const modal = document.getElementById('modal-staff-pin');
+      const overlay = document.getElementById('overlay');
+      if (modal) modal.classList.add('open');
+      if (overlay) overlay.classList.add('open');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка генерации PIN-кода', 'error');
+  }
+}
+
+function closeStaffPinModal() {
+  const modal = document.getElementById('modal-staff-pin');
+  const overlay = document.getElementById('overlay');
+  if (modal) modal.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function copyStaffPinCommand() {
+  const pinEl = document.getElementById('staff-pin-code-text');
+  const pin = pinEl ? pinEl.textContent.trim() : '';
+  const cmd = `/connect_staff ${pin}`;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(cmd);
+    }
+    showToast(typeof t === 'function' ? t('telegram.pin_copied') : 'Команда скопирована в буфер обмена', 'success');
+  } catch (err) {
+    showToast(`Команда: ${cmd}`, 'info');
+  }
+}
+
+async function saveTelegramSettings() {
+  const tokenInput = document.getElementById('tg-setting-token');
+  const userInput = document.getElementById('tg-setting-username');
+  const chatInput = document.getElementById('tg-setting-chat-id');
+
+  const payload = {};
+  if (tokenInput && tokenInput.value && !tokenInput.value.includes('***')) {
+    payload.token = tokenInput.value.trim();
+  }
+  if (userInput) {
+    payload.botUsername = userInput.value.trim();
+  }
+  if (chatInput) {
+    payload.staffChatId = chatInput.value.trim();
+  }
+
+  try {
+    const res = await apiFetch('/api/telegram/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+    if (res && res.success) {
+      telegramSettingsCache = res;
+      showToast(typeof t === 'function' ? t('telegram.settings_saved') : 'Настройки бота успешно сохранены', 'success');
+      const botNamePreview = document.getElementById('tg-preview-bot-name');
+      if (botNamePreview && res.botUsername) {
+        botNamePreview.textContent = res.botUsername;
+      }
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения настроек бота', 'error');
+  }
+}
+
 // ─── NAVIGATION ──────────────────────────────────────────────
 let currentPage = 'calendar';
 let pageParams = {};
@@ -3819,7 +4318,8 @@ function navigate(page, params={}) {
     player_detail: typeof t === 'function' ? t('nav.sectors') : 'Сектор',
     calculator: typeof t === 'function' ? t('nav.calculator') : 'Калькулятор и Аналитика',
     pending_registrations: typeof t === 'function' ? t('nav.pending_registrations') : 'Заявки на регистрацию',
-    users: typeof t === 'function' ? t('nav.users_rights') : 'Управление пользователями'
+    users: typeof t === 'function' ? t('nav.users_rights') : 'Управление пользователями',
+    notifications: typeof t === 'function' ? t('telegram.admin_nav_title') : 'Уведомления и шаблоны'
   };
   const titleEl = document.getElementById('page-title');
   if (titleEl) {
@@ -3845,7 +4345,8 @@ function navigate(page, params={}) {
     player_detail: () => renderPlayerDetail(params.id),
     calculator: renderCalculator,
     pending_registrations: renderPendingRegistrations,
-    users: renderUsers
+    users: renderUsers,
+    notifications: renderNotificationsPage
   };
 
   const renderer = pageRenderers[page];
@@ -9175,4 +9676,19 @@ if (typeof window !== 'undefined') {
   window.zoomIn = zoomIn;
   window.zoomOut = zoomOut;
   window.resetZoom = resetZoom;
+
+  window.connectUserTelegram = connectUserTelegram;
+  window.disconnectUserTelegram = disconnectUserTelegram;
+  window.toggleTelegramNotifications = toggleTelegramNotifications;
+  window.renderNotificationsPage = renderNotificationsPage;
+  window.onSelectNotificationTemplate = onSelectNotificationTemplate;
+  window.insertTemplateTag = insertTemplateTag;
+  window.updateTemplateLivePreview = updateTemplateLivePreview;
+  window.saveCurrentTemplate = saveCurrentTemplate;
+  window.resetCurrentTemplate = resetCurrentTemplate;
+  window.sendTestTemplateNotification = sendTestTemplateNotification;
+  window.generateStaffPinCode = generateStaffPinCode;
+  window.closeStaffPinModal = closeStaffPinModal;
+  window.copyStaffPinCommand = copyStaffPinCommand;
+  window.saveTelegramSettings = saveTelegramSettings;
 }
