@@ -957,8 +957,15 @@ function toast(msg, type='success') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.innerHTML = `<span>${{success:'✓',error:'✕',info:'ℹ'}[type]||'✓'}</span><span>${msg}</span>`;
-  document.getElementById('toasts').appendChild(el);
+  const container = document.getElementById('toasts');
+  if (container) {
+    container.appendChild(el);
+  }
   setTimeout(()=>el.remove(), 3500);
+}
+
+function showToast(msg, type = 'info') {
+  return toast(msg, type);
 }
 
 function openModal(id) {
@@ -3934,7 +3941,7 @@ function isEventPast(ev) { return !isEventActive(ev) && !isEventUpcoming(ev); }
 
 // ─── PAGE: NOTIFICATIONS & TEMPLATES (R4, R5) ────────────────
 let notificationTemplatesCache = [];
-let currentSelectedTemplateKey = 'event_place_assigned';
+let currentSelectedTemplateKey = 'staff_new_user_pending';
 let telegramSettingsCache = null;
 
 async function renderNotificationsPage() {
@@ -4098,7 +4105,7 @@ async function renderNotificationsPage() {
 
     const initialKey = notificationTemplatesCache.some(tpl => tpl.key === currentSelectedTemplateKey)
       ? currentSelectedTemplateKey
-      : (notificationTemplatesCache[0]?.key || 'event_place_assigned');
+      : (notificationTemplatesCache.find(tpl => tpl.channel === 'staff')?.key || notificationTemplatesCache[0]?.key || 'staff_new_user_pending');
     onSelectNotificationTemplate(initialKey);
 
   } catch (err) {
