@@ -3135,6 +3135,373 @@ test('API GET /api/screenshots/:filename validates traversal, authenticates user
   }
 });
 
+test('API Telegram Bot Settings & Bind Token Lifecycle (RBAC)', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register a regular R3 user
+    const r3Reg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_tester', password: 'password123' })
+    })).json();
+    const db = require('./db.js');
+    db.approveUser(r3Reg.userId, 'r3');
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_tester', password: 'password123' })
+    })).json();
+
+    // 1. Initial settings for R5
+    const initSettingsRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(initSettingsRes.status, 200);
+    const initSettings = await initSettingsRes.json();
+    assert.equal(initSettings.hasToken, false);
+    assert.equal(initSettings.tokenMasked, null);
+
+    // 2. R3 cannot read or update settings
+    const r3ReadRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      headers: { Authorization: `Bearer ${r3Login.token}` }
+    });
+    assert.equal(r3ReadRes.status, 403);
+
+    const r3UpdateRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${r3Login.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'fake:token' })
+    });
+    assert.equal(r3UpdateRes.status, 403);
+
+    // 3. R5 updates settings
+    const updateRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: '123456789:ABC_TEST_BOT_TOKEN_XYZ',
+        staffChatId: '-1001987654321',
+        botUsername: 'KoWTestBot'
+      })
+    });
+    assert.equal(updateRes.status, 200);
+    const updateData = await updateRes.json();
+    assert.equal(updateData.success, true);
+    assert.equal(updateData.hasToken, true);
+    assert.equal(updateData.staffChatId, '-1001987654321');
+    assert.equal(updateData.botUsername, 'KoWTestBot');
+
+    // 4. Verify settings read back masked token
+    const readBack = await (await fetch(`${baseUrl}/api/telegram/settings`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    })).json();
+    assert.equal(readBack.hasToken, true);
+    assert.ok(readBack.tokenMasked.includes('***'));
+    assert.equal(readBack.staffChatId, '-1001987654321');
+    assert.equal(readBack.botUsername, 'KoWTestBot');
+
+    // 5. User generates personal bind token
+    const bindTokenRes = await fetch(`${baseUrl}/api/telegram/bind-token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Login.token}` }
+    });
+    assert.equal(bindTokenRes.status, 200);
+    const bindTokenData = await bindTokenRes.json();
+    assert.ok(bindTokenData.token);
+    assert.ok(bindTokenData.expiresAt);
+    assert.ok(bindTokenData.deepLink.startsWith('https://t.me/KoWTestBot?start=bind_'));
+
+    // 6. Staff bind token generation (R5 only)
+    const staffPinR3Res = await fetch(`${baseUrl}/api/telegram/staff-bind-token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Login.token}` }
+    });
+    assert.equal(staffPinR3Res.status, 403);
+
+    const staffPinRes = await fetch(`${baseUrl}/api/telegram/staff-bind-token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(staffPinRes.status, 200);
+    const staffPinData = await staffPinRes.json();
+    assert.ok(staffPinData.pin.startsWith('KOW-STAFF-'));
+    assert.ok(staffPinData.expiresAt);
+
+    // 7. Unbind user telegram
+    const unbindRes = await fetch(`${baseUrl}/api/telegram/bind`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${r3Login.token}` }
+    });
+    assert.equal(unbindRes.status, 200);
+    const unbindData = await unbindRes.json();
+    assert.equal(unbindData.success, true);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API Telegram Webhook: /start bind, /connect_staff, and inline callbacks', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  const editedMessages = [];
+  const answeredCallbacks = [];
+
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 100 + sentMessages.length, chat: { id: payload.chat_id } } })
+      };
+    }
+    if (url.includes('/editMessageText')) {
+      editedMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: payload.message_id, text: payload.text } })
+      };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      answeredCallbacks.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    db.setAppSetting('telegram_bot_token', 'mock_token');
+
+    // 1. Test /start bind_<token>
+    const regSoldier = db.registerUser({ username: 'soldier_hook', password: 'pass', playerName: 'Солдат' });
+    db.approveUser(regSoldier.userId, 'r3');
+    const validToken = 'bind_token_valid_123';
+    db.createTelegramBindToken(regSoldier.userId, validToken, new Date(Date.now() + 600000).toISOString());
+
+    const bindWebhookRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          chat: { id: 777888 },
+          from: { id: 777888, username: 'soldier_tg_handle' },
+          text: `/start bind_${validToken}`
+        }
+      })
+    });
+    assert.equal(bindWebhookRes.status, 200);
+
+    // Verify confirmation message sent
+    assert.ok(sentMessages.some(m => m.chat_id === 777888 && m.text.includes('успешно подключен')));
+    // Verify user in DB bound
+    const boundSoldier = db.findUserById(regSoldier.userId);
+    assert.equal(boundSoldier.telegram_chat_id, 777888);
+    assert.equal(boundSoldier.telegram_username, 'soldier_tg_handle');
+
+    // 2. Test /start with expired or invalid token
+    const invalidWebhookRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 2,
+        message: {
+          chat: { id: 999111 },
+          from: { id: 999111 },
+          text: '/start bind_invalid_token'
+        }
+      })
+    });
+    assert.equal(invalidWebhookRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 999111 && m.text.includes('истек')));
+
+    // 3. Test /connect_staff <PIN>
+    const staffPin = 'KOW-STAFF-7777';
+    db.createStaffBindToken(staffPin, new Date(Date.now() + 600000).toISOString());
+
+    const staffWebhookRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 3,
+        message: {
+          chat: { id: -100888999 },
+          from: { id: 555 },
+          text: `/connect_staff ${staffPin}`
+        }
+      })
+    });
+    assert.equal(staffWebhookRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === -100888999 && m.text.includes('Чат штаба успешно подключен')));
+    assert.equal(db.getAppSetting('telegram_staff_chat_id'), '-100888999');
+
+    // 4. Test callback queries: approve_user and reject_user
+    // Register pending rookie
+    const recruit = db.registerUser({ username: 'rookie_soldier', password: 'pass', playerName: 'Новобранец' });
+    assert.equal(recruit.is_approved, 0);
+
+    // A) Unauthorized attempt to approve (stranger telegram ID 444333)
+    const unauthCbRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 4,
+        callback_query: {
+          id: 'cb_query_unauth',
+          from: { id: 444333, username: 'random_user' },
+          message: { chat: { id: -100888999 }, message_id: 42 },
+          data: `approve_user:${recruit.userId}`
+        }
+      })
+    });
+    assert.equal(unauthCbRes.status, 200);
+    assert.ok(answeredCallbacks.some(c => c.callback_query_id === 'cb_query_unauth' && c.show_alert === true && c.text.includes('Доступ запрещен')));
+    assert.equal(db.findUserById(recruit.userId).is_approved, 0);
+
+    // B) Authorized officer approval
+    // Bind admin user (R5) to Telegram ID 10001
+    const adminUser = db.findUserByUsername('admin');
+    db.bindUserTelegram(adminUser.id, 10001, 'general_admin');
+
+    const authCbRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 5,
+        callback_query: {
+          id: 'cb_query_auth',
+          from: { id: 10001, username: 'general_admin' },
+          message: { chat: { id: -100888999 }, message_id: 42 },
+          data: `approve_user:${recruit.userId}`
+        }
+      })
+    });
+    assert.equal(authCbRes.status, 200);
+    assert.ok(answeredCallbacks.some(c => c.callback_query_id === 'cb_query_auth' && c.text.includes('одобрен')));
+    assert.ok(editedMessages.some(m => m.chat_id === -100888999 && m.message_id === 42 && m.text.includes('одобрен офицером')));
+    assert.equal(db.findUserById(recruit.userId).is_approved, 1);
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('API Notification Templates CRUD, reset, and test send', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 501, chat: { id: payload.chat_id } } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // 1. GET /api/notification-templates (7 default templates)
+    const listRes = await fetch(`${baseUrl}/api/notification-templates`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(listRes.status, 200);
+    const templates = await listRes.json();
+    assert.equal(templates.length, 7);
+
+    // 2. PUT /api/notification-templates/:key
+    const putRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        template: '🎯 Место #{place} для {sectorName}',
+        parseMode: 'HTML'
+      })
+    });
+    assert.equal(putRes.status, 200);
+    const putData = await putRes.json();
+    assert.equal(putData.template.template, '🎯 Место #{place} для {sectorName}');
+
+    // 3. Test send for personal template
+    // Admin has no telegram linked yet -> 400
+    db.setAppSetting('telegram_bot_token', 'mock_token');
+    const testNoTgRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned/test`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(testNoTgRes.status, 400);
+
+    // Bind admin's telegram
+    const adminUser = db.findUserByUsername('admin');
+    db.bindUserTelegram(adminUser.id, 999888, 'admin_tg');
+
+    // Now test send succeeds
+    const testSendRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned/test`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(testSendRes.status, 200);
+    const testSendData = await testSendRes.json();
+    assert.equal(testSendData.success, true);
+    assert.ok(sentMessages.some(m => m.chat_id === 999888 && m.text.includes('🎯 Место #1')));
+
+    // 4. Test send for staff template
+    db.setAppSetting('telegram_staff_chat_id', '-100333222');
+    const testStaffRes = await fetch(`${baseUrl}/api/notification-templates/staff_new_user_pending/test`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(testStaffRes.status, 200);
+    assert.ok(sentMessages.some(m => String(m.chat_id) === '-100333222' && m.text.includes('Новый боец')));
+
+    // 5. POST /api/notification-templates/:key/reset
+    const resetRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned/reset`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(resetRes.status, 200);
+    const resetData = await resetRes.json();
+    assert.equal(resetData.template.template, resetData.template.default_template);
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+
 
 async function run() {
   let passed = 0;

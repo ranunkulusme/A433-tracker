@@ -6,6 +6,7 @@ const { URL } = require('node:url');
 const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
+const telegram = require('./telegram.js');
 
 let APP_VERSION = '3.21.0';
 try {
@@ -1532,6 +1533,369 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const stream = fs.createReadStream(fullFilePath);
       return stream.pipe(res);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // TELEGRAM BOT WEBHOOK & MANAGEMENT ENDPOINTS
+    // ─────────────────────────────────────────────────────────
+
+    if (pathname === '/api/telegram/webhook' && req.method === 'POST') {
+      const update = body || {};
+      const token = db.getAppSetting('telegram_bot_token');
+
+      // 1. Message update
+      if (update.message) {
+        const msg = update.message;
+        const text = (msg.text || '').trim();
+        const chatId = msg.chat?.id;
+
+        // A) /start bind_<token>
+        const bindMatch = text.match(/^\/start(?:\s+|@\w+\s+)bind_([a-zA-Z0-9_-]+)/i);
+        if (bindMatch) {
+          const bindToken = bindMatch[1];
+          const user = db.findUserByTelegramBindToken(bindToken);
+          if (user) {
+            const username = msg.from?.username || msg.from?.first_name || '';
+            db.bindUserTelegram(user.id, chatId, username);
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '✅ <b>Ваш аккаунт KoW Tracker успешно подключен!</b>\nТеперь вы будете получать персональные уведомления о распределении мест и событиях альянса.'
+              });
+            }
+            return sendJson(res, 200, { ok: true, bound: true, userId: user.id });
+          } else {
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '❌ <b>Срок действия ссылки истек или токен недействителен.</b>\nПожалуйста, сгенерируйте новую ссылку для привязки в Личном кабинете KoW Tracker.'
+              });
+            }
+            return sendJson(res, 200, { ok: true, bound: false, reason: 'token_expired_or_invalid' });
+          }
+        }
+
+        // B) /connect_staff <PIN>
+        const staffMatch = text.match(/^\/connect_staff(?:\s+|@\w+\s+)(KOW-STAFF-[A-Z0-9-]+)/i);
+        if (staffMatch) {
+          const pin = staffMatch[1].trim().toUpperCase();
+          const bindRes = db.verifyAndBindStaffChat(pin, chatId);
+          if (bindRes.success) {
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '✅ <b>Чат штаба успешно подключен к KoW Tracker!</b>\nОповещения для офицеров Р4/Р5 активированы.'
+              });
+            }
+            return sendJson(res, 200, { ok: true, staffConnected: true, chatId });
+          } else {
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '❌ <b>Неверный или истекший код привязки штаба.</b>\nСгенерируйте свежий PIN в настройках KoW Tracker (раздел Настройки ➔ Уведомления).'
+              });
+            }
+            return sendJson(res, 200, { ok: true, staffConnected: false, reason: bindRes.reason });
+          }
+        }
+      }
+
+      // 2. Callback query update (interactive buttons)
+      if (update.callback_query) {
+        const cq = update.callback_query;
+        const cqId = cq.id;
+        const data = cq.data || '';
+        const fromId = cq.from?.id;
+        const chatMsg = cq.message;
+
+        const approveMatch = data.match(/^approve_user:(\d+)$/);
+        const rejectMatch = data.match(/^reject_user:(\d+)$/);
+
+        if (approveMatch || rejectMatch) {
+          const targetUserId = Number((approveMatch || rejectMatch)[1]);
+          const isApprove = Boolean(approveMatch);
+
+          const officer = db.findUserByTelegramChatId(fromId);
+          const isStaff = officer && (officer.rank === 'r5' || officer.rank === 'r4' || logic.hasUserPermission(officer, 'approve_users'));
+
+          if (!isStaff) {
+            if (token) {
+              await telegram.answerTelegramCallback({
+                token,
+                callbackQueryId: cqId,
+                text: '⛔ Доступ запрещен. У вас нет прав офицера для одобрения новичков.',
+                showAlert: true
+              });
+            }
+            return sendJson(res, 200, { ok: true, authorized: false });
+          }
+
+          const targetUser = db.findUserById(targetUserId);
+          const targetName = targetUser?.username || `ID ${targetUserId}`;
+          const officerHandle = cq.from?.username ? `@${cq.from.username}` : (officer.username || 'Офицер');
+          const officerRank = (officer.rank || 'r4').toUpperCase();
+
+          if (isApprove) {
+            db.approveUser(targetUserId, 'r3');
+            if (token) {
+              await telegram.answerTelegramCallback({
+                token,
+                callbackQueryId: cqId,
+                text: '✅ Пользователь одобрен (Р3)'
+              });
+              if (chatMsg?.chat?.id && chatMsg?.message_id) {
+                await telegram.editTelegramMessageText({
+                  token,
+                  chatId: chatMsg.chat.id,
+                  messageId: chatMsg.message_id,
+                  text: `✅ Пользователь <b>@${targetName}</b> одобрен офицером <b>${officerHandle}</b> (${officerRank})`,
+                  replyMarkup: { inline_keyboard: [] }
+                });
+              }
+            }
+            return sendJson(res, 200, { ok: true, action: 'approved', userId: targetUserId });
+          } else {
+            db.rejectUser(targetUserId);
+            if (token) {
+              await telegram.answerTelegramCallback({
+                token,
+                callbackQueryId: cqId,
+                text: '❌ Пользователь отклонен'
+              });
+              if (chatMsg?.chat?.id && chatMsg?.message_id) {
+                await telegram.editTelegramMessageText({
+                  token,
+                  chatId: chatMsg.chat.id,
+                  messageId: chatMsg.message_id,
+                  text: `❌ Пользователь <b>@${targetName}</b> отклонен офицером <b>${officerHandle}</b> (${officerRank})`,
+                  replyMarkup: { inline_keyboard: [] }
+                });
+              }
+            }
+            return sendJson(res, 200, { ok: true, action: 'rejected', userId: targetUserId });
+          }
+        }
+      }
+
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (pathname === '/api/telegram/settings' && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const token = db.getAppSetting('telegram_bot_token');
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      const botUsername = db.getAppSetting('telegram_bot_username');
+
+      let tokenMasked = null;
+      if (token && typeof token === 'string') {
+        if (token.length > 8) {
+          const colonIdx = token.indexOf(':');
+          if (colonIdx > 0) {
+            tokenMasked = token.slice(0, colonIdx + 1) + '***' + token.slice(-4);
+          } else {
+            tokenMasked = token.slice(0, 4) + '***' + token.slice(-4);
+          }
+        } else {
+          tokenMasked = '***';
+        }
+      }
+
+      return sendJson(res, 200, {
+        hasToken: Boolean(token),
+        tokenMasked,
+        staffChatId: staffChatId || null,
+        botUsername: botUsername || null
+      });
+    }
+
+    if (pathname === '/api/telegram/settings' && req.method === 'PUT') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки Telegram бота');
+      }
+
+      if (body.token !== undefined) {
+        const rawToken = String(body.token).trim();
+        db.setAppSetting('telegram_bot_token', rawToken);
+      }
+
+      if (body.staffChatId !== undefined) {
+        db.setAppSetting('telegram_staff_chat_id', String(body.staffChatId).trim());
+      }
+
+      if (body.botUsername !== undefined) {
+        db.setAppSetting('telegram_bot_username', String(body.botUsername).trim());
+      }
+
+      const token = db.getAppSetting('telegram_bot_token');
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      const botUsername = db.getAppSetting('telegram_bot_username');
+
+      return sendJson(res, 200, {
+        success: true,
+        hasToken: Boolean(token),
+        staffChatId: staffChatId || null,
+        botUsername: botUsername || null
+      });
+    }
+
+    if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+
+      const token = crypto.randomBytes(16).toString('hex');
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      db.createTelegramBindToken(req.user.id, token, expiresAt);
+
+      const botUsername = db.getAppSetting('telegram_bot_username') || 'KoWTrackerBot';
+      const deepLink = `https://t.me/${botUsername}?start=bind_${token}`;
+
+      return sendJson(res, 200, {
+        token,
+        expiresAt,
+        deepLink,
+        botUsername
+      });
+    }
+
+    if (pathname === '/api/telegram/bind' && req.method === 'DELETE') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      db.unbindUserTelegram(req.user.id);
+      return sendJson(res, 200, { success: true });
+    }
+
+    if (pathname === '/api/telegram/staff-bind-token' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки чата штаба');
+      }
+
+      const pin = `KOW-STAFF-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      db.createStaffBindToken(pin, expiresAt);
+
+      return sendJson(res, 200, {
+        pin,
+        expiresAt
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // NOTIFICATION TEMPLATES ENDPOINTS
+    // ─────────────────────────────────────────────────────────
+
+    if (pathname === '/api/notification-templates' && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const templates = db.getNotificationTemplates();
+      return sendJson(res, 200, templates);
+    }
+
+    const tplMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)$/);
+    if (tplMatch && req.method === 'PUT') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const key = tplMatch[1];
+      const updated = db.updateNotificationTemplate(key, body);
+      if (!updated) {
+        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
+      }
+      return sendJson(res, 200, { success: true, template: updated });
+    }
+
+    const tplResetMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/reset$/);
+    if (tplResetMatch && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const key = tplResetMatch[1];
+      const reset = db.resetNotificationTemplate(key);
+      if (!reset) {
+        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
+      }
+      return sendJson(res, 200, { success: true, template: reset });
+    }
+
+    const tplTestMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/test$/);
+    if (tplTestMatch && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const key = tplTestMatch[1];
+      const tpl = db.getNotificationTemplate(key);
+      if (!tpl) {
+        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
+      }
+
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 400, 'NO_BOT_TOKEN', 'Токен Telegram бота не настроен в системе');
+      }
+
+      let targetChatId = null;
+      if (tpl.channel === 'personal') {
+        targetChatId = req.user.telegram_chat_id;
+        if (!targetChatId) {
+          return sendError(res, 400, 'NO_TELEGRAM_LINKED', 'Привяжите ваш Telegram аккаунт в Личном кабинете для получения тестовых сообщений');
+        }
+      } else {
+        targetChatId = db.getAppSetting('telegram_staff_chat_id');
+        if (!targetChatId) {
+          return sendError(res, 400, 'NO_STAFF_CHAT_LINKED', 'Чат штаба не привязан. Подключите чат штаба через PIN-код или укажите ID чата в настройках');
+        }
+        if (targetChatId && !isNaN(Number(targetChatId))) {
+          targetChatId = Number(targetChatId);
+        }
+      }
+
+      const templateText = body.template !== undefined ? body.template : tpl.template;
+      const parseMode = body.parseMode || body.parse_mode || tpl.parse_mode || 'HTML';
+      const sampleData = logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key] || {};
+      const renderedText = logic.renderTemplate(templateText, sampleData);
+
+      const sendRes = await telegram.sendTelegramMessage({
+        token: botToken,
+        chatId: targetChatId,
+        text: renderedText,
+        parseMode
+      });
+
+      if (!sendRes.ok) {
+        return sendJson(res, 200, { success: false, error: sendRes.error });
+      }
+
+      return sendJson(res, 200, { success: true, messageId: sendRes.result?.message_id });
     }
 
     // Unmatched API endpoint

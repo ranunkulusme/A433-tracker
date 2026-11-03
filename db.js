@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested, calculateStockDiff } = require('./logic.js');
+const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested, calculateStockDiff, DEFAULT_NOTIFICATION_TEMPLATES } = require('./logic.js');
 
 let currentDb = null;
 
@@ -55,6 +55,7 @@ function verifySession(token) {
   const row = getDb().prepare(`
     SELECT s.token, s.user_id, s.created_at, s.expires_at,
            u.id, u.username, u.rank, u.is_approved, u.player_id, u.permissions,
+           u.telegram_chat_id, u.telegram_username, u.telegram_notifications_enabled,
            p.name as player_name
     FROM sessions s
     JOIN users u ON s.user_id = u.id
@@ -70,7 +71,13 @@ function verifySession(token) {
     playerId: row.player_id,
     player_id: row.player_id,
     playerName: row.player_name || '',
-    permissions: parsePermissions(row.permissions)
+    permissions: parsePermissions(row.permissions),
+    telegramChatId: row.telegram_chat_id,
+    telegram_chat_id: row.telegram_chat_id,
+    telegramUsername: row.telegram_username,
+    telegram_username: row.telegram_username,
+    telegramNotificationsEnabled: row.telegram_notifications_enabled !== 0,
+    telegram_notifications_enabled: row.telegram_notifications_enabled
   };
 }
 
@@ -90,7 +97,10 @@ function findUserByUsername(username) {
   if (!user) return null;
   return {
     ...user,
-    permissions: parsePermissions(user.permissions)
+    permissions: parsePermissions(user.permissions),
+    telegramChatId: user.telegram_chat_id,
+    telegramUsername: user.telegram_username,
+    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0
   };
 }
 
@@ -99,7 +109,10 @@ function findUserById(id) {
   if (!user) return null;
   return {
     ...user,
-    permissions: parsePermissions(user.permissions)
+    permissions: parsePermissions(user.permissions),
+    telegramChatId: user.telegram_chat_id,
+    telegramUsername: user.telegram_username,
+    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0
   };
 }
 
@@ -215,6 +228,9 @@ function getPendingUsers() {
   const rows = db.prepare(`
     SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
            u.permissions,
+           u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
+           u.telegram_username as telegramUsername, u.telegram_username,
+           u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
            u.created_at as createdAt, u.created_at,
            p.name as playerName
     FROM users u
@@ -224,7 +240,8 @@ function getPendingUsers() {
   `).all();
   return rows.map(r => ({
     ...r,
-    permissions: parsePermissions(r.permissions)
+    permissions: parsePermissions(r.permissions),
+    telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0
   }));
 }
 
@@ -233,6 +250,9 @@ function getUsers() {
   const rows = db.prepare(`
     SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
            u.permissions,
+           u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
+           u.telegram_username as telegramUsername, u.telegram_username,
+           u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
            u.created_at as createdAt, u.created_at,
            p.name as playerName
     FROM users u
@@ -241,7 +261,8 @@ function getUsers() {
   `).all();
   return rows.map(r => ({
     ...r,
-    permissions: parsePermissions(r.permissions)
+    permissions: parsePermissions(r.permissions),
+    telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0
   }));
 }
 
@@ -1621,6 +1642,21 @@ function migrateSchema(db) {
     if (!userCols.includes('permissions')) {
       db.exec("ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]';");
     }
+    if (!userCols.includes('telegram_chat_id')) {
+      db.exec("ALTER TABLE users ADD COLUMN telegram_chat_id INTEGER NULL;");
+    }
+    if (!userCols.includes('telegram_username')) {
+      db.exec("ALTER TABLE users ADD COLUMN telegram_username TEXT NULL;");
+    }
+    if (!userCols.includes('telegram_notifications_enabled')) {
+      db.exec("ALTER TABLE users ADD COLUMN telegram_notifications_enabled INTEGER NOT NULL DEFAULT 1;");
+    }
+    if (!userCols.includes('telegram_bind_token')) {
+      db.exec("ALTER TABLE users ADD COLUMN telegram_bind_token TEXT NULL;");
+    }
+    if (!userCols.includes('telegram_bind_expires_at')) {
+      db.exec("ALTER TABLE users ADD COLUMN telegram_bind_expires_at TEXT NULL;");
+    }
   }
 
   const playerCols = getColumns('players');
@@ -1732,7 +1768,45 @@ function migrateSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_stock_history_player ON stock_history_records(player_id);
     CREATE INDEX IF NOT EXISTS idx_stock_history_created ON stock_history_records(created_at);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_templates (
+      key TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff')),
+      parse_mode TEXT NOT NULL DEFAULT 'HTML',
+      template TEXT NOT NULL,
+      default_template TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+
+  try {
+    const tCount = db.prepare('SELECT count(*) as count FROM notification_templates').get().count;
+    if (tCount === 0 && DEFAULT_NOTIFICATION_TEMPLATES) {
+      const insertT = db.prepare(`
+        INSERT INTO notification_templates (key, title, channel, parse_mode, template, default_template, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      const now = new Date().toISOString();
+      for (const [key, item] of Object.entries(DEFAULT_NOTIFICATION_TEMPLATES)) {
+        insertT.run(
+          item.key || key,
+          item.title || key,
+          item.channel || 'personal',
+          item.parseMode || 'HTML',
+          item.template,
+          item.template,
+          now
+        );
+      }
+    }
+  } catch (e) {}
 }
 
 // ─── INIT DB ─────────────────────────────────────────────────
@@ -1767,6 +1841,11 @@ function initDb(filePath) {
       is_approved INTEGER NOT NULL DEFAULT 0,
       player_id INTEGER NULL REFERENCES players(id) ON DELETE SET NULL,
       permissions TEXT NOT NULL DEFAULT '[]',
+      telegram_chat_id INTEGER NULL,
+      telegram_username TEXT NULL,
+      telegram_notifications_enabled INTEGER NOT NULL DEFAULT 1,
+      telegram_bind_token TEXT NULL,
+      telegram_bind_expires_at TEXT NULL,
       created_at TEXT NOT NULL
     );
 
@@ -1889,6 +1968,22 @@ function initDb(filePath) {
       created_at TEXT NOT NULL,
       expires_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_templates (
+      key TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff')),
+      parse_mode TEXT NOT NULL DEFAULT 'HTML',
+      template TEXT NOT NULL,
+      default_template TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   migrateSchema(db);
@@ -1909,6 +2004,162 @@ function initDb(filePath) {
   } catch (e) {}
 
   return db;
+}
+
+// ─── APP SETTINGS ───────────────────────────────────────────
+function getAppSetting(key) {
+  if (!key) return null;
+  const row = getDb().prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setAppSetting(key, value) {
+  if (!key) return null;
+  const strVal = value !== undefined && value !== null ? String(value) : '';
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(key, strVal, now);
+  return strVal;
+}
+
+// ─── NOTIFICATION TEMPLATES ──────────────────────────────────
+function getNotificationTemplates() {
+  return getDb().prepare('SELECT * FROM notification_templates ORDER BY channel, key').all();
+}
+
+function getNotificationTemplate(key) {
+  if (!key) return null;
+  return getDb().prepare('SELECT * FROM notification_templates WHERE key = ?').get(key) || null;
+}
+
+function updateNotificationTemplate(key, updates = {}) {
+  if (!key) return null;
+  const existing = getNotificationTemplate(key);
+  if (!existing) return null;
+
+  const title = updates.title !== undefined ? updates.title : existing.title;
+  const parseMode = updates.parse_mode !== undefined ? updates.parse_mode : (updates.parseMode !== undefined ? updates.parseMode : existing.parse_mode);
+  const template = updates.template !== undefined ? updates.template : existing.template;
+  const now = new Date().toISOString();
+
+  getDb().prepare(`
+    UPDATE notification_templates
+    SET title = ?, parse_mode = ?, template = ?, updated_at = ?
+    WHERE key = ?
+  `).run(title, parseMode, template, now, key);
+
+  return getNotificationTemplate(key);
+}
+
+function resetNotificationTemplate(key) {
+  if (!key) return null;
+  const existing = getNotificationTemplate(key);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    UPDATE notification_templates
+    SET template = default_template, updated_at = ?
+    WHERE key = ?
+  `).run(now, key);
+
+  return getNotificationTemplate(key);
+}
+
+// ─── USER TELEGRAM BINDING ───────────────────────────────────
+function createTelegramBindToken(userId, token, expiresAt) {
+  if (!userId || !token) return false;
+  getDb().prepare(`
+    UPDATE users
+    SET telegram_bind_token = ?, telegram_bind_expires_at = ?
+    WHERE id = ?
+  `).run(token, expiresAt, userId);
+  return true;
+}
+
+function findUserByTelegramBindToken(token) {
+  if (!token) return null;
+  const now = new Date().toISOString();
+  const row = getDb().prepare(`
+    SELECT * FROM users
+    WHERE telegram_bind_token = ? AND telegram_bind_expires_at > ?
+  `).get(token, now);
+  if (!row) return null;
+  return {
+    ...row,
+    permissions: parsePermissions(row.permissions)
+  };
+}
+
+function bindUserTelegram(userId, chatId, username) {
+  if (!userId) return null;
+  getDb().prepare(`
+    UPDATE users
+    SET telegram_chat_id = ?, telegram_username = ?, telegram_bind_token = NULL, telegram_bind_expires_at = NULL
+    WHERE id = ?
+  `).run(chatId, username || null, userId);
+  return findUserById(userId);
+}
+
+function unbindUserTelegram(userId) {
+  if (!userId) return false;
+  getDb().prepare(`
+    UPDATE users
+    SET telegram_chat_id = NULL, telegram_username = NULL, telegram_bind_token = NULL, telegram_bind_expires_at = NULL
+    WHERE id = ?
+  `).run(userId);
+  return true;
+}
+
+function findUserByTelegramChatId(chatId) {
+  if (chatId === undefined || chatId === null) return null;
+  const row = getDb().prepare('SELECT * FROM users WHERE telegram_chat_id = ?').get(chatId);
+  if (!row) return null;
+  return {
+    ...row,
+    permissions: parsePermissions(row.permissions)
+  };
+}
+
+function toggleTelegramNotifications(userId, enabled) {
+  if (!userId) return false;
+  const val = enabled ? 1 : 0;
+  getDb().prepare('UPDATE users SET telegram_notifications_enabled = ? WHERE id = ?').run(val, userId);
+  return true;
+}
+
+// ─── STAFF CHAT BINDING ──────────────────────────────────────
+function createStaffBindToken(token, expiresAt) {
+  if (!token) return false;
+  setAppSetting('telegram_staff_bind_token', token);
+  setAppSetting('telegram_staff_bind_expires_at', expiresAt);
+  return true;
+}
+
+function verifyAndBindStaffChat(token, chatId) {
+  if (!token || !chatId) {
+    return { success: false, reason: 'invalid' };
+  }
+  const currentToken = getAppSetting('telegram_staff_bind_token');
+  const expiresAt = getAppSetting('telegram_staff_bind_expires_at');
+
+  if (!currentToken || currentToken.toUpperCase() !== token.toUpperCase()) {
+    return { success: false, reason: 'invalid' };
+  }
+
+  if (expiresAt && new Date(expiresAt).getTime() < Date.now()) {
+    return { success: false, reason: 'expired' };
+  }
+
+  // Valid: save staff chat ID and clear token
+  setAppSetting('telegram_staff_chat_id', String(chatId));
+  setAppSetting('telegram_staff_bind_token', '');
+  setAppSetting('telegram_staff_bind_expires_at', '');
+
+  return { success: true, chatId };
 }
 
 module.exports = {
@@ -1968,4 +2219,18 @@ module.exports = {
   exportKowJson,
   importKowJson,
   parsePermissions,
+  getAppSetting,
+  setAppSetting,
+  getNotificationTemplates,
+  getNotificationTemplate,
+  updateNotificationTemplate,
+  resetNotificationTemplate,
+  createTelegramBindToken,
+  findUserByTelegramBindToken,
+  bindUserTelegram,
+  unbindUserTelegram,
+  findUserByTelegramChatId,
+  toggleTelegramNotifications,
+  createStaffBindToken,
+  verifyAndBindStaffChat,
 };

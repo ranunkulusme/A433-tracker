@@ -1649,6 +1649,120 @@ test('cleanupExpiredScreenshots deletes screenshot files older than 30 days and 
   }
 });
 
+test('app_settings and notification_templates initialized and seeded on initDb', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // app_settings
+  assert.equal(dbModule.getAppSetting('telegram_bot_token'), null);
+  dbModule.setAppSetting('telegram_bot_token', '123456:ABC-DEF');
+  assert.equal(dbModule.getAppSetting('telegram_bot_token'), '123456:ABC-DEF');
+
+  dbModule.setAppSetting('telegram_bot_token', '999999:UPDATED');
+  assert.equal(dbModule.getAppSetting('telegram_bot_token'), '999999:UPDATED');
+
+  // notification_templates seeded with 7 baseline items
+  const templates = dbModule.getNotificationTemplates();
+  assert.equal(templates.length, 7);
+
+  const t1 = dbModule.getNotificationTemplate('event_place_assigned');
+  assert.ok(t1);
+  assert.equal(t1.key, 'event_place_assigned');
+  assert.equal(t1.channel, 'personal');
+  assert.equal(t1.parse_mode, 'HTML');
+  assert.equal(t1.template, t1.default_template);
+
+  // Update template
+  const updated = dbModule.updateNotificationTemplate('event_place_assigned', {
+    template: 'Кастомный текст {place}',
+    parse_mode: 'HTML'
+  });
+  assert.equal(updated.template, 'Кастомный текст {place}');
+  assert.notEqual(updated.template, updated.default_template);
+
+  // Reset template
+  const reset = dbModule.resetNotificationTemplate('event_place_assigned');
+  assert.equal(reset.template, reset.default_template);
+});
+
+test('user telegram binding lifecycle and queries', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'soldier_tg', password: 'password123', playerName: 'Боец' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Generate bind token
+  const token = 'token_abc_123';
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  dbModule.createTelegramBindToken(reg.userId, token, expiresAt);
+
+  // Find user by valid token
+  const userByToken = dbModule.findUserByTelegramBindToken(token);
+  assert.ok(userByToken);
+  assert.equal(userByToken.id, reg.userId);
+
+  // Expired token returns null
+  const expiredToken = 'token_expired';
+  dbModule.createTelegramBindToken(reg.userId, expiredToken, new Date(Date.now() - 60000).toISOString());
+  assert.equal(dbModule.findUserByTelegramBindToken(expiredToken), null);
+
+  // Bind telegram
+  const bound = dbModule.bindUserTelegram(reg.userId, 123456789, 'soldier_tg_username');
+  assert.equal(bound.telegram_chat_id, 123456789);
+  assert.equal(bound.telegram_username, 'soldier_tg_username');
+  assert.equal(bound.telegram_bind_token, null);
+
+  // Find user by chatId
+  const userByChat = dbModule.findUserByTelegramChatId(123456789);
+  assert.ok(userByChat);
+  assert.equal(userByChat.username, 'soldier_tg');
+
+  // Toggle notifications
+  dbModule.toggleTelegramNotifications(reg.userId, 0);
+  assert.equal(dbModule.findUserById(reg.userId).telegram_notifications_enabled, 0);
+  dbModule.toggleTelegramNotifications(reg.userId, 1);
+  assert.equal(dbModule.findUserById(reg.userId).telegram_notifications_enabled, 1);
+
+  // Unbind telegram
+  dbModule.unbindUserTelegram(reg.userId);
+  const unlinked = dbModule.findUserById(reg.userId);
+  assert.equal(unlinked.telegram_chat_id, null);
+  assert.equal(unlinked.telegram_username, null);
+  assert.equal(dbModule.findUserByTelegramChatId(123456789), null);
+});
+
+test('staff chat binding lifecycle with PIN verification', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const pin = 'KOW-STAFF-9999';
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  dbModule.createStaffBindToken(pin, expiresAt);
+
+  // Invalid pin fails
+  const invalidRes = dbModule.verifyAndBindStaffChat('KOW-WRONG', -100123456);
+  assert.equal(invalidRes.success, false);
+  assert.equal(invalidRes.reason, 'invalid');
+
+  // Valid pin succeeds and sets staff chat id
+  const validRes = dbModule.verifyAndBindStaffChat('KOW-STAFF-9999', -100123456);
+  assert.equal(validRes.success, true);
+  assert.equal(validRes.chatId, -100123456);
+  assert.equal(dbModule.getAppSetting('telegram_staff_chat_id'), '-100123456');
+
+  // Re-verifying used pin fails (one-time use)
+  const reusedRes = dbModule.verifyAndBindStaffChat('KOW-STAFF-9999', -100123456);
+  assert.equal(reusedRes.success, false);
+
+  // Expired pin fails
+  dbModule.createStaffBindToken('KOW-STAFF-EXP', new Date(Date.now() - 1000).toISOString());
+  const expiredRes = dbModule.verifyAndBindStaffChat('KOW-STAFF-EXP', -100123456);
+  assert.equal(expiredRes.success, false);
+  assert.equal(expiredRes.reason, 'expired');
+});
+
+
 
 
 

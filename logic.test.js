@@ -56,6 +56,9 @@ const {
   simulateCalendarEventProgress,
   calculateStockDiff,
   getStockFreshness,
+  DEFAULT_NOTIFICATION_TEMPLATES,
+  NOTIFICATION_TEMPLATE_SAMPLE_DATA,
+  renderTemplate,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -2593,4 +2596,61 @@ test('getStockFreshness computes status, days elapsed and label', () => {
   assert.equal(stale.status, 'stale');
   assert.equal(stale.days, 22);
   assert.equal(stale.label, '22 дн. назад');
+});
+
+test('DEFAULT_NOTIFICATION_TEMPLATES contains all 7 baseline templates with valid metadata', () => {
+  assert.ok(DEFAULT_NOTIFICATION_TEMPLATES, 'DEFAULT_NOTIFICATION_TEMPLATES must exist');
+  const expectedKeys = [
+    'event_place_assigned',
+    'event_registration_opened',
+    'stock_reminder_personal',
+    'staff_new_user_pending',
+    'staff_event_deadline_24h',
+    'staff_event_autopick_summary',
+    'staff_stale_stocks_alert'
+  ];
+
+  for (const key of expectedKeys) {
+    const item = DEFAULT_NOTIFICATION_TEMPLATES[key];
+    assert.ok(item, `Template ${key} should exist`);
+    assert.equal(item.key, key);
+    assert.ok(item.title && typeof item.title === 'string', `${key} must have a title`);
+    assert.ok(['personal', 'staff'].includes(item.channel), `${key} channel must be personal or staff`);
+    assert.equal(item.parseMode, 'HTML');
+    assert.ok(Array.isArray(item.placeholders) && item.placeholders.length > 0, `${key} must have placeholders`);
+    assert.ok(typeof item.template === 'string' && item.template.length > 20, `${key} must have template text`);
+  }
+});
+
+test('renderTemplate safely replaces tokens, preserves HTML, and handles missing data without undefined', () => {
+  const sample = 'Привет, <b>{username}</b>! Ваш сектор <i>{sectorName}</i> занял #{place}. Ссылка: <a href="{link}">Перейти</a> {missing}';
+  const rendered = renderTemplate(sample, {
+    username: 'Alice',
+    sectorName: 'Sector 42',
+    place: 1,
+    link: 'https://kow.example.com'
+  });
+
+  assert.equal(
+    rendered,
+    'Привет, <b>Alice</b>! Ваш сектор <i>Sector 42</i> занял #1. Ссылка: <a href="https://kow.example.com">Перейти</a> '
+  );
+  assert.ok(!rendered.includes('undefined'), 'Should never contain "undefined"');
+  assert.ok(!rendered.includes('{missing}'), 'Missing placeholder should be replaced by empty string');
+
+  // Edge cases
+  assert.equal(renderTemplate('', { a: 1 }), '');
+  assert.equal(renderTemplate(null, { a: 1 }), '');
+  assert.equal(renderTemplate(undefined, {}), '');
+  assert.equal(renderTemplate('Простой текст без тегов', {}), 'Простой текст без тегов');
+
+  // Verify all 7 templates with sample data
+  for (const [key, item] of Object.entries(DEFAULT_NOTIFICATION_TEMPLATES)) {
+    const sampleData = NOTIFICATION_TEMPLATE_SAMPLE_DATA[key];
+    assert.ok(sampleData, `Sample data must exist for ${key}`);
+    const out = renderTemplate(item.template, sampleData);
+    assert.ok(out.length > 0, `Rendered text for ${key} should not be empty`);
+    assert.ok(!out.includes('undefined'), `Rendered ${key} should not contain undefined`);
+    assert.ok(!/\{[a-zA-Z0-9_]+\}/.test(out), `Rendered ${key} should not have any remaining unrendered placeholders: ${out}`);
+  }
 });
