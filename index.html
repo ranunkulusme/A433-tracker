@@ -156,6 +156,109 @@
           </div>
         </div>
 
+        <!-- Mieru Tunnel Settings Block (R5) -->
+        <div class="settings-card mieru-settings-card" id="card-mieru-settings">
+          <div class="settings-card-title mieru-card-header">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">🛡️</span>
+              <h3 data-i18n="mieru.card_title">Туннель Mieru (обход блокировок Telegram)</h3>
+            </div>
+            <div id="mieru-status-badge" class="mieru-status-badge stopped">
+              ⚪ <span id="mieru-status-text" data-i18n="mieru.status_stopped">Туннель выключен</span>
+            </div>
+          </div>
+          <div class="settings-card-body">
+            <!-- Enabled toggle -->
+            <label class="mieru-toggle-wrap">
+              <input type="checkbox" id="mieru-setting-enabled" onchange="onMieruToggleChange(this.checked)">
+              <span style="font-weight:600" data-i18n="mieru.toggle_enable">Использовать туннель Mieru для Telegram</span>
+            </label>
+
+            <!-- Mode Switcher Tabs -->
+            <div class="mieru-nav-tabs">
+              <button type="button" class="mieru-tab-btn active" id="mieru-tab-btn-form" onclick="switchMieruTab('form')" data-i18n="mieru.tab_form">📝 По полям</button>
+              <button type="button" class="mieru-tab-btn" id="mieru-tab-btn-json" onclick="switchMieruTab('json')" data-i18n="mieru.tab_json">📋 Код JSON</button>
+            </div>
+
+            <!-- Tab 1: Form Fields -->
+            <div id="mieru-tab-form">
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="mieru-setting-server" data-i18n="mieru.server_address">Адрес сервера (IP или домен)</label>
+                  <input type="text" id="mieru-setting-server" placeholder="123.45.67.89 или vpn.example.com" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+                <div class="form-group">
+                  <label for="mieru-setting-port-range">
+                    <span data-i18n="mieru.port_range">Порт или диапазон портов</span>
+                    <small style="color:var(--text2);margin-left:4px" data-i18n="mieru.port_range_hint">(например: 10000-10050 или 443)</small>
+                  </label>
+                  <input type="text" id="mieru-setting-port-range" placeholder="10000-10050" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+              </div>
+
+              <div class="form-row form-row-3" style="margin-top:10px">
+                <div class="form-group">
+                  <label for="mieru-setting-username" data-i18n="mieru.username">Пользователь (User / UUID)</label>
+                  <input type="text" id="mieru-setting-username" placeholder="user1" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+                <div class="form-group">
+                  <label for="mieru-setting-password" data-i18n="mieru.password">Пароль (Password)</label>
+                  <input type="password" id="mieru-setting-password" placeholder="******" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+                <div class="form-group">
+                  <label for="mieru-setting-transport" data-i18n="mieru.transport">Протокол передачи</label>
+                  <select id="mieru-setting-transport" class="form-control" onchange="syncMieruFormToJson()">
+                    <option value="TCP">TCP</option>
+                    <option value="UDP">UDP</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row form-row-2" style="margin-top:10px">
+                <div class="form-group">
+                  <label for="mieru-setting-socks5-port" data-i18n="mieru.socks5_port">Локальный SOCKS5 порт</label>
+                  <input type="number" id="mieru-setting-socks5-port" value="1080" placeholder="1080" autocomplete="off" oninput="syncMieruFormToJson()">
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 2: Raw JSON -->
+            <div id="mieru-tab-json" style="display:none">
+              <div class="form-group">
+                <label for="mieru-setting-json" data-i18n="mieru.json_label">Конфигурация Mieru (JSON)</label>
+                <textarea id="mieru-setting-json" class="mieru-json-textarea" rows="10" spellcheck="false" placeholder="Вставьте сюда JSON-конфигурацию клиента Mieru..." oninput="syncMieruJsonToForm()"></textarea>
+              </div>
+              <div class="mieru-json-help">
+                <strong>💡 Пример структуры JSON (client.json):</strong>
+                <pre>{
+  "profiles": [
+    {
+      "profileName": "kow_profile",
+      "serverAddress": "1.2.3.4",
+      "portRanges": ["10000-10050"],
+      "user": "username",
+      "password": "password",
+      "transport": "TCP",
+      "multiplexing": "MULTIPLEXING_LOW"
+    }
+  ],
+  "activeProfile": "kow_profile",
+  "socks5Port": 1080,
+  "httpPort": 0,
+  "logging": { "level": "INFO" }
+}</pre>
+              </div>
+            </div>
+
+            <!-- Actions & Test Result -->
+            <div class="form-actions" style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-mieru-settings" onclick="saveMieruSettings()" data-i18n="mieru.btn_save">💾 Сохранить настройки Mieru</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-test-mieru-tunnel" onclick="testMieruConnection()" data-i18n="mieru.btn_test">⚡ Проверить туннель Mieru</button>
+              <span id="mieru-test-result" style="display:none"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Template Editor Block -->
         <div class="settings-card template-editor-card" id="template-editor-block" style="margin-top:20px">
           <div class="settings-card-title">
