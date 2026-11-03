@@ -1575,6 +1575,14 @@ function renderSidebarNav() {
     });
   }
 
+  if (canManage() || role === 'r4' || role === 'r5') {
+    items.push({
+      page: 'notifications',
+      label: typeof t === 'function' ? t('telegram.admin_nav_title') : 'Уведомления и шаблоны',
+      icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`
+    });
+  }
+
   nav.innerHTML = items.map(item => `
     <a href="#" class="nav-item ${currentPage === item.page ? 'active' : ''}" data-page="${item.page}">
       ${item.icon}
@@ -1691,7 +1699,13 @@ async function renderMyCabinet() {
     ? logic.calculateTotalStarPoints(profile.stock)
     : (((profile.stock?.legendaryStars1 || 0) * 110) + ((profile.stock?.legendaryStars2 || 0) * 420) + ((profile.stock?.legendaryStars3 || 0) * 960));
 
+  const profileUser = profile.user || currentUser || {};
+  const isTgConnected = Boolean(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id || currentUser?.telegramChatId);
+  const rawNotif = profileUser.telegramNotificationsEnabled ?? profileUser.telegram_notifications_enabled ?? currentUser?.telegramNotificationsEnabled ?? currentUser?.telegram_notifications_enabled;
+  const isTgNotificationsEnabled = rawNotif !== false && rawNotif !== 0;
+
   c.innerHTML = `
+    <div id="page-my-cabinet" class="cabinet-page-wrap">
     <div class="section-header">
       <div>
         <div class="section-title">
@@ -1704,6 +1718,7 @@ async function renderMyCabinet() {
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        <button type="button" class="btn btn-secondary btn-sm btn-history-trigger" onclick="openStockHistoryModal(${profile.id})">📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}</button>
         <button type="button" class="btn btn-secondary btn-scanner" onclick="openSmartScannerModal('my_cabinet')">📷 Smart Scanner</button>
         <button type="button" class="btn-ghost btn-sm" onclick="openChangePasswordModal()">🔑 Сменить пароль</button>
         <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 Обновить</button>
@@ -1785,12 +1800,61 @@ async function renderMyCabinet() {
       <!-- Stock Card -->
       <div class="cabinet-card">
         <div class="cabinet-card-title">
-          <span>📦 Запасы гильдейца</span>
-          <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>📦 Запасы гильдейца</span>
+            ${renderStockFreshnessBadge(profile.stockUpdatedAt || profile.stock_updated_at)}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button type="button" class="btn-ghost btn-xs btn-history-trigger" onclick="openStockHistoryModal(${profile.id})" title="${escapeHtml(typeof t === 'function' ? t('audit.btn_history') : 'История склада')}">
+              📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}
+            </button>
+            <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
+          </div>
         </div>
         <div class="stock-grid stock-grid-3x2" id="cabinet-stock-grid-wrap" style="margin-bottom:0">
           ${renderCabinetStockGridHtml(profile, totalStarPoints)}
         </div>
+      </div>
+    </div>
+
+    <!-- TELEGRAM INTEGRATION CARD -->
+    <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
+      <div class="cabinet-card-title">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span>📱 ${typeof t === 'function' ? t('telegram.card_title') : 'Интеграция с Telegram'}</span>
+          <span id="tg-status-badge" class="badge ${isTgConnected ? 'badge-success tg-badge-connected' : 'badge-none tg-badge-disconnected'}">
+            ${isTgConnected ? '🟢 ' + (typeof t === 'function' ? t('telegram.status_connected') : 'Подключен') : '⚪ ' + (typeof t === 'function' ? t('telegram.status_not_connected') : 'Не привязан')}
+          </span>
+        </div>
+      </div>
+      <div class="tg-cabinet-content">
+        ${isTgConnected ? `
+          <div class="tg-connected-info">
+            <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+              ${(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)
+                ? (typeof t === 'function' ? t('telegram.connected_as', { username: (profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username) }) : `Привязан как @${escapeHtml(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)}`)
+                : (typeof t === 'function' ? t('telegram.connected_id', { chatId: (profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id) }) : `Chat ID: ${(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id)}`)}
+            </p>
+            <div class="tg-toggle-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+              <label class="switch-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="tg-notifications-toggle" ${isTgNotificationsEnabled ? 'checked' : ''} onchange="toggleTelegramNotifications(this.checked)">
+                <span style="font-size:13px">${typeof t === 'function' ? t('telegram.notifications_enabled') : 'Уведомления в Telegram'}</span>
+              </label>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()">
+              ${typeof t === 'function' ? t('telegram.btn_disconnect') : 'Отключить'}
+            </button>
+          </div>
+        ` : `
+          <div class="tg-disconnected-info">
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+              Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
+            </p>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
+              ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
+            </button>
+          </div>
+        `}
       </div>
     </div>
 
@@ -1823,9 +1887,66 @@ async function renderMyCabinet() {
     <div id="cabinet-sim-container">
       ${renderCabinetSimulatorHtml()}
     </div>
+    </div> <!-- #page-my-cabinet -->
   `;
   bindAllNumericInputs(c);
   updateCabinetVipProgressHint();
+}
+
+async function connectUserTelegram() {
+  try {
+    const data = await apiFetch('/api/telegram/bind-token', { method: 'POST' });
+    if (data && data.deepLink) {
+      window.open(data.deepLink, '_blank');
+      showToast(typeof t === 'function' ? t('telegram.open_telegram') : 'Откройте бота в Telegram и нажмите Start', 'info');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка генерации ссылки подключения', 'error');
+  }
+}
+
+async function disconnectUserTelegram() {
+  const msg = typeof t === 'function' ? t('telegram.disconnect_confirm') : 'Вы действительно хотите отключить Telegram-уведомления?';
+  if (!confirm(msg)) return;
+  try {
+    await apiFetch('/api/telegram/bind', { method: 'DELETE' });
+    if (currentUser) {
+      currentUser.telegram_chat_id = null;
+      currentUser.telegramChatId = null;
+      currentUser.telegram_username = null;
+      currentUser.telegramUsername = null;
+    }
+    if (myCabinetProfile && myCabinetProfile.user) {
+      myCabinetProfile.user.telegram_chat_id = null;
+      myCabinetProfile.user.telegramChatId = null;
+      myCabinetProfile.user.telegram_username = null;
+      myCabinetProfile.user.telegramUsername = null;
+    }
+    showToast(typeof t === 'function' ? t('toasts.saved_success') : 'Telegram успешно отключен', 'success');
+    renderMyCabinet();
+  } catch (err) {
+    showToast(err.message || 'Ошибка отключения Telegram', 'error');
+  }
+}
+
+async function toggleTelegramNotifications(enabled) {
+  try {
+    await apiFetch('/api/telegram/notifications', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: Boolean(enabled) })
+    });
+    if (currentUser) {
+      currentUser.telegramNotificationsEnabled = Boolean(enabled);
+      currentUser.telegram_notifications_enabled = enabled ? 1 : 0;
+    }
+    if (myCabinetProfile && myCabinetProfile.user) {
+      myCabinetProfile.user.telegramNotificationsEnabled = Boolean(enabled);
+      myCabinetProfile.user.telegram_notifications_enabled = enabled ? 1 : 0;
+    }
+    showToast(typeof t === 'function' ? t('toasts.saved_success') : 'Настройки уведомлений сохранены', 'success');
+  } catch (err) {
+    showToast(err.message || 'Ошибка обновления настроек', 'error');
+  }
 }
 
 function renderCabinetSimulatorHtml() {
@@ -3767,6 +3888,441 @@ function isEventUpcoming(ev) {
 }
 function isEventPast(ev) { return !isEventActive(ev) && !isEventUpcoming(ev); }
 
+// ─── PAGE: NOTIFICATIONS & TEMPLATES (R4, R5) ────────────────
+let notificationTemplatesCache = [];
+let currentSelectedTemplateKey = 'event_place_assigned';
+let telegramSettingsCache = null;
+
+async function renderNotificationsPage() {
+  const c = document.getElementById('content');
+  if (!c) return;
+
+  const role = currentUser?.rank || state.currentRole || 'r3';
+  if (role !== 'r4' && role !== 'r5' && !canManage()) {
+    navigate('my_cabinet');
+    return;
+  }
+
+  c.innerHTML = `
+    <div id="page-notifications" class="notifications-page-wrap">
+      <div class="section-header">
+        <div class="section-title">💬 ${typeof t === 'function' ? t('telegram.admin_nav_title') : 'Уведомления и шаблоны'}</div>
+        <button class="btn-ghost btn-sm" onclick="renderNotificationsPage()">🔄 Обновить</button>
+      </div>
+      <div id="notifications-page-loading" class="empty-state"><p>${typeof t === 'function' ? t('common.loading') : 'Загрузка...'}</p></div>
+      <div id="notifications-page-content" style="display:none"></div>
+    </div>
+  `;
+
+  try {
+    const [settingsRes, templatesRes] = await Promise.all([
+      apiFetch('/api/telegram/settings').catch(err => {
+        console.warn('Failed to load telegram settings:', err);
+        return null;
+      }),
+      apiFetch('/api/notification-templates').catch(err => {
+        console.warn('Failed to load templates:', err);
+        return [];
+      })
+    ]);
+
+    telegramSettingsCache = settingsRes;
+    notificationTemplatesCache = Array.isArray(templatesRes) ? templatesRes : [];
+
+    const pageContent = document.getElementById('notifications-page-content');
+    const pageLoading = document.getElementById('notifications-page-loading');
+    if (!pageContent) return;
+
+    if (pageLoading) pageLoading.style.display = 'none';
+    pageContent.style.display = 'block';
+
+    const isR5 = role === 'r5';
+    const botTokenVal = (settingsRes && settingsRes.tokenMasked) ? settingsRes.tokenMasked : '';
+    const botUserVal = (settingsRes && settingsRes.botUsername) ? settingsRes.botUsername : '';
+    const staffChatVal = (settingsRes && settingsRes.staffChatId) ? settingsRes.staffChatId : '';
+
+    pageContent.innerHTML = `
+      ${isR5 ? `
+        <!-- Bot Settings (R5) -->
+        <div class="settings-card bot-settings-card" id="bot-settings-block">
+          <div class="settings-card-title">
+            <span style="font-size:18px">⚙️</span>
+            <h3>${typeof t === 'function' ? t('telegram.bot_settings_title') : 'Настройки Telegram-бота'}</h3>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-row form-row-3">
+              <div class="form-group">
+                <label for="tg-setting-token">${typeof t === 'function' ? t('telegram.bot_token') : 'Токен бота (BotFather)'}</label>
+                <input type="password" id="tg-setting-token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" value="${escapeHtml(botTokenVal)}" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-username">${typeof t === 'function' ? t('telegram.bot_username') : 'Имя бота (@username)'}</label>
+                <input type="text" id="tg-setting-username" placeholder="KoWTrackerBot" value="${escapeHtml(botUserVal)}" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-chat-id">${typeof t === 'function' ? t('telegram.staff_chat_id') : 'ID чата штаба'}</label>
+                <input type="text" id="tg-setting-chat-id" placeholder="-1001234567890" value="${escapeHtml(staffChatVal)}" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-actions" style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-tg-settings" onclick="saveTelegramSettings()">
+                ${typeof t === 'function' ? t('telegram.save_settings') : '💾 Сохранить настройки бота'}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-staff-pin" onclick="generateStaffPinCode()">
+                ${typeof t === 'function' ? t('telegram.btn_generate_staff_pin') : '🔑 Сгенерировать код привязки штаба'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Template Editor -->
+      <div class="settings-card template-editor-card" id="template-editor-block" style="margin-top:20px">
+        <div class="settings-card-title">
+          <span style="font-size:18px">📝</span>
+          <h3>${typeof t === 'function' ? t('templates.editor_title') : 'Редактор шаблонов сообщений'}</h3>
+        </div>
+        <div class="settings-card-body">
+          <div class="form-group" style="margin-bottom:16px">
+            <label for="template-event-select">${typeof t === 'function' ? t('templates.select_template') : 'Выберите событие'}</label>
+            <select id="template-event-select" class="form-control" onchange="onSelectNotificationTemplate(this.value)">
+              ${notificationTemplatesCache.map(tpl => {
+                const channelBadge = tpl.channel === 'staff'
+                  ? (typeof t === 'function' ? t('templates.channel_staff') : '[💬 Штаб]')
+                  : (typeof t === 'function' ? t('templates.channel_personal') : '[👤 Личное]');
+                const name = tpl.name || tpl.key;
+                const isSelected = tpl.key === currentSelectedTemplateKey ? 'selected' : '';
+                return `<option value="${escapeHtml(tpl.key)}" ${isSelected}>${channelBadge} ${escapeHtml(name)} (${escapeHtml(tpl.key)})</option>`;
+              }).join('')}
+            </select>
+          </div>
+
+          <!-- Placeholders Palette -->
+          <div class="template-placeholders-wrap" style="margin-bottom:16px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px">
+              ${typeof t === 'function' ? t('templates.available_placeholders') : 'Доступные переменные (кликните для вставки):'}
+            </div>
+            <div class="template-chips-palette" id="template-placeholders-palette"></div>
+          </div>
+
+          <div class="template-editor-columns">
+            <!-- Left: Textarea -->
+            <div class="template-editor-col">
+              <label for="template-editor-textarea" style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block">
+                ${typeof t === 'function' ? t('templates.template_text') : 'Текст шаблона (HTML)'}
+              </label>
+              <textarea id="template-editor-textarea" class="template-textarea" rows="12" oninput="updateTemplateLivePreview()"></textarea>
+            </div>
+
+            <!-- Right: Live Preview in Telegram Style -->
+            <div class="template-preview-col">
+              <label style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block">
+                ${typeof t === 'function' ? t('templates.live_preview') : 'Предпросмотр (стиль Telegram)'}
+              </label>
+              <div class="tg-preview-container" id="template-live-preview-container">
+                <div class="tg-preview-bubble">
+                  <div class="tg-preview-header">
+                    <span class="tg-bot-avatar">🤖</span>
+                    <span class="tg-bot-name" id="tg-preview-bot-name">${escapeHtml(botUserVal || 'KoW Tracker Bot')}</span>
+                    <span class="tg-bot-tag">bot</span>
+                  </div>
+                  <div class="tg-preview-body" id="template-live-preview-body"></div>
+                  <div class="tg-preview-meta">
+                    <span class="tg-preview-time" id="tg-preview-time">12:00</span>
+                    <span class="tg-preview-ticks">✓✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="template-actions" style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+            <button type="button" class="btn btn-primary" id="btn-save-template" onclick="saveCurrentTemplate()">
+              ${typeof t === 'function' ? t('templates.btn_save') : '💾 Сохранить шаблон'}
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-reset-template" onclick="resetCurrentTemplate()">
+              ${typeof t === 'function' ? t('templates.btn_reset') : '↩️ Сбросить к базовому'}
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-test-template" onclick="sendTestTemplateNotification()">
+              ${typeof t === 'function' ? t('templates.btn_test') : '🚀 Отправить тест в Telegram'}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const initialKey = notificationTemplatesCache.some(tpl => tpl.key === currentSelectedTemplateKey)
+      ? currentSelectedTemplateKey
+      : (notificationTemplatesCache[0]?.key || 'event_place_assigned');
+    onSelectNotificationTemplate(initialKey);
+
+  } catch (err) {
+    c.innerHTML = `<div class="empty-state"><p>Ошибка загрузки страницы уведомлений: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function onSelectNotificationTemplate(key) {
+  currentSelectedTemplateKey = key;
+  const select = document.getElementById('template-event-select');
+  if (select && select.value !== key) {
+    select.value = key;
+  }
+
+  const tpl = notificationTemplatesCache.find(t => t.key === key);
+  const textarea = document.getElementById('template-editor-textarea');
+  if (textarea && tpl) {
+    textarea.value = tpl.template || '';
+  }
+
+  const palette = document.getElementById('template-placeholders-palette');
+  if (palette) {
+    const sampleData = (typeof logic !== 'undefined' && logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA)
+      ? logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key]
+      : null;
+    const tags = sampleData ? Object.keys(sampleData) : [];
+    if (tags.length) {
+      palette.innerHTML = tags.map(tag => `
+        <button type="button" class="tag-chip" onclick="insertTemplateTag('{${tag}}')" title="Кликните для вставки {${tag}}">
+          + {${escapeHtml(tag)}}
+        </button>
+      `).join('');
+    } else {
+      palette.innerHTML = `<span style="font-size:12px;color:var(--text3)">Нет доступных переменных</span>`;
+    }
+  }
+
+  updateTemplateLivePreview();
+}
+
+function insertTemplateTag(tag) {
+  if (!tag) return;
+  const formattedTag = tag.startsWith('{') && tag.endsWith('}') ? tag : `{${tag}}`;
+  const textarea = document.getElementById('template-editor-textarea');
+  if (!textarea) return;
+
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  const val = textarea.value;
+
+  textarea.value = val.slice(0, start) + formattedTag + val.slice(end);
+  const newPos = start + formattedTag.length;
+  textarea.selectionStart = newPos;
+  textarea.selectionEnd = newPos;
+  textarea.focus();
+
+  updateTemplateLivePreview();
+}
+
+function sanitizeTelegramHtmlPreview(html) {
+  if (!html || typeof html !== 'string') return '';
+  if (typeof DOMParser === 'undefined') return html;
+  try {
+    const allowedTags = new Set(['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'a', 'code', 'pre', 'blockquote', 'tg-spoiler', 'br', 'span']);
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    function clean(node) {
+      const children = Array.from(node.childNodes);
+      for (const child of children) {
+        if (child.nodeType === 1) {
+          const tagName = child.tagName.toLowerCase();
+          if (!allowedTags.has(tagName)) {
+            const textNode = doc.createTextNode(child.textContent || '');
+            node.replaceChild(textNode, child);
+          } else {
+            const attrs = Array.from(child.attributes);
+            for (const attr of attrs) {
+              if (tagName === 'a' && attr.name.toLowerCase() === 'href') {
+                const val = (attr.value || '').trim().toLowerCase();
+                if (val.startsWith('javascript:') || val.startsWith('data:')) {
+                  child.removeAttribute(attr.name);
+                }
+              } else {
+                child.removeAttribute(attr.name);
+              }
+            }
+            clean(child);
+          }
+        }
+      }
+    }
+    clean(doc.body);
+    return doc.body.innerHTML;
+  } catch (e) {
+    return html;
+  }
+}
+
+function updateTemplateLivePreview() {
+  const textarea = document.getElementById('template-editor-textarea');
+  const previewBody = document.getElementById('template-live-preview-body');
+  const timeEl = document.getElementById('tg-preview-time');
+  if (!previewBody) return;
+
+  const rawText = textarea ? textarea.value : '';
+  const key = currentSelectedTemplateKey;
+  const sampleData = (typeof logic !== 'undefined' && logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA)
+    ? (logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key] || {})
+    : {};
+
+  const rendered = (typeof logic !== 'undefined' && logic.renderTemplate)
+    ? logic.renderTemplate(rawText, sampleData)
+    : rawText;
+
+  previewBody.innerHTML = sanitizeTelegramHtmlPreview(rendered);
+
+  if (timeEl) {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    timeEl.textContent = `${hh}:${mm}`;
+  }
+}
+
+async function saveCurrentTemplate() {
+  const textarea = document.getElementById('template-editor-textarea');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text) {
+    showToast(typeof t === 'function' ? t('templates.empty_text_error') : 'Текст шаблона не может быть пустым', 'error');
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/api/notification-templates/${currentSelectedTemplateKey}`, {
+      method: 'PUT',
+      body: JSON.stringify({ template: textarea.value })
+    });
+    if (res && res.template) {
+      const idx = notificationTemplatesCache.findIndex(t => t.key === currentSelectedTemplateKey);
+      if (idx >= 0) notificationTemplatesCache[idx] = res.template;
+    }
+    showToast(typeof t === 'function' ? t('templates.save_success') : 'Шаблон успешно сохранен', 'success');
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения шаблона', 'error');
+  }
+}
+
+async function resetCurrentTemplate() {
+  const confirmMsg = typeof t === 'function' ? t('templates.reset_confirm') : 'Вы уверены, что хотите сбросить этот шаблон к базовому?';
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch(`/api/notification-templates/${currentSelectedTemplateKey}/reset`, {
+      method: 'POST'
+    });
+    if (res && res.template) {
+      const idx = notificationTemplatesCache.findIndex(t => t.key === currentSelectedTemplateKey);
+      if (idx >= 0) notificationTemplatesCache[idx] = res.template;
+      const textarea = document.getElementById('template-editor-textarea');
+      if (textarea) textarea.value = res.template.template || '';
+      updateTemplateLivePreview();
+    }
+    showToast(typeof t === 'function' ? t('templates.reset_success') : 'Шаблон сброшен к базовому', 'success');
+  } catch (err) {
+    showToast(err.message || 'Ошибка сброса шаблона', 'error');
+  }
+}
+
+async function sendTestTemplateNotification() {
+  const textarea = document.getElementById('template-editor-textarea');
+  const templateText = textarea ? textarea.value : undefined;
+
+  try {
+    const res = await apiFetch(`/api/notification-templates/${currentSelectedTemplateKey}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ template: templateText })
+    });
+    if (res && res.success) {
+      showToast(typeof t === 'function' ? t('templates.test_success') : 'Тестовое сообщение отправлено в Telegram', 'success');
+    } else {
+      showToast(res.error || 'Ошибка отправки тестового сообщения', 'error');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка отправки тестового сообщения', 'error');
+  }
+}
+
+async function generateStaffPinCode() {
+  try {
+    const res = await apiFetch('/api/telegram/staff-bind-token', { method: 'POST' });
+    if (res && res.pin) {
+      const pinEl = document.getElementById('staff-pin-code-text');
+      if (pinEl) pinEl.textContent = res.pin;
+      const modal = document.getElementById('modal-staff-pin');
+      const overlay = document.getElementById('overlay');
+      if (modal) modal.classList.add('open');
+      if (overlay) overlay.classList.add('open');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка генерации PIN-кода', 'error');
+  }
+}
+
+function closeStaffPinModal() {
+  const modal = document.getElementById('modal-staff-pin');
+  const overlay = document.getElementById('overlay');
+  if (modal) modal.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function copyStaffPinCommand() {
+  const pinEl = document.getElementById('staff-pin-code-text');
+  const pin = pinEl ? pinEl.textContent.trim() : '';
+  const cmd = `/connect_staff ${pin}`;
+  const btn = document.getElementById('btn-copy-staff-cmd');
+  const originalText = btn ? btn.textContent : '';
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(cmd);
+    }
+    showToast(typeof t === 'function' ? t('telegram.pin_copied') : 'Команда скопирована в буфер обмена', 'success');
+    if (btn) {
+      btn.textContent = '✅ Скопировано!';
+      setTimeout(() => {
+        if (btn) btn.textContent = originalText;
+      }, 1800);
+    }
+  } catch (err) {
+    showToast(`Команда: ${cmd}`, 'info');
+  }
+}
+
+async function saveTelegramSettings() {
+  const tokenInput = document.getElementById('tg-setting-token');
+  const userInput = document.getElementById('tg-setting-username');
+  const chatInput = document.getElementById('tg-setting-chat-id');
+
+  const payload = {};
+  if (tokenInput && tokenInput.value && !tokenInput.value.includes('***')) {
+    payload.token = tokenInput.value.trim();
+  }
+  if (userInput) {
+    payload.botUsername = userInput.value.trim();
+  }
+  if (chatInput) {
+    payload.staffChatId = chatInput.value.trim();
+  }
+
+  try {
+    const res = await apiFetch('/api/telegram/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+    if (res && res.success) {
+      telegramSettingsCache = res;
+      showToast(typeof t === 'function' ? t('telegram.settings_saved') : 'Настройки бота успешно сохранены', 'success');
+      const botNamePreview = document.getElementById('tg-preview-bot-name');
+      if (botNamePreview && res.botUsername) {
+        botNamePreview.textContent = res.botUsername;
+      }
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения настроек бота', 'error');
+  }
+}
+
 // ─── NAVIGATION ──────────────────────────────────────────────
 let currentPage = 'calendar';
 let pageParams = {};
@@ -3810,7 +4366,8 @@ function navigate(page, params={}) {
     player_detail: typeof t === 'function' ? t('nav.sectors') : 'Сектор',
     calculator: typeof t === 'function' ? t('nav.calculator') : 'Калькулятор и Аналитика',
     pending_registrations: typeof t === 'function' ? t('nav.pending_registrations') : 'Заявки на регистрацию',
-    users: typeof t === 'function' ? t('nav.users_rights') : 'Управление пользователями'
+    users: typeof t === 'function' ? t('nav.users_rights') : 'Управление пользователями',
+    notifications: typeof t === 'function' ? t('telegram.admin_nav_title') : 'Уведомления и шаблоны'
   };
   const titleEl = document.getElementById('page-title');
   if (titleEl) {
@@ -3836,7 +4393,8 @@ function navigate(page, params={}) {
     player_detail: () => renderPlayerDetail(params.id),
     calculator: renderCalculator,
     pending_registrations: renderPendingRegistrations,
-    users: renderUsers
+    users: renderUsers,
+    notifications: renderNotificationsPage
   };
 
   const renderer = pageRenderers[page];
@@ -4576,6 +5134,7 @@ function renderPlayers() {
           ${filteredPlayers.map(p=>{
             const rewards = dailyRewards(p.sector);
             const stock = canSeeStock(p.id) ? `${fmtNum(p.stock.coupons)} куп. · ${fmtNum(p.stock.puzzles)} пазл. · ${fmtNum(p.stock.chests)} сун.` : 'Скрыто';
+            const freshnessBadge = canSeeStock(p.id) ? renderStockFreshnessBadge(p.stockUpdatedAt || p.stock_updated_at) : '';
             const isR5 = (currentUser?.rank || state.currentRole) === 'r5';
             const ownerPermsBtn = (isR5 && p.userId)
               ? ` <button class="btn-perm-edit-inline" title="Настроить права доступа @${escapeHtml(p.username)}" onclick="event.stopPropagation();openUserPermissionsModal(${p.userId})">🛡️</button>`
@@ -4628,9 +5187,13 @@ function renderPlayers() {
                   ` : ''}
                 </div>
               </td>
-              <td style="font-family:var(--mono);font-size:12px">${stock}</td>
+              <td style="font-size:12px">
+                <div style="font-family:var(--mono)">${stock}</div>
+                ${freshnessBadge ? `<div style="margin-top:4px">${freshnessBadge}</div>` : ''}
+              </td>
               <td>
                 <div style="display:flex;gap:4px">
+                  ${canSeeStock(p.id) ? `<button class="action-btn btn-history-trigger" title="${escapeHtml(typeof t === 'function' ? t('audit.btn_history') : 'История склада')}" onclick="event.stopPropagation();openStockHistoryModal(${p.id})">📜</button>` : ''}
                   ${isR5 && p.userId ? `<button class="action-btn" title="Права доступа владельца @${escapeHtml(p.username || '')}" onclick="event.stopPropagation();openUserPermissionsModal(${p.userId})">🛡️</button>` : ''}
                   ${canManage() || state.currentPlayerId === p.id ? `<button class="action-btn" onclick="openPlayerModal(${p.id})">✏️</button>` : ''}
                   ${canManage() ? `<button class="action-btn danger" onclick="confirmDeletePlayer(${p.id})">🗑</button>` : ''}
@@ -4693,8 +5256,16 @@ function renderPlayerDetail(playerId) {
     </div>
     ${stockVisible ? `
       <div class="section-header">
-        <div class="section-title">📦 Запасы сектора</div>
-        ${canEditSector ? `<span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>` : ''}
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="section-title">📦 Запасы сектора</div>
+          ${renderStockFreshnessBadge(p.stockUpdatedAt || p.stock_updated_at)}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" class="btn btn-secondary btn-sm btn-history-trigger" onclick="openStockHistoryModal(${p.id})">
+            📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}
+          </button>
+          ${canEditSector ? `<span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>` : ''}
+        </div>
       </div>
       <div class="stock-grid" id="sector-stock-grid-wrap-${p.id}" style="margin-bottom:20px">
         ${renderSectorStockGridHtml(p, canEditSector)}
@@ -8502,9 +9073,13 @@ async function applyScanResultsToProfile() {
     const confidentialityLevel = myCabinetProfile?.sector?.confidentialityLevel || 0;
     const chests = myCabinetProfile?.stock?.chests || 0;
 
+    const activeSectorId = myCabinetProfile?.id || myCabinetProfile?.activeSectorId;
+    const currentStock = myCabinetProfile?.stock ? { ...myCabinetProfile.stock } : {};
+
     const payload = {
       sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
-      stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
+      stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests },
+      stockUpdateSource: 'ocr_scan'
     };
     if (updateNick && nick) {
       payload.name = nick;
@@ -8519,6 +9094,25 @@ async function applyScanResultsToProfile() {
         method: 'PUT',
         body: payload
       });
+
+      const screenshotBase64 = lastScanResults?.screenshotBase64 ||
+        (typeof smartScanner !== 'undefined' && smartScanner.getLastScreenshotBase64 && smartScanner.getLastScreenshotBase64());
+      if (screenshotBase64 && activeSectorId) {
+        try {
+          await apiFetch(`/api/players/${activeSectorId}/stock-history`, {
+            method: 'POST',
+            body: {
+              source: 'ocr_scan',
+              snapshotBefore: currentStock,
+              snapshotAfter: payload.stock,
+              screenshotBase64
+            }
+          });
+        } catch (histErr) {
+          console.warn('Failed to upload screenshot audit history:', histErr);
+        }
+      }
+
       toast('Данные Smart Scanner успешно применены в профиль!');
       closeSmartScannerModal();
       await renderMyCabinet();
@@ -8545,6 +9139,41 @@ async function applyScanResultsToProfile() {
     if (document.getElementById('fp-stock-legendary-stars-2')) document.getElementById('fp-stock-legendary-stars-2').value = formatInputNumber(legendaryStars2);
     if (document.getElementById('fp-stock-legendary-stars-3')) document.getElementById('fp-stock-legendary-stars-3').value = formatInputNumber(legendaryStars3);
     updatePlayerModalStarPoints();
+
+    const screenshotBase64 = lastScanResults?.screenshotBase64 ||
+      (typeof smartScanner !== 'undefined' && smartScanner.getLastScreenshotBase64 && smartScanner.getLastScreenshotBase64());
+    if (screenshotBase64 && editPlayerId) {
+      const p = getPlayer(editPlayerId);
+      const oldStock = p ? { ...p.stock } : {};
+      const newStock = {
+        coupons,
+        puzzles,
+        starCoupons,
+        legendaryStars1,
+        legendaryStars2,
+        legendaryStars3,
+        chests: p?.stock?.chests || 0
+      };
+      try {
+        await apiFetch(`/api/players/${editPlayerId}/stock-history`, {
+          method: 'POST',
+          body: {
+            source: 'ocr_scan',
+            snapshotBefore: oldStock,
+            snapshotAfter: newStock,
+            screenshotBase64
+          }
+        });
+        if (p) {
+          p.stock = newStock;
+          p.stockUpdatedAt = new Date().toISOString();
+          p.stockUpdateSource = 'ocr_scan';
+        }
+      } catch (histErr) {
+        console.warn('Failed to record stock history:', histErr);
+      }
+    }
+
     toast('Данные Smart Scanner перенесены в карточку игрока!');
     closeSmartScannerModal();
   }
@@ -8636,6 +9265,264 @@ function initSmartScanner() {
     window.__scannerPasteInitialized = true;
     window.addEventListener('paste', handleScannerGlobalPaste);
   }
+}
+
+/* ── MODULE 3: STOCK AUDIT, FRESHNESS & SCREENSHOT ZOOM ── */
+
+function renderStockFreshnessBadge(updatedAt) {
+  const getFn = (typeof logic !== 'undefined' && logic.getStockFreshness)
+    ? logic.getStockFreshness
+    : (typeof getStockFreshness === 'function' ? getStockFreshness : null);
+  const info = getFn ? getFn(updatedAt) : { status: 'unknown', days: null, label: 'нет данных' };
+
+  let icon = '•';
+  let titleKey = 'audit.freshness_stale';
+  if (info.status === 'fresh') {
+    icon = '✓';
+    titleKey = 'audit.freshness_fresh';
+  } else if (info.status === 'warning') {
+    icon = '⏳';
+    titleKey = 'audit.freshness_warning';
+  } else if (info.status === 'stale') {
+    icon = '⚠️';
+    titleKey = 'audit.freshness_stale';
+  }
+
+  const titleText = (typeof t === 'function' ? t(titleKey) : titleKey);
+  const statusClass = `freshness-${info.status}`;
+
+  let labelText = info.label;
+  if (info.days === 0) {
+    labelText = (typeof t === 'function' ? t('audit.today') : 'сегодня');
+  } else if (info.days !== null && info.days !== undefined) {
+    labelText = (typeof t === 'function' ? t('audit.days_ago', { days: info.days }) : `${info.days} дн. назад`);
+  } else {
+    labelText = (typeof t === 'function' ? t('audit.no_data') : 'нет данных');
+  }
+
+  return `<span class="freshness-badge ${statusClass}" title="${escapeHtml(titleText)}"><span class="freshness-dot"></span>${icon} ${escapeHtml(labelText)}</span>`;
+}
+
+let currentHistoryPlayerId = null;
+
+async function openStockHistoryModal(playerId) {
+  currentHistoryPlayerId = playerId;
+  const p = getPlayer(playerId) || (myCabinetProfile && myCabinetProfile.id === playerId ? myCabinetProfile : null);
+  const sectorName = p ? p.name : `ID ${playerId}`;
+
+  const titleEl = document.getElementById('modal-stock-history-title');
+  if (titleEl) {
+    const baseTitle = (typeof t === 'function' ? t('audit.history_title') : 'История изменений склада');
+    titleEl.textContent = `${baseTitle}: ${sectorName}`;
+  }
+
+  const loadingEl = document.getElementById('stock-history-loading');
+  const listEl = document.getElementById('stock-history-list');
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (listEl) listEl.innerHTML = '';
+
+  openModal('modal-stock-history');
+
+  try {
+    const data = await apiFetch(`/api/players/${playerId}/stock-history`);
+    if (loadingEl) loadingEl.style.display = 'none';
+
+    const records = (data && Array.isArray(data.records)) ? data.records : [];
+    if (!listEl) return;
+
+    if (!records.length) {
+      const emptyText = (typeof t === 'function' ? t('audit.empty_history') : 'История изменений пока пуста');
+      listEl.innerHTML = `<div class="history-empty">📜 ${escapeHtml(emptyText)}</div>`;
+      return;
+    }
+
+    const calcDiffFn = (typeof logic !== 'undefined' && logic.calculateStockDiff)
+      ? logic.calculateStockDiff
+      : (typeof calculateStockDiff === 'function' ? calculateStockDiff : null);
+
+    const cardsHtml = records.map(r => {
+      let timeStr = r.createdAt || '';
+      try {
+        const d = new Date(r.createdAt);
+        if (!isNaN(d.getTime())) {
+          timeStr = d.toLocaleString();
+        }
+      } catch (_) {}
+
+      const authorText = r.authorUsername
+        ? `@${r.authorUsername}`
+        : (typeof t === 'function' ? t('audit.unknown_author') : 'Владелец сектора');
+
+      const isOcr = r.source === 'ocr_scan';
+      const sourceLabel = isOcr
+        ? `📸 ${typeof t === 'function' ? t('audit.source_ocr') : 'Скриншот (OCR)'}`
+        : `✏️ ${typeof t === 'function' ? t('audit.source_manual') : 'Ручная правка'}`;
+      const sourceClass = isOcr ? 'source-ocr' : 'source-manual';
+
+      let chipsHtml = '';
+      if (calcDiffFn && (r.snapshotBefore || r.snapshotAfter)) {
+        const diffRes = calcDiffFn(r.snapshotBefore || {}, r.snapshotAfter || {});
+        if (diffRes.chips && diffRes.chips.length > 0) {
+          chipsHtml = diffRes.chips.map(c => {
+            return `<span class="diff-chip ${c.type}">${escapeHtml(c.formatted)}</span>`;
+          }).join('');
+        }
+      }
+      if (!chipsHtml) {
+        const summaryText = r.diffSummary || (typeof t === 'function' ? t('audit.empty_history') : 'Без изменений');
+        chipsHtml = `<span class="diff-chip neutral">${escapeHtml(summaryText)}</span>`;
+      }
+
+      let screenshotHtml = '';
+      if (r.screenshotPath) {
+        const filename = r.screenshotPath.split('/').pop();
+        const screenshotUrl = `/api/screenshots/${encodeURIComponent(filename)}`;
+        const viewText = typeof t === 'function' ? t('audit.view_screenshot') : 'Посмотреть скриншот';
+        screenshotHtml = `
+          <div class="history-thumb-container">
+            <img class="history-thumb" src="${screenshotUrl}" alt="Screenshot" onclick="openScreenshotZoom('${screenshotUrl}')" title="${escapeHtml(viewText)}">
+            <a href="javascript:void(0)" class="history-thumb-label" onclick="openScreenshotZoom('${screenshotUrl}')">🔍 ${escapeHtml(viewText)}</a>
+          </div>
+        `;
+      } else if (isOcr) {
+        const archiveNotice = typeof t === 'function' ? t('audit.archived_screenshot_notice') : 'Архив: скриншот удален по истечении 30 дней';
+        screenshotHtml = `<div class="history-archived-note">📁 ${escapeHtml(archiveNotice)}</div>`;
+      }
+
+      return `
+        <div class="history-card">
+          <div class="history-card-header">
+            <div class="history-card-meta">
+              <span class="history-author">👤 ${escapeHtml(authorText)}</span>
+              <span class="history-time">🕒 ${escapeHtml(timeStr)}</span>
+            </div>
+            <span class="history-source-badge ${sourceClass}">${escapeHtml(sourceLabel)}</span>
+          </div>
+          <div class="history-card-body">
+            <div class="diff-chips">${chipsHtml}</div>
+            ${screenshotHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listEl.innerHTML = cardsHtml;
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (listEl) {
+      listEl.innerHTML = `<div class="history-empty" style="color:var(--red)">Ошибка загрузки истории: ${escapeHtml(err.message)}</div>`;
+    }
+    toast('Ошибка загрузки истории склада: ' + err.message, 'error');
+  }
+}
+
+function closeStockHistoryModal() {
+  closeModal('modal-stock-history');
+}
+
+let currentZoomScale = 1.0;
+let currentZoomUrl = '';
+let zoomPanX = 0;
+let zoomPanY = 0;
+let isZoomPanning = false;
+let startPanX = 0;
+let startPanY = 0;
+
+function openScreenshotZoom(url) {
+  if (!url) return;
+  currentZoomUrl = url;
+  currentZoomScale = 1.0;
+  zoomPanX = 0;
+  zoomPanY = 0;
+
+  const img = document.getElementById('zoom-screenshot-img');
+  if (img) {
+    img.src = url;
+    applyZoomTransform();
+    initZoomPanHandlers();
+  }
+
+  const resetBtn = document.getElementById('btn-zoom-reset');
+  if (resetBtn) resetBtn.textContent = '100%';
+
+  const infoEl = document.getElementById('zoom-screenshot-info');
+  if (infoEl) {
+    const filename = url.split('/').pop();
+    infoEl.textContent = filename ? decodeURIComponent(filename) : '';
+  }
+
+  openModal('modal-screenshot-zoom');
+}
+
+function closeScreenshotZoom() {
+  closeModal('modal-screenshot-zoom');
+}
+
+function zoomIn() {
+  currentZoomScale = Math.min(4.0, Math.round((currentZoomScale + 0.25) * 100) / 100);
+  applyZoomTransform();
+}
+
+function zoomOut() {
+  currentZoomScale = Math.max(0.5, Math.round((currentZoomScale - 0.25) * 100) / 100);
+  if (currentZoomScale <= 1.0) {
+    zoomPanX = 0;
+    zoomPanY = 0;
+  }
+  applyZoomTransform();
+}
+
+function resetZoom() {
+  currentZoomScale = 1.0;
+  zoomPanX = 0;
+  zoomPanY = 0;
+  applyZoomTransform();
+}
+
+function applyZoomTransform() {
+  const img = document.getElementById('zoom-screenshot-img');
+  if (img) {
+    img.style.transform = `translate(${zoomPanX}px, ${zoomPanY}px) scale(${currentZoomScale})`;
+    img.style.cursor = currentZoomScale > 1.0 ? (isZoomPanning ? 'grabbing' : 'grab') : 'default';
+  }
+  const resetBtn = document.getElementById('btn-zoom-reset');
+  if (resetBtn) {
+    resetBtn.textContent = `${Math.round(currentZoomScale * 100)}%`;
+  }
+}
+
+let zoomPanInitialized = false;
+function initZoomPanHandlers() {
+  if (zoomPanInitialized) return;
+  const wrapper = document.getElementById('zoom-img-wrapper') || document.getElementById('zoom-screenshot-img');
+  if (!wrapper) return;
+  zoomPanInitialized = true;
+
+  wrapper.addEventListener('pointerdown', (e) => {
+    if (currentZoomScale <= 1.0) return;
+    isZoomPanning = true;
+    startPanX = e.clientX - zoomPanX;
+    startPanY = e.clientY - zoomPanY;
+    applyZoomTransform();
+    wrapper.setPointerCapture?.(e.pointerId);
+  });
+
+  wrapper.addEventListener('pointermove', (e) => {
+    if (!isZoomPanning || currentZoomScale <= 1.0) return;
+    zoomPanX = e.clientX - startPanX;
+    zoomPanY = e.clientY - startPanY;
+    applyZoomTransform();
+  });
+
+  const stopPan = (e) => {
+    if (!isZoomPanning) return;
+    isZoomPanning = false;
+    applyZoomTransform();
+    wrapper.releasePointerCapture?.(e.pointerId);
+  };
+
+  wrapper.addEventListener('pointerup', stopPan);
+  wrapper.addEventListener('pointercancel', stopPan);
 }
 
 function updateSidebarVersion(ver) {
@@ -8828,4 +9715,28 @@ if (typeof window !== 'undefined') {
   window.toggleLangDropdown = toggleLangDropdown;
   window.changeAppLanguage = changeAppLanguage;
   window.updateLangSwitcherUI = updateLangSwitcherUI;
+
+  window.renderStockFreshnessBadge = renderStockFreshnessBadge;
+  window.openStockHistoryModal = openStockHistoryModal;
+  window.closeStockHistoryModal = closeStockHistoryModal;
+  window.openScreenshotZoom = openScreenshotZoom;
+  window.closeScreenshotZoom = closeScreenshotZoom;
+  window.zoomIn = zoomIn;
+  window.zoomOut = zoomOut;
+  window.resetZoom = resetZoom;
+
+  window.connectUserTelegram = connectUserTelegram;
+  window.disconnectUserTelegram = disconnectUserTelegram;
+  window.toggleTelegramNotifications = toggleTelegramNotifications;
+  window.renderNotificationsPage = renderNotificationsPage;
+  window.onSelectNotificationTemplate = onSelectNotificationTemplate;
+  window.insertTemplateTag = insertTemplateTag;
+  window.updateTemplateLivePreview = updateTemplateLivePreview;
+  window.saveCurrentTemplate = saveCurrentTemplate;
+  window.resetCurrentTemplate = resetCurrentTemplate;
+  window.sendTestTemplateNotification = sendTestTemplateNotification;
+  window.generateStaffPinCode = generateStaffPinCode;
+  window.closeStaffPinModal = closeStaffPinModal;
+  window.copyStaffPinCommand = copyStaffPinCommand;
+  window.saveTelegramSettings = saveTelegramSettings;
 }

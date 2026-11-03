@@ -260,6 +260,93 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('audit dictionary provides freshness, history, and source translations across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('audit.freshness_fresh'), 'Свежие данные');
+    assert.equal(t('audit.freshness_warning'), 'Требует обновления');
+    assert.equal(t('audit.freshness_stale'), 'Склад устарел');
+    assert.equal(t('audit.history_title'), 'История изменений склада');
+    assert.equal(t('audit.source_manual'), 'Ручная правка');
+    assert.equal(t('audit.source_ocr'), 'Скриншот (OCR)');
+    assert.equal(t('audit.archived_screenshot_notice'), 'Архив: скриншот удален по истечении 30 дней');
+    assert.equal(t('audit.view_screenshot'), 'Посмотреть скриншот');
+    assert.equal(t('audit.btn_history'), 'История склада');
+    assert.equal(t('audit.empty_history'), 'История изменений пока пуста');
+    assert.equal(t('audit.zoom_title'), 'Оригинальный скриншот');
+
+    await setAppLanguage('en');
+    assert.equal(t('audit.freshness_fresh'), 'Fresh data');
+    assert.equal(t('audit.freshness_warning'), 'Needs update');
+    assert.equal(t('audit.freshness_stale'), 'Stock is stale');
+    assert.equal(t('audit.history_title'), 'Warehouse Audit History');
+    assert.equal(t('audit.source_manual'), 'Manual edit');
+    assert.equal(t('audit.source_ocr'), 'Screenshot (OCR)');
+    assert.equal(t('audit.archived_screenshot_notice'), 'Archive: screenshot removed after 30 days');
+    assert.equal(t('audit.view_screenshot'), 'View screenshot');
+    assert.equal(t('audit.btn_history'), 'Stock History');
+    assert.equal(t('audit.empty_history'), 'No history recorded yet');
+    assert.equal(t('audit.zoom_title'), 'Original Screenshot');
+
+    await setAppLanguage('de');
+    assert.equal(t('audit.freshness_fresh'), 'Aktuelle Daten');
+    assert.equal(t('audit.freshness_warning'), 'Aktualisierung erforderlich');
+    assert.equal(t('audit.freshness_stale'), 'Lager veraltet');
+    assert.equal(t('audit.history_title'), 'Lager-Änderungsverlauf');
+    assert.equal(t('audit.source_manual'), 'Manuelle Bearbeitung');
+    assert.equal(t('audit.source_ocr'), 'Screenshot (OCR)');
+    assert.equal(t('audit.archived_screenshot_notice'), 'Archiv: Screenshot nach 30 Tagen gelöscht');
+    assert.equal(t('audit.view_screenshot'), 'Screenshot ansehen');
+    assert.equal(t('audit.btn_history'), 'Lager-Verlauf');
+    assert.equal(t('audit.empty_history'), 'Noch kein Änderungsverlauf vorhanden');
+    assert.equal(t('audit.zoom_title'), 'Original-Screenshot');
+
+    await setAppLanguage('ru');
+  });
+
+  await test('telegram and templates dictionaries provide required keys across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('telegram.card_title'), 'Интеграция с Telegram');
+    assert.equal(t('telegram.status_connected'), 'Подключен');
+    assert.equal(t('telegram.status_not_connected'), 'Не привязан');
+    assert.equal(t('telegram.btn_connect'), '📱 Подключить Telegram');
+    assert.equal(t('telegram.btn_disconnect'), 'Отключить');
+    assert.equal(t('telegram.notifications_enabled'), 'Уведомления в Telegram');
+    assert.equal(t('telegram.admin_nav_title'), 'Уведомления и шаблоны');
+    assert.equal(t('telegram.bot_settings_title'), 'Настройки Telegram-бота');
+    assert.equal(t('telegram.bot_token'), 'Токен бота (BotFather)');
+    assert.equal(t('telegram.staff_chat_id'), 'ID чата штаба');
+    assert.equal(t('telegram.btn_generate_staff_pin'), '🔑 Сгенерировать код привязки штаба');
+    assert.equal(t('telegram.staff_pin_modal_title'), 'Код привязки чата штаба');
+    assert.equal(t('telegram.staff_pin_hint'), 'Добавьте бота в чат штаба и отправьте команду:');
+    assert.equal(t('templates.editor_title'), 'Редактор шаблонов сообщений');
+    assert.equal(t('templates.select_template'), 'Выберите событие');
+    assert.equal(t('templates.available_placeholders'), 'Доступные переменные (кликните для вставки)');
+    assert.equal(t('templates.template_text'), 'Текст шаблона (HTML)');
+    assert.equal(t('templates.live_preview'), 'Предпросмотр (стиль Telegram)');
+    assert.equal(t('templates.btn_save'), '💾 Сохранить шаблон');
+    assert.equal(t('templates.btn_reset'), '↩️ Сбросить к базовому');
+    assert.equal(t('templates.btn_test'), '🚀 Отправить тест в Telegram');
+    assert.equal(t('templates.save_success'), 'Шаблон успешно сохранен');
+    assert.equal(t('templates.reset_success'), 'Шаблон сброшен к базовому');
+    assert.equal(t('templates.test_success'), 'Тестовое сообщение отправлено в Telegram');
+
+    await setAppLanguage('en');
+    assert.equal(t('telegram.card_title'), 'Telegram Integration');
+    assert.equal(t('telegram.status_connected'), 'Connected');
+    assert.equal(t('telegram.btn_connect'), '📱 Connect Telegram');
+    assert.equal(t('templates.editor_title'), 'Notification Template Editor');
+    assert.equal(t('templates.btn_save'), '💾 Save Template');
+
+    await setAppLanguage('de');
+    assert.equal(t('telegram.card_title'), 'Telegram-Integration');
+    assert.equal(t('telegram.status_connected'), 'Verbunden');
+    assert.equal(t('telegram.btn_connect'), '📱 Telegram verbinden');
+    assert.equal(t('templates.editor_title'), 'Benachrichtigungsvorlagen-Editor');
+    assert.equal(t('templates.btn_save'), '💾 Vorlage speichern');
+
+    await setAppLanguage('ru');
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);

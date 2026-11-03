@@ -19,6 +19,87 @@
   let tesseractLoadingPromise = null;
   let activeWorkerInstance = null;
   let workerInitializationPromise = null;
+  let lastScreenshotBase64 = null;
+
+  /**
+   * Сжатие Canvas или файла изображения в WebP/JPEG base64 (качество quality = 0.85)
+   * @param {HTMLCanvasElement|File|Blob|string} fileOrCanvas
+   * @param {number} [quality=0.85]
+   * @param {number} [maxDimension=1920]
+   * @returns {Promise<string|null>} Data URL base64
+   */
+  async function compressScreenshot(fileOrCanvas, quality = 0.85, maxDimension = 1920) {
+    if (!fileOrCanvas) return null;
+
+    if (typeof fileOrCanvas === 'string' && fileOrCanvas.startsWith('data:image/')) {
+      return fileOrCanvas;
+    }
+
+    if (typeof document === 'undefined' && typeof window === 'undefined') {
+      if (fileOrCanvas && typeof fileOrCanvas.toDataURL === 'function') {
+        return fileOrCanvas.toDataURL('image/jpeg', quality);
+      }
+      return 'data:image/jpeg;base64,' + (Buffer.isBuffer(fileOrCanvas) ? fileOrCanvas.toString('base64') : '');
+    }
+
+    let sourceCanvas = null;
+
+    if (typeof HTMLCanvasElement !== 'undefined' && fileOrCanvas instanceof HTMLCanvasElement) {
+      sourceCanvas = fileOrCanvas;
+    } else if (fileOrCanvas && fileOrCanvas.getContext && typeof fileOrCanvas.toDataURL === 'function') {
+      sourceCanvas = fileOrCanvas;
+    } else if ((typeof Blob !== 'undefined' && fileOrCanvas instanceof Blob) || (typeof File !== 'undefined' && fileOrCanvas instanceof File)) {
+      sourceCanvas = await new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(fileOrCanvas);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          let w = img.naturalWidth || img.width;
+          let h = img.naturalHeight || img.height;
+          if (maxDimension && (w > maxDimension || h > maxDimension)) {
+            if (w > h) {
+              h = Math.round((h * maxDimension) / w);
+              w = maxDimension;
+            } else {
+              w = Math.round((w * maxDimension) / h);
+              h = maxDimension;
+            }
+          }
+          const c = document.createElement('canvas');
+          c.width = w;
+          c.height = h;
+          const ctx = c.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+          }
+          resolve(c);
+        };
+        img.onerror = (err) => {
+          URL.revokeObjectURL(url);
+          reject(err);
+        };
+        img.src = url;
+      });
+    }
+
+    if (!sourceCanvas) return null;
+
+    let dataUrl = null;
+    try {
+      dataUrl = sourceCanvas.toDataURL('image/webp', quality);
+      if (!dataUrl || !dataUrl.startsWith('data:image/webp')) {
+        dataUrl = sourceCanvas.toDataURL('image/jpeg', quality);
+      }
+    } catch (_) {
+      try {
+        dataUrl = sourceCanvas.toDataURL('image/jpeg', quality);
+      } catch (err) {
+        console.warn('Canvas toDataURL failed:', err);
+      }
+    }
+
+    return dataUrl;
+  }
 
   /**
    * Разрешение модуля бизнес-логики (logic.js)
@@ -410,6 +491,8 @@
     const rawTexts = [];
     let accumulated = { sector: {}, stock: {} };
     let processedCount = 0;
+    let primaryScreenshotCanvas = null;
+    let primaryScreenshotFile = null;
 
     if (total === 0) {
       return {
@@ -534,6 +617,10 @@
       };
 
       accumulated = logic.mergeScanResults(accumulated, currentScan);
+      if (!primaryScreenshotCanvas || isActualWarehouse) {
+        primaryScreenshotCanvas = preprocessedCanvas;
+        primaryScreenshotFile = file;
+      }
       processedCount++;
     }
 
@@ -544,6 +631,18 @@
     const finalSector = accumulated.sector || {};
     const finalStock = accumulated.stock || {};
     const totalStarPoints = logic.calculateTotalStarPoints(finalStock);
+
+    let screenshotBase64 = null;
+    try {
+      if (primaryScreenshotFile && typeof Blob !== 'undefined' && (primaryScreenshotFile instanceof Blob || (typeof File !== 'undefined' && primaryScreenshotFile instanceof File))) {
+        screenshotBase64 = await compressScreenshot(primaryScreenshotFile, 0.85);
+      } else if (primaryScreenshotCanvas) {
+        screenshotBase64 = await compressScreenshot(primaryScreenshotCanvas, 0.85);
+      }
+    } catch (e) {
+      console.warn('Screenshot compression error:', e);
+    }
+    lastScreenshotBase64 = screenshotBase64;
 
     reportProgress({
       current: total,
@@ -560,6 +659,7 @@
       totalStarPoints,
       imagesProcessed: processedCount,
       rawTexts,
+      screenshotBase64,
     };
   }
 
@@ -704,6 +804,10 @@
     getOcrWorker,
     terminateWorker,
     resolveLogic,
+    compressScreenshot,
+    compressImageToBase64: compressScreenshot,
+    getLastScreenshotBase64: () => lastScreenshotBase64,
+    setLastScreenshotBase64: (val) => { lastScreenshotBase64 = val; },
   };
 
   return smartScanner;

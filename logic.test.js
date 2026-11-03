@@ -54,6 +54,11 @@ const {
   applyPermissionPreset,
   extractSectorCalendarEvents,
   simulateCalendarEventProgress,
+  calculateStockDiff,
+  getStockFreshness,
+  DEFAULT_NOTIFICATION_TEMPLATES,
+  NOTIFICATION_TEMPLATE_SAMPLE_DATA,
+  renderTemplate,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -2479,4 +2484,173 @@ test('simulateCalendarEventProgress handles zero deficit and empty calendar even
   assert.equal(emptyEvents.timeline.length, 1);
   assert.equal(emptyEvents.timeline[0].type, 'finish');
   assert.equal(emptyEvents.timeline[0].date, '2026-11-08');
+});
+
+test('calculateStockDiff calculates diff chips and human-readable summary', () => {
+  const before = { coupons: 1000, puzzles: 50, legendaryStars2: 1 };
+  const after = { coupons: 1500, puzzles: 40, legendaryStars2: 3 };
+
+  const diff = calculateStockDiff(before, after);
+  assert.equal(diff.summary, '+500 куп., -10 пазл., +2★ II');
+  assert.equal(diff.chips.length, 3);
+
+  assert.deepEqual(diff.chips[0], {
+    key: 'coupons',
+    label: 'куп.',
+    diff: 500,
+    formatted: '+500 куп.',
+    type: 'positive',
+  });
+  assert.deepEqual(diff.chips[1], {
+    key: 'puzzles',
+    label: 'пазл.',
+    diff: -10,
+    formatted: '-10 пазл.',
+    type: 'negative',
+  });
+  assert.deepEqual(diff.chips[2], {
+    key: 'legendaryStars2',
+    label: '★ II',
+    diff: 2,
+    formatted: '+2★ II',
+    type: 'positive',
+  });
+});
+
+test('calculateStockDiff returns "Без изменений" and empty chips when stocks are identical or empty', () => {
+  const unchanged = calculateStockDiff({ coupons: 100, puzzles: 50 }, { coupons: 100, puzzles: 50 });
+  assert.equal(unchanged.summary, 'Без изменений');
+  assert.equal(unchanged.chips.length, 0);
+
+  const empty = calculateStockDiff(null, undefined);
+  assert.equal(empty.summary, 'Без изменений');
+  assert.equal(empty.chips.length, 0);
+});
+
+test('calculateStockDiff handles all 7 inventory fields correctly', () => {
+  const before = {
+    coupons: 100,
+    puzzles: 20,
+    starCoupons: 300,
+    legendaryStars1: 5,
+    legendaryStars2: 4,
+    legendaryStars3: 3,
+    chests: 10,
+  };
+  const after = {
+    coupons: 150,
+    puzzles: 15,
+    starCoupons: 350,
+    legendaryStars1: 2,
+    legendaryStars2: 4, // no change
+    legendaryStars3: 5,
+    chests: 8,
+  };
+
+  const diff = calculateStockDiff(before, after);
+  assert.equal(diff.summary, '+50 куп., -5 пазл., +50 зв. куп., -3★ I, +2★ III, -2 сун.');
+  assert.equal(diff.chips.length, 6);
+  assert.equal(diff.chips.find(c => c.key === 'legendaryStars2'), undefined);
+});
+
+test('getStockFreshness computes status, days elapsed and label', () => {
+  const now = new Date('2026-11-03T12:00:00Z');
+
+  // null / empty / invalid
+  assert.deepEqual(getStockFreshness(null, now), { status: 'unknown', days: null, label: 'нет данных' });
+  assert.deepEqual(getStockFreshness('', now), { status: 'unknown', days: null, label: 'нет данных' });
+  assert.deepEqual(getStockFreshness('invalid-date', now), { status: 'unknown', days: null, label: 'нет данных' });
+
+  // today (0 days)
+  const today = getStockFreshness('2026-11-03T08:00:00Z', now);
+  assert.equal(today.status, 'fresh');
+  assert.equal(today.days, 0);
+  assert.equal(today.label, 'сегодня');
+
+  // 3 days ago (<= 7 -> fresh)
+  const threeDays = getStockFreshness('2026-10-31T12:00:00Z', now);
+  assert.equal(threeDays.status, 'fresh');
+  assert.equal(threeDays.days, 3);
+  assert.equal(threeDays.label, '3 дн. назад');
+
+  // exactly 7 days ago (<= 7 -> fresh)
+  const sevenDays = getStockFreshness('2026-10-27T12:00:00Z', now);
+  assert.equal(sevenDays.status, 'fresh');
+  assert.equal(sevenDays.days, 7);
+  assert.equal(sevenDays.label, '7 дн. назад');
+
+  // 10 days ago (7-14 -> warning)
+  const tenDays = getStockFreshness('2026-10-24T12:00:00Z', now);
+  assert.equal(tenDays.status, 'warning');
+  assert.equal(tenDays.days, 10);
+  assert.equal(tenDays.label, '10 дн. назад');
+
+  // 14 days ago (7-14 -> warning)
+  const fourteenDays = getStockFreshness('2026-10-20T12:00:00Z', now);
+  assert.equal(fourteenDays.status, 'warning');
+  assert.equal(fourteenDays.days, 14);
+  assert.equal(fourteenDays.label, '14 дн. назад');
+
+  // 22 days ago (> 14 -> stale)
+  const stale = getStockFreshness('2026-10-12T12:00:00Z', now);
+  assert.equal(stale.status, 'stale');
+  assert.equal(stale.days, 22);
+  assert.equal(stale.label, '22 дн. назад');
+});
+
+test('DEFAULT_NOTIFICATION_TEMPLATES contains all 7 baseline templates with valid metadata', () => {
+  assert.ok(DEFAULT_NOTIFICATION_TEMPLATES, 'DEFAULT_NOTIFICATION_TEMPLATES must exist');
+  const expectedKeys = [
+    'event_place_assigned',
+    'event_registration_opened',
+    'stock_reminder_personal',
+    'staff_new_user_pending',
+    'staff_event_deadline_24h',
+    'staff_event_autopick_summary',
+    'staff_stale_stocks_alert'
+  ];
+
+  for (const key of expectedKeys) {
+    const item = DEFAULT_NOTIFICATION_TEMPLATES[key];
+    assert.ok(item, `Template ${key} should exist`);
+    assert.equal(item.key, key);
+    assert.ok(item.title && typeof item.title === 'string', `${key} must have a title`);
+    assert.ok(['personal', 'staff'].includes(item.channel), `${key} channel must be personal or staff`);
+    assert.equal(item.parseMode, 'HTML');
+    assert.ok(Array.isArray(item.placeholders) && item.placeholders.length > 0, `${key} must have placeholders`);
+    assert.ok(typeof item.template === 'string' && item.template.length > 20, `${key} must have template text`);
+  }
+});
+
+test('renderTemplate safely replaces tokens, preserves HTML, and handles missing data without undefined', () => {
+  const sample = 'Привет, <b>{username}</b>! Ваш сектор <i>{sectorName}</i> занял #{place}. Ссылка: <a href="{link}">Перейти</a> {missing}';
+  const rendered = renderTemplate(sample, {
+    username: 'Alice',
+    sectorName: 'Sector 42',
+    place: 1,
+    link: 'https://kow.example.com'
+  });
+
+  assert.equal(
+    rendered,
+    'Привет, <b>Alice</b>! Ваш сектор <i>Sector 42</i> занял #1. Ссылка: <a href="https://kow.example.com">Перейти</a> '
+  );
+  assert.ok(!rendered.includes('undefined'), 'Should never contain "undefined"');
+  assert.ok(!rendered.includes('{missing}'), 'Missing placeholder should be replaced by empty string');
+
+  // Edge cases
+  assert.equal(renderTemplate('', { a: 1 }), '');
+  assert.equal(renderTemplate(null, { a: 1 }), '');
+  assert.equal(renderTemplate(undefined, {}), '');
+  assert.equal(renderTemplate('Простой текст без тегов', {}), 'Простой текст без тегов');
+
+  // Verify all 7 templates with sample data
+  for (const [key, item] of Object.entries(DEFAULT_NOTIFICATION_TEMPLATES)) {
+    const sampleData = NOTIFICATION_TEMPLATE_SAMPLE_DATA[key];
+    assert.ok(sampleData, `Sample data must exist for ${key}`);
+    const out = renderTemplate(item.template, sampleData);
+    assert.ok(out.length > 0, `Rendered text for ${key} should not be empty`);
+    assert.ok(!out.includes('undefined'), `Rendered ${key} should not contain undefined`);
+    assert.ok(!/\{[a-zA-Z0-9_]+\}/.test(out), `Rendered ${key} should not have any remaining unrendered placeholders: ${out}`);
+  }
 });

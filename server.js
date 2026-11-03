@@ -1,10 +1,12 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const db = require('./db.js');
 const logic = require('./logic.js');
 const s3 = require('./s3.js');
+const telegram = require('./telegram.js');
 
 let APP_VERSION = '3.21.0';
 try {
@@ -238,6 +240,194 @@ function maskPlayerStockIfNeeded(player, user) {
   };
 }
 
+function getAppBaseUrl(req = null) {
+  const settingUrl = db.getAppSetting('app_base_url');
+  if (settingUrl) return settingUrl.replace(/\/+$/, '');
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    return `${proto}://${req.headers.host}`;
+  }
+  return 'http://localhost:3000';
+}
+
+async function dispatchNotification(eventKey, data = {}, options = {}) {
+  try {
+    const template = db.getNotificationTemplate(eventKey);
+    if (!template) {
+      console.warn(`[Notification] Template "${eventKey}" not found`);
+      return { sent: false, reason: 'template_not_found' };
+    }
+
+    const token = db.getAppSetting('telegram_bot_token');
+    if (!token) {
+      return { sent: false, reason: 'no_bot_token' };
+    }
+
+    const renderedText = logic.renderTemplate(template.template, data);
+    const parseMode = template.parse_mode || 'HTML';
+    const replyMarkup = options.replyMarkup || undefined;
+
+    if (template.channel === 'staff') {
+      let staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      if (!staffChatId) {
+        return { sent: false, reason: 'no_staff_chat_id' };
+      }
+      if (staffChatId && !isNaN(Number(staffChatId))) {
+        staffChatId = Number(staffChatId);
+      }
+      const res = await telegram.sendTelegramMessage({
+        token,
+        chatId: staffChatId,
+        text: renderedText,
+        parseMode,
+        replyMarkup
+      });
+      return { sent: res.ok, result: res };
+    }
+
+    if (template.channel === 'personal') {
+      if (options.userId) {
+        const user = db.findUserById(options.userId);
+        if (!user) {
+          return { sent: false, reason: 'user_not_found' };
+        }
+        if (!user.telegram_chat_id || user.telegram_notifications_enabled === 0) {
+          return { sent: false, reason: 'notifications_disabled_or_no_chat' };
+        }
+        const res = await telegram.sendTelegramMessage({
+          token,
+          chatId: user.telegram_chat_id,
+          text: renderedText,
+          parseMode,
+          replyMarkup
+        });
+        return { sent: res.ok, result: res };
+      }
+
+      if (options.broadcast) {
+        const users = db.getUsers();
+        const targets = users.filter(u => u.is_approved !== 0 && u.telegram_chat_id && u.telegram_notifications_enabled !== 0);
+        let sentCount = 0;
+        for (const u of targets) {
+          const res = await telegram.sendTelegramMessage({
+            token,
+            chatId: u.telegram_chat_id,
+            text: renderedText,
+            parseMode,
+            replyMarkup
+          });
+          if (res.ok) sentCount++;
+        }
+        return { sent: true, sentCount, totalTargets: targets.length };
+      }
+
+      if (options.chatId) {
+        const res = await telegram.sendTelegramMessage({
+          token,
+          chatId: options.chatId,
+          text: renderedText,
+          parseMode,
+          replyMarkup
+        });
+        return { sent: res.ok, result: res };
+      }
+
+      return { sent: false, reason: 'no_target_specified' };
+    }
+
+    return { sent: false, reason: 'unknown_channel' };
+  } catch (err) {
+    console.warn(`[Notification] Error dispatching "${eventKey}":`, err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+async function checkStaleStockReminders(req = null) {
+  try {
+    const players = db.getPlayers();
+    const totalSectors = players.length;
+    let freshCount = 0;
+    let warningCount = 0;
+    let staleCount = 0;
+    let personalRemindersSent = 0;
+
+    const baseUrl = getAppBaseUrl(req);
+    const now = new Date();
+
+    const staleSectors = [];
+
+    for (const player of players) {
+      const freshness = logic.getStockFreshness(player.stockUpdatedAt, now);
+      if (freshness.status === 'fresh') {
+        freshCount++;
+      } else if (freshness.status === 'warning') {
+        warningCount++;
+      } else if (freshness.status === 'stale') {
+        staleCount++;
+        staleSectors.push({ player, freshness });
+      }
+    }
+
+    // 1. Personal reminders to owners of stale sectors
+    for (const { player, freshness } of staleSectors) {
+      if (player.userId) {
+        const user = db.findUserById(player.userId);
+        if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
+          const res = await dispatchNotification('stock_reminder_personal', {
+            username: user.username,
+            sectorName: player.name || 'Сектор',
+            daysOverdue: String(freshness.days ?? '14+'),
+            link: `${baseUrl}/#cabinet`
+          }, { userId: user.id }).catch(err => {
+            console.warn(`[Reminders] Error sending reminder to user ${user.id}:`, err.message);
+            return { sent: false };
+          });
+          if (res && res.sent) {
+            personalRemindersSent++;
+          }
+        }
+      }
+    }
+
+    // 2. Staff alert summary
+    let staffAlertSent = false;
+    const staffRes = await dispatchNotification('staff_stale_stocks_alert', {
+      totalSectors: String(totalSectors),
+      freshCount: String(freshCount),
+      warningCount: String(warningCount),
+      staleCount: String(staleCount),
+      link: `${baseUrl}/#matrix`
+    }).catch(err => {
+      console.warn('[Reminders] Error sending staff_stale_stocks_alert:', err.message);
+      return { sent: false };
+    });
+    if (staffRes && staffRes.sent) {
+      staffAlertSent = true;
+    }
+
+    return {
+      totalSectors,
+      freshCount,
+      warningCount,
+      staleCount,
+      personalRemindersSent,
+      staffAlertSent
+    };
+  } catch (err) {
+    console.warn('[Reminders] Error in checkStaleStockReminders:', err.message);
+    return {
+      totalSectors: 0,
+      freshCount: 0,
+      warningCount: 0,
+      staleCount: 0,
+      personalRemindersSent: 0,
+      staffAlertSent: false,
+      error: err.message
+    };
+  }
+}
+
 const FORBIDDEN_FILES = new Set([
   'package.json',
   'package-lock.json',
@@ -393,6 +583,51 @@ function createRequestHandler(staticDir, s3Manager = null) {
         if (regRes.error) {
           return sendError(res, 400, regRes.error, regRes.message || 'Ошибка при регистрации');
         }
+
+        if (regRes.pendingApproval || !regRes.is_approved) {
+          try {
+            let sectorName = playerName || 'Не привязан';
+            let power = '0';
+            let vip = '0';
+            const targetPlayerId = regRes.playerId || playerId;
+            if (targetPlayerId) {
+              const p = db.getPlayerById(targetPlayerId);
+              if (p) {
+                sectorName = p.name || sectorName;
+                vip = p.vip !== undefined ? String(p.vip) : '0';
+                const rawPower = Number(p.power) || 0;
+                if (rawPower >= 1000000) {
+                  power = (rawPower / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+                } else if (rawPower >= 1000) {
+                  power = (rawPower / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+                } else {
+                  power = String(rawPower);
+                }
+              }
+            }
+
+            await dispatchNotification('staff_new_user_pending', {
+              username,
+              sectorName,
+              power,
+              vip
+            }, {
+              replyMarkup: {
+                inline_keyboard: [
+                  [
+                    { text: '🛡️ Одобрить (Р3)', callback_data: `approve_user:${regRes.userId}` },
+                    { text: '❌ Отклонить', callback_data: `reject_user:${regRes.userId}` }
+                  ]
+                ]
+              }
+            }).catch(err => {
+              console.warn('[Notification] Error dispatching staff_new_user_pending:', err.message);
+            });
+          } catch (notifErr) {
+            console.warn('[Notification] Error preparing staff_new_user_pending:', notifErr.message);
+          }
+        }
+
         return sendJson(res, 200, {
           success: true,
           pendingApproval: regRes.pendingApproval,
@@ -533,7 +768,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
           id: req.user.id,
           username: req.user.username,
           rank: req.user.rank,
-          permissions: Array.isArray(req.user.permissions) ? req.user.permissions : []
+          permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+          telegram_chat_id: req.user.telegram_chat_id,
+          telegram_username: req.user.telegram_username,
+          telegram_notifications_enabled: req.user.telegram_notifications_enabled !== 0,
+          telegramChatId: req.user.telegram_chat_id,
+          telegramUsername: req.user.telegram_username,
+          telegramNotificationsEnabled: req.user.telegram_notifications_enabled !== 0
         },
         sectors,
         activeSectorId: activeSector ? activeSector.id : null,
@@ -604,6 +845,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
         sanitizeStock(body.stock);
       }
 
+      if (body.telegramNotificationsEnabled !== undefined || body.telegram_notifications_enabled !== undefined) {
+        const en = (body.telegramNotificationsEnabled ?? body.telegram_notifications_enabled) !== false;
+        db.toggleTelegramNotifications(req.user.id, en);
+      }
+
       if (Array.isArray(body.officers)) {
         for (const o of body.officers) {
           if (o.skills !== undefined) {
@@ -629,7 +875,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
-      const updated = db.updatePlayer(req.user.playerId, body);
+      const updated = db.updatePlayer(req.user.playerId, { ...body, editorUserId: req.user.id });
       if (body.stock) {
         db.recordStockHistory(req.user.playerId, body.stock);
       }
@@ -822,7 +1068,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
           }
         }
       }
-      const updated = db.updatePlayer(targetPlayerId, body);
+      const updated = db.updatePlayer(targetPlayerId, { ...body, editorUserId: req.user.id });
       if (body.stock) {
         db.recordStockHistory(targetPlayerId, body.stock);
       }
@@ -833,6 +1079,94 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!requireRole(['r4', 'r5'])(req, res)) return;
       db.deletePlayer(Number(playerMatch[1]));
       return sendJson(res, 200, { success: true });
+    }
+
+    const stockHistoryMatch = pathname.match(/^\/api\/players\/(\d+)\/stock-history$/);
+    if (stockHistoryMatch && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const targetPlayerId = Number(stockHistoryMatch[1]);
+      const player = db.getPlayerById(targetPlayerId);
+      if (!player) {
+        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
+      }
+
+      const isStaff = req.user.rank === 'r4' || req.user.rank === 'r5';
+      const isOwner = player.userId === req.user.id || req.user.player_id === targetPlayerId;
+      const hasPerm = logic.hasUserPermission(req.user, 'view_sectors') || logic.hasUserPermission(req.user, 'view_stocks');
+
+      if (!isStaff && !isOwner && !hasPerm) {
+        return sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав для просмотра истории склада этого сектора');
+      }
+
+      const records = db.getStockHistory(targetPlayerId, 50);
+      return sendJson(res, 200, { records });
+    }
+
+    if (stockHistoryMatch && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const targetPlayerId = Number(stockHistoryMatch[1]);
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+
+      const { source = 'manual_edit', snapshotBefore, snapshotAfter, screenshotBase64 } = body;
+      const validSource = source === 'ocr_scan' ? 'ocr_scan' : 'manual_edit';
+
+      const before = snapshotBefore ? logic.normalizeStock(snapshotBefore) : check.player.stock;
+      const after = snapshotAfter ? logic.normalizeStock(snapshotAfter) : before;
+
+      const diff = logic.calculateStockDiff(before, after);
+
+      let screenshotPath = null;
+      if (screenshotBase64 && typeof screenshotBase64 === 'string' && screenshotBase64.trim()) {
+        const yyyyMm = new Date().toISOString().slice(0, 7);
+        const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
+        if (!fs.existsSync(screenshotsDir)) {
+          fs.mkdirSync(screenshotsDir, { recursive: true });
+        }
+
+        let ext = '.jpg';
+        let b64 = screenshotBase64;
+        const match = screenshotBase64.match(/^data:(image\/(jpeg|jpg|webp|png));base64,(.+)$/);
+        if (match) {
+          const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];
+          ext = mime === 'image/webp' ? '.webp' : (mime === 'image/png' ? '.png' : '.jpg');
+          b64 = match[3];
+        }
+
+        const buf = Buffer.from(b64, 'base64');
+        const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 8);
+        const filename = `${targetPlayerId}_${Date.now()}_${hash}${ext}`;
+        const fullPath = path.join(screenshotsDir, filename);
+        fs.writeFileSync(fullPath, buf);
+        screenshotPath = `${yyyyMm}/${filename}`;
+      }
+
+      const now = new Date().toISOString();
+      const record = db.recordStockHistory({
+        playerId: targetPlayerId,
+        userId: req.user.id,
+        source: validSource,
+        snapshotBefore: before,
+        snapshotAfter: after,
+        diffSummary: diff.summary,
+        screenshotPath,
+        createdAt: now
+      });
+
+      if (snapshotAfter) {
+        db.updatePlayer(targetPlayerId, {
+          stock: after,
+          stockUpdatedAt: now,
+          stockUpdateSource: validSource,
+          recordHistory: false
+        });
+      }
+
+      return sendJson(res, 201, record);
     }
 
     const playerOfficersMatch = pathname.match(/^\/api\/players\/(\d+)\/officers$/);
@@ -1088,7 +1422,30 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/events' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
+      const isNew = !body.id;
       const saved = db.saveEvent(body);
+
+      if (isNew && saved && saved.id) {
+        try {
+          const eventTypes = db.getEventTypes();
+          const et = eventTypes.find(t => t.id === saved.typeId);
+          const effectivePlaces = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom) : et.places) : [];
+          const totalPlaces = effectivePlaces ? effectivePlaces.length : (et?.places?.length || 0);
+          const baseUrl = getAppBaseUrl(req);
+
+          await dispatchNotification('event_registration_opened', {
+            eventName: et?.name || 'Событие',
+            eventDate: saved.dateFrom || '',
+            totalPlaces: String(totalPlaces),
+            link: `${baseUrl}/#cabinet`
+          }, { broadcast: true }).catch(err => {
+            console.warn('[Notification] Error broadcasting event_registration_opened:', err.message);
+          });
+        } catch (notifErr) {
+          console.warn('[Notification] Error preparing event_registration_opened:', notifErr.message);
+        }
+      }
+
       return sendJson(res, 200, saved);
     }
 
@@ -1267,7 +1624,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, { success: true });
     }
 
-    const autopickMatch = pathname.match(/^\/api\/events\/(\d+)\/autopick$/);
+    const autopickMatch = pathname.match(/^\/api\/events\/(\d+)\/(?:autopick|auto-pick)$/);
     if (autopickMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const eventId = Number(autopickMatch[1]);
@@ -1298,6 +1655,61 @@ function createRequestHandler(staticDir, s3Manager = null) {
       ev.assignments = result.assignments;
       db.saveEvent(ev);
 
+      // Trigger 3: event_place_assigned & Trigger 4: staff_event_autopick_summary
+      try {
+        const baseUrl = getAppBaseUrl(req);
+        const assignedList = (result.assignments || []).filter(a => a.playerId && Number(a.place) > 0);
+
+        // 1. Personal notifications to each assigned sector owner
+        for (const a of assignedList) {
+          const player = db.getPlayerById(a.playerId);
+          if (player && player.userId) {
+            const user = db.findUserById(player.userId);
+            if (user) {
+              const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
+              await dispatchNotification('event_place_assigned', {
+                username: user.username,
+                sectorName: player.name || a.playerName || 'Сектор',
+                eventName: et?.name || 'Событие',
+                eventDate: ev.dateFrom || '',
+                place: String(a.place),
+                coupons: String(coupons),
+                link: `${baseUrl}/#calendar`
+              }, { userId: user.id }).catch(err => {
+                console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
+              });
+            }
+          }
+        }
+
+        // 2. Staff autopick summary
+        const topFormatted = assignedList
+          .sort((x, y) => Number(x.place) - Number(y.place))
+          .slice(0, 5)
+          .map((a, idx) => {
+            const p = players.find(pl => pl.id === a.playerId);
+            const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
+            const safeName = String(a.playerName || p?.name || 'Сектор')
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+            return `${idx + 1}. #${a.place}: ${safeName}${vipStr}`;
+          })
+          .join('\n');
+
+        await dispatchNotification('staff_event_autopick_summary', {
+          eventName: et?.name || 'Событие',
+          assignedCount: String(assignedList.length),
+          availablePlaces: String(places.length),
+          topAssignmentsList: topFormatted || 'Назначений нет',
+          link: `${baseUrl}/#events`
+        }).catch(err => {
+          console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
+        });
+      } catch (autopickNotifErr) {
+        console.warn('[Notification] Error in autopick notifications:', autopickNotifErr.message);
+      }
+
       return sendJson(res, 200, {
         success: true,
         assignments: result.assignments,
@@ -1325,7 +1737,48 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (eventMatch && req.method === 'PUT') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const saved = db.saveEvent({ ...body, id: Number(eventMatch[1]) });
+      const eventId = Number(eventMatch[1]);
+      const prevEvent = db.getEventById(eventId);
+      const prevAssignments = prevEvent?.assignments || [];
+
+      const saved = db.saveEvent({ ...body, id: eventId });
+
+      try {
+        const newAssignments = Array.isArray(body.assignments) ? body.assignments : [];
+        if (newAssignments.length > 0) {
+          const eventTypes = db.getEventTypes();
+          const et = eventTypes.find(t => t.id === (saved.typeId || prevEvent?.typeId));
+          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom || prevEvent?.dateFrom) : et.places) : [];
+          const baseUrl = getAppBaseUrl(req);
+
+          for (const a of newAssignments) {
+            if (a.playerId && Number(a.place) > 0) {
+              const already = prevAssignments.some(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
+              if (!already) {
+                const player = db.getPlayerById(a.playerId);
+                if (player && player.userId) {
+                  const user = db.findUserById(player.userId);
+                  if (user) {
+                    const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
+                    await dispatchNotification('event_place_assigned', {
+                      username: user.username,
+                      sectorName: player.name || a.playerName || 'Сектор',
+                      eventName: et?.name || 'Событие',
+                      eventDate: saved.dateFrom || prevEvent?.dateFrom || '',
+                      place: String(a.place),
+                      coupons: String(coupons),
+                      link: `${baseUrl}/#calendar`
+                    }, { userId: user.id }).catch(() => {});
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Notification] Error in PUT /api/events/:id place notifications:', err.message);
+      }
+
       return sendJson(res, 200, saved);
     }
 
@@ -1376,6 +1829,467 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
     }
 
+    // ─────────────────────────────────────────────────────────
+    // SCREENSHOT STORAGE & SERVING
+    // ─────────────────────────────────────────────────────────
+    const screenshotMatch = pathname.match(/^\/api\/screenshots\/(.+)$/);
+    if (screenshotMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+
+      const rawParam = screenshotMatch[1];
+      let filename = '';
+      try {
+        filename = decodeURIComponent(rawParam);
+      } catch (e) {
+        return sendError(res, 400, 'BAD_REQUEST', 'Некорректное имя файла');
+      }
+
+      // Check path traversal: forbid '..' or '/' or '\\'
+      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        return sendError(res, 400, 'BAD_REQUEST', 'Недопустимое имя файла');
+      }
+
+      const dbInstance = db.getDb();
+      const record = dbInstance.prepare(`
+        SELECT shr.*, p.user_id as player_owner_id
+        FROM stock_history_records shr
+        JOIN players p ON p.id = shr.player_id
+        WHERE shr.screenshot_path = ? OR shr.screenshot_path LIKE ('%/' || ?)
+      `).get(filename, filename);
+
+      if (!record) {
+        return sendError(res, 404, 'NOT_FOUND', 'Скриншот не найден');
+      }
+
+      const isStaff = req.user.rank === 'r4' || req.user.rank === 'r5';
+      const isOwner = record.player_owner_id === req.user.id || req.user.player_id === record.player_id;
+      const hasPerm = logic.hasUserPermission(req.user, 'view_sectors') || logic.hasUserPermission(req.user, 'view_stocks');
+
+      if (!isStaff && !isOwner && !hasPerm) {
+        return sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав для просмотра этого скриншота');
+      }
+
+      const baseScreenshotsDir = path.resolve(path.join(__dirname, 'data', 'screenshots'));
+      const fullFilePath = path.resolve(baseScreenshotsDir, record.screenshot_path);
+
+      if (!fullFilePath.startsWith(baseScreenshotsDir + path.sep)) {
+        return sendError(res, 403, 'FORBIDDEN', 'Доступ запрещен');
+      }
+
+      if (!fs.existsSync(fullFilePath)) {
+        return sendError(res, 404, 'NOT_FOUND', 'Файл скриншота удален или отсутствует');
+      }
+
+      const ext = path.extname(fullFilePath).toLowerCase();
+      const contentType = ext === '.webp' ? 'image/webp' : (ext === '.png' ? 'image/png' : 'image/jpeg');
+
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'private, max-age=86400'
+      });
+
+      if (req.method === 'HEAD') {
+        return res.end();
+      }
+
+      const stream = fs.createReadStream(fullFilePath);
+      return stream.pipe(res);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // TELEGRAM BOT WEBHOOK & MANAGEMENT ENDPOINTS
+    // ─────────────────────────────────────────────────────────
+
+    if (pathname === '/api/telegram/webhook' && req.method === 'POST') {
+      const configuredSecret = db.getAppSetting('telegram_webhook_secret');
+      if (configuredSecret) {
+        const incomingSecret = req.headers['x-telegram-bot-api-secret-token'];
+        if (incomingSecret !== configuredSecret) {
+          return sendError(res, 401, 'UNAUTHORIZED', 'Invalid webhook secret token');
+        }
+      }
+
+      const update = body || {};
+      const token = db.getAppSetting('telegram_bot_token');
+
+      // 1. Message update
+      if (update.message) {
+        const msg = update.message;
+        const text = (msg.text || '').trim();
+        const chatId = msg.chat?.id;
+
+        // A) /start bind_<token>
+        const bindMatch = text.match(/^\/start(?:\s+|@\w+\s+)bind_([a-zA-Z0-9_-]+)/i);
+        if (bindMatch) {
+          const bindToken = bindMatch[1];
+          const user = db.findUserByTelegramBindToken(bindToken);
+          if (user) {
+            const username = msg.from?.username || msg.from?.first_name || '';
+            db.bindUserTelegram(user.id, chatId, username);
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '✅ <b>Ваш аккаунт KoW Tracker успешно подключен!</b>\nТеперь вы будете получать персональные уведомления о распределении мест и событиях альянса.'
+              });
+            }
+            return sendJson(res, 200, { ok: true, bound: true, userId: user.id });
+          } else {
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '❌ <b>Срок действия ссылки истек или токен недействителен.</b>\nПожалуйста, сгенерируйте новую ссылку для привязки в Личном кабинете KoW Tracker.'
+              });
+            }
+            return sendJson(res, 200, { ok: true, bound: false, reason: 'token_expired_or_invalid' });
+          }
+        }
+
+        // B) /connect_staff <PIN>
+        const staffMatch = text.match(/^\/connect_staff(?:\s+|@\w+\s+)(KOW-STAFF-[A-Z0-9-]+)/i);
+        if (staffMatch) {
+          const pin = staffMatch[1].trim().toUpperCase();
+          const bindRes = db.verifyAndBindStaffChat(pin, chatId);
+          if (bindRes.success) {
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '✅ <b>Чат штаба успешно подключен к KoW Tracker!</b>\nОповещения для офицеров Р4/Р5 активированы.'
+              });
+            }
+            return sendJson(res, 200, { ok: true, staffConnected: true, chatId });
+          } else {
+            if (token) {
+              await telegram.sendTelegramMessage({
+                token,
+                chatId,
+                text: '❌ <b>Неверный или истекший код привязки штаба.</b>\nСгенерируйте свежий PIN в настройках KoW Tracker (раздел Настройки ➔ Уведомления).'
+              });
+            }
+            return sendJson(res, 200, { ok: true, staffConnected: false, reason: bindRes.reason });
+          }
+        }
+      }
+
+      // 2. Callback query update (interactive buttons)
+      if (update.callback_query) {
+        const cq = update.callback_query;
+        const cqId = cq.id;
+        const data = cq.data || '';
+        const fromId = cq.from?.id;
+        const chatMsg = cq.message;
+
+        const approveMatch = data.match(/^approve_user:(\d+)$/);
+        const rejectMatch = data.match(/^reject_user:(\d+)$/);
+
+        if (approveMatch || rejectMatch) {
+          const targetUserId = Number((approveMatch || rejectMatch)[1]);
+          const isApprove = Boolean(approveMatch);
+
+          const officer = db.findUserByTelegramChatId(fromId);
+          const isStaff = officer && (officer.rank === 'r5' || officer.rank === 'r4' || logic.hasUserPermission(officer, 'approve_users'));
+
+          if (!isStaff) {
+            if (token) {
+              await telegram.answerTelegramCallback({
+                token,
+                callbackQueryId: cqId,
+                text: '⛔ Доступ запрещен. У вас нет прав офицера для одобрения новичков.',
+                showAlert: true
+              });
+            }
+            return sendJson(res, 200, { ok: true, authorized: false });
+          }
+
+          const targetUser = db.findUserById(targetUserId);
+          const targetName = targetUser?.username || `ID ${targetUserId}`;
+          const officerHandle = cq.from?.username ? `@${cq.from.username}` : (officer.username || 'Офицер');
+          const officerRank = (officer.rank || 'r4').toUpperCase();
+
+          if (isApprove) {
+            db.approveUser(targetUserId, 'r3');
+            if (token) {
+              await telegram.answerTelegramCallback({
+                token,
+                callbackQueryId: cqId,
+                text: '✅ Пользователь одобрен (Р3)'
+              });
+              if (chatMsg?.chat?.id && chatMsg?.message_id) {
+                await telegram.editTelegramMessageText({
+                  token,
+                  chatId: chatMsg.chat.id,
+                  messageId: chatMsg.message_id,
+                  text: `✅ Пользователь <b>@${targetName}</b> одобрен офицером <b>${officerHandle}</b> (${officerRank})`,
+                  replyMarkup: { inline_keyboard: [] }
+                });
+              }
+            }
+            return sendJson(res, 200, { ok: true, action: 'approved', userId: targetUserId });
+          } else {
+            db.rejectUser(targetUserId);
+            if (token) {
+              await telegram.answerTelegramCallback({
+                token,
+                callbackQueryId: cqId,
+                text: '❌ Пользователь отклонен'
+              });
+              if (chatMsg?.chat?.id && chatMsg?.message_id) {
+                await telegram.editTelegramMessageText({
+                  token,
+                  chatId: chatMsg.chat.id,
+                  messageId: chatMsg.message_id,
+                  text: `❌ Пользователь <b>@${targetName}</b> отклонен офицером <b>${officerHandle}</b> (${officerRank})`,
+                  replyMarkup: { inline_keyboard: [] }
+                });
+              }
+            }
+            return sendJson(res, 200, { ok: true, action: 'rejected', userId: targetUserId });
+          }
+        }
+      }
+
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (pathname === '/api/telegram/settings' && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const token = db.getAppSetting('telegram_bot_token');
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      const botUsername = db.getAppSetting('telegram_bot_username');
+
+      let tokenMasked = null;
+      if (token && typeof token === 'string') {
+        if (token.length > 8) {
+          const colonIdx = token.indexOf(':');
+          if (colonIdx > 0) {
+            tokenMasked = token.slice(0, colonIdx + 1) + '***' + token.slice(-4);
+          } else {
+            tokenMasked = token.slice(0, 4) + '***' + token.slice(-4);
+          }
+        } else {
+          tokenMasked = '***';
+        }
+      }
+
+      return sendJson(res, 200, {
+        hasToken: Boolean(token),
+        tokenMasked,
+        staffChatId: staffChatId || null,
+        botUsername: botUsername || null
+      });
+    }
+
+    if (pathname === '/api/telegram/settings' && req.method === 'PUT') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки Telegram бота');
+      }
+
+      if (body.token !== undefined) {
+        const rawToken = String(body.token).trim();
+        db.setAppSetting('telegram_bot_token', rawToken);
+      }
+
+      if (body.staffChatId !== undefined) {
+        db.setAppSetting('telegram_staff_chat_id', String(body.staffChatId).trim());
+      }
+
+      if (body.botUsername !== undefined) {
+        db.setAppSetting('telegram_bot_username', String(body.botUsername).trim());
+      }
+
+      const token = db.getAppSetting('telegram_bot_token');
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      const botUsername = db.getAppSetting('telegram_bot_username');
+
+      return sendJson(res, 200, {
+        success: true,
+        hasToken: Boolean(token),
+        staffChatId: staffChatId || null,
+        botUsername: botUsername || null
+      });
+    }
+
+    if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+
+      const token = crypto.randomBytes(16).toString('hex');
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      db.createTelegramBindToken(req.user.id, token, expiresAt);
+
+      const botUsername = db.getAppSetting('telegram_bot_username') || 'KoWTrackerBot';
+      const deepLink = `https://t.me/${botUsername}?start=bind_${token}`;
+
+      return sendJson(res, 200, {
+        token,
+        expiresAt,
+        deepLink,
+        botUsername
+      });
+    }
+
+    if (pathname === '/api/telegram/bind' && req.method === 'DELETE') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      db.unbindUserTelegram(req.user.id);
+      return sendJson(res, 200, { success: true });
+    }
+
+    if (pathname === '/api/telegram/notifications' && (req.method === 'PUT' || req.method === 'POST')) {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const enabled = body.enabled !== false && body.enabled !== 0 && body.enabled !== '0';
+      db.toggleTelegramNotifications(req.user.id, enabled);
+      return sendJson(res, 200, { success: true, enabled });
+    }
+
+    if (pathname === '/api/telegram/staff-bind-token' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки чата штаба');
+      }
+
+      const pin = `KOW-STAFF-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      db.createStaffBindToken(pin, expiresAt);
+
+      return sendJson(res, 200, {
+        pin,
+        expiresAt
+      });
+    }
+
+    if (pathname === '/api/telegram/check-reminders' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const result = await checkStaleStockReminders(req);
+      return sendJson(res, 200, { success: true, ...result });
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // NOTIFICATION TEMPLATES ENDPOINTS
+    // ─────────────────────────────────────────────────────────
+
+    if (pathname === '/api/notification-templates' && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const templates = db.getNotificationTemplates();
+      return sendJson(res, 200, templates);
+    }
+
+    const tplMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)$/);
+    if (tplMatch && req.method === 'PUT') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const key = tplMatch[1];
+      const updated = db.updateNotificationTemplate(key, body);
+      if (!updated) {
+        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
+      }
+      return sendJson(res, 200, { success: true, template: updated });
+    }
+
+    const tplResetMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/reset$/);
+    if (tplResetMatch && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const key = tplResetMatch[1];
+      const reset = db.resetNotificationTemplate(key);
+      if (!reset) {
+        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
+      }
+      return sendJson(res, 200, { success: true, template: reset });
+    }
+
+    const tplTestMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/test$/);
+    if (tplTestMatch && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+      const key = tplTestMatch[1];
+      const tpl = db.getNotificationTemplate(key);
+      if (!tpl) {
+        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
+      }
+
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 400, 'NO_BOT_TOKEN', 'Токен Telegram бота не настроен в системе');
+      }
+
+      let targetChatId = null;
+      if (tpl.channel === 'personal') {
+        targetChatId = req.user.telegram_chat_id;
+        if (!targetChatId) {
+          return sendError(res, 400, 'NO_TELEGRAM_LINKED', 'Привяжите ваш Telegram аккаунт в Личном кабинете для получения тестовых сообщений');
+        }
+      } else {
+        targetChatId = db.getAppSetting('telegram_staff_chat_id');
+        if (!targetChatId) {
+          return sendError(res, 400, 'NO_STAFF_CHAT_LINKED', 'Чат штаба не привязан. Подключите чат штаба через PIN-код или укажите ID чата в настройках');
+        }
+        if (targetChatId && !isNaN(Number(targetChatId))) {
+          targetChatId = Number(targetChatId);
+        }
+      }
+
+      const templateText = body.template !== undefined ? body.template : tpl.template;
+      const parseMode = body.parseMode || body.parse_mode || tpl.parse_mode || 'HTML';
+      const sampleData = logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key] || {};
+      const renderedText = logic.renderTemplate(templateText, sampleData);
+
+      const sendRes = await telegram.sendTelegramMessage({
+        token: botToken,
+        chatId: targetChatId,
+        text: renderedText,
+        parseMode
+      });
+
+      if (!sendRes.ok) {
+        return sendJson(res, 200, { success: false, error: sendRes.error });
+      }
+
+      return sendJson(res, 200, { success: true, messageId: sendRes.result?.message_id });
+    }
+
     // Unmatched API endpoint
     return sendError(res, 404, 'NOT_FOUND', `Endpoint ${pathname} not found`);
     } catch (err) {
@@ -1419,12 +2333,39 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     db.initDb(dbPath);
   }
 
+  // Ensure screenshots base directory exists
+  const screenshotsDir = path.join(__dirname, 'data', 'screenshots');
+  if (!fs.existsSync(screenshotsDir)) {
+    try {
+      fs.mkdirSync(screenshotsDir, { recursive: true });
+    } catch (_) {}
+  }
+
+  // Clean up expired screenshots on startup and schedule 24-hour retention interval
+  db.cleanupExpiredScreenshots(null, screenshotsDir).catch(() => {});
+  const retentionInterval = setInterval(() => {
+    db.cleanupExpiredScreenshots(null, screenshotsDir).catch(err => {
+      console.error('[Retention] Cleanup error:', err);
+    });
+  }, 24 * 60 * 60 * 1000);
+  if (retentionInterval.unref) retentionInterval.unref();
+
+  // Schedule daily stale stock check (24h)
+  const staleReminderInterval = setInterval(() => {
+    checkStaleStockReminders().catch(err => {
+      console.error('[Reminders] Error in scheduled checkStaleStockReminders:', err);
+    });
+  }, 24 * 60 * 60 * 1000);
+  if (staleReminderInterval.unref) staleReminderInterval.unref();
+
   const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
   server.s3Manager = activeS3Manager;
 
   // Promisify close for clean test teardowns
   const originalClose = server.close.bind(server);
   server.close = function (callback) {
+    clearInterval(retentionInterval);
+    clearInterval(staleReminderInterval);
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);
@@ -1506,5 +2447,7 @@ if (require.main === module) {
 module.exports = {
   startServer,
   createRequestHandler,
-  MIME_TYPES
+  MIME_TYPES,
+  dispatchNotification,
+  checkStaleStockReminders
 };

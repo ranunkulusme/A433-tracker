@@ -2500,6 +2500,236 @@
     return [...preset.permissions];
   }
 
+  const STOCK_DIFF_FIELDS = [
+    { key: 'coupons', label: 'куп.', unit: 'куп.', name: 'Купоны' },
+    { key: 'puzzles', label: 'пазл.', unit: 'пазл.', name: 'Пазлы' },
+    { key: 'starCoupons', label: 'зв. куп.', unit: 'зв. куп.', name: 'Звездные купоны' },
+    { key: 'legendaryStars1', label: '★ I', unit: '★ I', name: 'Звезды I' },
+    { key: 'legendaryStars2', label: '★ II', unit: '★ II', name: 'Звезды II' },
+    { key: 'legendaryStars3', label: '★ III', unit: '★ III', name: 'Звезды III' },
+    { key: 'chests', label: 'сун.', unit: 'сун.', name: 'Сундуки' },
+  ];
+
+  function calculateStockDiff(before, after) {
+    const b = normalizeStock(before);
+    const a = normalizeStock(after);
+
+    const chips = [];
+
+    for (const item of STOCK_DIFF_FIELDS) {
+      const valBefore = b[item.key] || 0;
+      const valAfter = a[item.key] || 0;
+      const diff = valAfter - valBefore;
+
+      if (diff !== 0) {
+        const sign = diff > 0 ? '+' : '-';
+        const absVal = Math.abs(diff);
+        const absFormatted = typeof formatInputNumber === 'function'
+          ? (formatInputNumber(absVal) || String(absVal))
+          : String(absVal);
+        const space = item.unit.startsWith('★') ? '' : ' ';
+        const formatted = `${sign}${absFormatted}${space}${item.unit}`;
+
+        chips.push({
+          key: item.key,
+          label: item.label,
+          diff,
+          formatted,
+          type: diff > 0 ? 'positive' : 'negative',
+        });
+      }
+    }
+
+    const summary = chips.length > 0
+      ? chips.map(c => c.formatted).join(', ')
+      : 'Без изменений';
+
+    return {
+      summary,
+      chips,
+    };
+  }
+
+  function getStockFreshness(updatedAt, now = new Date()) {
+    if (!updatedAt) {
+      return {
+        status: 'unknown',
+        days: null,
+        label: 'нет данных',
+      };
+    }
+
+    const updatedDate = new Date(updatedAt);
+    if (isNaN(updatedDate.getTime())) {
+      return {
+        status: 'unknown',
+        days: null,
+        label: 'нет данных',
+      };
+    }
+
+    const nowDate = now instanceof Date ? now : new Date(now);
+    if (isNaN(nowDate.getTime())) {
+      return {
+        status: 'unknown',
+        days: null,
+        label: 'нет данных',
+      };
+    }
+
+    const diffMs = nowDate.getTime() - updatedDate.getTime();
+    const days = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+
+    let status = 'fresh';
+    if (days <= 7) {
+      status = 'fresh';
+    } else if (days <= 14) {
+      status = 'warning';
+    } else {
+      status = 'stale';
+    }
+
+    const label = days === 0 ? 'сегодня' : `${days} дн. назад`;
+
+    return {
+      status,
+      days,
+      label,
+    };
+  }
+
+  const DEFAULT_NOTIFICATION_TEMPLATES = Object.freeze({
+    event_place_assigned: Object.freeze({
+      key: 'event_place_assigned',
+      title: 'Назначение призового места',
+      channel: 'personal',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'eventDate', 'sectorName', 'place', 'coupons', 'link']),
+      template: `🎯 <b>Вам назначено призовое место!</b>\n\nСобытие: <b>{eventName}</b>\nДата старта: <b>{eventDate}</b>\nСектор: <b>{sectorName}</b>\nНазначенное место: <b>#{place}</b>\nНаграда: <b>+{coupons}</b> призовых купонов 🎟️\n\n<i>Не забудьте подготовить ресурсы и активировать необходимые бусты перед стартом!</i>\n🔗 <a href="{link}">Открыть расписание в KoW Tracker</a>`
+    }),
+    event_registration_opened: Object.freeze({
+      key: 'event_registration_opened',
+      title: 'Открытие регистрации на событие',
+      channel: 'personal',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'eventDate', 'totalPlaces', 'link']),
+      template: `📢 <b>Открыта подача заявок на событие!</b>\n\nСобытие: <b>{eventName}</b>\nДата проведения: <b>{eventDate}</b>\nДоступно мест по регламенту: <b>{totalPlaces}</b>\n\nПодайте заявку на желаемое место через Личный кабинет:\n🔗 <a href="{link}">Подать заявку на участие</a>`
+    }),
+    stock_reminder_personal: Object.freeze({
+      key: 'stock_reminder_personal',
+      title: 'Напоминание об актуализации склада',
+      channel: 'personal',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['username', 'sectorName', 'daysOverdue', 'link']),
+      template: `⚠️ <b>Напоминание: актуализируйте данные склада</b>\n\nПривет, <b>{username}</b>! Данные по вашему сектору <b>{sectorName}</b> не обновлялись уже <b>{daysOverdue} дн.</b>\n\nАктуальные запасы купонов, пазлов и звезд необходимы офицерам для справедливого распределения призовых мест на ивентах.\n📸 Загрузите свежий скриншот склада через Смарт-сканер:\n🔗 <a href="{link}">Обновить склад в Личном кабинете</a>`
+    }),
+    staff_new_user_pending: Object.freeze({
+      key: 'staff_new_user_pending',
+      title: 'Заявка нового бойца на регистрацию',
+      channel: 'staff',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['username', 'sectorName', 'power', 'vip']),
+      template: `🔔 <b>Новый боец ожидает одобрения!</b>\n\nПользователь: <b>@{username}</b>\nИгровой сектор: <b>{sectorName}</b>\nСила: <b>{power}</b> | VIP: <b>{vip}</b>\n\n<i>Проверьте бойца в списках альянса и подтвердите доступ:</i>`
+    }),
+    staff_event_deadline_24h: Object.freeze({
+      key: 'staff_event_deadline_24h',
+      title: '24 часа до старта / готовность к автоподбору',
+      channel: 'staff',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'eventDate', 'registrationsCount', 'availablePlaces', 'link']),
+      template: `⏳ <b>24 часа до старта события: {eventName}</b>\n\nДата старта: <b>{eventDate}</b>\nПодано заявок: <b>{registrationsCount}</b> на <b>{availablePlaces}</b> призовых мест.\n\nЗапустите автоподбор кандидатов с учетом КПД и очереди альянса:\n🔗 <a href="{link}">Открыть распределение мест и автоподбор</a>`
+    }),
+    staff_event_autopick_summary: Object.freeze({
+      key: 'staff_event_autopick_summary',
+      title: 'Сводка автоподбора мест',
+      channel: 'staff',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'assignedCount', 'availablePlaces', 'topAssignmentsList', 'link']),
+      template: `🎯 <b>Автоподбор успешно завершен: {eventName}</b>\n\nРаспределено мест: <b>{assignedCount} / {availablePlaces}</b>\nТоп назначенных секторов:\n{topAssignmentsList}\n\nОповещения назначенных бойцам подготовлены к отправке.\n🔗 <a href="{link}">Просмотреть и утвердить сетку в трекере</a>`
+    }),
+    staff_stale_stocks_alert: Object.freeze({
+      key: 'staff_stale_stocks_alert',
+      title: 'Сводка устаревших складов',
+      channel: 'staff',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['totalSectors', 'freshCount', 'warningCount', 'staleCount', 'link']),
+      template: `📊 <b>Отчет службы кадров: актуальность складов альянса</b>\n\nВсего активных секторов: <b>{totalSectors}</b>\n🟢 Актуальные (до 7 дн.): <b>{freshCount}</b>\n🟡 Требуют внимания (7–14 дн.): <b>{warningCount}</b>\n🔴 Устарели (>14 дн.): <b>{staleCount}</b>\n\nБойцам с устаревшими данными автоматически отправлены персональные напоминания в Telegram.\n🔗 <a href="{link}">Открыть мониторинг актуальности складов</a>`
+    })
+  });
+
+  const NOTIFICATION_TEMPLATE_SAMPLE_DATA = Object.freeze({
+    event_place_assigned: Object.freeze({
+      eventName: 'Битва за трон (King of War)',
+      eventDate: '2026-11-10 12:00 UTC',
+      sectorName: 'Sector 7 (Рейнджер)',
+      place: '1',
+      coupons: '50',
+      link: 'https://kow.example.com/#calendar'
+    }),
+    event_registration_opened: Object.freeze({
+      eventName: 'Мощь времени (Power of Time)',
+      eventDate: '2026-11-15 00:00 UTC',
+      totalPlaces: '10',
+      link: 'https://kow.example.com/#cabinet'
+    }),
+    stock_reminder_personal: Object.freeze({
+      username: 'Commander',
+      sectorName: 'Sector 12 (Цитадель)',
+      daysOverdue: '16',
+      link: 'https://kow.example.com/#cabinet'
+    }),
+    staff_new_user_pending: Object.freeze({
+      username: 'recruit_soldier',
+      sectorName: 'Sector 99',
+      power: '45.2M',
+      vip: '12'
+    }),
+    staff_event_deadline_24h: Object.freeze({
+      eventName: 'Могучие войска (Mighty Forces)',
+      eventDate: '2026-11-05 18:00 UTC',
+      registrationsCount: '14',
+      availablePlaces: '5',
+      link: 'https://kow.example.com/#events'
+    }),
+    staff_event_autopick_summary: Object.freeze({
+      eventName: 'Битва за трон',
+      assignedCount: '5',
+      availablePlaces: '5',
+      topAssignmentsList: '1. #1: Sector 3 (VIP 15)\n2. #2: Sector 7 (VIP 14)\n3. #3: Sector 1 (VIP 13)',
+      link: 'https://kow.example.com/#events'
+    }),
+    staff_stale_stocks_alert: Object.freeze({
+      totalSectors: '42',
+      freshCount: '28',
+      warningCount: '8',
+      staleCount: '6',
+      link: 'https://kow.example.com/#matrix'
+    })
+  });
+
+  function escapeHtml(str) {
+    if (typeof str !== 'string') str = String(str || '');
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function renderTemplate(templateText, data = {}) {
+    if (typeof templateText !== 'string' || !templateText) return '';
+    const d = (data && typeof data === 'object') ? data : {};
+    return templateText.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => {
+      const val = d[key];
+      if (val !== undefined && val !== null) {
+        if (key === 'link' || key === 'topAssignmentsList') {
+          return String(val);
+        }
+        return escapeHtml(String(val));
+      }
+      return '';
+    });
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -2572,5 +2802,10 @@
     PERMISSION_PRESETS,
     hasUserPermission,
     applyPermissionPreset,
+    calculateStockDiff,
+    getStockFreshness,
+    DEFAULT_NOTIFICATION_TEMPLATES,
+    NOTIFICATION_TEMPLATE_SAMPLE_DATA,
+    renderTemplate,
   };
 });
