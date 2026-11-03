@@ -3501,6 +3501,356 @@ test('API Notification Templates CRUD, reset, and test send', async () => {
   }
 });
 
+test('API Notification Triggers: new user registration alerts staff chat with inline buttons', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 101 } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    db.setAppSetting('telegram_bot_token', 'mock_token_123');
+    db.setAppSetting('telegram_staff_chat_id', '-100999888777');
+
+    // Register a new pending user with sector info
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'new_recruit_42',
+        password: 'secure_password_123',
+        playerName: 'Sector 42 (Alpha)'
+      })
+    });
+    assert.equal(regRes.status, 200);
+    const regData = await regRes.json();
+    assert.equal(regData.success, true);
+    assert.equal(regData.pendingApproval, true);
+
+    // Verify telegram message sent to staff chat
+    assert.equal(sentMessages.length, 1);
+    const msg = sentMessages[0];
+    assert.equal(msg.chat_id, -100999888777);
+    assert.ok(msg.text.includes('new_recruit_42'));
+    assert.ok(msg.text.includes('Sector 42 (Alpha)'));
+    assert.ok(msg.reply_markup);
+    assert.ok(Array.isArray(msg.reply_markup.inline_keyboard));
+    const buttons = msg.reply_markup.inline_keyboard[0];
+    assert.equal(buttons.length, 2);
+    assert.ok(buttons[0].text.includes('Одобрить (Р3)'));
+    assert.equal(buttons[0].callback_data, `approve_user:${regData.userId}`);
+    assert.ok(buttons[1].text.includes('Отклонить'));
+    assert.equal(buttons[1].callback_data, `reject_user:${regData.userId}`);
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('API Notification Triggers: event creation broadcasts registration opened', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 102 } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    db.setAppSetting('telegram_bot_token', 'mock_token_123');
+
+    // 1. Setup 2 users with telegram: one with notifications enabled, one disabled
+    const u1 = db.registerUser({ username: 'player_one', password: 'password', playerName: 'Sector 1' });
+    db.approveUser(u1.userId, 'r3');
+    db.bindUserTelegram(u1.userId, 111001, 'player_one_tg');
+
+    const u2 = db.registerUser({ username: 'player_two', password: 'password', playerName: 'Sector 2' });
+    db.approveUser(u2.userId, 'r3');
+    db.bindUserTelegram(u2.userId, 222002, 'player_two_tg');
+    db.toggleTelegramNotifications(u2.userId, false);
+
+    // Also admin user with telegram enabled
+    const admin = db.findUserByUsername('admin');
+    db.bindUserTelegram(admin.id, 999009, 'admin_tg');
+
+    // Login as admin
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const eventTypes = db.getEventTypes();
+    const et = eventTypes[0];
+
+    // Create an event
+    const createRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        typeId: et.id,
+        dateFrom: '2026-11-20',
+        dateTo: '2026-11-22',
+        note: 'Season Championship'
+      })
+    });
+    assert.equal(createRes.status, 200);
+
+    // Assert broadcast was sent to player_one and admin, but NOT player_two (disabled)
+    assert.equal(sentMessages.length, 2);
+    const chatIds = sentMessages.map(m => m.chat_id);
+    assert.ok(chatIds.includes(111001));
+    assert.ok(chatIds.includes(999009));
+    assert.ok(!chatIds.includes(222002));
+
+    const broadcastMsg = sentMessages.find(m => m.chat_id === 111001);
+    assert.ok(broadcastMsg.text.includes(et.name));
+    assert.ok(broadcastMsg.text.includes('2026-11-20'));
+    assert.ok(broadcastMsg.text.includes('Подайте заявку'));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('API Notification Triggers: event place assignment and autopick summary', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 103 } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    db.setAppSetting('telegram_bot_token', 'mock_token_123');
+    db.setAppSetting('telegram_staff_chat_id', '-100555666');
+
+    // Setup player with user account and telegram
+    const regRes = db.registerUser({ username: 'champion_user', password: 'password', playerName: 'Sector Victor' });
+    db.approveUser(regRes.userId, 'r3');
+    db.bindUserTelegram(regRes.userId, 777007, 'champion_tg');
+
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const eventTypes = db.getEventTypes();
+    const et = eventTypes[0];
+
+    // 1. Test manual place assignment via PUT /api/events/:id
+    const ev = db.saveEvent({
+      typeId: et.id,
+      dateFrom: '2026-12-01',
+      dateTo: '2026-12-03',
+      assignments: []
+    });
+
+    sentMessages.length = 0; // Clear messages
+
+    const putRes = await fetch(`${baseUrl}/api/events/${ev.id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ...ev,
+        assignments: [
+          { place: 1, playerId: regRes.playerId, coupons: 12500 }
+        ]
+      })
+    });
+    assert.equal(putRes.status, 200);
+
+    // Verify personal notification sent to sector owner
+    assert.equal(sentMessages.length, 1);
+    const personalMsg = sentMessages[0];
+    assert.equal(personalMsg.chat_id, 777007);
+    assert.ok(personalMsg.text.includes('#1'));
+    assert.ok(personalMsg.text.includes('Sector Victor'));
+    assert.ok(personalMsg.text.includes('12500'));
+
+    // 2. Test auto-pick triggers
+    // Register candidate for an event with officer deficit
+    const ev2 = db.saveEvent({
+      typeId: et.id,
+      dateFrom: '2026-12-10',
+      dateTo: '2026-12-12',
+      assignments: []
+    });
+
+    const catalog = db.getCatalog();
+    const po = db.addPlayerOfficer(regRes.playerId, {
+      catalogId: catalog[0].id,
+      name: catalog[0].name,
+      level: 0,
+      coupons: 0
+    });
+
+    db.registerForEvent({
+      eventId: ev2.id,
+      playerId: regRes.playerId,
+      desiredPlace: 1,
+      officerId: po.id
+    });
+
+    sentMessages.length = 0;
+
+    const autopickRes = await fetch(`${baseUrl}/api/events/${ev2.id}/autopick`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(autopickRes.status, 200);
+
+    // Should send personal notification to assigned player + summary to staff chat
+    assert.ok(sentMessages.length >= 2);
+    const personalAutopick = sentMessages.find(m => m.chat_id === 777007);
+    assert.ok(personalAutopick);
+    assert.ok(personalAutopick.text.includes('Sector Victor'));
+
+    const staffSummary = sentMessages.find(m => m.chat_id === -100555666);
+    assert.ok(staffSummary);
+    assert.ok(staffSummary.text.includes('Автоподбор успешно завершен'));
+    assert.ok(staffSummary.text.includes(et.name));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('API Notification Triggers: stale stock reminders and staff summary', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 104 } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    db.setAppSetting('telegram_bot_token', 'mock_token_123');
+    db.setAppSetting('telegram_staff_chat_id', '-100444333');
+
+    // 1. Create stale player (> 14 days ago) with user and telegram
+    const staleReg = db.registerUser({ username: 'stale_commander', password: 'password', playerName: 'Sector Stale' });
+    db.approveUser(staleReg.userId, 'r3');
+    db.bindUserTelegram(staleReg.userId, 888111, 'stale_tg');
+    const eighteenDaysAgo = new Date(Date.now() - 18 * 24 * 60 * 60 * 1000).toISOString();
+    db.updatePlayer(staleReg.playerId, { stockUpdatedAt: eighteenDaysAgo });
+
+    // 2. Create fresh player (today) with user and telegram
+    const freshReg = db.registerUser({ username: 'fresh_commander', password: 'password', playerName: 'Sector Fresh' });
+    db.approveUser(freshReg.userId, 'r3');
+    db.bindUserTelegram(freshReg.userId, 888222, 'fresh_tg');
+    db.updatePlayer(freshReg.playerId, { stockUpdatedAt: new Date().toISOString() });
+
+    // Login accounts
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'stale_commander', password: 'password' })
+    })).json();
+
+    // R3 is forbidden
+    const r3CheckRes = await fetch(`${baseUrl}/api/telegram/check-reminders`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Login.token}` }
+    });
+    assert.equal(r3CheckRes.status, 403);
+
+    // R5 executes check-reminders
+    const checkRes = await fetch(`${baseUrl}/api/telegram/check-reminders`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(checkRes.status, 200);
+    const checkData = await checkRes.json();
+    assert.equal(checkData.success, true);
+    assert.ok(checkData.staleCount >= 1);
+    assert.ok(checkData.personalRemindersSent >= 1);
+    assert.equal(checkData.staffAlertSent, true);
+
+    // Verify personal reminder was sent to stale user (888111) but NOT fresh user (888222)
+    const personalReminder = sentMessages.find(m => m.chat_id === 888111);
+    assert.ok(personalReminder);
+    assert.ok(personalReminder.text.includes('Sector Stale'));
+    assert.ok(personalReminder.text.includes('18 дн.'));
+
+    assert.ok(!sentMessages.some(m => m.chat_id === 888222));
+
+    // Verify staff summary sent to staff chat
+    const staffAlert = sentMessages.find(m => m.chat_id === -100444333);
+    assert.ok(staffAlert);
+    assert.ok(staffAlert.text.includes('актуальность складов'));
+    assert.ok(staffAlert.text.includes('Устарели (>14 дн.)'));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 
 
 async function run() {

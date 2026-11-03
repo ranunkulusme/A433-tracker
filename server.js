@@ -240,6 +240,194 @@ function maskPlayerStockIfNeeded(player, user) {
   };
 }
 
+function getAppBaseUrl(req = null) {
+  const settingUrl = db.getAppSetting('app_base_url');
+  if (settingUrl) return settingUrl.replace(/\/+$/, '');
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    return `${proto}://${req.headers.host}`;
+  }
+  return '';
+}
+
+async function dispatchNotification(eventKey, data = {}, options = {}) {
+  try {
+    const template = db.getNotificationTemplate(eventKey);
+    if (!template) {
+      console.warn(`[Notification] Template "${eventKey}" not found`);
+      return { sent: false, reason: 'template_not_found' };
+    }
+
+    const token = db.getAppSetting('telegram_bot_token');
+    if (!token) {
+      return { sent: false, reason: 'no_bot_token' };
+    }
+
+    const renderedText = logic.renderTemplate(template.template, data);
+    const parseMode = template.parse_mode || 'HTML';
+    const replyMarkup = options.replyMarkup || undefined;
+
+    if (template.channel === 'staff') {
+      let staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      if (!staffChatId) {
+        return { sent: false, reason: 'no_staff_chat_id' };
+      }
+      if (staffChatId && !isNaN(Number(staffChatId))) {
+        staffChatId = Number(staffChatId);
+      }
+      const res = await telegram.sendTelegramMessage({
+        token,
+        chatId: staffChatId,
+        text: renderedText,
+        parseMode,
+        replyMarkup
+      });
+      return { sent: res.ok, result: res };
+    }
+
+    if (template.channel === 'personal') {
+      if (options.userId) {
+        const user = db.findUserById(options.userId);
+        if (!user) {
+          return { sent: false, reason: 'user_not_found' };
+        }
+        if (!user.telegram_chat_id || user.telegram_notifications_enabled === 0) {
+          return { sent: false, reason: 'notifications_disabled_or_no_chat' };
+        }
+        const res = await telegram.sendTelegramMessage({
+          token,
+          chatId: user.telegram_chat_id,
+          text: renderedText,
+          parseMode,
+          replyMarkup
+        });
+        return { sent: res.ok, result: res };
+      }
+
+      if (options.broadcast) {
+        const users = db.getUsers();
+        const targets = users.filter(u => u.is_approved !== 0 && u.telegram_chat_id && u.telegram_notifications_enabled !== 0);
+        let sentCount = 0;
+        for (const u of targets) {
+          const res = await telegram.sendTelegramMessage({
+            token,
+            chatId: u.telegram_chat_id,
+            text: renderedText,
+            parseMode,
+            replyMarkup
+          });
+          if (res.ok) sentCount++;
+        }
+        return { sent: true, sentCount, totalTargets: targets.length };
+      }
+
+      if (options.chatId) {
+        const res = await telegram.sendTelegramMessage({
+          token,
+          chatId: options.chatId,
+          text: renderedText,
+          parseMode,
+          replyMarkup
+        });
+        return { sent: res.ok, result: res };
+      }
+
+      return { sent: false, reason: 'no_target_specified' };
+    }
+
+    return { sent: false, reason: 'unknown_channel' };
+  } catch (err) {
+    console.warn(`[Notification] Error dispatching "${eventKey}":`, err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+async function checkStaleStockReminders(req = null) {
+  try {
+    const players = db.getPlayers();
+    const totalSectors = players.length;
+    let freshCount = 0;
+    let warningCount = 0;
+    let staleCount = 0;
+    let personalRemindersSent = 0;
+
+    const baseUrl = getAppBaseUrl(req);
+    const now = new Date();
+
+    const staleSectors = [];
+
+    for (const player of players) {
+      const freshness = logic.getStockFreshness(player.stockUpdatedAt, now);
+      if (freshness.status === 'fresh') {
+        freshCount++;
+      } else if (freshness.status === 'warning') {
+        warningCount++;
+      } else if (freshness.status === 'stale') {
+        staleCount++;
+        staleSectors.push({ player, freshness });
+      }
+    }
+
+    // 1. Personal reminders to owners of stale sectors
+    for (const { player, freshness } of staleSectors) {
+      if (player.userId) {
+        const user = db.findUserById(player.userId);
+        if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
+          const res = await dispatchNotification('stock_reminder_personal', {
+            username: user.username,
+            sectorName: player.name || 'Сектор',
+            daysOverdue: String(freshness.days ?? '14+'),
+            link: `${baseUrl}/#cabinet`
+          }, { userId: user.id }).catch(err => {
+            console.warn(`[Reminders] Error sending reminder to user ${user.id}:`, err.message);
+            return { sent: false };
+          });
+          if (res && res.sent) {
+            personalRemindersSent++;
+          }
+        }
+      }
+    }
+
+    // 2. Staff alert summary
+    let staffAlertSent = false;
+    const staffRes = await dispatchNotification('staff_stale_stocks_alert', {
+      totalSectors: String(totalSectors),
+      freshCount: String(freshCount),
+      warningCount: String(warningCount),
+      staleCount: String(staleCount),
+      link: `${baseUrl}/#matrix`
+    }).catch(err => {
+      console.warn('[Reminders] Error sending staff_stale_stocks_alert:', err.message);
+      return { sent: false };
+    });
+    if (staffRes && staffRes.sent) {
+      staffAlertSent = true;
+    }
+
+    return {
+      totalSectors,
+      freshCount,
+      warningCount,
+      staleCount,
+      personalRemindersSent,
+      staffAlertSent
+    };
+  } catch (err) {
+    console.warn('[Reminders] Error in checkStaleStockReminders:', err.message);
+    return {
+      totalSectors: 0,
+      freshCount: 0,
+      warningCount: 0,
+      staleCount: 0,
+      personalRemindersSent: 0,
+      staffAlertSent: false,
+      error: err.message
+    };
+  }
+}
+
 const FORBIDDEN_FILES = new Set([
   'package.json',
   'package-lock.json',
@@ -395,6 +583,51 @@ function createRequestHandler(staticDir, s3Manager = null) {
         if (regRes.error) {
           return sendError(res, 400, regRes.error, regRes.message || 'Ошибка при регистрации');
         }
+
+        if (regRes.pendingApproval || !regRes.is_approved) {
+          try {
+            let sectorName = playerName || 'Не привязан';
+            let power = '0';
+            let vip = '0';
+            const targetPlayerId = regRes.playerId || playerId;
+            if (targetPlayerId) {
+              const p = db.getPlayerById(targetPlayerId);
+              if (p) {
+                sectorName = p.name || sectorName;
+                vip = p.vip !== undefined ? String(p.vip) : '0';
+                const rawPower = Number(p.power) || 0;
+                if (rawPower >= 1000000) {
+                  power = (rawPower / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+                } else if (rawPower >= 1000) {
+                  power = (rawPower / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+                } else {
+                  power = String(rawPower);
+                }
+              }
+            }
+
+            await dispatchNotification('staff_new_user_pending', {
+              username,
+              sectorName,
+              power,
+              vip
+            }, {
+              replyMarkup: {
+                inline_keyboard: [
+                  [
+                    { text: '🛡️ Одобрить (Р3)', callback_data: `approve_user:${regRes.userId}` },
+                    { text: '❌ Отклонить', callback_data: `reject_user:${regRes.userId}` }
+                  ]
+                ]
+              }
+            }).catch(err => {
+              console.warn('[Notification] Error dispatching staff_new_user_pending:', err.message);
+            });
+          } catch (notifErr) {
+            console.warn('[Notification] Error preparing staff_new_user_pending:', notifErr.message);
+          }
+        }
+
         return sendJson(res, 200, {
           success: true,
           pendingApproval: regRes.pendingApproval,
@@ -1189,7 +1422,30 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/events' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
+      const isNew = !body.id;
       const saved = db.saveEvent(body);
+
+      if (isNew && saved && saved.id) {
+        try {
+          const eventTypes = db.getEventTypes();
+          const et = eventTypes.find(t => t.id === saved.typeId);
+          const effectivePlaces = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom) : et.places) : [];
+          const totalPlaces = effectivePlaces ? effectivePlaces.length : (et?.places?.length || 0);
+          const baseUrl = getAppBaseUrl(req);
+
+          await dispatchNotification('event_registration_opened', {
+            eventName: et?.name || 'Событие',
+            eventDate: saved.dateFrom || '',
+            totalPlaces: String(totalPlaces),
+            link: `${baseUrl}/#cabinet`
+          }, { broadcast: true }).catch(err => {
+            console.warn('[Notification] Error broadcasting event_registration_opened:', err.message);
+          });
+        } catch (notifErr) {
+          console.warn('[Notification] Error preparing event_registration_opened:', notifErr.message);
+        }
+      }
+
       return sendJson(res, 200, saved);
     }
 
@@ -1368,7 +1624,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, { success: true });
     }
 
-    const autopickMatch = pathname.match(/^\/api\/events\/(\d+)\/autopick$/);
+    const autopickMatch = pathname.match(/^\/api\/events\/(\d+)\/(?:autopick|auto-pick)$/);
     if (autopickMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const eventId = Number(autopickMatch[1]);
@@ -1399,6 +1655,57 @@ function createRequestHandler(staticDir, s3Manager = null) {
       ev.assignments = result.assignments;
       db.saveEvent(ev);
 
+      // Trigger 3: event_place_assigned & Trigger 4: staff_event_autopick_summary
+      try {
+        const baseUrl = getAppBaseUrl(req);
+        const assignedList = (result.assignments || []).filter(a => a.playerId && Number(a.place) > 0);
+
+        // 1. Personal notifications to each assigned sector owner
+        for (const a of assignedList) {
+          const player = db.getPlayerById(a.playerId);
+          if (player && player.userId) {
+            const user = db.findUserById(player.userId);
+            if (user) {
+              const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
+              await dispatchNotification('event_place_assigned', {
+                username: user.username,
+                sectorName: player.name || a.playerName || 'Сектор',
+                eventName: et?.name || 'Событие',
+                eventDate: ev.dateFrom || '',
+                place: String(a.place),
+                coupons: String(coupons),
+                link: `${baseUrl}/#calendar`
+              }, { userId: user.id }).catch(err => {
+                console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
+              });
+            }
+          }
+        }
+
+        // 2. Staff autopick summary
+        const topFormatted = assignedList
+          .sort((x, y) => Number(x.place) - Number(y.place))
+          .slice(0, 5)
+          .map((a, idx) => {
+            const p = players.find(pl => pl.id === a.playerId);
+            const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
+            return `${idx + 1}. #${a.place}: ${a.playerName || p?.name || 'Сектор'}${vipStr}`;
+          })
+          .join('\n');
+
+        await dispatchNotification('staff_event_autopick_summary', {
+          eventName: et?.name || 'Событие',
+          assignedCount: String(assignedList.length),
+          availablePlaces: String(places.length),
+          topAssignmentsList: topFormatted || 'Назначений нет',
+          link: `${baseUrl}/#events`
+        }).catch(err => {
+          console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
+        });
+      } catch (autopickNotifErr) {
+        console.warn('[Notification] Error in autopick notifications:', autopickNotifErr.message);
+      }
+
       return sendJson(res, 200, {
         success: true,
         assignments: result.assignments,
@@ -1426,7 +1733,48 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (eventMatch && req.method === 'PUT') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const saved = db.saveEvent({ ...body, id: Number(eventMatch[1]) });
+      const eventId = Number(eventMatch[1]);
+      const prevEvent = db.getEventById(eventId);
+      const prevAssignments = prevEvent?.assignments || [];
+
+      const saved = db.saveEvent({ ...body, id: eventId });
+
+      try {
+        const newAssignments = Array.isArray(body.assignments) ? body.assignments : [];
+        if (newAssignments.length > 0) {
+          const eventTypes = db.getEventTypes();
+          const et = eventTypes.find(t => t.id === (saved.typeId || prevEvent?.typeId));
+          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom || prevEvent?.dateFrom) : et.places) : [];
+          const baseUrl = getAppBaseUrl(req);
+
+          for (const a of newAssignments) {
+            if (a.playerId && Number(a.place) > 0) {
+              const already = prevAssignments.some(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
+              if (!already) {
+                const player = db.getPlayerById(a.playerId);
+                if (player && player.userId) {
+                  const user = db.findUserById(player.userId);
+                  if (user) {
+                    const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
+                    await dispatchNotification('event_place_assigned', {
+                      username: user.username,
+                      sectorName: player.name || a.playerName || 'Сектор',
+                      eventName: et?.name || 'Событие',
+                      eventDate: saved.dateFrom || prevEvent?.dateFrom || '',
+                      place: String(a.place),
+                      coupons: String(coupons),
+                      link: `${baseUrl}/#calendar`
+                    }, { userId: user.id }).catch(() => {});
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Notification] Error in PUT /api/events/:id place notifications:', err.message);
+      }
+
       return sendJson(res, 200, saved);
     }
 
@@ -1817,6 +2165,18 @@ function createRequestHandler(staticDir, s3Manager = null) {
       });
     }
 
+    if (pathname === '/api/telegram/check-reminders' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const result = await checkStaleStockReminders(req);
+      return sendJson(res, 200, { success: true, ...result });
+    }
+
     // ─────────────────────────────────────────────────────────
     // NOTIFICATION TEMPLATES ENDPOINTS
     // ─────────────────────────────────────────────────────────
@@ -1978,6 +2338,14 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   }, 24 * 60 * 60 * 1000);
   if (retentionInterval.unref) retentionInterval.unref();
 
+  // Schedule daily stale stock check (24h)
+  const staleReminderInterval = setInterval(() => {
+    checkStaleStockReminders().catch(err => {
+      console.error('[Reminders] Error in scheduled checkStaleStockReminders:', err);
+    });
+  }, 24 * 60 * 60 * 1000);
+  if (staleReminderInterval.unref) staleReminderInterval.unref();
+
   const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
   server.s3Manager = activeS3Manager;
 
@@ -1985,6 +2353,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   const originalClose = server.close.bind(server);
   server.close = function (callback) {
     clearInterval(retentionInterval);
+    clearInterval(staleReminderInterval);
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);
@@ -2066,5 +2435,7 @@ if (require.main === module) {
 module.exports = {
   startServer,
   createRequestHandler,
-  MIME_TYPES
+  MIME_TYPES,
+  dispatchNotification,
+  checkStaleStockReminders
 };
