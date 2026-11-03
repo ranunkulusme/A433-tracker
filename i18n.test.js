@@ -260,6 +260,49 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('audit dictionary provides freshness, history, and source translations across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('audit.freshness_fresh'), 'Свежие данные');
+    assert.equal(t('audit.freshness_warning'), 'Требует обновления');
+    assert.equal(t('audit.freshness_stale'), 'Склад устарел');
+    assert.equal(t('audit.history_title'), 'История изменений склада');
+    assert.equal(t('audit.source_manual'), 'Ручная правка');
+    assert.equal(t('audit.source_ocr'), 'Скриншот (OCR)');
+    assert.equal(t('audit.archived_screenshot_notice'), 'Архив: скриншот удален по истечении 30 дней');
+    assert.equal(t('audit.view_screenshot'), 'Посмотреть скриншот');
+    assert.equal(t('audit.btn_history'), 'История склада');
+    assert.equal(t('audit.empty_history'), 'История изменений пока пуста');
+    assert.equal(t('audit.zoom_title'), 'Оригинальный скриншот');
+
+    await setAppLanguage('en');
+    assert.equal(t('audit.freshness_fresh'), 'Fresh data');
+    assert.equal(t('audit.freshness_warning'), 'Needs update');
+    assert.equal(t('audit.freshness_stale'), 'Stock is stale');
+    assert.equal(t('audit.history_title'), 'Warehouse Audit History');
+    assert.equal(t('audit.source_manual'), 'Manual edit');
+    assert.equal(t('audit.source_ocr'), 'Screenshot (OCR)');
+    assert.equal(t('audit.archived_screenshot_notice'), 'Archive: screenshot removed after 30 days');
+    assert.equal(t('audit.view_screenshot'), 'View screenshot');
+    assert.equal(t('audit.btn_history'), 'Stock History');
+    assert.equal(t('audit.empty_history'), 'No history recorded yet');
+    assert.equal(t('audit.zoom_title'), 'Original Screenshot');
+
+    await setAppLanguage('de');
+    assert.equal(t('audit.freshness_fresh'), 'Aktuelle Daten');
+    assert.equal(t('audit.freshness_warning'), 'Aktualisierung erforderlich');
+    assert.equal(t('audit.freshness_stale'), 'Lager veraltet');
+    assert.equal(t('audit.history_title'), 'Lager-Änderungsverlauf');
+    assert.equal(t('audit.source_manual'), 'Manuelle Bearbeitung');
+    assert.equal(t('audit.source_ocr'), 'Screenshot (OCR)');
+    assert.equal(t('audit.archived_screenshot_notice'), 'Archiv: Screenshot nach 30 Tagen gelöscht');
+    assert.equal(t('audit.view_screenshot'), 'Screenshot ansehen');
+    assert.equal(t('audit.btn_history'), 'Lager-Verlauf');
+    assert.equal(t('audit.empty_history'), 'Noch kein Änderungsverlauf vorhanden');
+    assert.equal(t('audit.zoom_title'), 'Original-Screenshot');
+
+    await setAppLanguage('ru');
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);

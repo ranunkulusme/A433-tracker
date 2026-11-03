@@ -1704,6 +1704,7 @@ async function renderMyCabinet() {
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        <button type="button" class="btn btn-secondary btn-sm btn-history-trigger" onclick="openStockHistoryModal(${profile.id})">📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}</button>
         <button type="button" class="btn btn-secondary btn-scanner" onclick="openSmartScannerModal('my_cabinet')">📷 Smart Scanner</button>
         <button type="button" class="btn-ghost btn-sm" onclick="openChangePasswordModal()">🔑 Сменить пароль</button>
         <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 Обновить</button>
@@ -1785,8 +1786,16 @@ async function renderMyCabinet() {
       <!-- Stock Card -->
       <div class="cabinet-card">
         <div class="cabinet-card-title">
-          <span>📦 Запасы гильдейца</span>
-          <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>📦 Запасы гильдейца</span>
+            ${renderStockFreshnessBadge(profile.stockUpdatedAt || profile.stock_updated_at)}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button type="button" class="btn-ghost btn-xs btn-history-trigger" onclick="openStockHistoryModal(${profile.id})" title="${escapeHtml(typeof t === 'function' ? t('audit.btn_history') : 'История склада')}">
+              📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}
+            </button>
+            <span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>
+          </div>
         </div>
         <div class="stock-grid stock-grid-3x2" id="cabinet-stock-grid-wrap" style="margin-bottom:0">
           ${renderCabinetStockGridHtml(profile, totalStarPoints)}
@@ -4576,6 +4585,7 @@ function renderPlayers() {
           ${filteredPlayers.map(p=>{
             const rewards = dailyRewards(p.sector);
             const stock = canSeeStock(p.id) ? `${fmtNum(p.stock.coupons)} куп. · ${fmtNum(p.stock.puzzles)} пазл. · ${fmtNum(p.stock.chests)} сун.` : 'Скрыто';
+            const freshnessBadge = canSeeStock(p.id) ? renderStockFreshnessBadge(p.stockUpdatedAt || p.stock_updated_at) : '';
             const isR5 = (currentUser?.rank || state.currentRole) === 'r5';
             const ownerPermsBtn = (isR5 && p.userId)
               ? ` <button class="btn-perm-edit-inline" title="Настроить права доступа @${escapeHtml(p.username)}" onclick="event.stopPropagation();openUserPermissionsModal(${p.userId})">🛡️</button>`
@@ -4628,9 +4638,13 @@ function renderPlayers() {
                   ` : ''}
                 </div>
               </td>
-              <td style="font-family:var(--mono);font-size:12px">${stock}</td>
+              <td style="font-size:12px">
+                <div style="font-family:var(--mono)">${stock}</div>
+                ${freshnessBadge ? `<div style="margin-top:4px">${freshnessBadge}</div>` : ''}
+              </td>
               <td>
                 <div style="display:flex;gap:4px">
+                  ${canSeeStock(p.id) ? `<button class="action-btn btn-history-trigger" title="${escapeHtml(typeof t === 'function' ? t('audit.btn_history') : 'История склада')}" onclick="event.stopPropagation();openStockHistoryModal(${p.id})">📜</button>` : ''}
                   ${isR5 && p.userId ? `<button class="action-btn" title="Права доступа владельца @${escapeHtml(p.username || '')}" onclick="event.stopPropagation();openUserPermissionsModal(${p.userId})">🛡️</button>` : ''}
                   ${canManage() || state.currentPlayerId === p.id ? `<button class="action-btn" onclick="openPlayerModal(${p.id})">✏️</button>` : ''}
                   ${canManage() ? `<button class="action-btn danger" onclick="confirmDeletePlayer(${p.id})">🗑</button>` : ''}
@@ -4693,8 +4707,16 @@ function renderPlayerDetail(playerId) {
     </div>
     ${stockVisible ? `
       <div class="section-header">
-        <div class="section-title">📦 Запасы сектора</div>
-        ${canEditSector ? `<span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>` : ''}
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="section-title">📦 Запасы сектора</div>
+          ${renderStockFreshnessBadge(p.stockUpdatedAt || p.stock_updated_at)}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" class="btn btn-secondary btn-sm btn-history-trigger" onclick="openStockHistoryModal(${p.id})">
+            📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}
+          </button>
+          ${canEditSector ? `<span style="font-size:12px;color:var(--text3);font-weight:normal">💡 Кликните на плашку для быстрого изменения</span>` : ''}
+        </div>
       </div>
       <div class="stock-grid" id="sector-stock-grid-wrap-${p.id}" style="margin-bottom:20px">
         ${renderSectorStockGridHtml(p, canEditSector)}
@@ -8502,9 +8524,13 @@ async function applyScanResultsToProfile() {
     const confidentialityLevel = myCabinetProfile?.sector?.confidentialityLevel || 0;
     const chests = myCabinetProfile?.stock?.chests || 0;
 
+    const activeSectorId = myCabinetProfile?.id || myCabinetProfile?.activeSectorId;
+    const currentStock = myCabinetProfile?.stock ? { ...myCabinetProfile.stock } : {};
+
     const payload = {
       sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
-      stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
+      stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests },
+      stockUpdateSource: 'ocr_scan'
     };
     if (updateNick && nick) {
       payload.name = nick;
@@ -8519,6 +8545,25 @@ async function applyScanResultsToProfile() {
         method: 'PUT',
         body: payload
       });
+
+      const screenshotBase64 = lastScanResults?.screenshotBase64 ||
+        (typeof smartScanner !== 'undefined' && smartScanner.getLastScreenshotBase64 && smartScanner.getLastScreenshotBase64());
+      if (screenshotBase64 && activeSectorId) {
+        try {
+          await apiFetch(`/api/players/${activeSectorId}/stock-history`, {
+            method: 'POST',
+            body: {
+              source: 'ocr_scan',
+              snapshotBefore: currentStock,
+              snapshotAfter: payload.stock,
+              screenshotBase64
+            }
+          });
+        } catch (histErr) {
+          console.warn('Failed to upload screenshot audit history:', histErr);
+        }
+      }
+
       toast('Данные Smart Scanner успешно применены в профиль!');
       closeSmartScannerModal();
       await renderMyCabinet();
@@ -8545,6 +8590,41 @@ async function applyScanResultsToProfile() {
     if (document.getElementById('fp-stock-legendary-stars-2')) document.getElementById('fp-stock-legendary-stars-2').value = formatInputNumber(legendaryStars2);
     if (document.getElementById('fp-stock-legendary-stars-3')) document.getElementById('fp-stock-legendary-stars-3').value = formatInputNumber(legendaryStars3);
     updatePlayerModalStarPoints();
+
+    const screenshotBase64 = lastScanResults?.screenshotBase64 ||
+      (typeof smartScanner !== 'undefined' && smartScanner.getLastScreenshotBase64 && smartScanner.getLastScreenshotBase64());
+    if (screenshotBase64 && editPlayerId) {
+      const p = getPlayer(editPlayerId);
+      const oldStock = p ? { ...p.stock } : {};
+      const newStock = {
+        coupons,
+        puzzles,
+        starCoupons,
+        legendaryStars1,
+        legendaryStars2,
+        legendaryStars3,
+        chests: p?.stock?.chests || 0
+      };
+      try {
+        apiFetch(`/api/players/${editPlayerId}/stock-history`, {
+          method: 'POST',
+          body: {
+            source: 'ocr_scan',
+            snapshotBefore: oldStock,
+            snapshotAfter: newStock,
+            screenshotBase64
+          }
+        }).catch(err => console.warn('Failed to record stock history:', err));
+        if (p) {
+          p.stock = newStock;
+          p.stockUpdatedAt = new Date().toISOString();
+          p.stockUpdateSource = 'ocr_scan';
+        }
+      } catch (histErr) {
+        console.warn('Failed to record stock history:', histErr);
+      }
+    }
+
     toast('Данные Smart Scanner перенесены в карточку игрока!');
     closeSmartScannerModal();
   }
@@ -8635,6 +8715,215 @@ function initSmartScanner() {
   if (typeof window !== 'undefined' && !window.__scannerPasteInitialized) {
     window.__scannerPasteInitialized = true;
     window.addEventListener('paste', handleScannerGlobalPaste);
+  }
+}
+
+/* ── MODULE 3: STOCK AUDIT, FRESHNESS & SCREENSHOT ZOOM ── */
+
+function renderStockFreshnessBadge(updatedAt) {
+  const getFn = (typeof logic !== 'undefined' && logic.getStockFreshness)
+    ? logic.getStockFreshness
+    : (typeof getStockFreshness === 'function' ? getStockFreshness : null);
+  const info = getFn ? getFn(updatedAt) : { status: 'unknown', days: null, label: 'нет данных' };
+
+  let icon = '•';
+  let titleKey = 'audit.freshness_stale';
+  if (info.status === 'fresh') {
+    icon = '✓';
+    titleKey = 'audit.freshness_fresh';
+  } else if (info.status === 'warning') {
+    icon = '⏳';
+    titleKey = 'audit.freshness_warning';
+  } else if (info.status === 'stale') {
+    icon = '⚠️';
+    titleKey = 'audit.freshness_stale';
+  }
+
+  const titleText = (typeof t === 'function' ? t(titleKey) : titleKey);
+  const statusClass = `freshness-${info.status}`;
+
+  let labelText = info.label;
+  if (info.days === 0) {
+    labelText = (typeof t === 'function' ? t('audit.today') : 'сегодня');
+  } else if (info.days !== null && info.days !== undefined) {
+    labelText = (typeof t === 'function' ? t('audit.days_ago', { days: info.days }) : `${info.days} дн. назад`);
+  } else {
+    labelText = (typeof t === 'function' ? t('audit.no_data') : 'нет данных');
+  }
+
+  return `<span class="freshness-badge ${statusClass}" title="${escapeHtml(titleText)}"><span class="freshness-dot"></span>${icon} ${escapeHtml(labelText)}</span>`;
+}
+
+let currentHistoryPlayerId = null;
+
+async function openStockHistoryModal(playerId) {
+  currentHistoryPlayerId = playerId;
+  const p = getPlayer(playerId) || (myCabinetProfile && myCabinetProfile.id === playerId ? myCabinetProfile : null);
+  const sectorName = p ? p.name : `ID ${playerId}`;
+
+  const titleEl = document.getElementById('modal-stock-history-title');
+  if (titleEl) {
+    const baseTitle = (typeof t === 'function' ? t('audit.history_title') : 'История изменений склада');
+    titleEl.textContent = `${baseTitle}: ${sectorName}`;
+  }
+
+  const loadingEl = document.getElementById('stock-history-loading');
+  const listEl = document.getElementById('stock-history-list');
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (listEl) listEl.innerHTML = '';
+
+  openModal('modal-stock-history');
+
+  try {
+    const data = await apiFetch(`/api/players/${playerId}/stock-history`);
+    if (loadingEl) loadingEl.style.display = 'none';
+
+    const records = (data && Array.isArray(data.records)) ? data.records : [];
+    if (!listEl) return;
+
+    if (!records.length) {
+      const emptyText = (typeof t === 'function' ? t('audit.empty_history') : 'История изменений пока пуста');
+      listEl.innerHTML = `<div class="history-empty">📜 ${escapeHtml(emptyText)}</div>`;
+      return;
+    }
+
+    const calcDiffFn = (typeof logic !== 'undefined' && logic.calculateStockDiff)
+      ? logic.calculateStockDiff
+      : (typeof calculateStockDiff === 'function' ? calculateStockDiff : null);
+
+    const cardsHtml = records.map(r => {
+      let timeStr = r.createdAt || '';
+      try {
+        const d = new Date(r.createdAt);
+        if (!isNaN(d.getTime())) {
+          timeStr = d.toLocaleString();
+        }
+      } catch (_) {}
+
+      const authorText = r.authorUsername
+        ? `@${r.authorUsername}`
+        : (typeof t === 'function' ? t('audit.unknown_author') : 'Владелец сектора');
+
+      const isOcr = r.source === 'ocr_scan';
+      const sourceLabel = isOcr
+        ? `📸 ${typeof t === 'function' ? t('audit.source_ocr') : 'Скриншот (OCR)'}`
+        : `✏️ ${typeof t === 'function' ? t('audit.source_manual') : 'Ручная правка'}`;
+      const sourceClass = isOcr ? 'source-ocr' : 'source-manual';
+
+      let chipsHtml = '';
+      if (calcDiffFn && (r.snapshotBefore || r.snapshotAfter)) {
+        const diffRes = calcDiffFn(r.snapshotBefore || {}, r.snapshotAfter || {});
+        if (diffRes.chips && diffRes.chips.length > 0) {
+          chipsHtml = diffRes.chips.map(c => {
+            return `<span class="diff-chip ${c.type}">${escapeHtml(c.formatted)}</span>`;
+          }).join('');
+        }
+      }
+      if (!chipsHtml) {
+        const summaryText = r.diffSummary || (typeof t === 'function' ? t('audit.empty_history') : 'Без изменений');
+        chipsHtml = `<span class="diff-chip neutral">${escapeHtml(summaryText)}</span>`;
+      }
+
+      let screenshotHtml = '';
+      if (r.screenshotPath) {
+        const filename = r.screenshotPath.split('/').pop();
+        const screenshotUrl = `/api/screenshots/${encodeURIComponent(filename)}`;
+        const viewText = typeof t === 'function' ? t('audit.view_screenshot') : 'Посмотреть скриншот';
+        screenshotHtml = `
+          <div class="history-thumb-container">
+            <img class="history-thumb" src="${screenshotUrl}" alt="Screenshot" onclick="openScreenshotZoom('${screenshotUrl}')" title="${escapeHtml(viewText)}">
+            <a href="javascript:void(0)" class="history-thumb-label" onclick="openScreenshotZoom('${screenshotUrl}')">🔍 ${escapeHtml(viewText)}</a>
+          </div>
+        `;
+      } else if (isOcr) {
+        const archiveNotice = typeof t === 'function' ? t('audit.archived_screenshot_notice') : 'Архив: скриншот удален по истечении 30 дней';
+        screenshotHtml = `<div class="history-archived-note">📁 ${escapeHtml(archiveNotice)}</div>`;
+      }
+
+      return `
+        <div class="history-card">
+          <div class="history-card-header">
+            <div class="history-card-meta">
+              <span class="history-author">👤 ${escapeHtml(authorText)}</span>
+              <span class="history-time">🕒 ${escapeHtml(timeStr)}</span>
+            </div>
+            <span class="history-source-badge ${sourceClass}">${escapeHtml(sourceLabel)}</span>
+          </div>
+          <div class="history-card-body">
+            <div class="diff-chips">${chipsHtml}</div>
+            ${screenshotHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listEl.innerHTML = cardsHtml;
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (listEl) {
+      listEl.innerHTML = `<div class="history-empty" style="color:var(--red)">Ошибка загрузки истории: ${escapeHtml(err.message)}</div>`;
+    }
+    toast('Ошибка загрузки истории склада: ' + err.message, 'error');
+  }
+}
+
+function closeStockHistoryModal() {
+  closeModal('modal-stock-history');
+}
+
+let currentZoomScale = 1.0;
+let currentZoomUrl = '';
+
+function openScreenshotZoom(url) {
+  if (!url) return;
+  currentZoomUrl = url;
+  currentZoomScale = 1.0;
+
+  const img = document.getElementById('zoom-screenshot-img');
+  if (img) {
+    img.src = url;
+    img.style.transform = 'scale(1)';
+  }
+
+  const resetBtn = document.getElementById('btn-zoom-reset');
+  if (resetBtn) resetBtn.textContent = '100%';
+
+  const infoEl = document.getElementById('zoom-screenshot-info');
+  if (infoEl) {
+    const filename = url.split('/').pop();
+    infoEl.textContent = filename ? decodeURIComponent(filename) : '';
+  }
+
+  openModal('modal-screenshot-zoom');
+}
+
+function closeScreenshotZoom() {
+  closeModal('modal-screenshot-zoom');
+}
+
+function zoomIn() {
+  currentZoomScale = Math.min(4.0, Math.round((currentZoomScale + 0.25) * 100) / 100);
+  applyZoomTransform();
+}
+
+function zoomOut() {
+  currentZoomScale = Math.max(0.5, Math.round((currentZoomScale - 0.25) * 100) / 100);
+  applyZoomTransform();
+}
+
+function resetZoom() {
+  currentZoomScale = 1.0;
+  applyZoomTransform();
+}
+
+function applyZoomTransform() {
+  const img = document.getElementById('zoom-screenshot-img');
+  if (img) {
+    img.style.transform = `scale(${currentZoomScale})`;
+  }
+  const resetBtn = document.getElementById('btn-zoom-reset');
+  if (resetBtn) {
+    resetBtn.textContent = `${Math.round(currentZoomScale * 100)}%`;
   }
 }
 
@@ -8828,4 +9117,13 @@ if (typeof window !== 'undefined') {
   window.toggleLangDropdown = toggleLangDropdown;
   window.changeAppLanguage = changeAppLanguage;
   window.updateLangSwitcherUI = updateLangSwitcherUI;
+
+  window.renderStockFreshnessBadge = renderStockFreshnessBadge;
+  window.openStockHistoryModal = openStockHistoryModal;
+  window.closeStockHistoryModal = closeStockHistoryModal;
+  window.openScreenshotZoom = openScreenshotZoom;
+  window.closeScreenshotZoom = closeScreenshotZoom;
+  window.zoomIn = zoomIn;
+  window.zoomOut = zoomOut;
+  window.resetZoom = resetZoom;
 }

@@ -1189,6 +1189,51 @@
   </div>
 </div>
 
+<!-- Modal: Stock Audit History -->
+<div class="modal modal-wide" id="modal-stock-history" style="max-width:780px">
+  <div class="modal-header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">📜</span>
+      <h3 id="modal-stock-history-title" data-i18n="audit.history_title">История изменений склада</h3>
+    </div>
+    <button class="modal-close" onclick="closeStockHistoryModal()" title="Закрыть">✕</button>
+  </div>
+  <div class="modal-body" style="max-height:72vh;overflow-y:auto">
+    <div id="stock-history-loading" style="display:none;text-align:center;padding:24px;color:var(--text3)" data-i18n="common.loading">
+      Загрузка...
+    </div>
+    <div id="stock-history-list" class="stock-history-list"></div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn-ghost" onclick="closeStockHistoryModal()" data-i18n="common.close">Закрыть</button>
+  </div>
+</div>
+
+<!-- Modal: Screenshot Zoom Viewer -->
+<div class="modal modal-wide modal-zoom" id="modal-screenshot-zoom" style="max-width:960px;width:95vw">
+  <div class="modal-header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">🔍</span>
+      <h3 id="modal-screenshot-zoom-title" data-i18n="audit.zoom_title">Оригинальный скриншот</h3>
+    </div>
+    <div class="zoom-controls">
+      <button type="button" class="btn-sm btn-ghost zoom-btn" id="btn-zoom-out" onclick="zoomOut()" title="Уменьшить" data-i18n-attr="title:audit.zoom_out">🔍−</button>
+      <button type="button" class="btn-sm btn-ghost zoom-btn" id="btn-zoom-reset" onclick="resetZoom()" title="Сброс" data-i18n="audit.zoom_reset">100%</button>
+      <button type="button" class="btn-sm btn-ghost zoom-btn" id="btn-zoom-in" onclick="zoomIn()" title="Увеличить" data-i18n-attr="title:audit.zoom_in">🔍+</button>
+      <button class="modal-close" onclick="closeScreenshotZoom()" title="Закрыть" style="margin-left:8px">✕</button>
+    </div>
+  </div>
+  <div class="modal-body zoom-modal-body" style="max-height:78vh;overflow:auto;padding:12px;background:var(--bg3);display:flex;justify-content:center;align-items:center">
+    <div class="zoom-img-wrapper" id="zoom-img-wrapper" style="overflow:auto;max-width:100%;max-height:100%;text-align:center">
+      <img id="zoom-screenshot-img" src="" alt="Screenshot" style="transform-origin:center center;transition:transform 0.15s ease-out;max-width:100%;max-height:72vh;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.3)">
+    </div>
+  </div>
+  <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center">
+    <span id="zoom-screenshot-info" style="font-size:12px;color:var(--text3)"></span>
+    <button type="button" class="btn-ghost" onclick="closeScreenshotZoom()" data-i18n="common.close">Закрыть</button>
+  </div>
+</div>
+
 <div class="toast-container" id="toasts"></div>
 <script src="logic.js"></script>
 <script src="/ocr.js"></script>

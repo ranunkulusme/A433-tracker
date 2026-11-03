@@ -111,6 +111,31 @@ const I18N_RESOURCES = {
         access_denied: "Доступ ограничен правами ранга",
         import_success: "Импортировано {{count}} записей",
         export_success: "Данные успешно экспортированы"
+      },
+      audit: {
+        freshness_fresh: "Свежие данные",
+        freshness_warning: "Требует обновления",
+        freshness_stale: "Склад устарел",
+        history_title: "История изменений склада",
+        source_manual: "Ручная правка",
+        source_ocr: "Скриншот (OCR)",
+        archived_screenshot_notice: "Архив: скриншот удален по истечении 30 дней",
+        view_screenshot: "Посмотреть скриншот",
+        btn_history: "История склада",
+        empty_history: "История изменений пока пуста",
+        zoom_title: "Оригинальный скриншот",
+        zoom_in: "Увеличить",
+        zoom_out: "Уменьшить",
+        zoom_reset: "Сброс",
+        diff_coupons: "куп.",
+        diff_puzzles: "пазл.",
+        diff_stars: "зв.",
+        author: "Автор",
+        source: "Источник",
+        unknown_author: "Владелец сектора",
+        today: "сегодня",
+        days_ago: "{{days}} дн. назад",
+        no_data: "нет данных"
       }
     }
   },
@@ -220,6 +245,31 @@ const I18N_RESOURCES = {
         access_denied: "Access denied by rank permissions",
         import_success: "Imported {{count}} records",
         export_success: "Data exported successfully"
+      },
+      audit: {
+        freshness_fresh: "Fresh data",
+        freshness_warning: "Needs update",
+        freshness_stale: "Stock is stale",
+        history_title: "Warehouse Audit History",
+        source_manual: "Manual edit",
+        source_ocr: "Screenshot (OCR)",
+        archived_screenshot_notice: "Archive: screenshot removed after 30 days",
+        view_screenshot: "View screenshot",
+        btn_history: "Stock History",
+        empty_history: "No history recorded yet",
+        zoom_title: "Original Screenshot",
+        zoom_in: "Zoom In",
+        zoom_out: "Zoom Out",
+        zoom_reset: "Reset",
+        diff_coupons: "cpn.",
+        diff_puzzles: "pzl.",
+        diff_stars: "stars",
+        author: "Author",
+        source: "Source",
+        unknown_author: "Sector Owner",
+        today: "today",
+        days_ago: "{{days}} d. ago",
+        no_data: "no data"
       }
     }
   },
@@ -329,6 +379,31 @@ const I18N_RESOURCES = {
         access_denied: "Zugriff durch Rangberechtigungen verweigert",
         import_success: "{{count}} Datensätze importiert",
         export_success: "Daten erfolgreich exportiert"
+      },
+      audit: {
+        freshness_fresh: "Aktuelle Daten",
+        freshness_warning: "Aktualisierung erforderlich",
+        freshness_stale: "Lager veraltet",
+        history_title: "Lager-Änderungsverlauf",
+        source_manual: "Manuelle Bearbeitung",
+        source_ocr: "Screenshot (OCR)",
+        archived_screenshot_notice: "Archiv: Screenshot nach 30 Tagen gelöscht",
+        view_screenshot: "Screenshot ansehen",
+        btn_history: "Lager-Verlauf",
+        empty_history: "Noch kein Änderungsverlauf vorhanden",
+        zoom_title: "Original-Screenshot",
+        zoom_in: "Vergrößern",
+        zoom_out: "Verkleinern",
+        zoom_reset: "Zurücksetzen",
+        diff_coupons: "Kup.",
+        diff_puzzles: "Pzl.",
+        diff_stars: "Sterne",
+        author: "Autor",
+        source: "Quelle",
+        unknown_author: "Sektorbesitzer",
+        today: "heute",
+        days_ago: "vor {{days}} T.",
+        no_data: "keine Daten"
       }
     }
   }
