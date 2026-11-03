@@ -33,7 +33,8 @@ async function callTelegramApi(token, method, payload = null, options = {}) {
       method: payload !== null ? 'POST' : 'GET',
       headers: {
         'Accept': 'application/json'
-      }
+      },
+      signal: options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(options.timeoutMs || 10000) : undefined)
     };
 
     if (payload !== null) {
