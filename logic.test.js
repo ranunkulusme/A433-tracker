@@ -52,6 +52,8 @@ const {
   PERMISSION_PRESETS,
   hasUserPermission,
   applyPermissionPreset,
+  extractSectorCalendarEvents,
+  simulateCalendarEventProgress,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -2099,13 +2101,337 @@ test('applyPermissionPreset returns correct permission list for presets and hand
   assert.deepStrictEqual(applyPermissionPreset('analytics'), ['view_sectors', 'view_stocks', 'view_matrix']);
 });
 
+test('extractSectorCalendarEvents filters out past events and extracts assigned places in guaranteed mode', () => {
+  const eventTypes = [
+    {
+      id: 1,
+      name: 'Битва Альянсов',
+      color: '#ff5500',
+      places: [
+        { place: 1, coupons: 10000 },
+        { place: 2, coupons: 5000 },
+      ]
+    }
+  ];
 
+  const events = [
+    // Прошедшее событие (dateTo < today) - должно быть проигнорировано
+    {
+      id: 101,
+      typeId: 1,
+      dateFrom: '2026-10-01',
+      dateTo: '2026-10-03',
+      assignments: [{ place: 1, playerId: 42 }]
+    },
+    // Текущее активное событие (dateTo >= today) с переопределенными купонами actualCoupons
+    {
+      id: 102,
+      typeId: 1,
+      dateFrom: '2026-11-01',
+      dateTo: '2026-11-05',
+      assignments: [{ place: 2, playerId: 42, actualCoupons: 6000 }]
+    },
+    // Будущее событие для игрока 42
+    {
+      id: 103,
+      typeId: 1,
+      dateFrom: '2026-11-10',
+      dateTo: '2026-11-12',
+      assignments: [{ place: 1, playerId: 42 }]
+    },
+    // Событие для другого игрока 99 - не должно попадать
+    {
+      id: 104,
+      typeId: 1,
+      dateFrom: '2026-11-15',
+      dateTo: '2026-11-17',
+      assignments: [{ place: 1, playerId: 99 }]
+    }
+  ];
 
+  const result = extractSectorCalendarEvents({
+    events,
+    eventTypes,
+    playerId: 42,
+    today: '2026-11-03',
+    mode: 'guaranteed'
+  });
 
+  assert.equal(result.length, 2);
+  assert.deepStrictEqual(result[0], {
+    eventId: 102,
+    eventName: 'Битва Альянсов',
+    date: '2026-11-01',
+    place: 2,
+    coupons: 6000,
+    status: 'assigned',
+    color: '#ff5500'
+  });
+  assert.deepStrictEqual(result[1], {
+    eventId: 103,
+    eventName: 'Битва Альянсов',
+    date: '2026-11-10',
+    place: 1,
+    coupons: 10000,
+    status: 'assigned',
+    color: '#ff5500'
+  });
+});
 
+test('extractSectorCalendarEvents in optimistic mode includes registrations with desiredPlace and handles desiredPlace=0', () => {
+  const eventTypes = [
+    {
+      id: 2,
+      name: 'Зимняя Охота',
+      color: '#3b82f6',
+      places: [
+        { place: 1, coupons: 12000 },
+        { place: 2, coupons: 7000 },
+        { place: 3, coupons: 3000 },
+      ]
+    }
+  ];
 
+  const events = [
+    // Утвержденное назначение
+    {
+      id: 201,
+      typeId: 2,
+      dateFrom: '2026-11-10',
+      dateTo: '2026-11-12',
+      assignments: [{ place: 2, playerId: 10 }]
+    },
+    // Регистрация с конкретным желаемым местом 3
+    {
+      id: 202,
+      typeId: 2,
+      dateFrom: '2026-11-17',
+      dateTo: '2026-11-19',
+      registrations: [{ playerId: 10, desiredPlace: 3 }]
+    },
+    // Регистрация с desiredPlace = 0 (любое подходящее -> дефолт 1 место)
+    {
+      id: 203,
+      typeId: 2,
+      dateFrom: '2026-11-24',
+      dateTo: '2026-11-26',
+      registrations: [{ playerId: 10, desiredPlace: 0 }]
+    },
+    // Регистрация с другим officerId
+    {
+      id: 204,
+      typeId: 2,
+      dateFrom: '2026-12-01',
+      dateTo: '2026-12-03',
+      registrations: [{ playerId: 10, officerId: 'officer_target_b', desiredPlace: 1 }]
+    }
+  ];
 
+  // В гарантированном режиме только назначенные
+  const guaranteed = extractSectorCalendarEvents({
+    events,
+    eventTypes,
+    playerId: 10,
+    today: '2026-11-03',
+    mode: 'guaranteed'
+  });
+  assert.equal(guaranteed.length, 1);
+  assert.equal(guaranteed[0].eventId, 201);
+  assert.equal(guaranteed[0].status, 'assigned');
 
+  // В оптимистичном режиме с фильтром по офицеру 'officer_target_a'
+  const optimistic = extractSectorCalendarEvents({
+    events,
+    eventTypes,
+    playerId: 10,
+    officerId: 'officer_target_a',
+    today: '2026-11-03',
+    mode: 'optimistic'
+  });
 
+  assert.equal(optimistic.length, 3);
+  // Событие 201 (назначено, без жесткого officerId -> подходит)
+  assert.equal(optimistic[0].eventId, 201);
+  assert.equal(optimistic[0].status, 'assigned');
+  assert.equal(optimistic[0].coupons, 7000);
 
+  // Событие 202 (заявка на 3 место -> 3000 купонов)
+  assert.equal(optimistic[1].eventId, 202);
+  assert.equal(optimistic[1].status, 'registered');
+  assert.equal(optimistic[1].place, 3);
+  assert.equal(optimistic[1].coupons, 3000);
 
+  // Событие 203 (заявка на 0 место -> дефолт 1 место, 12000 купонов)
+  assert.equal(optimistic[2].eventId, 203);
+  assert.equal(optimistic[2].status, 'registered');
+  assert.equal(optimistic[2].place, 1);
+  assert.equal(optimistic[2].coupons, 12000);
+
+  // Событие 204 отфильтровано, так как оно жестко привязано к 'officer_target_b'
+});
+
+test('simulateCalendarEventProgress calculates day-by-day reduction, savedDays, and timeline', () => {
+  const calendarEvents = [
+    {
+      eventId: 1,
+      eventName: 'Ивент 1',
+      date: '2026-11-08', // День 5 от 2026-11-03
+      place: 2,
+      coupons: 5000, // 5000 / 500 = 10 пазлов
+      status: 'assigned',
+      color: '#ff5500'
+    },
+    {
+      eventId: 2,
+      eventName: 'Ивент 2',
+      date: '2026-11-13', // День 10 от 2026-11-03
+      place: 1,
+      coupons: 10000, // 10000 / 500 = 20 пазлов
+      status: 'assigned',
+      color: '#3b82f6'
+    }
+  ];
+
+  const result = simulateCalendarEventProgress({
+    deficitPuzzles: 50,
+    costPerPuzzle: 500,
+    dailyIncome: 2,
+    calendarEvents,
+    today: '2026-11-03'
+  });
+
+  // Базовый расчет: 50 / 2 = 25 дней. Дата: 2026-11-28
+  assert.equal(result.baseDays, 25);
+  assert.equal(result.baseDate, '2026-11-28');
+
+  // Дни 0-4 (5 дней) доход VIP: 5 * 2 = 10 пазлов -> дефицит 40
+  // День 5: Ивент 1 дает 10 пазлов -> дефицит 30
+  // Дни 5-9 (5 дней) доход VIP: 5 * 2 = 10 пазлов -> дефицит 20
+  // День 10: Ивент 2 дает 20 пазлов -> дефицит 0! Финиш ровно в день ивента!
+  assert.equal(result.simulatedDays, 10);
+  assert.equal(result.simulatedDate, '2026-11-13');
+  assert.equal(result.savedDays, 15);
+  assert.equal(result.totalCouponsFromEvents, 15000);
+  assert.equal(result.totalPuzzlesFromEvents, 30);
+  assert.equal(result.remainingDeficitPuzzles, 0);
+  assert.equal(result.remainingDeficitCoupons, 0);
+
+  // Проверка таймлайна
+  assert.equal(result.timeline.length, 3);
+  assert.equal(result.timeline[0].type, 'event');
+  assert.equal(result.timeline[0].date, '2026-11-08');
+  assert.equal(result.timeline[0].puzzlesGained, 10);
+  assert.equal(result.timeline[0].remainingDeficitPuzzles, 30);
+  assert.equal(result.timeline[0].progressPct, 40);
+
+  assert.equal(result.timeline[1].type, 'event');
+  assert.equal(result.timeline[1].date, '2026-11-13');
+  assert.equal(result.timeline[1].puzzlesGained, 20);
+  assert.equal(result.timeline[1].remainingDeficitPuzzles, 0);
+  assert.equal(result.timeline[1].progressPct, 100);
+
+  assert.equal(result.timeline[2].type, 'finish');
+  assert.equal(result.timeline[2].date, '2026-11-13');
+  assert.equal(result.timeline[2].remainingDeficitPuzzles, 0);
+  assert.equal(result.timeline[2].progressPct, 100);
+});
+
+test('simulateCalendarEventProgress finishes exactly on event day when event coupons fully cover deficit', () => {
+  const calendarEvents = [
+    {
+      eventId: 10,
+      eventName: 'Супер Ивент',
+      date: '2026-11-05', // День 2
+      place: 1,
+      coupons: 10000, // 20 пазлов
+      status: 'assigned',
+    }
+  ];
+
+  const result = simulateCalendarEventProgress({
+    deficitPuzzles: 10,
+    costPerPuzzle: 500,
+    dailyIncome: 1,
+    calendarEvents,
+    today: '2026-11-03'
+  });
+
+  // Базовый расчет: 10 / 1 = 10 дней -> 2026-11-13
+  assert.equal(result.baseDays, 10);
+  assert.equal(result.baseDate, '2026-11-13');
+
+  // День 0: daily 1 -> дефицит 9
+  // День 1: daily 1 -> дефицит 8
+  // День 2: ивент дает 20 пазлов (дефицит 8 -> 0)
+  // Финиш фиксируется ровно в день ивента: simulatedDays = 2, simulatedDate = '2026-11-05'
+  assert.equal(result.simulatedDays, 2);
+  assert.equal(result.simulatedDate, '2026-11-05');
+  assert.equal(result.savedDays, 8);
+  assert.equal(result.totalPuzzlesFromEvents, 20);
+});
+
+test('simulateCalendarEventProgress handles costPerPuzzle = 0 (puzzle-only officer)', () => {
+  const calendarEvents = [
+    {
+      eventId: 50,
+      eventName: 'Ивент Купонов',
+      date: '2026-11-05',
+      place: 1,
+      coupons: 25000,
+      status: 'assigned',
+    }
+  ];
+
+  const result = simulateCalendarEventProgress({
+    deficitPuzzles: 30,
+    costPerPuzzle: 0,
+    dailyIncome: 3,
+    calendarEvents,
+    today: '2026-11-03'
+  });
+
+  // Офицер только за пазлы: купоны не конвертируются в пазлы
+  assert.equal(result.baseDays, 10);
+  assert.equal(result.simulatedDays, 10);
+  assert.equal(result.savedDays, 0);
+  assert.equal(result.totalCouponsFromEvents, 25000);
+  assert.equal(result.totalPuzzlesFromEvents, 0);
+  assert.equal(result.remainingDeficitPuzzles, 0);
+});
+
+test('simulateCalendarEventProgress handles zero deficit and empty calendar events', () => {
+  // Нулевой дефицит
+  const zeroDef = simulateCalendarEventProgress({
+    deficitPuzzles: 0,
+    costPerPuzzle: 500,
+    dailyIncome: 2,
+    calendarEvents: [],
+    today: '2026-11-03'
+  });
+  assert.equal(zeroDef.baseDays, 0);
+  assert.equal(zeroDef.simulatedDays, 0);
+  assert.equal(zeroDef.savedDays, 0);
+  assert.equal(zeroDef.totalCouponsFromEvents, 0);
+  assert.equal(zeroDef.totalPuzzlesFromEvents, 0);
+  assert.equal(zeroDef.timeline.length, 1);
+  assert.equal(zeroDef.timeline[0].type, 'finish');
+  assert.equal(zeroDef.timeline[0].date, '2026-11-03');
+
+  // Пустой календарь при ненулевом дефиците
+  const emptyEvents = simulateCalendarEventProgress({
+    deficitPuzzles: 20,
+    costPerPuzzle: 500,
+    dailyIncome: 4,
+    calendarEvents: [],
+    today: '2026-11-03'
+  });
+  assert.equal(emptyEvents.baseDays, 5);
+  assert.equal(emptyEvents.simulatedDays, 5);
+  assert.equal(emptyEvents.simulatedDate, '2026-11-08');
+  assert.equal(emptyEvents.savedDays, 0);
+  assert.equal(emptyEvents.totalCouponsFromEvents, 0);
+  assert.equal(emptyEvents.totalPuzzlesFromEvents, 0);
+  assert.equal(emptyEvents.timeline.length, 1);
+  assert.equal(emptyEvents.timeline[0].type, 'finish');
+  assert.equal(emptyEvents.timeline[0].date, '2026-11-08');
+});
