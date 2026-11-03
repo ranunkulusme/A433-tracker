@@ -2707,13 +2707,24 @@
     })
   });
 
+  function escapeHtml(str) {
+    if (typeof str !== 'string') str = String(str || '');
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   function renderTemplate(templateText, data = {}) {
     if (typeof templateText !== 'string' || !templateText) return '';
     const d = (data && typeof data === 'object') ? data : {};
     return templateText.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => {
       const val = d[key];
       if (val !== undefined && val !== null) {
-        return String(val);
+        if (key === 'link' || key === 'topAssignmentsList') {
+          return String(val);
+        }
+        return escapeHtml(String(val));
       }
       return '';
     });

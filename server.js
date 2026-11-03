@@ -248,7 +248,7 @@ function getAppBaseUrl(req = null) {
     const proto = req.headers['x-forwarded-proto'] || 'http';
     return `${proto}://${req.headers.host}`;
   }
-  return '';
+  return 'http://localhost:3000';
 }
 
 async function dispatchNotification(eventKey, data = {}, options = {}) {
