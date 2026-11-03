@@ -25,6 +25,7 @@ let myCabinetProfile = null;
 let myCabinetSectors = [];
 let regModalSelectedSectorId = null;
 let myCabinetSim = {
+  mode: 'guaranteed',
   officerId: null,
   targetLevel: 180,
   planned: { top1: 0, top2: 0, top3: 0, top4: 0 }
@@ -1792,7 +1793,9 @@ function renderCabinetSimulatorHtml() {
   const stockPuzzlesFromCoupons = costPerPuzzle > 0 ? Math.floor(stockCoupons / costPerPuzzle) : 0;
   const totalStockPuzzlesForOfficer = stockMedals + stockPuzzlesFromCoupons;
 
-  const et = state.eventTypes[0];
+  const currentMode = myCabinetSim.mode || 'guaranteed';
+
+  const et = (state.eventTypes && state.eventTypes[0]) || null;
   const resolvedPlaces = et ? resolveEventPlaces(et, today) : [];
   const top1Coupons = resolvedPlaces.find(p => p.place === 1)?.coupons || 12500;
   const top2Coupons = resolvedPlaces.find(p => p.place === 2)?.coupons || 6500;
@@ -1804,27 +1807,280 @@ function renderCabinetSimulatorHtml() {
   const top3PuzStr = costPerPuzzle > 0 ? ` (+${fmtNum(Math.floor(top3Coupons / costPerPuzzle))} пазл.)` : ' (только купоны на склад)';
   const top4PuzStr = costPerPuzzle > 0 ? ` (+${fmtNum(Math.floor(top4Coupons / costPerPuzzle))} пазл.)` : ' (только купоны на склад)';
 
-  const sim = simulateEventProgress({
-    deficitPuzzles: def.deficitPuzzles,
-    costPerPuzzle,
-    dailyIncome: def.dailyIncome,
-    plannedEvents: [
-      { coupons: top1Coupons, count: myCabinetSim.planned.top1 },
-      { coupons: top2Coupons, count: myCabinetSim.planned.top2 },
-      { coupons: top3Coupons, count: myCabinetSim.planned.top3 },
-      { coupons: top4Coupons, count: myCabinetSim.planned.top4 },
-    ],
-    today
-  });
+  let calendarEvents = [];
+  let sim;
+
+  if (currentMode === 'manual') {
+    const simFn = (typeof logic !== 'undefined' && logic.simulateEventProgress)
+      ? logic.simulateEventProgress
+      : (typeof simulateEventProgress === 'function' ? simulateEventProgress : null);
+
+    sim = simFn ? simFn({
+      deficitPuzzles: def.deficitPuzzles,
+      costPerPuzzle,
+      dailyIncome: def.dailyIncome,
+      plannedEvents: [
+        { coupons: top1Coupons, count: myCabinetSim.planned?.top1 || 0 },
+        { coupons: top2Coupons, count: myCabinetSim.planned?.top2 || 0 },
+        { coupons: top3Coupons, count: myCabinetSim.planned?.top3 || 0 },
+        { coupons: top4Coupons, count: myCabinetSim.planned?.top4 || 0 },
+      ],
+      today
+    }) : {
+      puzzlesFromEvents: 0,
+      remainingDeficitPuzzles: def.deficitPuzzles,
+      remainingDeficitCoupons: def.deficitCoupons,
+      simulatedDays: def.daysWithoutEvents,
+      simulatedDate: def.dateWithoutEvents,
+      savedDays: 0,
+    };
+  } else {
+    const extractFn = (typeof logic !== 'undefined' && logic.extractSectorCalendarEvents)
+      ? logic.extractSectorCalendarEvents
+      : (typeof extractSectorCalendarEvents === 'function' ? extractSectorCalendarEvents : null);
+
+    calendarEvents = extractFn ? extractFn({
+      events: state.events || [],
+      eventTypes: state.eventTypes || [],
+      playerId: myCabinetProfile.id,
+      officerId: selectedOfficer.id,
+      today,
+      mode: currentMode
+    }) : [];
+
+    const simCalFn = (typeof logic !== 'undefined' && logic.simulateCalendarEventProgress)
+      ? logic.simulateCalendarEventProgress
+      : (typeof simulateCalendarEventProgress === 'function' ? simulateCalendarEventProgress : null);
+
+    sim = simCalFn ? simCalFn({
+      deficitPuzzles: def.deficitPuzzles,
+      costPerPuzzle,
+      dailyIncome: def.dailyIncome,
+      calendarEvents,
+      today
+    }) : {
+      baseDays: def.daysWithoutEvents,
+      baseDate: def.dateWithoutEvents,
+      simulatedDays: def.daysWithoutEvents,
+      simulatedDate: def.dateWithoutEvents,
+      savedDays: 0,
+      totalCouponsFromEvents: 0,
+      totalPuzzlesFromEvents: 0,
+      remainingDeficitPuzzles: def.deficitPuzzles,
+      remainingDeficitCoupons: def.deficitCoupons,
+      timeline: []
+    };
+  }
 
   const targetPuz = targetLevel * PUZZLES_PER_LEVEL;
   const currentPuzTotal = def.currentPuzzles + def.stockPuzzles;
   const progressPct = Math.min(100, Math.round((currentPuzTotal / Math.max(1, targetPuz)) * 100));
-  const effectivePuzzles = Math.min(targetPuz, currentPuzTotal + sim.puzzlesFromEvents);
+  const puzzlesFromEvents = (currentMode === 'manual')
+    ? (sim.puzzlesFromEvents || 0)
+    : (sim.totalPuzzlesFromEvents || 0);
+  const effectivePuzzles = Math.min(targetPuz, currentPuzTotal + puzzlesFromEvents);
   const simProgressPct = Math.min(100, Math.round((effectivePuzzles / Math.max(1, targetPuz)) * 100));
+
+  let middleSectionHtml = '';
+  if (currentMode === 'manual') {
+    middleSectionHtml = `
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">Планируемые призовые места в ивентах:</div>
+      <div class="sim-counter-grid">
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥇 1 место</span>
+            <span class="sim-counter-desc">${fmtNum(top1Coupons)} купонов${top1PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top1', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned?.top1 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top1', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥈 2 место</span>
+            <span class="sim-counter-desc">${fmtNum(top2Coupons)} купонов${top2PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top2', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned?.top2 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top2', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥉 3 место</span>
+            <span class="sim-counter-desc">${fmtNum(top3Coupons)} купонов${top3PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top3', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned?.top3 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top3', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🎖️ 4–10 место</span>
+            <span class="sim-counter-desc">${fmtNum(top4Coupons)} купонов${top4PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top4', -1)">−</button>
+            <span class="sim-counter-val">${myCabinetSim.planned?.top4 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top4', 1)">+</button>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (calendarEvents.length > 0) {
+    const timelineItemsHtml = (sim.timeline || []).map(item => {
+      if (item.type === 'finish') {
+        return `
+          <div class="sim-timeline-item finish">
+            <div class="sim-timeline-badge"></div>
+            <div class="sim-timeline-content">
+              <div>
+                <div class="sim-timeline-event-name" style="color:var(--green)">
+                  🏆 Цель достигнута!
+                </div>
+                <div class="sim-timeline-event-meta">
+                  <span>📅 ${formatDate(item.date)}</span>
+                  <span>· Дефицит полностью закрыт (0 пазлов)</span>
+                </div>
+              </div>
+              <div class="sim-timeline-stage-rewards">
+                <span class="badge badge-success">Прогресс 100%</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const calEv = calendarEvents.find(e => String(e.eventId) === String(item.eventId) && e.date === item.date)
+        || calendarEvents.find(e => String(e.eventId) === String(item.eventId))
+        || {};
+      const evColor = calEv.color || '#8b5cf6';
+      const placeStr = item.place ? `#${item.place}` : '';
+      const statusBadge = item.status === 'assigned'
+        ? `<span class="badge badge-success">✓ Утверждено</span>`
+        : `<span class="badge badge-warning">⏳ Заявка</span>`;
+      const gainedStr = item.puzzlesGained > 0
+        ? `<span style="font-size:11.5px;color:var(--text3)">(+${fmtNum(item.puzzlesGained)} пазл.)</span>`
+        : '';
+      const remStr = (item.remainingDeficitPuzzles !== undefined && item.remainingDeficitPuzzles > 0)
+        ? `<span>· Остаток дефицита: ${fmtNum(item.remainingDeficitPuzzles)} пазл.</span>`
+        : (item.remainingDeficitPuzzles === 0 ? `<span>· Дефицит закрыт</span>` : '');
+
+      return `
+        <div class="sim-timeline-item">
+          <div class="sim-timeline-badge" style="border-color:${escapeHtml(evColor)}"></div>
+          <div class="sim-timeline-content">
+            <div>
+              <div class="sim-timeline-event-name">
+                <span class="badge" style="background:${escapeHtml(evColor)}22;color:${escapeHtml(evColor)};border-color:${escapeHtml(evColor)}55">
+                  ${escapeHtml(item.eventName || 'Событие')}
+                </span>
+                ${placeStr ? `<span class="sim-timeline-place-tag">${placeStr}</span>` : ''}
+                ${statusBadge}
+              </div>
+              <div class="sim-timeline-event-meta">
+                <span>📅 ${formatDate(item.date)}</span>
+                ${remStr}
+              </div>
+            </div>
+            <div class="sim-timeline-stage-rewards">
+              <span class="sim-timeline-coupons-val">+${fmtNum(item.coupons)} купонов</span>
+              ${gainedStr}
+              <span class="sim-timeline-progress-tag">Прогресс: <strong>${item.progressPct}%</strong></span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    middleSectionHtml = `
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 Хронология прокачки по событиям календаря:</div>
+      <div class="sim-timeline">
+        ${timelineItemsHtml}
+      </div>
+    `;
+  } else if (def.deficitPuzzles === 0) {
+    middleSectionHtml = `
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 Хронология прокачки по событиям календаря:</div>
+      <div class="sim-timeline">
+        <div class="sim-timeline-item finish">
+          <div class="sim-timeline-badge"></div>
+          <div class="sim-timeline-content">
+            <div>
+              <div class="sim-timeline-event-name" style="color:var(--green)">
+                🏆 Цель достигнута!
+              </div>
+              <div class="sim-timeline-event-meta">
+                <span>📅 ${formatDate(today)}</span>
+                <span>· Офицер уже достиг целевого уровня прокачки (Ур. ${targetLevel})</span>
+              </div>
+            </div>
+            <div class="sim-timeline-stage-rewards">
+              <span class="badge badge-success">Прогресс 100%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    const emptyMsg = currentMode === 'guaranteed'
+      ? 'В календаре пока нет утвержденных призовых мест для этого сектора. Переключитесь на «Оптимистичный» режим или подайте заявку на участие в ближайших событиях.'
+      : 'Нет поданных заявок или запланированных событий. Откройте календарь для выбора доступных ивентов.';
+    const emptyIcon = currentMode === 'guaranteed' ? '🛡️' : '🚀';
+
+    middleSectionHtml = `
+      <div class="sim-empty-events">
+        <div class="sim-empty-events-icon">${emptyIcon}</div>
+        <div class="sim-empty-events-text">${emptyMsg}</div>
+        <button type="button" class="btn-primary btn-sm" onclick="navigate('calendar')">📅 Открыть календарь событий</button>
+      </div>
+    `;
+  }
+
+  let subtitleParts = [];
+  if (def.dateWithoutEvents) {
+    subtitleParts.push(`Без ивентов (только VIP): ${formatDate(def.dateWithoutEvents)} (через ${fmtNum(def.daysWithoutEvents)} дн.)`);
+  } else {
+    subtitleParts.push(`Без ивентов (только VIP): —`);
+  }
+
+  if (currentMode === 'manual') {
+    if (sim.puzzlesFromEvents > 0) {
+      subtitleParts.push(`Награды с ивентов: +${fmtNum(sim.puzzlesFromEvents)} пазлов`);
+    }
+  } else {
+    if (sim.totalCouponsFromEvents > 0) {
+      subtitleParts.push(`Призовые купоны: +${fmtNum(sim.totalCouponsFromEvents)}${costPerPuzzle > 0 ? ` (+${fmtNum(sim.totalPuzzlesFromEvents)} пазлов)` : ''}`);
+    }
+  }
+
+  const forecastDaysText = sim.simulatedDays !== null
+    ? `<span style="font-size:12px;color:var(--text3)"> (через ${fmtNum(sim.simulatedDays)} дн.)</span>`
+    : '';
+
+  const savedBadge = sim.savedDays > 0
+    ? `<div class="sim-result-badge">⚡ Экономия: ${fmtNum(sim.savedDays)} ${formatDaysPlural(sim.savedDays)}!</div>`
+    : '';
 
   return `
     <div class="sim-box">
+      <div class="sim-mode-switcher">
+        <button type="button" class="sim-mode-btn ${currentMode==='guaranteed'?'active':''}" onclick="setCabinetSimMode('guaranteed')">
+          🛡️ Гарантированный (утвержденные)
+        </button>
+        <button type="button" class="sim-mode-btn ${currentMode==='optimistic'?'active':''}" onclick="setCabinetSimMode('optimistic')">
+          🚀 Оптимистичный (+заявки)
+        </button>
+        <button type="button" class="sim-mode-btn ${currentMode==='manual'?'active':''}" onclick="setCabinetSimMode('manual')">
+          ⚙️ Ручной подбор
+        </button>
+      </div>
+
       <div class="form-row" style="margin-bottom:16px">
         <div class="form-group">
           <label>Офицер для расчета</label>
@@ -1893,70 +2149,24 @@ function renderCabinetSimulatorHtml() {
         </div>
       </div>
 
-      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">Планируемые призовые места в ивентах:</div>
-      <div class="sim-counter-grid">
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🥇 1 место</span>
-            <span class="sim-counter-desc">${fmtNum(top1Coupons)} купонов${top1PuzStr}</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top1', -1)">−</button>
-            <span class="sim-counter-val">${myCabinetSim.planned.top1}</span>
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top1', 1)">+</button>
-          </div>
-        </div>
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🥈 2 место</span>
-            <span class="sim-counter-desc">${fmtNum(top2Coupons)} купонов${top2PuzStr}</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top2', -1)">−</button>
-            <span class="sim-counter-val">${myCabinetSim.planned.top2}</span>
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top2', 1)">+</button>
-          </div>
-        </div>
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🥉 3 место</span>
-            <span class="sim-counter-desc">${fmtNum(top3Coupons)} купонов${top3PuzStr}</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top3', -1)">−</button>
-            <span class="sim-counter-val">${myCabinetSim.planned.top3}</span>
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top3', 1)">+</button>
-          </div>
-        </div>
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🎖️ 4–10 место</span>
-            <span class="sim-counter-desc">${fmtNum(top4Coupons)} купонов${top4PuzStr}</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top4', -1)">−</button>
-            <span class="sim-counter-val">${myCabinetSim.planned.top4}</span>
-            <button type="button" class="sim-step-btn" onclick="adjustCabinetSimEvent('top4', 1)">+</button>
-          </div>
-        </div>
-      </div>
+      ${middleSectionHtml}
 
       <div class="sim-result-banner">
         <div>
           <div class="sim-result-title">
-            Прогноз достижения: <strong>${sim.simulatedDate ? formatDate(sim.simulatedDate) : 'Не достижимо'}</strong>
-            ${sim.simulatedDays !== null ? `<span style="font-size:12px;color:var(--text3)"> (${fmtNum(sim.simulatedDays)} дн.)</span>` : ''}
+            Прогноз достижения цели: <strong>${sim.simulatedDate ? formatDate(sim.simulatedDate) : 'Не достижимо'}</strong>${forecastDaysText}
           </div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
-            Без ивентов: ${def.dateWithoutEvents ? `${formatDate(def.dateWithoutEvents)} (${fmtNum(def.daysWithoutEvents)} дн.)` : '—'}
-            ${sim.puzzlesFromEvents > 0 ? `· Награды с ивентов: +${fmtNum(sim.puzzlesFromEvents)} пазлов` : ''}
+            ${subtitleParts.join(' · ')}
           </div>
         </div>
-        ${sim.savedDays > 0 ? `<div class="sim-result-badge">⚡ Экономия: ${fmtNum(sim.savedDays)} дней!</div>` : ''}
+        ${savedBadge}
       </div>
     </div>
   `;
 }
+
+const renderMyCabinetSimulator = renderCabinetSimulatorHtml;
 
 function renderCabinetOfficerSkills(o) {
   const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
@@ -3040,6 +3250,14 @@ function adjustCabinetSimEvent(key, delta) {
   if (container) container.innerHTML = renderCabinetSimulatorHtml();
 }
 
+function setCabinetSimMode(mode) {
+  if (mode === 'guaranteed' || mode === 'optimistic' || mode === 'manual') {
+    myCabinetSim.mode = mode;
+    const container = document.getElementById('cabinet-sim-container');
+    if (container) container.innerHTML = renderCabinetSimulatorHtml();
+  }
+}
+
 // ─── PAGE: PENDING REGISTRATIONS ─────────────────────────────
 async function renderPendingRegistrations() {
   const c = document.getElementById('content');
@@ -3443,6 +3661,14 @@ function formatDateShort(s) {
   if (!s) return '—';
   const d = new Date(s + 'T00:00:00');
   return d.toLocaleDateString('ru',{day:'numeric',month:'short'});
+}
+function formatDaysPlural(days) {
+  const n = Math.abs(Number(days) || 0) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return 'дней';
+  if (n1 > 1 && n1 < 5) return 'дня';
+  if (n1 === 1) return 'день';
+  return 'дней';
 }
 function isEventActive(ev) {
   const now = new Date(); now.setHours(0,0,0,0);
@@ -5433,6 +5659,7 @@ function renderOfficerDetail(catalogId) {
 let calcActiveTab = 'personal';
 let calcPlayerId = null;
 let calcOfficerId = null;
+let calcSimMode = 'guaranteed';
 let calcTargetLevel = 180;
 let calcPlanned = { top1: 0, top2: 0, top3: 0, top4: 0 };
 let matrixFilterType = 'all';
@@ -5448,6 +5675,13 @@ function setCalcTab(tab) {
     calcActiveTab = tab;
   }
   renderCalculator();
+}
+
+function setCalcSimMode(mode) {
+  if (mode === 'guaranteed' || mode === 'optimistic' || mode === 'manual') {
+    calcSimMode = mode;
+    renderCalculator();
+  }
 }
 
 function setMatrixSearch(query) {
@@ -5468,7 +5702,11 @@ function setMatrixSort(col) {
 function setCalcPlayer(id) {
   calcPlayerId = id ? parseInt(id) : null;
   const p = getPlayer(calcPlayerId);
-  calcOfficerId = p?.officers?.[0]?.id || null;
+  const eligibleFn = (typeof logic !== 'undefined' && logic.getSimulatorEligibleOfficers)
+    ? logic.getSimulatorEligibleOfficers
+    : (typeof getSimulatorEligibleOfficers === 'function' ? getSimulatorEligibleOfficers : null);
+  const eligible = eligibleFn ? eligibleFn(p?.officers, state.officerCatalog) : (p?.officers || []);
+  calcOfficerId = eligible?.[0]?.id || p?.officers?.[0]?.id || null;
   renderCalculator();
 }
 
@@ -5535,7 +5773,7 @@ function renderPersonalSimulator() {
     : (typeof getSimulatorEligibleOfficers === 'function' ? getSimulatorEligibleOfficers : null);
   const eligibleOfficers = eligibleFn ? eligibleFn(player.officers, state.officerCatalog) : (player.officers || []);
 
-  const officer = eligibleOfficers.find(o => o.id === calcOfficerId) || eligibleOfficers[0];
+  const officer = eligibleOfficers.find(o => String(o.id) === String(calcOfficerId)) || eligibleOfficers[0];
   const cat = officer ? getCatalogOfficer(officer.catalogId) : null;
 
   if (!officer || !cat) {
@@ -5544,7 +5782,7 @@ function renderPersonalSimulator() {
         <div class="form-group">
           <label>Игрок</label>
           <select onchange="setCalcPlayer(this.value)">
-            ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${p.name}</option>`).join('')}
+            ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -5567,30 +5805,283 @@ function renderPersonalSimulator() {
     today,
   });
 
-  const et = state.eventTypes[0];
+  const costPerPuzzle = def.costPerPuzzle;
+  const currentMode = calcSimMode || 'guaranteed';
+
+  const et = (state.eventTypes && state.eventTypes[0]) || null;
   const resolvedPlaces = et ? resolveEventPlaces(et, today) : [];
   const top1Coupons = resolvedPlaces.find(p => p.place === 1)?.coupons || 12500;
   const top2Coupons = resolvedPlaces.find(p => p.place === 2)?.coupons || 6500;
   const top3Coupons = resolvedPlaces.find(p => p.place === 3)?.coupons || 3500;
   const top4Coupons = resolvedPlaces.find(p => p.place >= 4)?.coupons || 2750;
 
-  const sim = simulateEventProgress({
-    deficitPuzzles: def.deficitPuzzles,
-    costPerPuzzle: def.costPerPuzzle,
-    dailyIncome: def.dailyIncome,
-    plannedEvents: [
-      { coupons: top1Coupons, count: calcPlanned.top1 },
-      { coupons: top2Coupons, count: calcPlanned.top2 },
-      { coupons: top3Coupons, count: calcPlanned.top3 },
-      { coupons: top4Coupons, count: calcPlanned.top4 },
-    ],
-    today,
-  });
+  const top1PuzStr = costPerPuzzle > 0 ? ` (+${fmtNum(Math.floor(top1Coupons / costPerPuzzle))} пазл.)` : ' (только купоны на склад)';
+  const top2PuzStr = costPerPuzzle > 0 ? ` (+${fmtNum(Math.floor(top2Coupons / costPerPuzzle))} пазл.)` : ' (только купоны на склад)';
+  const top3PuzStr = costPerPuzzle > 0 ? ` (+${fmtNum(Math.floor(top3Coupons / costPerPuzzle))} пазл.)` : ' (только купоны на склад)';
+  const top4PuzStr = costPerPuzzle > 0 ? ` (+${fmtNum(Math.floor(top4Coupons / costPerPuzzle))} пазл.)` : ' (только купоны на склад)';
+
+  let calendarEvents = [];
+  let sim;
+
+  if (currentMode === 'manual') {
+    const simFn = (typeof logic !== 'undefined' && logic.simulateEventProgress)
+      ? logic.simulateEventProgress
+      : (typeof simulateEventProgress === 'function' ? simulateEventProgress : null);
+
+    sim = simFn ? simFn({
+      deficitPuzzles: def.deficitPuzzles,
+      costPerPuzzle: def.costPerPuzzle,
+      dailyIncome: def.dailyIncome,
+      plannedEvents: [
+        { coupons: top1Coupons, count: calcPlanned?.top1 || 0 },
+        { coupons: top2Coupons, count: calcPlanned?.top2 || 0 },
+        { coupons: top3Coupons, count: calcPlanned?.top3 || 0 },
+        { coupons: top4Coupons, count: calcPlanned?.top4 || 0 },
+      ],
+      today,
+    }) : {
+      puzzlesFromEvents: 0,
+      remainingDeficitPuzzles: def.deficitPuzzles,
+      remainingDeficitCoupons: def.deficitCoupons,
+      simulatedDays: def.daysWithoutEvents,
+      simulatedDate: def.dateWithoutEvents,
+      savedDays: 0,
+    };
+  } else {
+    const extractFn = (typeof logic !== 'undefined' && logic.extractSectorCalendarEvents)
+      ? logic.extractSectorCalendarEvents
+      : (typeof extractSectorCalendarEvents === 'function' ? extractSectorCalendarEvents : null);
+
+    calendarEvents = extractFn ? extractFn({
+      events: state.events || [],
+      eventTypes: state.eventTypes || [],
+      playerId: player.id,
+      officerId: officer.id,
+      today,
+      mode: currentMode,
+    }) : [];
+
+    const simCalFn = (typeof logic !== 'undefined' && logic.simulateCalendarEventProgress)
+      ? logic.simulateCalendarEventProgress
+      : (typeof simulateCalendarEventProgress === 'function' ? simulateCalendarEventProgress : null);
+
+    sim = simCalFn ? simCalFn({
+      deficitPuzzles: def.deficitPuzzles,
+      costPerPuzzle: def.costPerPuzzle,
+      dailyIncome: def.dailyIncome,
+      calendarEvents,
+      today,
+    }) : {
+      baseDays: def.daysWithoutEvents,
+      baseDate: def.dateWithoutEvents,
+      simulatedDays: def.daysWithoutEvents,
+      simulatedDate: def.dateWithoutEvents,
+      savedDays: 0,
+      totalCouponsFromEvents: 0,
+      totalPuzzlesFromEvents: 0,
+      remainingDeficitPuzzles: def.deficitPuzzles,
+      remainingDeficitCoupons: def.deficitCoupons,
+      timeline: []
+    };
+  }
 
   const targetPuz = calcTargetLevel * PUZZLES_PER_LEVEL;
   const currentPuzTotal = def.currentPuzzles + def.stockPuzzles;
   const progressPct = Math.min(100, Math.round((currentPuzTotal / Math.max(1, targetPuz)) * 100));
-  const simProgressPct = Math.min(100, Math.round(((currentPuzTotal + sim.puzzlesFromEvents) / Math.max(1, targetPuz)) * 100));
+  const puzzlesFromEvents = (currentMode === 'manual')
+    ? (sim.puzzlesFromEvents || 0)
+    : (sim.totalPuzzlesFromEvents || 0);
+  const effectivePuzzles = Math.min(targetPuz, currentPuzTotal + puzzlesFromEvents);
+  const simProgressPct = Math.min(100, Math.round((effectivePuzzles / Math.max(1, targetPuz)) * 100));
+
+  let middleSectionHtml = '';
+  if (currentMode === 'manual') {
+    middleSectionHtml = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 10px">
+        <div style="font-size:13px;font-weight:600">Планируемые призовые места в ивентах:</div>
+        <button type="button" class="btn-ghost btn-sm" onclick="resetCalcPlanned()">Сбросить симуляцию</button>
+      </div>
+      <div class="sim-counter-grid">
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥇 1 место</span>
+            <span class="sim-counter-desc">${fmtNum(top1Coupons)} купонов${top1PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top1', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned?.top1 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top1', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥈 2 место</span>
+            <span class="sim-counter-desc">${fmtNum(top2Coupons)} купонов${top2PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top2', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned?.top2 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top2', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🥉 3 место</span>
+            <span class="sim-counter-desc">${fmtNum(top3Coupons)} купонов${top3PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top3', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned?.top3 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top3', 1)">+</button>
+          </div>
+        </div>
+        <div class="sim-counter-card">
+          <div class="sim-counter-info">
+            <span class="sim-counter-title">🎖️ 4–10 место</span>
+            <span class="sim-counter-desc">${fmtNum(top4Coupons)} купонов${top4PuzStr}</span>
+          </div>
+          <div class="sim-counter-ctrl">
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top4', -1)">−</button>
+            <span class="sim-counter-val">${calcPlanned?.top4 || 0}</span>
+            <button type="button" class="sim-step-btn" onclick="changeCalcPlanned('top4', 1)">+</button>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (calendarEvents.length > 0) {
+    const timelineItemsHtml = (sim.timeline || []).map(item => {
+      if (item.type === 'finish') {
+        return `
+          <div class="sim-timeline-item finish">
+            <div class="sim-timeline-badge"></div>
+            <div class="sim-timeline-content">
+              <div>
+                <div class="sim-timeline-event-name" style="color:var(--green)">
+                  🏆 Цель достигнута!
+                </div>
+                <div class="sim-timeline-event-meta">
+                  <span>📅 ${formatDate(item.date)}</span>
+                  <span>· Дефицит полностью закрыт (0 пазлов)</span>
+                </div>
+              </div>
+              <div class="sim-timeline-stage-rewards">
+                <span class="badge badge-success">Прогресс 100%</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const calEv = calendarEvents.find(e => String(e.eventId) === String(item.eventId) && e.date === item.date)
+        || calendarEvents.find(e => String(e.eventId) === String(item.eventId))
+        || {};
+      const evColor = calEv.color || '#8b5cf6';
+      const placeStr = item.place ? `#${item.place}` : '';
+      const statusBadge = item.status === 'assigned'
+        ? `<span class="badge badge-success">✓ Утверждено</span>`
+        : `<span class="badge badge-warning">⏳ Заявка</span>`;
+      const gainedStr = item.puzzlesGained > 0
+        ? `<span style="font-size:11.5px;color:var(--text3)">(+${fmtNum(item.puzzlesGained)} пазл.)</span>`
+        : '';
+      const remStr = (item.remainingDeficitPuzzles !== undefined && item.remainingDeficitPuzzles > 0)
+        ? `<span>· Остаток дефицита: ${fmtNum(item.remainingDeficitPuzzles)} пазл.</span>`
+        : (item.remainingDeficitPuzzles === 0 ? `<span>· Дефицит закрыт</span>` : '');
+
+      return `
+        <div class="sim-timeline-item">
+          <div class="sim-timeline-badge" style="border-color:${escapeHtml(evColor)}"></div>
+          <div class="sim-timeline-content">
+            <div>
+              <div class="sim-timeline-event-name">
+                <span class="badge" style="background:${escapeHtml(evColor)}22;color:${escapeHtml(evColor)};border-color:${escapeHtml(evColor)}55">
+                  ${escapeHtml(item.eventName || 'Событие')}
+                </span>
+                ${placeStr ? `<span class="sim-timeline-place-tag">${placeStr}</span>` : ''}
+                ${statusBadge}
+              </div>
+              <div class="sim-timeline-event-meta">
+                <span>📅 ${formatDate(item.date)}</span>
+                ${remStr}
+              </div>
+            </div>
+            <div class="sim-timeline-stage-rewards">
+              <span class="sim-timeline-coupons-val">+${fmtNum(item.coupons)} купонов</span>
+              ${gainedStr}
+              <span class="sim-timeline-progress-tag">Прогресс: <strong>${item.progressPct}%</strong></span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    middleSectionHtml = `
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 Хронология прокачки по событиям календаря:</div>
+      <div class="sim-timeline">
+        ${timelineItemsHtml}
+      </div>
+    `;
+  } else if (def.deficitPuzzles === 0) {
+    middleSectionHtml = `
+      <div style="font-size:13px;font-weight:600;margin:16px 0 8px">📅 Хронология прокачки по событиям календаря:</div>
+      <div class="sim-timeline">
+        <div class="sim-timeline-item finish">
+          <div class="sim-timeline-badge"></div>
+          <div class="sim-timeline-content">
+            <div>
+              <div class="sim-timeline-event-name" style="color:var(--green)">
+                🏆 Цель достигнута!
+              </div>
+              <div class="sim-timeline-event-meta">
+                <span>📅 ${formatDate(today)}</span>
+                <span>· Офицер уже достиг целевого уровня прокачки (Ур. ${calcTargetLevel})</span>
+              </div>
+            </div>
+            <div class="sim-timeline-stage-rewards">
+              <span class="badge badge-success">Прогресс 100%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    const emptyMsg = currentMode === 'guaranteed'
+      ? 'В календаре пока нет утвержденных призовых мест для этого сектора. Переключитесь на «Оптимистичный» режим или подайте заявку на участие в ближайших событиях.'
+      : 'Нет поданных заявок или запланированных событий. Откройте календарь для выбора доступных ивентов.';
+    const emptyIcon = currentMode === 'guaranteed' ? '🛡️' : '🚀';
+
+    middleSectionHtml = `
+      <div class="sim-empty-events">
+        <div class="sim-empty-events-icon">${emptyIcon}</div>
+        <div class="sim-empty-events-text">${emptyMsg}</div>
+        <button type="button" class="btn-primary btn-sm" onclick="navigate('calendar')">📅 Открыть календарь событий</button>
+      </div>
+    `;
+  }
+
+  let subtitleParts = [];
+  if (def.dateWithoutEvents) {
+    subtitleParts.push(`Без ивентов (только VIP): ${formatDate(def.dateWithoutEvents)} (через ${fmtNum(def.daysWithoutEvents)} дн.)`);
+  } else {
+    subtitleParts.push(`Без ивентов (только VIP): —`);
+  }
+
+  if (currentMode === 'manual') {
+    if (sim.puzzlesFromEvents > 0) {
+      subtitleParts.push(`Награды с ивентов: +${fmtNum(sim.puzzlesFromEvents)} пазлов`);
+    }
+  } else {
+    if (sim.totalCouponsFromEvents > 0) {
+      subtitleParts.push(`Призовые купоны: +${fmtNum(sim.totalCouponsFromEvents)}${costPerPuzzle > 0 ? ` (+${fmtNum(sim.totalPuzzlesFromEvents)} пазлов)` : ''}`);
+    }
+  }
+
+  const forecastDaysText = sim.simulatedDays !== null
+    ? `<span style="font-size:12px;color:var(--text3)"> (через ${fmtNum(sim.simulatedDays)} дн.)</span>`
+    : '';
+
+  const savedBadge = sim.savedDays > 0
+    ? `<div class="sim-result-badge">⚡ Экономия: ${fmtNum(sim.savedDays)} ${formatDaysPlural(sim.savedDays)}!</div>`
+    : '';
 
   return `
     <div class="sim-box" style="margin-bottom:20px">
@@ -5598,22 +6089,28 @@ function renderPersonalSimulator() {
         <div class="form-group">
           <label>Игрок</label>
           <select onchange="setCalcPlayer(this.value)">
-            ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${p.name}</option>`).join('')}
+            ${state.players.map(p => `<option value="${p.id}" ${p.id===calcPlayerId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
           <label>Офицер</label>
           <select onchange="setCalcOfficer(this.value)">
-            ${eligibleOfficers.map(o => `<option value="${o.id}" ${o.id===officer.id?'selected':''}>${officerLabel(o)} (ур. ${o.level})</option>`).join('')}
+            ${(() => {
+              const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
+                ? logic.sortOfficersByGeneration
+                : (typeof sortOfficersByGeneration === 'function' ? sortOfficersByGeneration : null);
+              const sorted = sortFn ? sortFn(eligibleOfficers, state.officerCatalog) : eligibleOfficers;
+              return sorted.map(o => `<option value="${o.id}" ${String(o.id)===String(officer.id)?'selected':''}>${escapeHtml(officerLabel(o))} (ур. ${o.level})</option>`).join('');
+            })()}
           </select>
         </div>
         <div class="form-group">
           <label>Целевой уровень подготовки</label>
           <div style="display:flex;gap:6px">
             <input type="number" min="1" max="180" value="${calcTargetLevel}" onchange="setCalcTargetLevel(this.value)" style="width:80px">
-            <button class="btn-ghost btn-sm" onclick="setCalcTargetLevel(60)">60</button>
-            <button class="btn-ghost btn-sm" onclick="setCalcTargetLevel(120)">120</button>
-            <button class="btn-ghost btn-sm" onclick="setCalcTargetLevel(180)">180</button>
+            <button type="button" class="btn-ghost btn-sm ${calcTargetLevel===60?'btn-primary':''}" onclick="setCalcTargetLevel(60)">60</button>
+            <button type="button" class="btn-ghost btn-sm ${calcTargetLevel===120?'btn-primary':''}" onclick="setCalcTargetLevel(120)">120</button>
+            <button type="button" class="btn-ghost btn-sm ${calcTargetLevel===180?'btn-primary':''}" onclick="setCalcTargetLevel(180)">180</button>
           </div>
         </div>
       </div>
@@ -5640,11 +6137,11 @@ function renderPersonalSimulator() {
         <div class="stock-card">
           <div class="label">Ежедневный доход</div>
           <div class="value">+${fmtNum(def.dailyIncome, 2)} <span style="font-size:12px;color:var(--text3)">пазл/день</span></div>
-          <div style="font-size:11px;color:var(--text3);margin-top:4px">VIP ${player.sector.vipLevel} · Конф. ${player.sector.confidentialityLevel} · 1 сундук/день</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">VIP ${player.sector?.vipLevel || 0} · Конф. ${player.sector?.confidentialityLevel || 0} · 1 сундук/день</div>
         </div>
         <div class="stock-card">
           <div class="label">Без ивентов</div>
-          <div class="value" style="font-size:16px">${def.dateWithoutEvents || '—'}</div>
+          <div class="value" style="font-size:16px">${def.dateWithoutEvents ? formatDate(def.dateWithoutEvents) : '—'}</div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
             ${def.daysWithoutEvents !== null ? `${fmtNum(def.daysWithoutEvents)} дней` : 'Недостижимо'}
           </div>
@@ -5663,79 +6160,36 @@ function renderPersonalSimulator() {
     </div>
 
     <div class="sim-box">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div>
-          <strong style="font-size:15px">Симулятор участия в будущих ивентах</strong>
-          <div style="font-size:12px;color:var(--text3)">Задайте планируемые призовые места для проверки ускорения прокачки</div>
-        </div>
-        <button class="btn-ghost btn-sm" onclick="resetCalcPlanned()">Сбросить симуляцию</button>
+      <div class="sim-mode-switcher">
+        <button type="button" class="sim-mode-btn ${currentMode==='guaranteed'?'active':''}" onclick="setCalcSimMode('guaranteed')">
+          🛡️ Гарантированный (утвержденные)
+        </button>
+        <button type="button" class="sim-mode-btn ${currentMode==='optimistic'?'active':''}" onclick="setCalcSimMode('optimistic')">
+          🚀 Оптимистичный (+заявки)
+        </button>
+        <button type="button" class="sim-mode-btn ${currentMode==='manual'?'active':''}" onclick="setCalcSimMode('manual')">
+          ⚙️ Ручной подбор
+        </button>
       </div>
 
-      <div class="sim-counter-grid">
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🥇 1 место</span>
-            <span class="sim-counter-desc">+${fmtNum(top1Coupons)} купонов</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top1', -1)">−</button>
-            <span class="sim-counter-val">${calcPlanned.top1}</span>
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top1', 1)">+</button>
-          </div>
-        </div>
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🥈 2 место</span>
-            <span class="sim-counter-desc">+${fmtNum(top2Coupons)} купонов</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top2', -1)">−</button>
-            <span class="sim-counter-val">${calcPlanned.top2}</span>
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top2', 1)">+</button>
-          </div>
-        </div>
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">🥉 3 место</span>
-            <span class="sim-counter-desc">+${fmtNum(top3Coupons)} купонов</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top3', -1)">−</button>
-            <span class="sim-counter-val">${calcPlanned.top3}</span>
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top3', 1)">+</button>
-          </div>
-        </div>
-        <div class="sim-counter-card">
-          <div class="sim-counter-info">
-            <span class="sim-counter-title">4–10 место</span>
-            <span class="sim-counter-desc">+${fmtNum(top4Coupons)} купонов</span>
-          </div>
-          <div class="sim-counter-ctrl">
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top4', -1)">−</button>
-            <span class="sim-counter-val">${calcPlanned.top4}</span>
-            <button class="sim-step-btn" onclick="changeCalcPlanned('top4', 1)">+</button>
-          </div>
-        </div>
-      </div>
+      ${middleSectionHtml}
 
       <div class="sim-result-banner">
         <div>
           <div class="sim-result-title">
-            Прогноз с ивентами: <strong>${sim.simulatedDate || def.dateWithoutEvents || '—'}</strong>
+            Прогноз достижения цели: <strong>${sim.simulatedDate ? formatDate(sim.simulatedDate) : 'Не достижимо'}</strong>${forecastDaysText}
           </div>
-          <div style="font-size:12px;color:var(--text2);margin-top:2px">
-            Остаток после ивентов: <strong>${fmtNum(sim.remainingDeficitPuzzles)}</strong> пазлов (${def.costPerPuzzle > 0 ? fmtNum(sim.remainingDeficitCoupons) + ' куп.' : 'только пазлы'})
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">
+            ${subtitleParts.join(' · ')}
           </div>
         </div>
-        <div>
-          ${sim.savedDays > 0 ? `<span class="sim-result-badge">⚡ Экономия: −${fmtNum(sim.savedDays)} дней (+${fmtNum(sim.puzzlesFromEvents)} пазл.)</span>` : `<span style="font-size:12px;color:var(--text3)">Призовые места не выбраны</span>`}
-        </div>
+        ${savedBadge}
       </div>
 
       <div style="margin-top:14px">
         <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px">
-          <span>Прогресс с учетом симулированных наград</span>
-          <span>${simProgressPct}%</span>
+          <span>Прогресс с учетом наград симулятора:</span>
+          <strong>${simProgressPct}% (${fmtNum(effectivePuzzles)} / ${fmtNum(targetPuz)} пазлов)</strong>
         </div>
         <div class="progress-container">
           <div class="progress-fill green" style="width:${simProgressPct}%"></div>
@@ -8257,4 +8711,11 @@ if (typeof window !== 'undefined') {
   window.applyModalPreset = applyModalPreset;
   window.submitUserPermissions = submitUserPermissions;
   window.closeUserPermissionsModal = closeUserPermissionsModal;
+
+  window.setCabinetSimMode = setCabinetSimMode;
+  window.setCalcSimMode = setCalcSimMode;
+  window.renderCabinetSimulatorHtml = renderCabinetSimulatorHtml;
+  window.renderMyCabinetSimulator = renderMyCabinetSimulator;
+  window.renderPersonalSimulator = renderPersonalSimulator;
+  window.formatDaysPlural = formatDaysPlural;
 }

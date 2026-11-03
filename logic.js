@@ -1114,6 +1114,290 @@
     };
   }
 
+  function extractSectorCalendarEvents({ events, eventTypes, playerId, officerId, today, mode = 'guaranteed' }) {
+    if (!Array.isArray(events) || events.length === 0 || playerId == null) {
+      return [];
+    }
+
+    const baseToday = today || new Date().toISOString().slice(0, 10);
+
+    // Filter future and current active events ((ev.dateTo || ev.dateFrom) >= today) that are not yet accrued
+    const activeEvents = events.filter(ev => {
+      if (ev.accrued) return false;
+      const end = ev.dateTo || ev.dateFrom;
+      return end && end >= baseToday;
+    });
+
+    // Sort chronologically (dateFrom ASC, then id ASC)
+    activeEvents.sort((a, b) =>
+      (a.dateFrom || '').localeCompare(b.dateFrom || '') ||
+      (Number(a.id) || 0) - (Number(b.id) || 0)
+    );
+
+    const eventTypeMap = new Map();
+    if (Array.isArray(eventTypes)) {
+      eventTypes.forEach(t => {
+        if (t && t.id != null) eventTypeMap.set(String(t.id), t);
+      });
+    } else if (eventTypes instanceof Map) {
+      for (const [k, v] of eventTypes.entries()) {
+        eventTypeMap.set(String(k), v);
+      }
+    }
+
+    function resolveEffectivePlace(effectivePlaces, placeNum) {
+      if (!Array.isArray(effectivePlaces) || effectivePlaces.length === 0) return {};
+      const exact = effectivePlaces.find(p => Number(p.place) === placeNum);
+      if (exact) return exact;
+      // Range fallback (e.g. place: 4 covers 4..10 in standard reward table)
+      const sorted = [...effectivePlaces].sort((a, b) => Number(a.place) - Number(b.place));
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        if (Number(sorted[i].place) <= placeNum) return sorted[i];
+      }
+      return sorted[sorted.length - 1] || {};
+    }
+
+    const results = [];
+
+    activeEvents.forEach(ev => {
+      const typeId = ev.typeId ?? ev.eventType ?? ev.type;
+      const eventType = (typeId != null ? eventTypeMap.get(String(typeId)) : null) || null;
+
+      const places = (eventType ? resolveEventPlaces(eventType, ev.dateFrom) : []) || [];
+      const effectivePlaces = places.length > 0 ? places : (Array.isArray(ev.places) ? ev.places : []);
+
+      const assignments = Array.isArray(ev.assignments) ? ev.assignments : [];
+      const assignment = assignments.find(a =>
+        String(a.playerId) === String(playerId) &&
+        (!officerId || !a.officerId || String(a.officerId) === String(officerId))
+      );
+
+      if (assignment) {
+        const placeNum = Number(assignment.place) || 1;
+        const placeInfo = resolveEffectivePlace(effectivePlaces, placeNum);
+        const placeCoupons = (assignment.actualCoupons !== undefined && assignment.actualCoupons !== null)
+          ? Number(assignment.actualCoupons)
+          : (Number(placeInfo.coupons) || 0);
+
+        results.push({
+          eventId: ev.id,
+          eventName: (eventType && eventType.name) || ev.name || 'Событие',
+          date: ev.dateFrom,
+          place: placeNum,
+          coupons: placeCoupons,
+          status: 'assigned',
+          color: (eventType && eventType.color) || '#8b5cf6',
+        });
+      } else if (mode === 'optimistic') {
+        const registrations = Array.isArray(ev.registrations) ? ev.registrations : [];
+        const reg = registrations.find(r =>
+          String(r.playerId) === String(playerId) &&
+          (!officerId || !r.officerId || String(r.officerId) === String(officerId))
+        );
+
+        if (reg) {
+          let placeNum = 1;
+          let placeCoupons = 0;
+
+          if (reg.desiredPlace && Number(reg.desiredPlace) > 0) {
+            placeNum = Number(reg.desiredPlace);
+            const placeInfo = resolveEffectivePlace(effectivePlaces, placeNum);
+            placeCoupons = Number(placeInfo.coupons) || 0;
+          } else {
+            const placeInfo = resolveEffectivePlace(effectivePlaces, 1) || effectivePlaces[0] || {};
+            placeNum = Number(placeInfo.place) || 1;
+            placeCoupons = Number(placeInfo.coupons) || 0;
+          }
+
+          results.push({
+            eventId: ev.id,
+            eventName: (eventType && eventType.name) || ev.name || 'Событие',
+            date: ev.dateFrom,
+            place: placeNum,
+            coupons: placeCoupons,
+            status: 'registered',
+            color: (eventType && eventType.color) || '#8b5cf6',
+          });
+        }
+      }
+    });
+
+    return results;
+  }
+
+  function simulateCalendarEventProgress({ deficitPuzzles, costPerPuzzle, dailyIncome, calendarEvents = [], today, maxDays = 3650 }) {
+    const rawCost = Number(costPerPuzzle);
+    const effectiveCost = rawCost === 0 ? 0 : (rawCost || COUPON_PER_PUZZLE);
+
+    const initialDeficit = Math.max(0, Number(deficitPuzzles) || 0);
+    const daily = Math.max(0, Number(dailyIncome) || 0);
+    const baseToday = today || new Date().toISOString().slice(0, 10);
+    const limitDays = Math.max(1, Number(maxDays) || 3650);
+
+    const baseDays = initialDeficit === 0
+      ? 0
+      : (daily > 0 ? Math.ceil(initialDeficit / daily) : null);
+    const baseDate = baseDays !== null ? dateAdd(baseToday, baseDays) : null;
+
+    if (initialDeficit === 0) {
+      return {
+        baseDays: 0,
+        baseDate: baseToday,
+        simulatedDays: 0,
+        simulatedDate: baseToday,
+        savedDays: 0,
+        totalCouponsFromEvents: 0,
+        totalPuzzlesFromEvents: 0,
+        remainingDeficitPuzzles: 0,
+        remainingDeficitCoupons: 0,
+        timeline: [
+          {
+            date: baseToday,
+            type: 'finish',
+            remainingDeficitPuzzles: 0,
+            progressPct: 100,
+          },
+        ],
+      };
+    }
+
+    const eventsList = Array.isArray(calendarEvents) ? calendarEvents : [];
+
+    // Group events by effective date (active events starting before today are counted on today)
+    const eventsByDate = new Map();
+    let maxEventDate = baseToday;
+
+    eventsList.forEach(ev => {
+      if (!ev) return;
+      const effectiveDate = (ev.date && ev.date < baseToday) ? baseToday : (ev.date || baseToday);
+      if (!eventsByDate.has(effectiveDate)) {
+        eventsByDate.set(effectiveDate, []);
+      }
+      eventsByDate.get(effectiveDate).push(ev);
+      if (effectiveDate > maxEventDate) {
+        maxEventDate = effectiveDate;
+      }
+    });
+
+    let remainingDeficitPuzzles = initialDeficit;
+    let totalCouponsFromEvents = 0;
+    let totalPuzzlesFromEvents = 0;
+    const timeline = [];
+
+    let simulatedDays = null;
+    let simulatedDate = null;
+    let finished = false;
+
+    for (let d = 0; d <= limitDays; d++) {
+      const currentDate = dateAdd(baseToday, d);
+
+      // Fast-forward check: if past all calendar events and daily > 0
+      if (currentDate > maxEventDate && daily > 0 && remainingDeficitPuzzles > 0) {
+        const daysNeeded = Math.ceil(remainingDeficitPuzzles / daily);
+        simulatedDays = d + daysNeeded;
+        simulatedDate = dateAdd(baseToday, simulatedDays);
+        remainingDeficitPuzzles = 0;
+        timeline.push({
+          date: simulatedDate,
+          type: 'finish',
+          remainingDeficitPuzzles: 0,
+          progressPct: 100,
+        });
+        finished = true;
+        break;
+      }
+
+      // If past all calendar events and daily === 0, deficit cannot decrease further
+      if (currentDate > maxEventDate && daily === 0 && remainingDeficitPuzzles > 0) {
+        break;
+      }
+
+      // Check events on currentDate
+      const dayEvents = eventsByDate.get(currentDate);
+      if (dayEvents && dayEvents.length > 0) {
+        for (const ev of dayEvents) {
+          const coupons = Math.max(0, Number(ev.coupons) || 0);
+          totalCouponsFromEvents += coupons;
+
+          const gained = (effectiveCost > 0 && coupons > 0)
+            ? Math.floor(coupons / effectiveCost)
+            : 0;
+          totalPuzzlesFromEvents += gained;
+          remainingDeficitPuzzles = Math.max(0, remainingDeficitPuzzles - gained);
+
+          const progressPct = Math.min(
+            100,
+            Math.round(((initialDeficit - remainingDeficitPuzzles) / initialDeficit) * 100)
+          );
+
+          timeline.push({
+            date: currentDate,
+            type: 'event',
+            eventId: ev.eventId,
+            eventName: ev.eventName,
+            place: ev.place,
+            coupons: ev.coupons,
+            puzzlesGained: gained,
+            remainingDeficitPuzzles,
+            status: ev.status,
+            color: ev.color || '#8b5cf6',
+            progressPct,
+          });
+
+          if (remainingDeficitPuzzles <= 0) {
+            simulatedDays = d;
+            simulatedDate = currentDate;
+            timeline.push({
+              date: currentDate,
+              type: 'finish',
+              remainingDeficitPuzzles: 0,
+              progressPct: 100,
+            });
+            finished = true;
+            break;
+          }
+        }
+      }
+
+      if (finished) break;
+
+      // End of day d: add daily VIP income
+      if (daily > 0) {
+        remainingDeficitPuzzles = Math.max(0, remainingDeficitPuzzles - daily);
+        if (remainingDeficitPuzzles <= 0) {
+          simulatedDays = d + 1;
+          simulatedDate = dateAdd(baseToday, d + 1);
+          timeline.push({
+            date: simulatedDate,
+            type: 'finish',
+            remainingDeficitPuzzles: 0,
+            progressPct: 100,
+          });
+          finished = true;
+          break;
+        }
+      }
+    }
+
+    const remainingDeficitCoupons = effectiveCost > 0 ? remainingDeficitPuzzles * effectiveCost : 0;
+    const savedDays = (baseDays !== null && simulatedDays !== null)
+      ? Math.max(0, baseDays - simulatedDays)
+      : 0;
+
+    return {
+      baseDays,
+      baseDate,
+      simulatedDays,
+      simulatedDate,
+      savedDays,
+      totalCouponsFromEvents,
+      totalPuzzlesFromEvents,
+      remainingDeficitPuzzles,
+      remainingDeficitCoupons,
+      timeline,
+    };
+  }
+
   function smartAutoPick({ places, players, officerCatalog, eventDate }) {
     const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
     const today = eventDate || new Date().toISOString().slice(0, 10);
@@ -2258,6 +2542,8 @@
     buildAutoPick,
     calculateOfficerDeficit,
     simulateEventProgress,
+    extractSectorCalendarEvents,
+    simulateCalendarEventProgress,
     smartAutoPick,
     smartAutoPickWithRegistrations,
     isOfflineMutationAllowed,
