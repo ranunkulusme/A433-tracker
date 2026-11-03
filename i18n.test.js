@@ -170,6 +170,7 @@ async function runTests() {
 
   await test('safe fallback when key does not exist or translation is missing', () => {
     assert.equal(t('non_existent.super_key'), 'non_existent.super_key');
+    assert.equal(t('non_existent.with_fallback', 'Fallback value'), 'Fallback value');
   });
 
   await test('getLocalizedOfficerType translates types across ru, en, de', async () => {
@@ -177,6 +178,8 @@ async function runTests() {
     assert.equal(getLocalizedOfficerType('tank'), 'Танк');
     assert.equal(getLocalizedOfficerType('Танк'), 'Танк');
     assert.equal(getLocalizedOfficerType('Пехота'), 'Пехота');
+    assert.equal(getLocalizedOfficerType('ПТ'), 'ПТ-САУ');
+    assert.equal(getLocalizedOfficerType('пт'), 'ПТ-САУ');
     assert.equal(getLocalizedOfficerType('ПТ-Сау'), 'ПТ-САУ');
     assert.equal(getLocalizedOfficerType('Горнизон'), 'Гарнизон');
     assert.equal(getLocalizedOfficerType('Осада'), 'Осада');
@@ -185,6 +188,7 @@ async function runTests() {
     assert.equal(getLocalizedOfficerType('tank'), 'Tank');
     assert.equal(getLocalizedOfficerType('Танк'), 'Tank');
     assert.equal(getLocalizedOfficerType('Пехота'), 'Infantry');
+    assert.equal(getLocalizedOfficerType('ПТ'), 'Tank Destroyer');
     assert.equal(getLocalizedOfficerType('ПТ-Сау'), 'Tank Destroyer');
     assert.equal(getLocalizedOfficerType('Горнизон'), 'Garrison');
     assert.equal(getLocalizedOfficerType('Осада'), 'Siege');
@@ -193,6 +197,7 @@ async function runTests() {
     assert.equal(getLocalizedOfficerType('tank'), 'Panzer');
     assert.equal(getLocalizedOfficerType('Танк'), 'Panzer');
     assert.equal(getLocalizedOfficerType('Пехота'), 'Infanterie');
+    assert.equal(getLocalizedOfficerType('ПТ'), 'Jagdpanzer');
     assert.equal(getLocalizedOfficerType('ПТ-Сау'), 'Jagdpanzer');
     assert.equal(getLocalizedOfficerType('Горнизон'), 'Garnison');
     assert.equal(getLocalizedOfficerType('Осада'), 'Belagerung');

@@ -1561,7 +1561,7 @@ function renderSidebarNav() {
   if (canManage() || hasPermission('approve_users')) {
     items.push({
       page: 'pending_registrations',
-      label: 'Заявки на регистрацию',
+      label: typeof t === 'function' ? t('nav.pending_registrations') : 'Заявки на регистрацию',
       icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
       pill: pendingRequestsCount
     });
@@ -2431,7 +2431,7 @@ async function saveMySector() {
         sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
       }
     });
-    toast('Параметры сектора успешно сохранены');
+    toast(t('toasts.saved_success', 'Параметры сектора успешно сохранены'));
     await renderMyCabinet();
   } catch (err) {
     toast('Ошибка сохранения сектора: ' + err.message, 'error');
@@ -2474,7 +2474,7 @@ async function saveMyCabinetProfile() {
         stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
       }
     });
-    toast('Профиль успешно сохранен');
+    toast(t('toasts.saved_success', 'Профиль успешно сохранен'));
     await renderMyCabinet();
     return res;
   } catch (err) {
@@ -2705,7 +2705,7 @@ async function saveCabinetInline(key) {
     });
     myCabinetProfile.stock = stock;
     cabinetInlineEditingKey = null;
-    toast('✓ Запасы обновлены');
+    toast(t('toasts.saved_success', '✓ Запасы обновлены'));
     const wrap = document.getElementById('cabinet-stock-grid-wrap');
     if (wrap) wrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
     else await renderMyCabinet();
@@ -3660,7 +3660,7 @@ async function submitUserPermissions() {
       method: 'PATCH',
       body: { permissions: selected }
     });
-    toast('Права доступа успешно сохранены');
+    toast(t('toasts.saved_success', 'Права доступа успешно сохранены'));
     const userInCache = usersListCache.find(u => Number(u.id) === Number(userId));
     if (userInCache) {
       userInCache.permissions = selected;
@@ -3806,10 +3806,10 @@ function navigate(page, params={}) {
     officers: typeof t === 'function' ? t('nav.officers') : 'Офицеры',
     officer_detail: typeof t === 'function' ? t('nav.officers') : 'Офицер',
     event_types: typeof t === 'function' ? t('nav.event_types') : 'Настройка ивентов',
-    event_detail: 'Ивент',
+    event_detail: typeof t === 'function' ? t('nav.event_detail') : 'Ивент',
     player_detail: typeof t === 'function' ? t('nav.sectors') : 'Сектор',
     calculator: typeof t === 'function' ? t('nav.calculator') : 'Калькулятор и Аналитика',
-    pending_registrations: 'Заявки на регистрацию',
+    pending_registrations: typeof t === 'function' ? t('nav.pending_registrations') : 'Заявки на регистрацию',
     users: typeof t === 'function' ? t('nav.users_rights') : 'Управление пользователями'
   };
   const titleEl = document.getElementById('page-title');
@@ -8163,7 +8163,7 @@ function accrueEventRewards(id) {
 
 // ─── EXPORT / IMPORT ─────────────────────────────────────────
 function exportExcel() {
-  if (currentUser?.rank !== 'r5') { toast('Экспорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Экспорт доступен только для главы альянса (Р5)'), 'error'); return; }
   if (typeof XLSX === 'undefined') { toast('XLSX не загружен','error'); return; }
   const wb = XLSX.utils.book_new();
 
@@ -8208,34 +8208,34 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fData), 'Прогнозы');
 
   XLSX.writeFile(wb, `KoW_${new Date().toISOString().slice(0,10)}.xlsx`);
-  toast('Excel экспортирован!');
+  toast(t('toasts.export_success', 'Excel экспортирован!'));
 }
 
 function importData() {
-  if (currentUser?.rank !== 'r5') { toast('Импорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Импорт доступен только для главы альянса (Р5)'), 'error'); return; }
   document.getElementById('import-file').click();
 }
 function exportJson() {
-  if (currentUser?.rank !== 'r5') { toast('Экспорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Экспорт доступен только для главы альянса (Р5)'), 'error'); return; }
   const blob = new Blob([JSON.stringify({ ...state, version: 3 }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `KoW_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast('JSON экспортирован');
+  toast(t('toasts.export_success', 'JSON экспортирован'));
 }
 function handleImport(e) {
-  if (currentUser?.rank !== 'r5') { toast('Импорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Импорт доступен только для главы альянса (Р5)'), 'error'); return; }
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const data = JSON.parse(ev.target.result);
       const valid = validateImportData(data);
-      if (valid.ok) { state = migrateState(data); save(); toast('Импортировано!'); navigate('calendar'); }
+      if (valid.ok) { state = migrateState(data); save(); toast(t('toasts.import_success', { count: data.players?.length || 0 }) || t('toasts.saved_success', 'Импортировано!')); navigate('calendar'); }
       else toast(valid.error,'error');
-    } catch { toast('Ошибка чтения','error'); }
+    } catch { toast(t('toasts.error_occurred', { error: 'Parse JSON' }), 'error'); }
   };
   reader.readAsText(file); e.target.value='';
 }

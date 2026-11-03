@@ -36,6 +36,8 @@ const I18N_RESOURCES = {
         sectors: "Секторы",
         officers: "Каталог офицеров",
         event_types: "Типы ивентов",
+        event_detail: "Ивент",
+        pending_registrations: "Заявки на регистрацию",
         calculator: "Калькулятор",
         users_rights: "Пользователи и права",
         my_cabinet: "Личный кабинет",
@@ -143,6 +145,8 @@ const I18N_RESOURCES = {
         sectors: "Sectors",
         officers: "Officer Catalog",
         event_types: "Event Types",
+        event_detail: "Event Details",
+        pending_registrations: "Pending Registrations",
         calculator: "Calculator",
         users_rights: "Users & Rights",
         my_cabinet: "My Cabinet",
@@ -250,6 +254,8 @@ const I18N_RESOURCES = {
         sectors: "Sektoren",
         officers: "Offizierskatalog",
         event_types: "Event-Typen",
+        event_detail: "Event-Details",
+        pending_registrations: "Ausstehende Anmeldungen",
         calculator: "Rechner",
         users_rights: "Benutzer & Rechte",
         my_cabinet: "Mein Kabinett",
@@ -397,8 +403,11 @@ async function initI18n(options = {}) {
 }
 
 function t(key, options) {
+  const fallbackText = typeof options === 'string' ? options : null;
+  const optObj = (options && typeof options === 'object') ? options : null;
+
   if (i18nInstance && typeof i18nInstance.t === 'function') {
-    const res = i18nInstance.t(key, options);
+    const res = i18nInstance.t(key, optObj || (fallbackText ? { defaultValue: fallbackText } : undefined));
     if (res !== undefined && res !== key) {
       return res;
     }
@@ -424,16 +433,16 @@ function t(key, options) {
     }
 
     if (typeof val === 'string') {
-      if (options && typeof options === 'object') {
+      if (optObj) {
         return val.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => {
-          return options[k] !== undefined ? options[k] : `{{${k}}}`;
+          return optObj[k] !== undefined ? optObj[k] : `{{${k}}}`;
         });
       }
       return val;
     }
   }
 
-  return key;
+  return fallbackText || key;
 }
 
 function getAppLanguage() {
@@ -472,6 +481,8 @@ function getLocalizedOfficerType(type) {
     'siege': 'game.officer_types.siege',
     'Танк': 'game.officer_types.tank',
     'Пехота': 'game.officer_types.infantry',
+    'ПТ': 'game.officer_types.tank_destroyer',
+    'пт': 'game.officer_types.tank_destroyer',
     'ПТ-Сау': 'game.officer_types.tank_destroyer',
     'ПТ-САУ': 'game.officer_types.tank_destroyer',
     'Горнизон': 'game.officer_types.garrison',
