@@ -2500,6 +2500,104 @@
     return [...preset.permissions];
   }
 
+  const STOCK_DIFF_FIELDS = [
+    { key: 'coupons', label: 'куп.', unit: 'куп.', name: 'Купоны' },
+    { key: 'puzzles', label: 'пазл.', unit: 'пазл.', name: 'Пазлы' },
+    { key: 'starCoupons', label: 'зв. куп.', unit: 'зв. куп.', name: 'Звездные купоны' },
+    { key: 'legendaryStars1', label: '★ I', unit: '★ I', name: 'Звезды I' },
+    { key: 'legendaryStars2', label: '★ II', unit: '★ II', name: 'Звезды II' },
+    { key: 'legendaryStars3', label: '★ III', unit: '★ III', name: 'Звезды III' },
+    { key: 'chests', label: 'сун.', unit: 'сун.', name: 'Сундуки' },
+  ];
+
+  function calculateStockDiff(before, after) {
+    const b = normalizeStock(before);
+    const a = normalizeStock(after);
+
+    const chips = [];
+
+    for (const item of STOCK_DIFF_FIELDS) {
+      const valBefore = b[item.key] || 0;
+      const valAfter = a[item.key] || 0;
+      const diff = valAfter - valBefore;
+
+      if (diff !== 0) {
+        const sign = diff > 0 ? '+' : '-';
+        const absVal = Math.abs(diff);
+        const absFormatted = typeof formatInputNumber === 'function'
+          ? (formatInputNumber(absVal) || String(absVal))
+          : String(absVal);
+        const space = item.unit.startsWith('★') ? '' : ' ';
+        const formatted = `${sign}${absFormatted}${space}${item.unit}`;
+
+        chips.push({
+          key: item.key,
+          label: item.label,
+          diff,
+          formatted,
+          type: diff > 0 ? 'positive' : 'negative',
+        });
+      }
+    }
+
+    const summary = chips.length > 0
+      ? chips.map(c => c.formatted).join(', ')
+      : 'Без изменений';
+
+    return {
+      summary,
+      chips,
+    };
+  }
+
+  function getStockFreshness(updatedAt, now = new Date()) {
+    if (!updatedAt) {
+      return {
+        status: 'unknown',
+        days: null,
+        label: 'нет данных',
+      };
+    }
+
+    const updatedDate = new Date(updatedAt);
+    if (isNaN(updatedDate.getTime())) {
+      return {
+        status: 'unknown',
+        days: null,
+        label: 'нет данных',
+      };
+    }
+
+    const nowDate = now instanceof Date ? now : new Date(now);
+    if (isNaN(nowDate.getTime())) {
+      return {
+        status: 'unknown',
+        days: null,
+        label: 'нет данных',
+      };
+    }
+
+    const diffMs = nowDate.getTime() - updatedDate.getTime();
+    const days = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+
+    let status = 'fresh';
+    if (days <= 7) {
+      status = 'fresh';
+    } else if (days <= 14) {
+      status = 'warning';
+    } else {
+      status = 'stale';
+    }
+
+    const label = days === 0 ? 'сегодня' : `${days} дн. назад`;
+
+    return {
+      status,
+      days,
+      label,
+    };
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -2572,5 +2670,7 @@
     PERMISSION_PRESETS,
     hasUserPermission,
     applyPermissionPreset,
+    calculateStockDiff,
+    getStockFreshness,
   };
 });

@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested } = require('./logic.js');
+const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested, calculateStockDiff } = require('./logic.js');
 
 let currentDb = null;
 
@@ -365,6 +365,8 @@ function getPlayers() {
       legendaryStars3: p.stock_legendary_stars_3 || 0,
       chests: p.stock_chests || 0
     },
+    stockUpdatedAt: p.stock_updated_at || null,
+    stockUpdateSource: p.stock_update_source || null,
     officers: officersByPlayer.get(p.id) || []
   }));
 }
@@ -404,6 +406,8 @@ function getPlayerById(id) {
       legendaryStars3: p.stock_legendary_stars_3 || 0,
       chests: p.stock_chests || 0
     },
+    stockUpdatedAt: p.stock_updated_at || null,
+    stockUpdateSource: p.stock_update_source || null,
     officers: officerRows.map(o => ({
       id: o.id,
       catalogId: o.catalog_id,
@@ -481,6 +485,8 @@ function getPlayersByUserId(userId) {
       legendaryStars3: p.stock_legendary_stars_3 || 0,
       chests: p.stock_chests || 0
     },
+    stockUpdatedAt: p.stock_updated_at || null,
+    stockUpdateSource: p.stock_update_source || null,
     officers: officersByPlayer.get(p.id) || []
   }));
 }
@@ -610,13 +616,53 @@ function updatePlayer(id, updates = {}) {
   const chests = stk.chests !== undefined ? stk.chests : (updates.stock_chests !== undefined ? updates.stock_chests : existing.stock.chests);
   const now = new Date().toISOString();
 
+  const stockChanged =
+    coupons !== existing.stock.coupons ||
+    puzzles !== existing.stock.puzzles ||
+    starCoupons !== (existing.stock.starCoupons || 0) ||
+    legendaryStars1 !== (existing.stock.legendaryStars1 || 0) ||
+    legendaryStars2 !== (existing.stock.legendaryStars2 || 0) ||
+    legendaryStars3 !== (existing.stock.legendaryStars3 || 0) ||
+    chests !== existing.stock.chests;
+
+  const newStock = { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests };
+
+  const stockUpdatedAt = stockChanged
+    ? (updates.stockUpdatedAt || updates.stock_updated_at || now)
+    : (updates.stockUpdatedAt !== undefined ? updates.stockUpdatedAt : (updates.stock_updated_at !== undefined ? updates.stock_updated_at : (existing.stockUpdatedAt || null)));
+
+  const stockUpdateSource = stockChanged
+    ? (updates.stockUpdateSource || updates.stock_update_source || 'manual_edit')
+    : (updates.stockUpdateSource !== undefined ? updates.stockUpdateSource : (updates.stock_update_source !== undefined ? updates.stock_update_source : (existing.stockUpdateSource || null)));
+
+  if (stockChanged && updates.recordHistory !== false) {
+    const diff = calculateStockDiff(existing.stock, newStock);
+    if (diff.summary !== 'Без изменений') {
+      db.prepare(`
+        INSERT INTO stock_history_records (
+          player_id, user_id, source, snapshot_before, snapshot_after, diff_summary, screenshot_path, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        userId || existing.userId || null,
+        stockUpdateSource,
+        JSON.stringify(existing.stock),
+        JSON.stringify(newStock),
+        diff.summary,
+        updates.screenshotPath || updates.screenshot_path || null,
+        stockUpdatedAt
+      );
+    }
+  }
+
   db.prepare(`
     UPDATE players
     SET name = ?, real_name = ?, rank = ?, user_id = ?,
         vip_level = ?, vip_points = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
-        stock_coupons = ?, stock_puzzles = ?, stock_star_coupons = ?, stock_legendary_stars_1 = ?, stock_legendary_stars_2 = ?, stock_legendary_stars_3 = ?, stock_chests = ?, updated_at = ?
+        stock_coupons = ?, stock_puzzles = ?, stock_star_coupons = ?, stock_legendary_stars_1 = ?, stock_legendary_stars_2 = ?, stock_legendary_stars_3 = ?, stock_chests = ?,
+        stock_updated_at = ?, stock_update_source = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now, id);
+  `).run(name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, stockUpdatedAt, stockUpdateSource, now, id);
 
   return getPlayerById(id);
 }
@@ -1106,27 +1152,150 @@ function unregisterFromEvent(eventId, playerId) {
   return true;
 }
 
-// ─── STOCK HISTORY ───────────────────────────────────────────
-function getStockHistory() {
+// ─── STOCK HISTORY & AUDIT LOG ───────────────────────────────────────────
+function getStockHistory(playerId, limit = 50) {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM stock_history ORDER BY date ASC, id ASC').all();
-  return rows.map(r => ({
-    id: r.id,
-    playerId: r.player_id,
-    date: r.date,
-    coupons: r.coupons,
-    puzzles: r.puzzles,
-    chests: r.chests
-  }));
+  if (playerId === undefined || playerId === null) {
+    const rows = db.prepare('SELECT * FROM stock_history ORDER BY date ASC, id ASC').all();
+    return rows.map(r => ({
+      id: r.id,
+      playerId: r.player_id,
+      date: r.date,
+      coupons: r.coupons,
+      puzzles: r.puzzles,
+      chests: r.chests
+    }));
+  }
+
+  const pId = Number(playerId);
+  const lim = Math.max(1, Math.min(200, Number(limit) || 50));
+  const rows = db.prepare(`
+    SELECT shr.*, u.username as author_username, u.rank as author_rank
+    FROM stock_history_records shr
+    LEFT JOIN users u ON u.id = shr.user_id
+    WHERE shr.player_id = ?
+    ORDER BY shr.created_at DESC, shr.id DESC
+    LIMIT ?
+  `).all(pId, lim);
+
+  return rows.map(r => {
+    let before = {};
+    let after = {};
+    try {
+      before = typeof r.snapshot_before === 'string' ? JSON.parse(r.snapshot_before) : (r.snapshot_before || {});
+    } catch (e) {}
+    try {
+      after = typeof r.snapshot_after === 'string' ? JSON.parse(r.snapshot_after) : (r.snapshot_after || {});
+    } catch (e) {}
+
+    return {
+      id: r.id,
+      playerId: r.player_id,
+      userId: r.user_id,
+      authorUsername: r.author_username || null,
+      authorRank: r.author_rank || null,
+      source: r.source,
+      snapshotBefore: before,
+      snapshotAfter: after,
+      diffSummary: r.diff_summary,
+      screenshotPath: r.screenshot_path || null,
+      createdAt: r.created_at
+    };
+  });
 }
 
-function recordStockHistory(playerId, stock, date = null) {
+function getStockHistoryByPlayerId(playerId, limit = 50) {
+  return getStockHistory(playerId, limit);
+}
+
+function recordStockHistory(arg1, arg2, arg3) {
   const db = getDb();
-  const d = date || new Date().toISOString().slice(0, 10);
+  if (arg1 && typeof arg1 === 'object') {
+    const {
+      playerId,
+      userId = null,
+      source = 'manual_edit',
+      snapshotBefore = {},
+      snapshotAfter = {},
+      diffSummary = '',
+      screenshotPath = null,
+      createdAt = new Date().toISOString()
+    } = arg1;
+
+    const snapBeforeStr = typeof snapshotBefore === 'string' ? snapshotBefore : JSON.stringify(snapshotBefore || {});
+    const snapAfterStr = typeof snapshotAfter === 'string' ? snapshotAfter : JSON.stringify(snapshotAfter || {});
+
+    const res = db.prepare(`
+      INSERT INTO stock_history_records (
+        player_id, user_id, source, snapshot_before, snapshot_after, diff_summary, screenshot_path, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      playerId,
+      userId ? Number(userId) : null,
+      source,
+      snapBeforeStr,
+      snapAfterStr,
+      diffSummary,
+      screenshotPath || null,
+      createdAt
+    );
+
+    db.prepare(`
+      UPDATE players
+      SET stock_updated_at = ?, stock_update_source = ?
+      WHERE id = ?
+    `).run(createdAt, source, playerId);
+
+    return {
+      id: Number(res.lastInsertRowid),
+      playerId,
+      userId: userId ? Number(userId) : null,
+      source,
+      snapshotBefore: typeof snapshotBefore === 'string' ? JSON.parse(snapshotBefore) : snapshotBefore,
+      snapshotAfter: typeof snapshotAfter === 'string' ? JSON.parse(snapshotAfter) : snapshotAfter,
+      diffSummary,
+      screenshotPath: screenshotPath || null,
+      createdAt
+    };
+  }
+
+  const playerId = arg1;
+  const stock = arg2 || {};
+  const d = arg3 || new Date().toISOString().slice(0, 10);
   db.prepare(`
     INSERT INTO stock_history (player_id, date, coupons, puzzles, chests)
     VALUES (?, ?, ?, ?, ?)
   `).run(playerId, d, stock.coupons || 0, stock.puzzles || 0, stock.chests || 0);
+}
+
+async function cleanupExpiredScreenshots(dbInstance, screenshotsBaseDir) {
+  const db = dbInstance || getDb();
+  const baseDir = screenshotsBaseDir || path.join(__dirname, 'data', 'screenshots');
+  const resolvedBaseDir = path.resolve(baseDir);
+
+  const rows = db.prepare(`
+    SELECT id, screenshot_path
+    FROM stock_history_records
+    WHERE screenshot_path IS NOT NULL AND screenshot_path != '' AND created_at < datetime('now', '-30 days')
+  `).all();
+
+  let cleanedCount = 0;
+  for (const r of rows) {
+    if (r.screenshot_path) {
+      const targetPath = path.isAbsolute(r.screenshot_path)
+        ? path.resolve(r.screenshot_path)
+        : path.resolve(resolvedBaseDir, r.screenshot_path);
+
+      if (targetPath.startsWith(resolvedBaseDir + path.sep) || targetPath === resolvedBaseDir) {
+        try {
+          await fs.promises.unlink(targetPath);
+        } catch (e) {}
+      }
+      db.prepare('UPDATE stock_history_records SET screenshot_path = NULL WHERE id = ?').run(r.id);
+      cleanedCount++;
+    }
+  }
+  return cleanedCount;
 }
 
 // ─── IMPORT / EXPORT ─────────────────────────────────────────
@@ -1474,6 +1643,12 @@ function migrateSchema(db) {
     if (!playerCols.includes('stock_legendary_stars_3')) {
       db.exec("ALTER TABLE players ADD COLUMN stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0;");
     }
+    if (!playerCols.includes('stock_updated_at')) {
+      db.exec("ALTER TABLE players ADD COLUMN stock_updated_at TEXT NULL;");
+    }
+    if (!playerCols.includes('stock_update_source')) {
+      db.exec("ALTER TABLE players ADD COLUMN stock_update_source TEXT NULL;");
+    }
   }
 
   const officerCols = getColumns('player_officers');
@@ -1542,6 +1717,22 @@ function migrateSchema(db) {
       }
     }
   } catch (e) {}
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_history_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit')),
+      snapshot_before TEXT NOT NULL,
+      snapshot_after TEXT NOT NULL,
+      diff_summary TEXT NOT NULL,
+      screenshot_path TEXT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_history_player ON stock_history_records(player_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_history_created ON stock_history_records(created_at);
+  `);
 }
 
 // ─── INIT DB ─────────────────────────────────────────────────
@@ -1598,6 +1789,8 @@ function initDb(filePath) {
       stock_legendary_stars_2 INTEGER NOT NULL DEFAULT 0,
       stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0,
       stock_chests INTEGER DEFAULT 0,
+      stock_updated_at TEXT NULL,
+      stock_update_source TEXT NULL,
       updated_at TEXT NOT NULL
     );
 
@@ -1675,6 +1868,20 @@ function initDb(filePath) {
       puzzles INTEGER NOT NULL,
       chests INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS stock_history_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit')),
+      snapshot_before TEXT NOT NULL,
+      snapshot_after TEXT NOT NULL,
+      diff_summary TEXT NOT NULL,
+      screenshot_path TEXT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_history_player ON stock_history_records(player_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_history_created ON stock_history_records(created_at);
 
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
@@ -1755,7 +1962,9 @@ module.exports = {
   registerForEvent,
   unregisterFromEvent,
   getStockHistory,
+  getStockHistoryByPlayerId,
   recordStockHistory,
+  cleanupExpiredScreenshots,
   exportKowJson,
   importKowJson,
   parsePermissions,

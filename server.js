@@ -1,6 +1,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const db = require('./db.js');
 const logic = require('./logic.js');
@@ -835,6 +836,94 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, { success: true });
     }
 
+    const stockHistoryMatch = pathname.match(/^\/api\/players\/(\d+)\/stock-history$/);
+    if (stockHistoryMatch && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const targetPlayerId = Number(stockHistoryMatch[1]);
+      const player = db.getPlayerById(targetPlayerId);
+      if (!player) {
+        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
+      }
+
+      const isStaff = req.user.rank === 'r4' || req.user.rank === 'r5';
+      const isOwner = player.userId === req.user.id || req.user.player_id === targetPlayerId;
+      const hasPerm = logic.hasUserPermission(req.user, 'view_sectors') || logic.hasUserPermission(req.user, 'view_stocks');
+
+      if (!isStaff && !isOwner && !hasPerm) {
+        return sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав для просмотра истории склада этого сектора');
+      }
+
+      const records = db.getStockHistory(targetPlayerId, 50);
+      return sendJson(res, 200, { records });
+    }
+
+    if (stockHistoryMatch && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const targetPlayerId = Number(stockHistoryMatch[1]);
+      const check = checkSectorAccess(targetPlayerId);
+      if (!check.ok) return sendError(res, check.status, check.error, check.message);
+
+      const { source = 'manual_edit', snapshotBefore, snapshotAfter, screenshotBase64 } = body;
+      const validSource = source === 'ocr_scan' ? 'ocr_scan' : 'manual_edit';
+
+      const before = snapshotBefore ? logic.normalizeStock(snapshotBefore) : check.player.stock;
+      const after = snapshotAfter ? logic.normalizeStock(snapshotAfter) : before;
+
+      const diff = logic.calculateStockDiff(before, after);
+
+      let screenshotPath = null;
+      if (screenshotBase64 && typeof screenshotBase64 === 'string' && screenshotBase64.trim()) {
+        const yyyyMm = new Date().toISOString().slice(0, 7);
+        const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
+        if (!fs.existsSync(screenshotsDir)) {
+          fs.mkdirSync(screenshotsDir, { recursive: true });
+        }
+
+        let ext = '.jpg';
+        let b64 = screenshotBase64;
+        const match = screenshotBase64.match(/^data:(image\/(jpeg|jpg|webp|png));base64,(.+)$/);
+        if (match) {
+          const mime = match[1] === 'image/jpg' ? 'image/jpeg' : match[1];
+          ext = mime === 'image/webp' ? '.webp' : (mime === 'image/png' ? '.png' : '.jpg');
+          b64 = match[3];
+        }
+
+        const buf = Buffer.from(b64, 'base64');
+        const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 8);
+        const filename = `${targetPlayerId}_${Date.now()}_${hash}${ext}`;
+        const fullPath = path.join(screenshotsDir, filename);
+        fs.writeFileSync(fullPath, buf);
+        screenshotPath = `${yyyyMm}/${filename}`;
+      }
+
+      const now = new Date().toISOString();
+      const record = db.recordStockHistory({
+        playerId: targetPlayerId,
+        userId: req.user.id,
+        source: validSource,
+        snapshotBefore: before,
+        snapshotAfter: after,
+        diffSummary: diff.summary,
+        screenshotPath,
+        createdAt: now
+      });
+
+      if (snapshotAfter) {
+        db.updatePlayer(targetPlayerId, {
+          stock: after,
+          stockUpdatedAt: now,
+          stockUpdateSource: validSource,
+          recordHistory: false
+        });
+      }
+
+      return sendJson(res, 201, record);
+    }
+
     const playerOfficersMatch = pathname.match(/^\/api\/players\/(\d+)\/officers$/);
     if (playerOfficersMatch && req.method === 'POST') {
       const targetPlayerId = Number(playerOfficersMatch[1]);
@@ -1376,6 +1465,75 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
     }
 
+    // ─────────────────────────────────────────────────────────
+    // SCREENSHOT STORAGE & SERVING
+    // ─────────────────────────────────────────────────────────
+    const screenshotMatch = pathname.match(/^\/api\/screenshots\/(.+)$/);
+    if (screenshotMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+
+      const rawParam = screenshotMatch[1];
+      let filename = '';
+      try {
+        filename = decodeURIComponent(rawParam);
+      } catch (e) {
+        return sendError(res, 400, 'BAD_REQUEST', 'Некорректное имя файла');
+      }
+
+      // Check path traversal: forbid '..' or '/' or '\\'
+      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        return sendError(res, 400, 'BAD_REQUEST', 'Недопустимое имя файла');
+      }
+
+      const dbInstance = db.getDb();
+      const record = dbInstance.prepare(`
+        SELECT shr.*, p.user_id as player_owner_id
+        FROM stock_history_records shr
+        JOIN players p ON p.id = shr.player_id
+        WHERE shr.screenshot_path = ? OR shr.screenshot_path LIKE ('%/' || ?)
+      `).get(filename, filename);
+
+      if (!record) {
+        return sendError(res, 404, 'NOT_FOUND', 'Скриншот не найден');
+      }
+
+      const isStaff = req.user.rank === 'r4' || req.user.rank === 'r5';
+      const isOwner = record.player_owner_id === req.user.id || req.user.player_id === record.player_id;
+      const hasPerm = logic.hasUserPermission(req.user, 'view_sectors') || logic.hasUserPermission(req.user, 'view_stocks');
+
+      if (!isStaff && !isOwner && !hasPerm) {
+        return sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав для просмотра этого скриншота');
+      }
+
+      const baseScreenshotsDir = path.resolve(path.join(__dirname, 'data', 'screenshots'));
+      const fullFilePath = path.resolve(baseScreenshotsDir, record.screenshot_path);
+
+      if (!fullFilePath.startsWith(baseScreenshotsDir + path.sep)) {
+        return sendError(res, 403, 'FORBIDDEN', 'Доступ запрещен');
+      }
+
+      if (!fs.existsSync(fullFilePath)) {
+        return sendError(res, 404, 'NOT_FOUND', 'Файл скриншота удален или отсутствует');
+      }
+
+      const ext = path.extname(fullFilePath).toLowerCase();
+      const contentType = ext === '.webp' ? 'image/webp' : (ext === '.png' ? 'image/png' : 'image/jpeg');
+
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'private, max-age=86400'
+      });
+
+      if (req.method === 'HEAD') {
+        return res.end();
+      }
+
+      const stream = fs.createReadStream(fullFilePath);
+      return stream.pipe(res);
+    }
+
     // Unmatched API endpoint
     return sendError(res, 404, 'NOT_FOUND', `Endpoint ${pathname} not found`);
     } catch (err) {
@@ -1419,12 +1577,30 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     db.initDb(dbPath);
   }
 
+  // Ensure screenshots base directory exists
+  const screenshotsDir = path.join(__dirname, 'data', 'screenshots');
+  if (!fs.existsSync(screenshotsDir)) {
+    try {
+      fs.mkdirSync(screenshotsDir, { recursive: true });
+    } catch (_) {}
+  }
+
+  // Clean up expired screenshots on startup and schedule 24-hour retention interval
+  db.cleanupExpiredScreenshots(null, screenshotsDir).catch(() => {});
+  const retentionInterval = setInterval(() => {
+    db.cleanupExpiredScreenshots(null, screenshotsDir).catch(err => {
+      console.error('[Retention] Cleanup error:', err);
+    });
+  }, 24 * 60 * 60 * 1000);
+  if (retentionInterval.unref) retentionInterval.unref();
+
   const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
   server.s3Manager = activeS3Manager;
 
   // Promisify close for clean test teardowns
   const originalClose = server.close.bind(server);
   server.close = function (callback) {
+    clearInterval(retentionInterval);
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);

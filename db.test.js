@@ -4,7 +4,17 @@ const path = require('node:path');
 
 function test(name, fn) {
   try {
-    fn();
+    const res = fn();
+    if (res && typeof res.then === 'function') {
+      res.then(() => {
+        console.log(`ok - ${name}`);
+      }).catch((error) => {
+        console.error(`not ok - ${name}`);
+        console.error(error);
+        process.exitCode = 1;
+      });
+      return;
+    }
     console.log(`ok - ${name}`);
   } catch (error) {
     console.error(`not ok - ${name}`);
@@ -1497,6 +1507,146 @@ test('importKowJson handles legacy dumps without userPermissions gracefully', ()
   // Existing user permissions must not be erased
   const user = dbModule.findUserById(reg.userId);
   assert.deepStrictEqual(user.permissions, ['view_stocks']);
+});
+
+test('db migrations add stock_updated_at and stock_update_source to players, and create stock_history_records', () => {
+  const dbModule = require('./db.js');
+  const db = dbModule.initDb(':memory:');
+
+  const playerCols = db.prepare('PRAGMA table_info(players)').all().map(c => c.name);
+  assert(playerCols.includes('stock_updated_at'), 'players table must have stock_updated_at');
+  assert(playerCols.includes('stock_update_source'), 'players table must have stock_update_source');
+
+  const historyTables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='stock_history_records'").all();
+  assert.equal(historyTables.length, 1, 'stock_history_records table must exist');
+
+  const historyCols = db.prepare('PRAGMA table_info(stock_history_records)').all().map(c => c.name);
+  assert(historyCols.includes('player_id'));
+  assert(historyCols.includes('user_id'));
+  assert(historyCols.includes('source'));
+  assert(historyCols.includes('snapshot_before'));
+  assert(historyCols.includes('snapshot_after'));
+  assert(historyCols.includes('diff_summary'));
+  assert(historyCols.includes('screenshot_path'));
+  assert(historyCols.includes('created_at'));
+});
+
+test('recordStockHistory records audit history and updates players stock_updated_at', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const players = dbModule.getPlayers();
+  const player = players[0];
+  const admin = dbModule.findUserByUsername('admin');
+
+  const beforeSnap = { coupons: 100, puzzles: 50 };
+  const afterSnap = { coupons: 600, puzzles: 40 };
+
+  const record = dbModule.recordStockHistory({
+    playerId: player.id,
+    userId: admin.id,
+    source: 'ocr_scan',
+    snapshotBefore: beforeSnap,
+    snapshotAfter: afterSnap,
+    diffSummary: '+500 куп., -10 пазл.',
+    screenshotPath: '2026-11/test_screenshot.jpg',
+    createdAt: '2026-11-03T10:00:00.000Z'
+  });
+
+  assert(record.id > 0);
+  assert.equal(record.playerId, player.id);
+  assert.equal(record.source, 'ocr_scan');
+  assert.equal(record.diffSummary, '+500 куп., -10 пазл.');
+
+  // Check player fields updated
+  const updatedPlayer = dbModule.getPlayerById(player.id);
+  assert.equal(updatedPlayer.stockUpdatedAt, '2026-11-03T10:00:00.000Z');
+  assert.equal(updatedPlayer.stockUpdateSource, 'ocr_scan');
+
+  // Check getStockHistory
+  const history = dbModule.getStockHistory(player.id);
+  assert.equal(history.length, 1);
+  assert.equal(history[0].authorUsername, 'admin');
+  assert.equal(history[0].source, 'ocr_scan');
+  assert.deepStrictEqual(history[0].snapshotBefore, beforeSnap);
+  assert.deepStrictEqual(history[0].snapshotAfter, afterSnap);
+  assert.equal(history[0].screenshotPath, '2026-11/test_screenshot.jpg');
+});
+
+test('updatePlayer automatically records stock_history_records when stock changes', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const player = dbModule.getPlayers()[0];
+  const initialCoupons = player.stock.coupons;
+
+  dbModule.updatePlayer(player.id, {
+    stock: {
+      ...player.stock,
+      coupons: initialCoupons + 350,
+    }
+  });
+
+  const history = dbModule.getStockHistory(player.id);
+  assert.equal(history.length, 1);
+  assert.equal(history[0].source, 'manual_edit');
+  assert.equal(history[0].diffSummary, '+350 куп.');
+  assert(history[0].createdAt);
+
+  const updatedPlayer = dbModule.getPlayerById(player.id);
+  assert.equal(updatedPlayer.stock.coupons, initialCoupons + 350);
+  assert.equal(updatedPlayer.stockUpdateSource, 'manual_edit');
+  assert.equal(updatedPlayer.stockUpdatedAt, history[0].createdAt);
+});
+
+test('cleanupExpiredScreenshots deletes screenshot files older than 30 days and clears screenshot_path', async () => {
+  const dbModule = require('./db.js');
+  const db = dbModule.initDb(':memory:');
+
+  const tempDir = path.join(__dirname, 'data', 'test_screenshots_' + Date.now());
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  try {
+    const expiredFile = path.join(tempDir, 'expired.jpg');
+    const freshFile = path.join(tempDir, 'fresh.jpg');
+    fs.writeFileSync(expiredFile, 'fake-expired-image-bytes');
+    fs.writeFileSync(freshFile, 'fake-fresh-image-bytes');
+
+    const player = dbModule.getPlayers()[0];
+
+    // Expired record (35 days old)
+    db.prepare(`
+      INSERT INTO stock_history_records (
+        player_id, user_id, source, snapshot_before, snapshot_after, diff_summary, screenshot_path, created_at
+      ) VALUES (?, NULL, 'ocr_scan', '{}', '{}', '+100 куп.', ?, datetime('now', '-35 days'))
+    `).run(player.id, expiredFile);
+
+    // Fresh record (5 days old)
+    db.prepare(`
+      INSERT INTO stock_history_records (
+        player_id, user_id, source, snapshot_before, snapshot_after, diff_summary, screenshot_path, created_at
+      ) VALUES (?, NULL, 'ocr_scan', '{}', '{}', '+50 куп.', ?, datetime('now', '-5 days'))
+    `).run(player.id, freshFile);
+
+    const cleaned = await dbModule.cleanupExpiredScreenshots(db, tempDir);
+    assert.equal(cleaned, 1, 'Should clean exactly 1 expired screenshot');
+
+    // Expired file on disk should be deleted
+    assert.equal(fs.existsSync(expiredFile), false, 'Expired file should be unlinked');
+    // Fresh file on disk must still exist
+    assert.equal(fs.existsSync(freshFile), true, 'Fresh file should remain on disk');
+
+    // Expired record in DB must have screenshot_path = NULL, but record still exists!
+    const records = db.prepare('SELECT id, diff_summary, screenshot_path FROM stock_history_records ORDER BY id ASC').all();
+    assert.equal(records.length, 2);
+    assert.equal(records[0].screenshot_path, null, 'Expired record screenshot_path should be nullified');
+    assert.equal(records[0].diff_summary, '+100 куп.', 'Expired record history data preserved');
+    assert.equal(records[1].screenshot_path, freshFile, 'Fresh record screenshot_path remains');
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
 });
 
 

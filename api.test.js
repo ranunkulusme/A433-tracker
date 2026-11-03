@@ -2918,6 +2918,223 @@ test('API delegated permissions: manage_catalog and R5-only permissions manageme
   }
 });
 
+test('API GET /api/players/:id/stock-history enforces RBAC (R3 without permission is 403, owner or R4/R5 is 200)', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Register user 1: Sector Owner
+    const regOwner = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'owner_user', password: 'password123', playerName: 'Владелец Сектора' })
+    })).json();
+    assert(regOwner.userId, 'Must return userId');
+    db.approveUser(regOwner.userId, 'r3');
+    const ownerUser = db.findUserById(regOwner.userId);
+    const targetPlayerId = ownerUser.player_id;
+
+    const ownerLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'owner_user', password: 'password123' })
+    })).json();
+
+    // Register user 2: Stranger R3 (no permissions, no ownership of player 1)
+    const regStranger = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'stranger_user', password: 'password123', playerName: 'Чужой Игрок' })
+    })).json();
+    assert(regStranger.userId, 'Must return userId');
+    db.approveUser(regStranger.userId, 'r3');
+    const strangerLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'stranger_user', password: 'password123' })
+    })).json();
+
+    // 1. Unauthenticated -> 401
+    const unauthRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}/stock-history`);
+    assert.equal(unauthRes.status, 401);
+
+    // 2. Stranger R3 -> 403 Forbidden
+    const strangerRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}/stock-history`, {
+      headers: { Authorization: `Bearer ${strangerLogin.token}` }
+    });
+    assert.equal(strangerRes.status, 403);
+
+    // 3. Sector Owner R3 -> 200 OK
+    const ownerRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}/stock-history`, {
+      headers: { Authorization: `Bearer ${ownerLogin.token}` }
+    });
+    assert.equal(ownerRes.status, 200);
+    const ownerData = await ownerRes.json();
+    assert(Array.isArray(ownerData.records));
+
+    // 4. Admin R5 -> 200 OK
+    const adminRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}/stock-history`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(adminRes.status, 200);
+    const adminData = await adminRes.json();
+    assert(Array.isArray(adminData.records));
+
+    // 5. Grant stranger view_sectors permission -> 200 OK
+    db.updateUser(regStranger.userId, { permissions: ['view_sectors'] });
+    const delegatedRes = await fetch(`${baseUrl}/api/players/${targetPlayerId}/stock-history`, {
+      headers: { Authorization: `Bearer ${strangerLogin.token}` }
+    });
+    assert.equal(delegatedRes.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
+test('API POST /api/players/:id/stock-history uploads screenshot and creates audit history record', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const player = db.getPlayers()[0];
+    const initialCoupons = player.stock.coupons;
+
+    const fakeImageBase64 = 'data:image/jpeg;base64,' + Buffer.from('fake-jpeg-screenshot-data').toString('base64');
+
+    const postRes = await fetch(`${baseUrl}/api/players/${player.id}/stock-history`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        source: 'ocr_scan',
+        snapshotBefore: player.stock,
+        snapshotAfter: { ...player.stock, coupons: initialCoupons + 500 },
+        screenshotBase64: fakeImageBase64
+      })
+    });
+
+    assert.equal(postRes.status, 201);
+    const record = await postRes.json();
+    assert(record.id > 0);
+    assert.equal(record.playerId, player.id);
+    assert.equal(record.source, 'ocr_scan');
+    assert.equal(record.diffSummary, '+500 куп.');
+    assert(record.screenshotPath, 'Must have screenshotPath');
+
+    // Verify screenshot file created on disk
+    const diskPath = path.join(__dirname, 'data', 'screenshots', record.screenshotPath);
+    assert.equal(fs.existsSync(diskPath), true, 'Screenshot file must exist on disk');
+
+    // Clean up created file
+    try {
+      fs.unlinkSync(diskPath);
+    } catch (_) {}
+  } finally {
+    await server.close();
+  }
+});
+
+test('API GET /api/screenshots/:filename validates traversal, authenticates user, and checks sector permission', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const tempScreenshotsDir = path.join(__dirname, 'data', 'screenshots', '2026-11');
+  fs.mkdirSync(tempScreenshotsDir, { recursive: true });
+  const testFilename = `test_${Date.now()}_img.jpg`;
+  const testFilePath = path.join(tempScreenshotsDir, testFilename);
+  fs.writeFileSync(testFilePath, 'dummy-jpeg-content');
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const player = db.getPlayers()[0];
+
+    // Create history record linked to this screenshot
+    db.recordStockHistory({
+      playerId: player.id,
+      userId: 1,
+      source: 'ocr_scan',
+      snapshotBefore: { coupons: 100 },
+      snapshotAfter: { coupons: 200 },
+      diffSummary: '+100 куп.',
+      screenshotPath: `2026-11/${testFilename}`
+    });
+
+    // Register a stranger user without access to player 1
+    const regStranger = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'another_user', password: 'password123' })
+    })).json();
+    db.approveUser(regStranger.userId, 'r3');
+    const strangerLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'another_user', password: 'password123' })
+    })).json();
+
+    // 1. Path traversal attempt with .. -> 400
+    const traversalRes = await fetch(`${baseUrl}/api/screenshots/..%2fsecret.txt`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(traversalRes.status, 400);
+
+    // 2. Traversal attempt with slash -> 400
+    const slashRes = await fetch(`${baseUrl}/api/screenshots/sub%2ffile.jpg`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(slashRes.status, 400);
+
+    // 3. Unauthenticated -> 401
+    const unauthRes = await fetch(`${baseUrl}/api/screenshots/${testFilename}`);
+    assert.equal(unauthRes.status, 401);
+
+    // 4. Stranger R3 without sector access -> 403 Forbidden
+    const strangerRes = await fetch(`${baseUrl}/api/screenshots/${testFilename}`, {
+      headers: { Authorization: `Bearer ${strangerLogin.token}` }
+    });
+    assert.equal(strangerRes.status, 403);
+
+    // 5. Admin R5 -> 200 OK with correct image content
+    const adminRes = await fetch(`${baseUrl}/api/screenshots/${testFilename}`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(adminRes.status, 200);
+    assert(adminRes.headers.get('content-type').includes('image/jpeg'));
+    const bodyText = await adminRes.text();
+    assert.equal(bodyText, 'dummy-jpeg-content');
+  } finally {
+    try {
+      fs.unlinkSync(testFilePath);
+    } catch (_) {}
+    await server.close();
+  }
+});
+
 
 async function run() {
   let passed = 0;
