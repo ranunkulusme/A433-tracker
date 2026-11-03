@@ -841,22 +841,106 @@ function applyEvent(officer, couponAmount) {
   return { level: newLevel, coupons: remainder };
 }
 
+// ─── LANGUAGE SWITCHER & I18N ─────────────────────────────────
+const LANG_METADATA = {
+  ru: { flag: '🇷🇺', code: 'RU' },
+  en: { flag: '🇬🇧', code: 'EN' },
+  de: { flag: '🇩🇪', code: 'DE' }
+};
+
+function toggleLangDropdown(event) {
+  if (event && typeof event.stopPropagation === 'function') {
+    event.stopPropagation();
+  }
+  if (typeof document === 'undefined') return;
+  const switcher = document.getElementById('lang-switcher');
+  const menu = document.getElementById('lang-dropdown-menu');
+  if (!switcher || !menu) return;
+
+  const isOpen = switcher.classList.contains('open');
+  if (isOpen) {
+    switcher.classList.remove('open');
+    menu.style.display = 'none';
+  } else {
+    switcher.classList.add('open');
+    menu.style.display = 'flex';
+  }
+}
+
+function updateLangSwitcherUI(lang) {
+  if (typeof document === 'undefined') return;
+  const current = (lang || (typeof getAppLanguage === 'function' ? getAppLanguage() : 'ru') || 'ru').toLowerCase();
+  const meta = LANG_METADATA[current] || LANG_METADATA.ru;
+
+  const flagEl = document.getElementById('current-lang-flag');
+  if (flagEl) flagEl.textContent = meta.flag;
+
+  const codeEl = document.getElementById('current-lang-code');
+  if (codeEl) codeEl.textContent = meta.code;
+
+  document.querySelectorAll('.lang-option').forEach(btn => {
+    const btnLang = (btn.getAttribute('data-lang') || '').toLowerCase();
+    btn.classList.toggle('active', btnLang === current);
+  });
+}
+
+async function changeAppLanguage(lang) {
+  if (!['ru', 'en', 'de'].includes(lang)) return;
+
+  if (typeof setAppLanguage === 'function') {
+    await setAppLanguage(lang);
+  }
+
+  updateLangSwitcherUI(lang);
+  if (typeof updateStaticDOMTranslations === 'function') {
+    updateStaticDOMTranslations();
+  }
+
+  if (typeof document !== 'undefined') {
+    const switcher = document.getElementById('lang-switcher');
+    const menu = document.getElementById('lang-dropdown-menu');
+    if (switcher) switcher.classList.remove('open');
+    if (menu) menu.style.display = 'none';
+  }
+
+  if (typeof renderSidebarNav === 'function') {
+    renderSidebarNav();
+  }
+  if (typeof renderTopbarProfile === 'function') {
+    renderTopbarProfile();
+  }
+  if (typeof navigate === 'function' && currentPage) {
+    navigate(currentPage, pageParams);
+  }
+}
+
 // ─── UI HELPERS ──────────────────────────────────────────────
 const TANK_ICON = `<svg class="badge-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="display:inline-block;vertical-align:-2px"><rect x="14" y="8" width="8" height="2" rx="0.5"/><path d="M7 11h8V9a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v2z"/><path d="M4 14l1.5-3h13l1.5 3H4z"/><rect x="2" y="14" width="20" height="6" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="17" r="1.3"/><circle cx="10" cy="17" r="1.3"/><circle cx="14" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/></svg>`;
 
 function troopBadge(type) {
   const map = {
     'Пехота': { cls: 'badge-troop-infantry', icon: '🪖' },
+    'infantry': { cls: 'badge-troop-infantry', icon: '🪖' },
     'Танк': { cls: 'badge-troop-tank', icon: TANK_ICON },
+    'tank': { cls: 'badge-troop-tank', icon: TANK_ICON },
     'ПТ': { cls: 'badge-troop-td', icon: '🎯' },
     'ПТ-Сау': { cls: 'badge-troop-td', icon: '🎯' },
+    'ПТ-САУ': { cls: 'badge-troop-td', icon: '🎯' },
+    'tank_destroyer': { cls: 'badge-troop-td', icon: '🎯' },
     'Гарнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
     'Горнизон': { cls: 'badge-troop-garrison', icon: '🏰' },
+    'garrison': { cls: 'badge-troop-garrison', icon: '🏰' },
     'Осада': { cls: 'badge-troop-siege', icon: '💥' },
+    'siege': { cls: 'badge-troop-siege', icon: '💥' },
   };
-  const info = map[type];
-  if (!info) return `<span class="badge badge-none">${type || '—'}</span>`;
-  return `<span class="badge ${info.cls}">${info.icon} ${type}</span>`;
+  const localized = (typeof getLocalizedOfficerType === 'function')
+    ? getLocalizedOfficerType(type)
+    : (typeof window !== 'undefined' && typeof window.getLocalizedOfficerType === 'function'
+      ? window.getLocalizedOfficerType(type)
+      : type);
+  const info = map[type] || map[String(type || '').trim()] || map[String(type || '').trim().toLowerCase()];
+  if (!info) return `<span class="badge badge-none">${localized || type || '—'}</span>`;
+  return `<span class="badge ${info.cls}">${info.icon} ${localized}</span>`;
 }
 
 function evBadge(et) {
@@ -1436,20 +1520,20 @@ function renderSidebarNav() {
 
   items.push({
     page: 'my_cabinet',
-    label: 'Мой кабинет',
+    label: typeof t === 'function' ? t('nav.my_cabinet') : 'Мой кабинет',
     icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
   });
 
   items.push({
     page: 'calendar',
-    label: role === 'r3' && !hasPermission('manage_events') ? 'Календарь ивентов' : 'Календарь',
+    label: typeof t === 'function' ? t('nav.calendar') : (role === 'r3' && !hasPermission('manage_events') ? 'Календарь ивентов' : 'Календарь'),
     icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="8" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`
   });
 
   if (canManage() || hasPermission('view_sectors')) {
     items.push({
       page: 'players',
-      label: 'Секторы',
+      label: typeof t === 'function' ? t('nav.sectors') : 'Секторы',
       icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
     });
   }
@@ -1457,12 +1541,12 @@ function renderSidebarNav() {
   if (canManage() || hasPermission('manage_catalog')) {
     items.push({
       page: 'officers',
-      label: 'Офицеры',
+      label: typeof t === 'function' ? t('nav.officers') : 'Офицеры',
       icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z"/><path d="M9 12l2 2 4-5"/></svg>`
     });
     items.push({
       page: 'event_types',
-      label: 'Типы ивентов',
+      label: typeof t === 'function' ? t('nav.event_types') : 'Типы ивентов',
       icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>`
     });
   }
@@ -1470,14 +1554,14 @@ function renderSidebarNav() {
   const showMatrixInCalc = canManage() || hasPermission('view_matrix');
   items.push({
     page: 'calculator',
-    label: showMatrixInCalc ? 'Калькулятор и Аналитика' : 'Персональный калькулятор',
+    label: typeof t === 'function' ? t('nav.calculator') : (showMatrixInCalc ? 'Калькулятор и Аналитика' : 'Персональный калькулятор'),
     icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg>`
   });
 
   if (canManage() || hasPermission('approve_users')) {
     items.push({
       page: 'pending_registrations',
-      label: 'Заявки на регистрацию',
+      label: typeof t === 'function' ? t('nav.pending_registrations') : 'Заявки на регистрацию',
       icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
       pill: pendingRequestsCount
     });
@@ -1486,7 +1570,7 @@ function renderSidebarNav() {
   if (role === 'r5') {
     items.push({
       page: 'users',
-      label: 'Пользователи и права',
+      label: typeof t === 'function' ? t('nav.users_rights') : 'Пользователи и права',
       icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`
     });
   }
@@ -2064,20 +2148,20 @@ function renderCabinetSimulatorHtml() {
     : '';
 
   const savedBadge = sim.savedDays > 0
-    ? `<div class="sim-result-badge">⚡ Экономия: ${fmtNum(sim.savedDays)} ${formatDaysPlural(sim.savedDays)}!</div>`
+    ? `<div class="sim-result-badge">${typeof t === 'function' ? t('game.sim.savings_badge', { days: fmtNum(sim.savedDays) }) : `⚡ Экономия: ${fmtNum(sim.savedDays)} ${formatDaysPlural(sim.savedDays)}!`}</div>`
     : '';
 
   return `
     <div class="sim-box">
       <div class="sim-mode-switcher">
         <button type="button" class="sim-mode-btn ${currentMode==='guaranteed'?'active':''}" onclick="setCabinetSimMode('guaranteed')">
-          🛡️ Гарантированный (утвержденные)
+          🛡️ ${typeof t === 'function' ? t('game.sim.guaranteed_mode') : 'Гарантированный (утвержденные)'}
         </button>
         <button type="button" class="sim-mode-btn ${currentMode==='optimistic'?'active':''}" onclick="setCabinetSimMode('optimistic')">
-          🚀 Оптимистичный (+заявки)
+          🚀 ${typeof t === 'function' ? t('game.sim.optimistic_mode') : 'Оптимистичный (+заявки)'}
         </button>
         <button type="button" class="sim-mode-btn ${currentMode==='manual'?'active':''}" onclick="setCabinetSimMode('manual')">
-          ⚙️ Ручной подбор
+          ⚙️ ${typeof t === 'function' ? t('game.sim.manual_mode') : 'Ручной подбор'}
         </button>
       </div>
 
@@ -2347,7 +2431,7 @@ async function saveMySector() {
         sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
       }
     });
-    toast('Параметры сектора успешно сохранены');
+    toast(t('toasts.saved_success', 'Параметры сектора успешно сохранены'));
     await renderMyCabinet();
   } catch (err) {
     toast('Ошибка сохранения сектора: ' + err.message, 'error');
@@ -2390,7 +2474,7 @@ async function saveMyCabinetProfile() {
         stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
       }
     });
-    toast('Профиль успешно сохранен');
+    toast(t('toasts.saved_success', 'Профиль успешно сохранен'));
     await renderMyCabinet();
     return res;
   } catch (err) {
@@ -2621,7 +2705,7 @@ async function saveCabinetInline(key) {
     });
     myCabinetProfile.stock = stock;
     cabinetInlineEditingKey = null;
-    toast('✓ Запасы обновлены');
+    toast(t('toasts.saved_success', '✓ Запасы обновлены'));
     const wrap = document.getElementById('cabinet-stock-grid-wrap');
     if (wrap) wrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
     else await renderMyCabinet();
@@ -3576,7 +3660,7 @@ async function submitUserPermissions() {
       method: 'PATCH',
       body: { permissions: selected }
     });
-    toast('Права доступа успешно сохранены');
+    toast(t('toasts.saved_success', 'Права доступа успешно сохранены'));
     const userInCache = usersListCache.find(u => Number(u.id) === Number(userId));
     if (userInCache) {
       userInCache.permissions = selected;
@@ -3716,17 +3800,17 @@ function navigate(page, params={}) {
 
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
   const titles = {
-    my_cabinet: 'Мой кабинет',
-    calendar: 'Календарь ивентов',
-    players: 'Секторы',
-    officers: 'Офицеры',
-    officer_detail: 'Офицер',
-    event_types: 'Настройка ивентов',
-    event_detail: 'Ивент',
-    player_detail: 'Сектор',
-    calculator: 'Калькулятор и Аналитика',
-    pending_registrations: 'Заявки на регистрацию',
-    users: 'Управление пользователями'
+    my_cabinet: typeof t === 'function' ? t('nav.my_cabinet') : 'Мой кабинет',
+    calendar: typeof t === 'function' ? t('nav.calendar') : 'Календарь ивентов',
+    players: typeof t === 'function' ? t('nav.sectors') : 'Секторы',
+    officers: typeof t === 'function' ? t('nav.officers') : 'Офицеры',
+    officer_detail: typeof t === 'function' ? t('nav.officers') : 'Офицер',
+    event_types: typeof t === 'function' ? t('nav.event_types') : 'Настройка ивентов',
+    event_detail: typeof t === 'function' ? t('nav.event_detail') : 'Ивент',
+    player_detail: typeof t === 'function' ? t('nav.sectors') : 'Сектор',
+    calculator: typeof t === 'function' ? t('nav.calculator') : 'Калькулятор и Аналитика',
+    pending_registrations: typeof t === 'function' ? t('nav.pending_registrations') : 'Заявки на регистрацию',
+    users: typeof t === 'function' ? t('nav.users_rights') : 'Управление пользователями'
   };
   const titleEl = document.getElementById('page-title');
   if (titleEl) {
@@ -6080,7 +6164,7 @@ function renderPersonalSimulator() {
     : '';
 
   const savedBadge = sim.savedDays > 0
-    ? `<div class="sim-result-badge">⚡ Экономия: ${fmtNum(sim.savedDays)} ${formatDaysPlural(sim.savedDays)}!</div>`
+    ? `<div class="sim-result-badge">${typeof t === 'function' ? t('game.sim.savings_badge', { days: fmtNum(sim.savedDays) }) : `⚡ Экономия: ${fmtNum(sim.savedDays)} ${formatDaysPlural(sim.savedDays)}!`}</div>`
     : '';
 
   return `
@@ -6162,13 +6246,13 @@ function renderPersonalSimulator() {
     <div class="sim-box">
       <div class="sim-mode-switcher">
         <button type="button" class="sim-mode-btn ${currentMode==='guaranteed'?'active':''}" onclick="setCalcSimMode('guaranteed')">
-          🛡️ Гарантированный (утвержденные)
+          🛡️ ${typeof t === 'function' ? t('game.sim.guaranteed_mode') : 'Гарантированный (утвержденные)'}
         </button>
         <button type="button" class="sim-mode-btn ${currentMode==='optimistic'?'active':''}" onclick="setCalcSimMode('optimistic')">
-          🚀 Оптимистичный (+заявки)
+          🚀 ${typeof t === 'function' ? t('game.sim.optimistic_mode') : 'Оптимистичный (+заявки)'}
         </button>
         <button type="button" class="sim-mode-btn ${currentMode==='manual'?'active':''}" onclick="setCalcSimMode('manual')">
-          ⚙️ Ручной подбор
+          ⚙️ ${typeof t === 'function' ? t('game.sim.manual_mode') : 'Ручной подбор'}
         </button>
       </div>
 
@@ -8079,7 +8163,7 @@ function accrueEventRewards(id) {
 
 // ─── EXPORT / IMPORT ─────────────────────────────────────────
 function exportExcel() {
-  if (currentUser?.rank !== 'r5') { toast('Экспорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Экспорт доступен только для главы альянса (Р5)'), 'error'); return; }
   if (typeof XLSX === 'undefined') { toast('XLSX не загружен','error'); return; }
   const wb = XLSX.utils.book_new();
 
@@ -8124,34 +8208,34 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fData), 'Прогнозы');
 
   XLSX.writeFile(wb, `KoW_${new Date().toISOString().slice(0,10)}.xlsx`);
-  toast('Excel экспортирован!');
+  toast(t('toasts.export_success', 'Excel экспортирован!'));
 }
 
 function importData() {
-  if (currentUser?.rank !== 'r5') { toast('Импорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Импорт доступен только для главы альянса (Р5)'), 'error'); return; }
   document.getElementById('import-file').click();
 }
 function exportJson() {
-  if (currentUser?.rank !== 'r5') { toast('Экспорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Экспорт доступен только для главы альянса (Р5)'), 'error'); return; }
   const blob = new Blob([JSON.stringify({ ...state, version: 3 }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `KoW_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast('JSON экспортирован');
+  toast(t('toasts.export_success', 'JSON экспортирован'));
 }
 function handleImport(e) {
-  if (currentUser?.rank !== 'r5') { toast('Импорт доступен только для главы альянса (Р5)', 'error'); return; }
+  if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Импорт доступен только для главы альянса (Р5)'), 'error'); return; }
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const data = JSON.parse(ev.target.result);
       const valid = validateImportData(data);
-      if (valid.ok) { state = migrateState(data); save(); toast('Импортировано!'); navigate('calendar'); }
+      if (valid.ok) { state = migrateState(data); save(); toast(t('toasts.import_success', { count: data.players?.length || 0 }) || t('toasts.saved_success', 'Импортировано!')); navigate('calendar'); }
       else toast(valid.error,'error');
-    } catch { toast('Ошибка чтения','error'); }
+    } catch { toast(t('toasts.error_occurred', { error: 'Parse JSON' }), 'error'); }
   };
   reader.readAsText(file); e.target.value='';
 }
@@ -8578,8 +8662,19 @@ async function fetchAndApplyAppVersion() {
   }
 }
 
-function initApp() {
+async function initApp() {
   load();
+  if (typeof initI18n === 'function') {
+    try {
+      await initI18n();
+    } catch (err) {
+      console.warn('initI18n failed:', err);
+    }
+  }
+  updateLangSwitcherUI(typeof getAppLanguage === 'function' ? getAppLanguage() : 'ru');
+  if (typeof updateStaticDOMTranslations === 'function') {
+    updateStaticDOMTranslations();
+  }
   renderSidebarNav();
   renderTopbarProfile();
   updateNetworkStatusUI();
@@ -8617,6 +8712,17 @@ function initApp() {
 }
 
 if (typeof window !== 'undefined') {
+  window.addEventListener('click', (e) => {
+    const switcher = document.getElementById('lang-switcher');
+    const menu = document.getElementById('lang-dropdown-menu');
+    if (switcher && switcher.classList.contains('open')) {
+      if (!switcher.contains(e.target)) {
+        switcher.classList.remove('open');
+        if (menu) menu.style.display = 'none';
+      }
+    }
+  });
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPrompt = e;
@@ -8718,4 +8824,8 @@ if (typeof window !== 'undefined') {
   window.renderMyCabinetSimulator = renderMyCabinetSimulator;
   window.renderPersonalSimulator = renderPersonalSimulator;
   window.formatDaysPlural = formatDaysPlural;
+
+  window.toggleLangDropdown = toggleLangDropdown;
+  window.changeAppLanguage = changeAppLanguage;
+  window.updateLangSwitcherUI = updateLangSwitcherUI;
 }
