@@ -8606,7 +8606,7 @@ async function applyScanResultsToProfile() {
         chests: p?.stock?.chests || 0
       };
       try {
-        apiFetch(`/api/players/${editPlayerId}/stock-history`, {
+        await apiFetch(`/api/players/${editPlayerId}/stock-history`, {
           method: 'POST',
           body: {
             source: 'ocr_scan',
@@ -8614,7 +8614,7 @@ async function applyScanResultsToProfile() {
             snapshotAfter: newStock,
             screenshotBase64
           }
-        }).catch(err => console.warn('Failed to record stock history:', err));
+        });
         if (p) {
           p.stock = newStock;
           p.stockUpdatedAt = new Date().toISOString();
@@ -8873,16 +8873,24 @@ function closeStockHistoryModal() {
 
 let currentZoomScale = 1.0;
 let currentZoomUrl = '';
+let zoomPanX = 0;
+let zoomPanY = 0;
+let isZoomPanning = false;
+let startPanX = 0;
+let startPanY = 0;
 
 function openScreenshotZoom(url) {
   if (!url) return;
   currentZoomUrl = url;
   currentZoomScale = 1.0;
+  zoomPanX = 0;
+  zoomPanY = 0;
 
   const img = document.getElementById('zoom-screenshot-img');
   if (img) {
     img.src = url;
-    img.style.transform = 'scale(1)';
+    applyZoomTransform();
+    initZoomPanHandlers();
   }
 
   const resetBtn = document.getElementById('btn-zoom-reset');
@@ -8908,23 +8916,64 @@ function zoomIn() {
 
 function zoomOut() {
   currentZoomScale = Math.max(0.5, Math.round((currentZoomScale - 0.25) * 100) / 100);
+  if (currentZoomScale <= 1.0) {
+    zoomPanX = 0;
+    zoomPanY = 0;
+  }
   applyZoomTransform();
 }
 
 function resetZoom() {
   currentZoomScale = 1.0;
+  zoomPanX = 0;
+  zoomPanY = 0;
   applyZoomTransform();
 }
 
 function applyZoomTransform() {
   const img = document.getElementById('zoom-screenshot-img');
   if (img) {
-    img.style.transform = `scale(${currentZoomScale})`;
+    img.style.transform = `translate(${zoomPanX}px, ${zoomPanY}px) scale(${currentZoomScale})`;
+    img.style.cursor = currentZoomScale > 1.0 ? (isZoomPanning ? 'grabbing' : 'grab') : 'default';
   }
   const resetBtn = document.getElementById('btn-zoom-reset');
   if (resetBtn) {
     resetBtn.textContent = `${Math.round(currentZoomScale * 100)}%`;
   }
+}
+
+let zoomPanInitialized = false;
+function initZoomPanHandlers() {
+  if (zoomPanInitialized) return;
+  const wrapper = document.getElementById('zoom-img-wrapper') || document.getElementById('zoom-screenshot-img');
+  if (!wrapper) return;
+  zoomPanInitialized = true;
+
+  wrapper.addEventListener('pointerdown', (e) => {
+    if (currentZoomScale <= 1.0) return;
+    isZoomPanning = true;
+    startPanX = e.clientX - zoomPanX;
+    startPanY = e.clientY - zoomPanY;
+    applyZoomTransform();
+    wrapper.setPointerCapture?.(e.pointerId);
+  });
+
+  wrapper.addEventListener('pointermove', (e) => {
+    if (!isZoomPanning || currentZoomScale <= 1.0) return;
+    zoomPanX = e.clientX - startPanX;
+    zoomPanY = e.clientY - startPanY;
+    applyZoomTransform();
+  });
+
+  const stopPan = (e) => {
+    if (!isZoomPanning) return;
+    isZoomPanning = false;
+    applyZoomTransform();
+    wrapper.releasePointerCapture?.(e.pointerId);
+  };
+
+  wrapper.addEventListener('pointerup', stopPan);
+  wrapper.addEventListener('pointercancel', stopPan);
 }
 
 function updateSidebarVersion(ver) {
