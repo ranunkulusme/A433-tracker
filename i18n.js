@@ -27,6 +27,10 @@ const I18N_RESOURCES = {
         date: "Дата",
         version: "Версия"
       },
+      auth: {
+        login: "Вход",
+        register: "Регистрация"
+      },
       nav: {
         calendar: "Календарь",
         sectors: "Секторы",
@@ -130,6 +134,10 @@ const I18N_RESOURCES = {
         date: "Date",
         version: "Version"
       },
+      auth: {
+        login: "Login",
+        register: "Register"
+      },
       nav: {
         calendar: "Calendar",
         sectors: "Sectors",
@@ -232,6 +240,10 @@ const I18N_RESOURCES = {
         status: "Status",
         date: "Datum",
         version: "Version"
+      },
+      auth: {
+        login: "Anmelden",
+        register: "Registrieren"
       },
       nav: {
         calendar: "Kalender",

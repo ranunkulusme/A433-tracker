@@ -98,6 +98,8 @@ async function runTests() {
     assert.equal(getAppLanguage(), 'ru');
     assert.equal(t('common.save'), 'Сохранить');
     assert.equal(t('common.cancel'), 'Отмена');
+    assert.equal(t('auth.login'), 'Вход');
+    assert.equal(t('auth.register'), 'Регистрация');
     assert.equal(t('nav.calendar'), 'Календарь');
     assert.equal(t('roles.r5'), 'Р5 — Лидер');
   });
@@ -107,6 +109,8 @@ async function runTests() {
     assert.equal(getAppLanguage(), 'en');
     assert.equal(t('common.save'), 'Save');
     assert.equal(t('common.cancel'), 'Cancel');
+    assert.equal(t('auth.login'), 'Login');
+    assert.equal(t('auth.register'), 'Register');
     assert.equal(t('nav.calendar'), 'Calendar');
     assert.equal(t('roles.r5'), 'R5 — Leader');
 
@@ -114,6 +118,8 @@ async function runTests() {
     assert.equal(getAppLanguage(), 'de');
     assert.equal(t('common.save'), 'Speichern');
     assert.equal(t('common.cancel'), 'Abbrechen');
+    assert.equal(t('auth.login'), 'Anmelden');
+    assert.equal(t('auth.register'), 'Registrieren');
     assert.equal(t('nav.calendar'), 'Kalender');
     assert.equal(t('roles.r5'), 'R5 — Anführer');
 
@@ -121,22 +127,41 @@ async function runTests() {
     await setAppLanguage('ru');
     assert.equal(getAppLanguage(), 'ru');
     assert.equal(t('common.save'), 'Сохранить');
+    assert.equal(t('auth.login'), 'Вход');
   });
 
   await test('interpolation of toast messages and sim parameters in all languages', async () => {
     await setAppLanguage('ru');
     assert.equal(t('toasts.import_success', { count: 12 }), 'Импортировано 12 записей');
     assert.equal(t('toasts.error_occurred', { error: '500' }), 'Произошла ошибка: 500');
+    assert.equal(t('toasts.saved_success'), 'Изменения успешно сохранены');
+    assert.equal(t('toasts.export_success'), 'Данные успешно экспортированы');
+    assert.equal(t('toasts.access_denied'), 'Доступ ограничен правами ранга');
+    assert.equal(t('game.sim.guaranteed_mode'), 'Гарантированный режим');
+    assert.equal(t('game.sim.optimistic_mode'), 'Оптимистичный режим');
+    assert.equal(t('game.sim.manual_mode'), 'Ручной ввод');
     assert.equal(t('game.sim.savings_badge', { days: 7 }), '⚡ Экономия: 7 дн.!');
 
     await setAppLanguage('en');
     assert.equal(t('toasts.import_success', { count: 12 }), 'Imported 12 records');
     assert.equal(t('toasts.error_occurred', { error: '500' }), 'An error occurred: 500');
+    assert.equal(t('toasts.saved_success'), 'Changes saved successfully');
+    assert.equal(t('toasts.export_success'), 'Data exported successfully');
+    assert.equal(t('toasts.access_denied'), 'Access denied by rank permissions');
+    assert.equal(t('game.sim.guaranteed_mode'), 'Guaranteed Mode');
+    assert.equal(t('game.sim.optimistic_mode'), 'Optimistic Mode');
+    assert.equal(t('game.sim.manual_mode'), 'Manual Mode');
     assert.equal(t('game.sim.savings_badge', { days: 7 }), '⚡ Savings: 7 days!');
 
     await setAppLanguage('de');
     assert.equal(t('toasts.import_success', { count: 12 }), '12 Datensätze importiert');
     assert.equal(t('toasts.error_occurred', { error: '500' }), 'Ein Fehler ist aufgetreten: 500');
+    assert.equal(t('toasts.saved_success'), 'Änderungen erfolgreich gespeichert');
+    assert.equal(t('toasts.export_success'), 'Daten erfolgreich exportiert');
+    assert.equal(t('toasts.access_denied'), 'Zugriff durch Rangberechtigungen verweigert');
+    assert.equal(t('game.sim.guaranteed_mode'), 'Garantierter Modus');
+    assert.equal(t('game.sim.optimistic_mode'), 'Optimistischer Modus');
+    assert.equal(t('game.sim.manual_mode'), 'Manueller Modus');
     assert.equal(t('game.sim.savings_badge', { days: 7 }), '⚡ Ersparnis: 7 Tage!');
 
     // Reset back to ru
