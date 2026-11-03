@@ -1121,8 +1121,9 @@
 
     const baseToday = today || new Date().toISOString().slice(0, 10);
 
-    // Filter future and current active events ((ev.dateTo || ev.dateFrom) >= today)
+    // Filter future and current active events ((ev.dateTo || ev.dateFrom) >= today) that are not yet accrued
     const activeEvents = events.filter(ev => {
+      if (ev.accrued) return false;
       const end = ev.dateTo || ev.dateFrom;
       return end && end >= baseToday;
     });
@@ -1136,19 +1137,31 @@
     const eventTypeMap = new Map();
     if (Array.isArray(eventTypes)) {
       eventTypes.forEach(t => {
-        if (t && t.id != null) eventTypeMap.set(t.id, t);
+        if (t && t.id != null) eventTypeMap.set(String(t.id), t);
       });
     } else if (eventTypes instanceof Map) {
       for (const [k, v] of eventTypes.entries()) {
-        eventTypeMap.set(k, v);
+        eventTypeMap.set(String(k), v);
       }
+    }
+
+    function resolveEffectivePlace(effectivePlaces, placeNum) {
+      if (!Array.isArray(effectivePlaces) || effectivePlaces.length === 0) return {};
+      const exact = effectivePlaces.find(p => Number(p.place) === placeNum);
+      if (exact) return exact;
+      // Range fallback (e.g. place: 4 covers 4..10 in standard reward table)
+      const sorted = [...effectivePlaces].sort((a, b) => Number(a.place) - Number(b.place));
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        if (Number(sorted[i].place) <= placeNum) return sorted[i];
+      }
+      return sorted[sorted.length - 1] || {};
     }
 
     const results = [];
 
     activeEvents.forEach(ev => {
       const typeId = ev.typeId ?? ev.eventType ?? ev.type;
-      const eventType = eventTypeMap.get(typeId) || null;
+      const eventType = (typeId != null ? eventTypeMap.get(String(typeId)) : null) || null;
 
       const places = (eventType ? resolveEventPlaces(eventType, ev.dateFrom) : []) || [];
       const effectivePlaces = places.length > 0 ? places : (Array.isArray(ev.places) ? ev.places : []);
@@ -1161,7 +1174,7 @@
 
       if (assignment) {
         const placeNum = Number(assignment.place) || 1;
-        const placeInfo = effectivePlaces.find(p => Number(p.place) === placeNum) || {};
+        const placeInfo = resolveEffectivePlace(effectivePlaces, placeNum);
         const placeCoupons = (assignment.actualCoupons !== undefined && assignment.actualCoupons !== null)
           ? Number(assignment.actualCoupons)
           : (Number(placeInfo.coupons) || 0);
@@ -1188,10 +1201,10 @@
 
           if (reg.desiredPlace && Number(reg.desiredPlace) > 0) {
             placeNum = Number(reg.desiredPlace);
-            const placeInfo = effectivePlaces.find(p => Number(p.place) === placeNum) || {};
+            const placeInfo = resolveEffectivePlace(effectivePlaces, placeNum);
             placeCoupons = Number(placeInfo.coupons) || 0;
           } else {
-            const placeInfo = effectivePlaces.find(p => Number(p.place) === 1) || effectivePlaces[0] || {};
+            const placeInfo = resolveEffectivePlace(effectivePlaces, 1) || effectivePlaces[0] || {};
             placeNum = Number(placeInfo.place) || 1;
             placeCoupons = Number(placeInfo.coupons) || 0;
           }
@@ -1327,6 +1340,7 @@
             puzzlesGained: gained,
             remainingDeficitPuzzles,
             status: ev.status,
+            color: ev.color || '#8b5cf6',
             progressPct,
           });
 

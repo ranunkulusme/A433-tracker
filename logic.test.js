@@ -2176,6 +2176,51 @@ test('extractSectorCalendarEvents filters out past events and extracts assigned 
     status: 'assigned',
     color: '#ff5500'
   });
+
+  // Range fallback and accrued exclusion check
+  const eventTypesWithRanges = [
+    {
+      id: 1,
+      name: 'King of War',
+      color: '#8b5cf6',
+      places: [
+        { place: 1, coupons: 12500 },
+        { place: 2, coupons: 6500 },
+        { place: 3, coupons: 3500 },
+        { place: 4, coupons: 2750 } // covers 4-10
+      ]
+    }
+  ];
+
+  const rangeEvents = [
+    {
+      id: 201,
+      typeId: 1,
+      dateFrom: '2026-11-15',
+      dateTo: '2026-11-17',
+      assignments: [{ playerId: 42, place: 6 }] // place 6 should resolve to place 4 (2750 coupons)
+    },
+    {
+      id: 202,
+      typeId: 1,
+      dateFrom: '2026-11-05',
+      dateTo: '2026-11-07',
+      accrued: true, // already accrued on stock
+      assignments: [{ playerId: 42, place: 1 }]
+    }
+  ];
+
+  const rangeResult = extractSectorCalendarEvents({
+    events: rangeEvents,
+    eventTypes: eventTypesWithRanges,
+    playerId: 42,
+    today: '2026-11-03',
+    mode: 'guaranteed'
+  });
+
+  assert.equal(rangeResult.length, 1);
+  assert.equal(rangeResult[0].place, 6);
+  assert.equal(rangeResult[0].coupons, 2750); // range fallback matches place 4
 });
 
 test('extractSectorCalendarEvents in optimistic mode includes registrations with desiredPlace and handles desiredPlace=0', () => {
