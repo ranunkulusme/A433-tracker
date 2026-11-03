@@ -4114,6 +4114,45 @@ function insertTemplateTag(tag) {
   updateTemplateLivePreview();
 }
 
+function sanitizeTelegramHtmlPreview(html) {
+  if (!html || typeof html !== 'string') return '';
+  if (typeof DOMParser === 'undefined') return html;
+  try {
+    const allowedTags = new Set(['b', 'strong', 'i', 'em', 'u', 'ins', 's', 'strike', 'del', 'a', 'code', 'pre', 'blockquote', 'tg-spoiler', 'br', 'span']);
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    function clean(node) {
+      const children = Array.from(node.childNodes);
+      for (const child of children) {
+        if (child.nodeType === 1) {
+          const tagName = child.tagName.toLowerCase();
+          if (!allowedTags.has(tagName)) {
+            const textNode = doc.createTextNode(child.textContent || '');
+            node.replaceChild(textNode, child);
+          } else {
+            const attrs = Array.from(child.attributes);
+            for (const attr of attrs) {
+              if (tagName === 'a' && attr.name.toLowerCase() === 'href') {
+                const val = (attr.value || '').trim().toLowerCase();
+                if (val.startsWith('javascript:') || val.startsWith('data:')) {
+                  child.removeAttribute(attr.name);
+                }
+              } else {
+                child.removeAttribute(attr.name);
+              }
+            }
+            clean(child);
+          }
+        }
+      }
+    }
+    clean(doc.body);
+    return doc.body.innerHTML;
+  } catch (e) {
+    return html;
+  }
+}
+
 function updateTemplateLivePreview() {
   const textarea = document.getElementById('template-editor-textarea');
   const previewBody = document.getElementById('template-live-preview-body');
@@ -4130,7 +4169,7 @@ function updateTemplateLivePreview() {
     ? logic.renderTemplate(rawText, sampleData)
     : rawText;
 
-  previewBody.innerHTML = rendered;
+  previewBody.innerHTML = sanitizeTelegramHtmlPreview(rendered);
 
   if (timeEl) {
     const now = new Date();

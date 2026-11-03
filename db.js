@@ -665,7 +665,7 @@ function updatePlayer(id, updates = {}) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        userId || existing.userId || null,
+        updates.editorUserId !== undefined ? updates.editorUserId : (userId || existing.userId || null),
         stockUpdateSource,
         JSON.stringify(existing.stock),
         JSON.stringify(newStock),

@@ -875,7 +875,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
-      const updated = db.updatePlayer(req.user.playerId, body);
+      const updated = db.updatePlayer(req.user.playerId, { ...body, editorUserId: req.user.id });
       if (body.stock) {
         db.recordStockHistory(req.user.playerId, body.stock);
       }
@@ -1068,7 +1068,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
           }
         }
       }
-      const updated = db.updatePlayer(targetPlayerId, body);
+      const updated = db.updatePlayer(targetPlayerId, { ...body, editorUserId: req.user.id });
       if (body.stock) {
         db.recordStockHistory(targetPlayerId, body.stock);
       }
@@ -1689,7 +1689,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
           .map((a, idx) => {
             const p = players.find(pl => pl.id === a.playerId);
             const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
-            return `${idx + 1}. #${a.place}: ${a.playerName || p?.name || 'Сектор'}${vipStr}`;
+            const safeName = String(a.playerName || p?.name || 'Сектор')
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+            return `${idx + 1}. #${a.place}: ${safeName}${vipStr}`;
           })
           .join('\n');
 
@@ -1899,6 +1903,14 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
 
     if (pathname === '/api/telegram/webhook' && req.method === 'POST') {
+      const configuredSecret = db.getAppSetting('telegram_webhook_secret');
+      if (configuredSecret) {
+        const incomingSecret = req.headers['x-telegram-bot-api-secret-token'];
+        if (incomingSecret !== configuredSecret) {
+          return sendError(res, 401, 'UNAUTHORIZED', 'Invalid webhook secret token');
+        }
+      }
+
       const update = body || {};
       const token = db.getAppSetting('telegram_bot_token');
 
