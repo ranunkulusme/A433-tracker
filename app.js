@@ -4231,11 +4231,20 @@ async function copyStaffPinCommand() {
   const pinEl = document.getElementById('staff-pin-code-text');
   const pin = pinEl ? pinEl.textContent.trim() : '';
   const cmd = `/connect_staff ${pin}`;
+  const btn = document.getElementById('btn-copy-staff-cmd');
+  const originalText = btn ? btn.textContent : '';
+
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(cmd);
     }
     showToast(typeof t === 'function' ? t('telegram.pin_copied') : 'Команда скопирована в буфер обмена', 'success');
+    if (btn) {
+      btn.textContent = '✅ Скопировано!';
+      setTimeout(() => {
+        if (btn) btn.textContent = originalText;
+      }, 1800);
+    }
   } catch (err) {
     showToast(`Команда: ${cmd}`, 'info');
   }
