@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.30.0';
+const APP_VERSION = 'v3.31.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -3966,8 +3966,34 @@ async function renderUsers() {
                 `;
               }
 
+              const isBlocked = Boolean(u.is_blocked || u.isBlocked);
+              let statusBadge = '';
+              if (isBlocked) {
+                statusBadge = `<span class="badge badge-danger" style="background:#ef4444;color:#fff">${typeof t === 'function' ? t('users.status_blocked') : '⛔ Заблокирован'}</span>`;
+              } else if (u.is_approved) {
+                statusBadge = `<span class="badge badge-success">${typeof t === 'function' ? t('users.active') : '✓ Активен'}</span>`;
+              } else {
+                statusBadge = `<span class="badge badge-pending">${typeof t === 'function' ? t('users.pending') : '⏳ Ожидает'}</span>`;
+              }
+
+              const isCurrentR5 = (currentUser?.rank || state.currentRole) === 'r5';
+              const isSelf = currentUser && Number(currentUser.id) === Number(u.id);
+
+              let blockActionHtml = '';
+              let deleteActionHtml = '';
+              if (isCurrentR5 && !isSelf) {
+                if (isBlocked) {
+                  blockActionHtml = `<button class="action-btn" style="color:var(--green,#10b981)" onclick="handleToggleBlockUser(${u.id}, false, '${escapeHtml(u.username)}')">${typeof t === 'function' ? t('users.btn_unblock') : '✅ Разблокировать'}</button>`;
+                } else {
+                  blockActionHtml = `<button class="action-btn" style="color:var(--orange,#f59e0b)" onclick="handleToggleBlockUser(${u.id}, true, '${escapeHtml(u.username)}')">${typeof t === 'function' ? t('users.btn_block') : '⛔ Заблокировать'}</button>`;
+                }
+                if (u.username !== 'admin') {
+                  deleteActionHtml = `<button class="action-btn" style="color:var(--red,#ef4444)" onclick="openDeleteUserModal(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.playerName || '')}')">${typeof t === 'function' ? t('users.btn_delete') : '🗑️ Удалить'}</button>`;
+                }
+              }
+
               return `
-                <tr>
+                <tr class="${isBlocked ? 'row-blocked' : ''}">
                   <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
                   <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
                   <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
@@ -3979,11 +4005,13 @@ async function renderUsers() {
                     </select>
                   </td>
                   <td>${permsHtml}</td>
-                  <td>${u.is_approved ? `<span class="badge badge-success">${typeof t === 'function' ? t('users.active') : '✓ Активен'}</span>` : `<span class="badge badge-pending">${typeof t === 'function' ? t('users.pending') : '⏳ Ожидает'}</span>`}</td>
+                  <td>${statusBadge}</td>
                   <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
                   <td style="text-align:right;white-space:nowrap">
                     <button class="action-btn" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                     <button class="action-btn" onclick="handleResetUserPassword(${u.id}, '${escapeHtml(u.username)}')">${typeof t === 'function' ? t('users.btn_password') : '🔑 Пароль'}</button>
+                    ${blockActionHtml}
+                    ${deleteActionHtml}
                   </td>
                 </tr>
               `;
@@ -4168,6 +4196,87 @@ async function handleResetUserPassword(userId, username) {
     }
   } catch (err) {
     toast(`Ошибка смены пароля: ${err.message}`, 'error');
+  }
+}
+
+async function handleToggleBlockUser(userId, blocked, username) {
+  const confirmMsg = blocked
+    ? (typeof t === 'function' ? t('users.confirm_block', { username }) : `Заблокировать доступ пользователю "${username}"? Все его активные сессии будут немедленно прекращены.`)
+    : (typeof t === 'function' ? t('users.confirm_unblock', { username }) : `Разблокировать доступ пользователю "${username}"?`);
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch(`/api/users/${userId}/block`, {
+      method: 'POST',
+      body: { blocked }
+    });
+    if (res && res.success) {
+      toast(blocked ? `Пользователь "${username}" заблокирован` : `Пользователь "${username}" разблокирован`);
+      await renderUsers();
+    }
+  } catch (err) {
+    toast(`Ошибка изменения статуса блокировки: ${err.message}`, 'error');
+  }
+}
+
+function openDeleteUserModal(userId, username, playerName) {
+  const idInput = document.getElementById('mdu-user-id');
+  if (idInput) idInput.value = userId;
+
+  const msgEl = document.getElementById('mdu-message');
+  if (msgEl) {
+    const text = typeof t === 'function' ? t('users.confirm_delete_desc', { username }) : `Вы уверены, что хотите удалить пользователя @${username}?`;
+    msgEl.innerHTML = `<strong>${escapeHtml(text)}</strong>`;
+  }
+
+  const sectorWrap = document.getElementById('mdu-sector-wrap');
+  const deleteSectorCheckbox = document.getElementById('mdu-delete-sector');
+  if (deleteSectorCheckbox) deleteSectorCheckbox.checked = false;
+
+  if (sectorWrap) {
+    if (playerName) {
+      sectorWrap.style.display = 'block';
+    } else {
+      sectorWrap.style.display = 'none';
+    }
+  }
+
+  openModal('modal-delete-user');
+}
+
+function closeDeleteUserModal() {
+  closeModal('modal-delete-user');
+}
+
+async function submitDeleteUser() {
+  const idInput = document.getElementById('mdu-user-id');
+  const userId = idInput ? parseInt(idInput.value, 10) : null;
+  if (!userId) return;
+
+  const deleteSectorCheckbox = document.getElementById('mdu-delete-sector');
+  const deleteSectors = Boolean(deleteSectorCheckbox && deleteSectorCheckbox.checked);
+
+  const btn = document.getElementById('btn-confirm-delete-user');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Удаление...';
+  }
+
+  try {
+    await apiFetch(`/api/users/${userId}`, {
+      method: 'DELETE',
+      body: { deleteSectors }
+    });
+    toast('Пользователь успешно удален');
+    closeDeleteUserModal();
+    await renderUsers();
+  } catch (err) {
+    toast(`Ошибка удаления пользователя: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = typeof t === 'function' ? t('users.btn_delete') : '🗑️ Удалить';
+    }
   }
 }
 
@@ -10649,6 +10758,10 @@ if (typeof window !== 'undefined') {
   window.applyModalPreset = applyModalPreset;
   window.submitUserPermissions = submitUserPermissions;
   window.closeUserPermissionsModal = closeUserPermissionsModal;
+  window.handleToggleBlockUser = handleToggleBlockUser;
+  window.openDeleteUserModal = openDeleteUserModal;
+  window.closeDeleteUserModal = closeDeleteUserModal;
+  window.submitDeleteUser = submitDeleteUser;
 
   window.setCabinetSimMode = setCabinetSimMode;
   window.setCalcSimMode = setCalcSimMode;

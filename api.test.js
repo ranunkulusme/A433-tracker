@@ -4052,6 +4052,170 @@ test('API Player Cabinet /api/my-profile preserves user telegram fields and supp
   }
 });
 
+test('API User Management: blocking, deletion, and registration sector linking (RBAC)', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Login as admin (R5)
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // 2. Register user with new sector
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'test_recruit',
+        password: 'password123',
+        playerName: 'База Рекрута'
+      })
+    });
+    assert.equal(regRes.status, 200);
+    const regData = await regRes.json();
+    assert.ok(regData.userId);
+
+    // 3. Approve user as R3
+    const approveRes = await fetch(`${baseUrl}/api/users/${regData.userId}/approve`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    assert.equal(approveRes.status, 200);
+
+    // 4. Recruit logs in and gets their profile
+    const recruitLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'test_recruit', password: 'password123' })
+    });
+    assert.equal(recruitLoginRes.status, 200);
+    const { token: recruitToken } = await recruitLoginRes.json();
+
+    const recruitProfRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${recruitToken}` }
+    });
+    assert.equal(recruitProfRes.status, 200);
+    const recruitProfile = await recruitProfRes.json();
+    assert.equal(recruitProfile.name, 'База Рекрута');
+    assert.ok(Array.isArray(recruitProfile.officers));
+
+    // 5. Non-R5 user cannot block or delete
+    const forbiddenBlock = await fetch(`${baseUrl}/api/users/${regData.userId}/block`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${recruitToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ blocked: true })
+    });
+    assert.equal(forbiddenBlock.status, 403);
+
+    const forbiddenDelete = await fetch(`${baseUrl}/api/users/${regData.userId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${recruitToken}` }
+    });
+    assert.equal(forbiddenDelete.status, 403);
+
+    // 6. Admin cannot self-block or self-delete
+    const selfBlock = await fetch(`${baseUrl}/api/users/1/block`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ blocked: true })
+    });
+    assert.equal(selfBlock.status, 400);
+
+    const selfDelete = await fetch(`${baseUrl}/api/users/1`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(selfDelete.status, 400);
+
+    // 7. Admin blocks user
+    const blockRes = await fetch(`${baseUrl}/api/users/${regData.userId}/block`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ blocked: true })
+    });
+    assert.equal(blockRes.status, 200);
+    const blockData = await blockRes.json();
+    assert.equal(blockData.user.is_blocked, 1);
+
+    // Blocked user's active session is rejected
+    const blockedProfRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${recruitToken}` }
+    });
+    assert.equal(blockedProfRes.status, 401);
+
+    // Blocked user login rejected with 403 ACCOUNT_BLOCKED
+    const blockedLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'test_recruit', password: 'password123' })
+    });
+    assert.equal(blockedLoginRes.status, 403);
+    const blockedLoginData = await blockedLoginRes.json();
+    assert.equal(blockedLoginData.error, 'ACCOUNT_BLOCKED');
+
+    // 8. Admin unblocks user
+    const unblockRes = await fetch(`${baseUrl}/api/users/${regData.userId}/block`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ blocked: false })
+    });
+    assert.equal(unblockRes.status, 200);
+
+    const reLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'test_recruit', password: 'password123' })
+    });
+    assert.equal(reLoginRes.status, 200);
+
+    // 9. Admin deletes user, keeping sector in guild
+    const delRes = await fetch(`${baseUrl}/api/users/${regData.userId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(delRes.status, 200);
+
+    // User is gone
+    const checkDeleted = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    const allUsers = await checkDeleted.json();
+    assert.ok(!allUsers.some(u => u.id === regData.userId));
+
+    // Sector still exists with userId = null
+    const checkSectors = await fetch(`${baseUrl}/api/players`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    const allSectors = await checkSectors.json();
+    const keptSector = allSectors.find(s => s.name === 'База Рекрута');
+    assert.ok(keptSector, 'Kept sector must exist in guild players');
+    assert.equal(keptSector.userId, null, 'Kept sector must be unassigned');
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 async function run() {

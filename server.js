@@ -866,6 +866,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 400, 'MISSING_FIELDS', 'Логин и пароль обязательны');
       }
       const loginRes = db.loginUser(username, password);
+      if (loginRes.error === 'ACCOUNT_BLOCKED') {
+        return sendError(res, 403, 'ACCOUNT_BLOCKED', 'Доступ к аккаунту заблокирован руководством гильдии');
+      }
       if (loginRes.error === 'PENDING_APPROVAL') {
         return sendError(res, 403, 'PENDING_APPROVAL', 'Аккаунт ожидает подтверждения Главой (Р5) или Чиновником (Р4)');
       }
@@ -965,6 +968,41 @@ function createRequestHandler(staticDir, s3Manager = null) {
         db.updatePlayer(updated.player_id, { rank: body.rank });
       }
       return sendJson(res, 200, { success: true, user: updated });
+    }
+
+    const userBlockMatch = pathname.match(/^\/api\/users\/(\d+)\/block$/);
+    if (userBlockMatch && req.method === 'POST') {
+      if (!requireRole(['r5'])(req, res)) return;
+      const targetUserId = Number(userBlockMatch[1]);
+      if (targetUserId === req.user.id) {
+        return sendError(res, 400, 'SELF_BLOCK_FORBIDDEN', 'Вы не можете заблокировать собственный аккаунт');
+      }
+      const targetUser = db.findUserById(targetUserId);
+      if (!targetUser) {
+        return sendError(res, 404, 'USER_NOT_FOUND', 'Пользователь не найден');
+      }
+      const isBlocked = body && body.blocked !== undefined ? Boolean(body.blocked) : true;
+      const updated = db.blockUser(targetUserId, isBlocked);
+      return sendJson(res, 200, { success: true, user: updated });
+    }
+
+    const userDeleteMatch = pathname.match(/^\/api\/users\/(\d+)$/);
+    if (userDeleteMatch && req.method === 'DELETE') {
+      if (!requireRole(['r5'])(req, res)) return;
+      const targetUserId = Number(userDeleteMatch[1]);
+      if (targetUserId === req.user.id) {
+        return sendError(res, 400, 'SELF_DELETE_FORBIDDEN', 'Вы не можете удалить собственный аккаунт');
+      }
+      const targetUser = db.findUserById(targetUserId);
+      if (!targetUser) {
+        return sendError(res, 404, 'USER_NOT_FOUND', 'Пользователь не найден');
+      }
+      if (targetUser.username === 'admin') {
+        return sendError(res, 400, 'ADMIN_DELETE_FORBIDDEN', 'Главного администратора (admin) нельзя удалить');
+      }
+      const deleteSectors = Boolean(body && body.deleteSectors);
+      const result = db.deleteUser(targetUserId, { deleteSectors });
+      return sendJson(res, 200, result);
     }
 
     // ─────────────────────────────────────────────────────────

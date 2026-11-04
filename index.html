@@ -1434,6 +1434,34 @@
   </div>
 </div>
 
+<!-- Modal: Delete User (R5) -->
+<div class="modal" id="modal-delete-user" style="max-width:480px">
+  <div class="modal-header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">🗑️</span>
+      <h3 id="modal-delete-user-title" data-i18n="users.confirm_delete_title">Удаление пользователя</h3>
+    </div>
+    <button class="modal-close" onclick="closeDeleteUserModal()" title="Закрыть">✕</button>
+  </div>
+  <div class="modal-body">
+    <input type="hidden" id="mdu-user-id">
+    <p id="mdu-message" style="margin-bottom:16px;color:var(--text);font-size:14px;line-height:1.5"></p>
+    <div class="form-group" id="mdu-sector-wrap" style="background:var(--bg3);padding:12px;border-radius:8px;border:1px solid var(--border)">
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;font-weight:normal;color:var(--text);margin:0">
+        <input type="checkbox" id="mdu-delete-sector" style="margin-top:2px;cursor:pointer">
+        <div>
+          <strong data-i18n="users.delete_remove_sector">Удалить сектор игрока вместе с аккаунтом</strong>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px" data-i18n="users.delete_remove_sector_hint">Если не ставить галочку, сектор останется в гильдии как свободный (без владельца).</div>
+        </div>
+      </label>
+    </div>
+  </div>
+  <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end">
+    <button type="button" class="btn-ghost" onclick="closeDeleteUserModal()" data-i18n="common.cancel">Отмена</button>
+    <button type="button" class="btn-danger" id="btn-confirm-delete-user" onclick="submitDeleteUser()" data-i18n="users.btn_delete">🗑️ Удалить</button>
+  </div>
+</div>
+
 <!-- Modal: Stock Audit History -->
 <div class="modal modal-wide" id="modal-stock-history" style="max-width:780px">
   <div class="modal-header">

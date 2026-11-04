@@ -2367,6 +2367,14 @@ select option { background: var(--bg3); }
 }
 
 /* Permissions Badges in Users Table */
+tr.row-blocked {
+  opacity: 0.72;
+  background: rgba(239, 68, 68, 0.04);
+}
+tr.row-blocked:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
 .permissions-cell {
   display: flex;
   align-items: center;

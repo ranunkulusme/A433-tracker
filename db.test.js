@@ -1939,6 +1939,128 @@ test('db clamps officer stars to 5 and softly migrates stars > 5 to 5 on initDb'
   }
 });
 
+test('user blocking and deactivation lifecycle in db', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // Register and approve user
+  const reg = dbModule.registerUser({ username: 'victim_user', password: 'password123', playerName: 'База Жертвы' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Login to get session
+  const loginRes = dbModule.loginUser('victim_user', 'password123');
+  assert.ok(loginRes.token);
+  assert.ok(dbModule.verifySession(loginRes.token), 'Session must be valid initially');
+
+  // Block user
+  const blocked = dbModule.blockUser(reg.userId, true);
+  assert.equal(blocked.is_blocked, 1);
+
+  // Session must be immediately invalidated
+  assert.equal(dbModule.verifySession(loginRes.token), null, 'Blocked user session must be rejected');
+
+  // Login attempt should be blocked
+  const loginBlocked = dbModule.loginUser('victim_user', 'password123');
+  assert.equal(loginBlocked.error, 'ACCOUNT_BLOCKED');
+
+  // Unblock user
+  const unblocked = dbModule.blockUser(reg.userId, false);
+  assert.equal(unblocked.is_blocked, 0);
+
+  // Login should work again
+  const loginUnblocked = dbModule.loginUser('victim_user', 'password123');
+  assert.ok(loginUnblocked.token);
+  assert.ok(dbModule.verifySession(loginUnblocked.token));
+});
+
+test('user deletion in db with keep or remove sector options', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // Case 1: deleteUser keeping sector
+  const reg1 = dbModule.registerUser({ username: 'keep_sec_user', password: 'password123', playerName: 'Сектор Хранения' });
+  dbModule.approveUser(reg1.userId, 'r3');
+  const playerId1 = reg1.playerId;
+  assert.ok(playerId1);
+
+  const delRes1 = dbModule.deleteUser(reg1.userId, { deleteSectors: false });
+  assert.equal(delRes1.success, true);
+  assert.equal(dbModule.findUserById(reg1.userId), null, 'User must be deleted');
+  const keptPlayer = dbModule.getPlayerById(playerId1);
+  assert.ok(keptPlayer, 'Player sector must remain in db');
+  assert.equal(keptPlayer.userId, null, 'Player sector userId must be cleared to null');
+
+  // Case 2: deleteUser removing sector
+  const reg2 = dbModule.registerUser({ username: 'del_sec_user', password: 'password123', playerName: 'Сектор Удаления' });
+  dbModule.approveUser(reg2.userId, 'r3');
+  const playerId2 = reg2.playerId;
+  assert.ok(playerId2);
+
+  const delRes2 = dbModule.deleteUser(reg2.userId, { deleteSectors: true });
+  assert.equal(delRes2.success, true);
+  assert.equal(dbModule.findUserById(reg2.userId), null, 'User must be deleted');
+  assert.equal(dbModule.getPlayerById(playerId2), null, 'Player sector must be completely removed');
+});
+
+test('registration guarantees sector creation, catalog officers initialization and user linking', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'fresh_cadet', password: 'password123', playerName: 'Новая База Кадета' });
+  assert.ok(reg.playerId, 'Must assign playerId');
+
+  const player = dbModule.getPlayerById(reg.playerId);
+  assert.ok(player, 'Player must be created');
+  assert.equal(player.name, 'Новая База Кадета');
+  assert.equal(player.userId, reg.userId, 'Player must be linked to userId');
+  assert.ok(Array.isArray(player.officers));
+
+  // Approve and verify getPlayersByUserId
+  dbModule.approveUser(reg.userId, 'r3');
+  const mySectors = dbModule.getPlayersByUserId(reg.userId);
+  assert.equal(mySectors.length, 1);
+  assert.equal(mySectors[0].id, reg.playerId);
+});
+
+test('registration links to existing free sector without creating duplicate', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // Pre-existing free player
+  const existing = dbModule.createPlayer({
+    name: '[A433]FreeSector',
+    userId: null
+  });
+  assert.ok(existing.id);
+
+  // Register with matching name (case-insensitive)
+  const reg = dbModule.registerUser({
+    username: 'claimed_owner',
+    password: 'password123',
+    playerName: '  [a433]freesector  '
+  });
+
+  assert.equal(reg.playerId, existing.id, 'Must link to existing free sector');
+  const linked = dbModule.getPlayerById(existing.id);
+  assert.equal(linked.userId, reg.userId, 'Existing player must be assigned to new userId');
+});
+
+test('rejectUser cleans up unapproved player created during registration if unpopulated', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'spam_applicant', password: 'password123', playerName: 'СпамБаза' });
+  const playerId = reg.playerId;
+  assert.ok(playerId);
+  assert.ok(dbModule.getPlayerById(playerId));
+
+  // Reject applicant
+  dbModule.rejectUser(reg.userId);
+  assert.equal(dbModule.findUserById(reg.userId), null);
+  assert.equal(dbModule.getPlayerById(playerId), null, 'Unapproved empty player must be cleaned up');
+});
+
+
 
 
 
