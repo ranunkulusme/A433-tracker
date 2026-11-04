@@ -327,6 +327,130 @@ async function runTests() {
     }
   })();
 
+  // 12. getTelegramUpdates payload and options
+  await (async () => {
+    let capturedUrl = null;
+    let capturedBody = null;
+    const mockFetch = async (url, options) => {
+      capturedUrl = url;
+      capturedBody = options.body ? JSON.parse(options.body) : null;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: [] })
+      };
+    };
+
+    const res = await telegram.getTelegramUpdates('tok_123', {
+      offset: 42,
+      limit: 50,
+      timeout: 15
+    }, {
+      baseUrl: 'https://mock.telegram.org',
+      fetchFn: mockFetch
+    });
+    assert.equal(res.ok, true);
+    assert.equal(capturedUrl, 'https://mock.telegram.org/bottok_123/getUpdates');
+    assert.equal(capturedBody.offset, 42);
+    assert.equal(capturedBody.limit, 50);
+    assert.equal(capturedBody.timeout, 15);
+    assert.deepEqual(capturedBody.allowed_updates, ['message', 'callback_query']);
+  })();
+
+  // 13. deleteTelegramWebhook
+  await (async () => {
+    let capturedUrl = null;
+    let capturedBody = null;
+    const mockFetch = async (url, options) => {
+      capturedUrl = url;
+      capturedBody = options.body ? JSON.parse(options.body) : null;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    };
+
+    const res = await telegram.deleteTelegramWebhook('tok_123', { dropPendingUpdates: true }, {
+      baseUrl: 'https://mock.telegram.org',
+      fetchFn: mockFetch
+    });
+    assert.equal(res.ok, true);
+    assert.equal(capturedUrl, 'https://mock.telegram.org/bottok_123/deleteWebhook');
+    assert.equal(capturedBody.drop_pending_updates, true);
+  })();
+
+  // 14. startTelegramPolling and stopTelegramPolling lifecycle
+  await (async () => {
+    const receivedUpdates = [];
+    let callCount = 0;
+
+    telegram.setTelegramFetch(async (url, options) => {
+      if (url.includes('/deleteWebhook')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: true })
+        };
+      }
+      if (url.includes('/getUpdates')) {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: true,
+              result: [
+                { update_id: 100, message: { text: '/start' } },
+                { update_id: 101, message: { text: '/connect_staff KOW-STAFF-1234' } }
+              ]
+            })
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: [] })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true })
+      };
+    });
+
+    try {
+      telegram.startTelegramPolling({
+        getBotToken: () => 'poll_tok',
+        getProxyUrl: () => null,
+        intervalMs: 10,
+        timeoutSec: 1,
+        onUpdate: async (upd) => {
+          receivedUpdates.push(upd);
+        }
+      });
+
+      // Wait a moment for polling loop to execute
+      await new Promise(r => setTimeout(r, 150));
+
+      const status = telegram.getTelegramPollingStatus();
+      assert.equal(status.running, true);
+      assert.equal(status.updatesCount, 2);
+      assert.equal(receivedUpdates.length, 2);
+      assert.equal(receivedUpdates[0].update_id, 100);
+      assert.equal(receivedUpdates[1].update_id, 101);
+
+      telegram.stopTelegramPolling();
+      const stoppedStatus = telegram.getTelegramPollingStatus();
+      assert.equal(stoppedStatus.running, false);
+    } finally {
+      telegram.stopTelegramPolling();
+      telegram.setTelegramFetch(null);
+    }
+  })();
+
   console.log('ok - all telegram.js unit tests passed');
 }
 

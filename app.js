@@ -1930,6 +1930,8 @@ async function renderMyCabinet() {
   updateCabinetVipProgressHint();
 }
 
+let personalBindPollTimer = null;
+
 async function connectUserTelegram() {
   try {
     const data = await apiFetch('/api/telegram/bind-token', { method: 'POST' });
@@ -1937,6 +1939,31 @@ async function connectUserTelegram() {
       const cleanDeepLink = data.deepLink.replace('t.me/@', 't.me/');
       window.open(cleanDeepLink, '_blank');
       showToast(typeof t === 'function' ? t('telegram.open_telegram') : 'Откройте бота в Telegram и нажмите Start', 'info');
+
+      if (personalBindPollTimer) clearInterval(personalBindPollTimer);
+      let pollCount = 0;
+      personalBindPollTimer = setInterval(async () => {
+        pollCount++;
+        if (pollCount > 30) {
+          clearInterval(personalBindPollTimer);
+          personalBindPollTimer = null;
+          return;
+        }
+        try {
+          const profile = await apiFetch('/api/my-profile');
+          if (profile && profile.user && (profile.user.telegram_chat_id || profile.user.telegramChatId)) {
+            clearInterval(personalBindPollTimer);
+            personalBindPollTimer = null;
+            if (currentUser) {
+              currentUser.telegram_chat_id = profile.user.telegram_chat_id || profile.user.telegramChatId;
+              currentUser.telegram_username = profile.user.telegram_username || profile.user.telegramUsername;
+            }
+            myCabinetProfile = profile;
+            showToast('✅ Telegram успешно подключен!', 'success');
+            renderMyCabinet();
+          }
+        } catch (_) {}
+      }, 3000);
     }
   } catch (err) {
     showToast(err.message || 'Ошибка генерации ссылки подключения', 'error');
@@ -4020,9 +4047,16 @@ async function renderNotificationsPage() {
       ${isR5 ? `
         <!-- Bot Settings (R5) -->
         <div class="settings-card bot-settings-card" id="bot-settings-block">
-          <div class="settings-card-title">
-            <span style="font-size:18px">⚙️</span>
-            <h3>${typeof t === 'function' ? t('telegram.bot_settings_title') : 'Настройки Telegram-бота'}</h3>
+          <div class="settings-card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">⚙️</span>
+              <h3>${typeof t === 'function' ? t('telegram.bot_settings_title') : 'Настройки Telegram-бота'}</h3>
+            </div>
+            <div id="tg-polling-badge" class="badge" style="font-size:12px;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,0.05);color:var(--text-muted)">
+              ${(settingsRes && settingsRes.polling && settingsRes.polling.running)
+                ? '🟢 <span style="color:var(--color-success,#4ade80)">Long Polling активен</span>'
+                : '⚪ <span>Опрос не запущен</span>'}
+            </div>
           </div>
           <div class="settings-card-body">
             <div class="form-row form-row-3">
@@ -4475,6 +4509,8 @@ async function sendTestTemplateNotification() {
   }
 }
 
+let staffPinPollTimer = null;
+
 async function generateStaffPinCode() {
   try {
     const res = await apiFetch('/api/telegram/staff-bind-token', { method: 'POST' });
@@ -4485,6 +4521,29 @@ async function generateStaffPinCode() {
       const overlay = document.getElementById('overlay');
       if (modal) modal.classList.add('open');
       if (overlay) overlay.classList.add('open');
+
+      if (staffPinPollTimer) clearInterval(staffPinPollTimer);
+      let pollCount = 0;
+      staffPinPollTimer = setInterval(async () => {
+        pollCount++;
+        if (pollCount > 40 || !modal.classList.contains('open')) {
+          clearInterval(staffPinPollTimer);
+          staffPinPollTimer = null;
+          return;
+        }
+        try {
+          const settings = await apiFetch('/api/telegram/settings');
+          if (settings && settings.staffChatId) {
+            clearInterval(staffPinPollTimer);
+            staffPinPollTimer = null;
+            const input = document.getElementById('tg-setting-chat-id');
+            if (input) input.value = settings.staffChatId;
+            showToast('✅ Чат штаба успешно привязан!', 'success');
+            closeStaffPinModal();
+            renderNotifications();
+          }
+        } catch (_) {}
+      }, 3000);
     }
   } catch (err) {
     showToast(err.message || 'Ошибка генерации PIN-кода', 'error');
@@ -4492,6 +4551,10 @@ async function generateStaffPinCode() {
 }
 
 function closeStaffPinModal() {
+  if (staffPinPollTimer) {
+    clearInterval(staffPinPollTimer);
+    staffPinPollTimer = null;
+  }
   const modal = document.getElementById('modal-staff-pin');
   const overlay = document.getElementById('overlay');
   if (modal) modal.classList.remove('open');
