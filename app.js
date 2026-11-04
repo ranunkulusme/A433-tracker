@@ -1705,9 +1705,22 @@ async function renderMyCabinet() {
     : (profile.sectors.find(s => Number(s.id) === Number(profile.activeSectorId)) || profile.sectors[0]);
 
   const profileSectors = profile.sectors;
-  profile = { ...activeSector, sectors: profileSectors, activeSectorId: activeSector.id };
+  const rawUser = profile.user || currentUser;
+  profile = { ...activeSector, sectors: profileSectors, activeSectorId: activeSector.id, user: rawUser };
   myCabinetProfile = profile;
   myCabinetSectors = profileSectors;
+
+  if (rawUser && currentUser) {
+    if (rawUser.telegram_chat_id || rawUser.telegramChatId) {
+      currentUser.telegram_chat_id = rawUser.telegram_chat_id || rawUser.telegramChatId;
+      currentUser.telegramChatId = currentUser.telegram_chat_id;
+      currentUser.telegram_username = rawUser.telegram_username || rawUser.telegramUsername;
+      currentUser.telegramUsername = currentUser.telegram_username;
+      currentUser.telegram_notifications_enabled = rawUser.telegram_notifications_enabled;
+      currentUser.telegramNotificationsEnabled = rawUser.telegramNotificationsEnabled;
+      try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+    }
+  }
 
   profileSectors.forEach(s => {
     const idx = state.players.findIndex(p => p.id === s.id);
@@ -1887,18 +1900,26 @@ async function renderMyCabinet() {
             <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
               Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
             </p>
-            <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
-              ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
-            </button>
+            <div class="tg-btn-group">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
+                ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-check-tg" onclick="checkTelegramBindStatus()">
+                ${typeof t === 'function' ? t('telegram.btn_check_status') : '🔄 Проверить статус'}
+              </button>
+            </div>
           </div>
         `}
       </div>
     </div>
 
     <!-- OFFICERS LIST -->
-    <div class="section-header" style="margin-top:20px">
+    <div class="section-header" style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div class="section-title">🎖️ ${typeof t === 'function' ? t('cabinet.my_officers') : 'Мои офицеры'} (${profile.officers.length})</div>
-      <button class="btn-primary btn-sm" onclick="openAddMyOfficerModal()">${typeof t === 'function' ? t('cabinet.btn_add_officer') : '+ Добавить офицера'}</button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        ${renderOfficerStockModeSwitcherHtml()}
+        <button class="btn-primary btn-sm" onclick="openAddMyOfficerModal()">${typeof t === 'function' ? t('cabinet.btn_add_officer') : '+ Добавить офицера'}</button>
+      </div>
     </div>
 
     ${profile.officers.length ? `
@@ -1932,6 +1953,50 @@ async function renderMyCabinet() {
 
 let personalBindPollTimer = null;
 
+async function checkTelegramBindStatus(silent = false) {
+  const btn = document.getElementById('btn-check-tg');
+  if (btn && !silent) {
+    btn.disabled = true;
+    btn.textContent = typeof t === 'function' ? t('telegram.checking_status') : 'Проверка...';
+  }
+  try {
+    const profile = await apiFetch('/api/my-profile');
+    const u = profile?.user;
+    const hasTg = Boolean(u && (u.telegram_chat_id || u.telegramChatId));
+    if (hasTg) {
+      if (currentUser) {
+        currentUser.telegram_chat_id = u.telegram_chat_id || u.telegramChatId;
+        currentUser.telegramChatId = currentUser.telegram_chat_id;
+        currentUser.telegram_username = u.telegram_username || u.telegramUsername;
+        currentUser.telegramUsername = currentUser.telegram_username;
+        currentUser.telegram_notifications_enabled = u.telegram_notifications_enabled;
+        currentUser.telegramNotificationsEnabled = u.telegramNotificationsEnabled;
+        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+      }
+      if (myCabinetProfile) {
+        myCabinetProfile.user = u;
+      }
+      if (personalBindPollTimer) {
+        clearInterval(personalBindPollTimer);
+        personalBindPollTimer = null;
+      }
+      showToast('✅ Telegram успешно подключен!', 'success');
+      await renderMyCabinet();
+      return true;
+    } else if (!silent) {
+      showToast(typeof t === 'function' ? t('telegram.not_connected_hint') : 'Привязка ещё не завершена. Отправьте боту команду /start в Telegram', 'info');
+    }
+  } catch (err) {
+    if (!silent) showToast(err.message || 'Ошибка проверки статуса Telegram', 'error');
+  } finally {
+    if (btn && !silent) {
+      btn.disabled = false;
+      btn.textContent = typeof t === 'function' ? t('telegram.btn_check_status') : '🔄 Проверить статус';
+    }
+  }
+  return false;
+}
+
 async function connectUserTelegram() {
   try {
     const data = await apiFetch('/api/telegram/bind-token', { method: 'POST' });
@@ -1944,26 +2009,17 @@ async function connectUserTelegram() {
       let pollCount = 0;
       personalBindPollTimer = setInterval(async () => {
         pollCount++;
-        if (pollCount > 30) {
+        if (pollCount > 40) {
           clearInterval(personalBindPollTimer);
           personalBindPollTimer = null;
           return;
         }
-        try {
-          const profile = await apiFetch('/api/my-profile');
-          if (profile && profile.user && (profile.user.telegram_chat_id || profile.user.telegramChatId)) {
-            clearInterval(personalBindPollTimer);
-            personalBindPollTimer = null;
-            if (currentUser) {
-              currentUser.telegram_chat_id = profile.user.telegram_chat_id || profile.user.telegramChatId;
-              currentUser.telegram_username = profile.user.telegram_username || profile.user.telegramUsername;
-            }
-            myCabinetProfile = profile;
-            showToast('✅ Telegram успешно подключен!', 'success');
-            renderMyCabinet();
-          }
-        } catch (_) {}
-      }, 3000);
+        const connected = await checkTelegramBindStatus(true);
+        if (connected) {
+          clearInterval(personalBindPollTimer);
+          personalBindPollTimer = null;
+        }
+      }, 2500);
     }
   } catch (err) {
     showToast(err.message || 'Ошибка генерации ссылки подключения', 'error');
@@ -2479,6 +2535,39 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
   const oldLevel = currentSkills[skillIndex];
   const newLevel = Math.max(1, Math.min(5, Number(level) || 1));
   if (oldLevel === newLevel) return;
+
+  const stockMode = getOfficerStockMode();
+  if (stockMode === 'retro') {
+    const newSkills = [...currentSkills];
+    newSkills[skillIndex] = newLevel;
+    try {
+      await apiFetch(`/api/my-profile/officers/${officerId}`, {
+        method: 'PUT',
+        body: { skills: newSkills }
+      });
+      off.skills = newSkills;
+      if (state.players) {
+        for (const p of state.players) {
+          if (p.officers) {
+            const o = p.officers.find(x => String(x.id) === String(officerId));
+            if (o) o.skills = newSkills;
+          }
+        }
+      }
+      const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+      if (cardEl && off) {
+        const today = new Date().toISOString().slice(0, 10);
+        cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
+      } else {
+        await renderMyCabinet();
+      }
+      toast(typeof t === 'function' ? t('officers.toast_retro_skills_updated') : '🎯 Навык обновлен (Ретро: без списания со склада)');
+      return;
+    } catch (err) {
+      toast('Ошибка обновления навыка: ' + (err.message || err), 'error');
+      return;
+    }
+  }
 
   const prevStock = myCabinetProfile?.stock ? JSON.parse(JSON.stringify(myCabinetProfile.stock)) : null;
   const prevOfficer = JSON.parse(JSON.stringify(off));
@@ -3188,6 +3277,53 @@ function renderMyOfficerModalSkills() {
   `;
 }
 
+function getOfficerStockMode() {
+  try {
+    const m = localStorage.getItem('kow_officer_stock_mode');
+    if (m === 'normal' || m === 'retro') return m;
+  } catch (_) {}
+  return 'retro';
+}
+
+function setOfficerStockMode(mode) {
+  const clean = mode === 'normal' ? 'normal' : 'retro';
+  try {
+    localStorage.setItem('kow_officer_stock_mode', clean);
+  } catch (_) {}
+  updateOfficerStockModeUI(clean);
+  const toastMsg = clean === 'normal'
+    ? (typeof t === 'function' ? t('officers.mode_normal_hint') : 'Режим прокачки со склада включен')
+    : (typeof t === 'function' ? t('officers.mode_retro_hint') : 'Ретро-режим без списания со склада включен');
+  toast((clean === 'normal' ? '⚡ ' : '📜 ') + toastMsg, 'info');
+}
+
+function updateOfficerStockModeUI(mode) {
+  const clean = mode || getOfficerStockMode();
+  document.querySelectorAll('.officer-stock-mode-pill').forEach(btn => {
+    const btnMode = btn.getAttribute('data-mode');
+    btn.classList.toggle('active', btnMode === clean);
+  });
+}
+
+function renderOfficerStockModeSwitcherHtml() {
+  const currentMode = getOfficerStockMode();
+  const title = typeof t === 'function' ? t('officers.stock_mode_title') : 'Режим склада:';
+  const retroLabel = typeof t === 'function' ? t('officers.mode_retro') : '📜 Ретро-режим';
+  const retroHint = typeof t === 'function' ? t('officers.mode_retro_hint') : 'Без списания со склада трекера';
+  const normalLabel = typeof t === 'function' ? t('officers.mode_normal') : '⚡ Прокачка';
+  const normalHint = typeof t === 'function' ? t('officers.mode_normal_hint') : 'Списание ресурсов со склада трекера';
+
+  return `
+    <div class="officer-stock-mode-wrap">
+      <span class="officer-stock-mode-title">${title}</span>
+      <div class="officer-stock-mode-pills">
+        <button type="button" class="officer-stock-mode-pill mode-retro ${currentMode === 'retro' ? 'active' : ''}" data-mode="retro" title="${retroHint}" onclick="setOfficerStockMode('retro')">${retroLabel}</button>
+        <button type="button" class="officer-stock-mode-pill mode-normal ${currentMode === 'normal' ? 'active' : ''}" data-mode="normal" title="${normalHint}" onclick="setOfficerStockMode('normal')">${normalLabel}</button>
+      </div>
+    </div>
+  `;
+}
+
 function setMyOfficerModalSkill(sIdx, lvl) {
   myOfficerModalSkills[sIdx] = Math.max(1, Math.min(5, Number(lvl) || 1));
   renderMyOfficerModalSkills();
@@ -3215,8 +3351,11 @@ function openAddMyOfficerModal() {
   const onlyPersonalEl = document.getElementById('my-officer-only-personal');
   if (onlyPersonalEl) onlyPersonalEl.checked = false;
   document.getElementById('my-officer-stars').value = 0;
+  const currentMode = getOfficerStockMode();
   const retroRadioOn = document.getElementById('my-officer-retro-on');
-  if (retroRadioOn) retroRadioOn.checked = true;
+  const retroRadioOff = document.getElementById('my-officer-retro-off');
+  if (currentMode === 'normal' && retroRadioOff) retroRadioOff.checked = true;
+  else if (retroRadioOn) retroRadioOn.checked = true;
   myOfficerModalSkills = [1, 1, 1, 1];
   renderMyOfficerModalSkills();
 
@@ -3239,8 +3378,11 @@ function openEditMyOfficerModal(officerId) {
   const editOnlyPersonalEl = document.getElementById('my-officer-only-personal');
   if (editOnlyPersonalEl) editOnlyPersonalEl.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
   document.getElementById('my-officer-stars').value = off.stars || 0;
+  const currentMode = getOfficerStockMode();
   const editRetroRadioOn = document.getElementById('my-officer-retro-on');
-  if (editRetroRadioOn) editRetroRadioOn.checked = true;
+  const editRetroRadioOff = document.getElementById('my-officer-retro-off');
+  if (currentMode === 'normal' && editRetroRadioOff) editRetroRadioOff.checked = true;
+  else if (editRetroRadioOn) editRetroRadioOn.checked = true;
   myOfficerModalSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
   renderMyOfficerModalSkills();
 
@@ -3363,12 +3505,57 @@ async function saveMyOfficerSubmit() {
         return;
       }
       const cat = getCatalogOfficer(catalogId);
+
+      let initialStockDeduction = null;
+      if (!isRetro && myCabinetProfile?.stock) {
+        const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
+          ? logic.calculateInitialOfficerStockDeduction
+          : calculateInitialOfficerStockDeduction;
+        if (initialFn) {
+          initialStockDeduction = initialFn({
+            officer: { level, stars, skills },
+            stock: myCabinetProfile.stock,
+            catalogOfficer: cat,
+            isRetrospective: false
+          });
+          if (!initialStockDeduction.canAfford) {
+            toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
+            return;
+          }
+        }
+      }
+
+      const payload = {
+        catalogId,
+        name: cat?.name || '',
+        level,
+        coupons,
+        stars,
+        skills,
+        personalPuzzles,
+        onlyPersonalPuzzles,
+        ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
+      };
+
       await apiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: { catalogId, name: cat?.name || '', level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles }
+        body: payload
       });
+
+      if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
+        await apiFetch('/api/my-profile', {
+          method: 'PUT',
+          body: { stock: initialStockDeduction.newStock }
+        });
+        myCabinetProfile.stock = initialStockDeduction.newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = initialStockDeduction.newStock;
+        }
+      }
+
       closeAllModals();
-      toast('Офицер добавлен в профиль');
+      toast('Офицер добавлен в профиль' + (initialStockDeduction?.deductStock ? ' (ресурсы списаны со склада)' : ''));
       await renderMyCabinet();
     }
   } catch (err) {
@@ -3413,6 +3600,37 @@ async function setMyOfficerStars(officerId, stars) {
   if (!off) return;
   const oldStars = Number(off.stars) || 0;
   if (oldStars === count) return;
+
+  const stockMode = getOfficerStockMode();
+  if (stockMode === 'retro') {
+    try {
+      await apiFetch(`/api/my-profile/officers/${officerId}`, {
+        method: 'PUT',
+        body: { stars: count }
+      });
+      off.stars = count;
+      if (state.players) {
+        for (const p of state.players) {
+          if (p.officers) {
+            const o = p.officers.find(x => String(x.id) === String(officerId));
+            if (o) o.stars = count;
+          }
+        }
+      }
+      const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
+      if (cardEl && off) {
+        const today = new Date().toISOString().slice(0, 10);
+        cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
+      } else {
+        await renderMyCabinet();
+      }
+      toast(typeof t === 'function' ? t('officers.toast_retro_stars_updated') : '⭐ Звёзды обновлены (Ретро: без списания со склада)');
+      return;
+    } catch (err) {
+      toast('Ошибка обновления звёзд: ' + (err.message || err), 'error');
+      return;
+    }
+  }
 
   const prevStock = myCabinetProfile?.stock ? JSON.parse(JSON.stringify(myCabinetProfile.stock)) : null;
   const prevOfficer = JSON.parse(JSON.stringify(off));
@@ -5878,9 +6096,12 @@ function renderPlayerDetail(playerId) {
         ${renderSectorStockGridHtml(p, canEditSector)}
       </div>
     ` : `<div class="empty-state"><p>Запасы скрыты для роли ${state.currentRole}</p></div>`}
-    <div class="section-header">
+    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div class="section-title">Офицеры сектора (${(p.officers || []).length})</div>
-      ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openAddSectorOfficerModal(${p.id})">+ Добавить офицера</button>` : ''}
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        ${renderOfficerStockModeSwitcherHtml()}
+        ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openAddSectorOfficerModal(${p.id})">+ Добавить офицера</button>` : ''}
+      </div>
     </div>
     <div class="table-wrap">
       <table>
@@ -6294,6 +6515,33 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
   const oldStars = off ? Number(off.stars) || 0 : 0;
   if (oldStars === s) return;
 
+  const stockMode = getOfficerStockMode();
+  if (stockMode === 'retro') {
+    try {
+      const res = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+        method: 'PUT',
+        body: { stars: s }
+      });
+      if (off) {
+        if (res && res.id) Object.assign(off, res);
+        else off.stars = s;
+      }
+      if (typeof save === 'function') save();
+
+      const cellEl = document.getElementById(`sector-officer-stars-cell-${officerId}`);
+      if (cellEl) {
+        cellEl.innerHTML = renderSectorOfficerStars(playerId, officerId, s);
+      } else {
+        renderPlayerDetail(playerId);
+      }
+      toast(typeof t === 'function' ? t('officers.toast_retro_stars_updated') : '⭐ Звёзды обновлены (Ретро: без списания со склада)');
+      return;
+    } catch (err) {
+      toast('Ошибка обновления звёзд: ' + (err.message || err), 'error');
+      return;
+    }
+  }
+
   const prevStock = p?.stock ? JSON.parse(JSON.stringify(p.stock)) : null;
   const prevOfficer = off ? JSON.parse(JSON.stringify(off)) : null;
 
@@ -6452,8 +6700,11 @@ function openAddSectorOfficerModal(playerId) {
   if (puzEl) puzEl.value = 0;
   const asoOnlyPersonal = document.getElementById('aso-only-personal');
   if (asoOnlyPersonal) asoOnlyPersonal.checked = false;
+  const currentMode = getOfficerStockMode();
   const asoRetroOn = document.getElementById('aso-retro-on');
-  if (asoRetroOn) asoRetroOn.checked = true;
+  const asoRetroOff = document.getElementById('aso-retro-off');
+  if (currentMode === 'normal' && asoRetroOff) asoRetroOff.checked = true;
+  else if (asoRetroOn) asoRetroOn.checked = true;
 
   renderAsoStarsPicker(asoSelectedStars);
   renderAsoSkillsPicker(asoSelectedSkills);
@@ -6534,6 +6785,27 @@ async function submitAddSectorOfficer() {
     ? asoSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
 
+  const p = getPlayer(addSectorOfficerPlayerId);
+
+  let initialStockDeduction = null;
+  if (!isRetro && p?.stock) {
+    const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
+      ? logic.calculateInitialOfficerStockDeduction
+      : calculateInitialOfficerStockDeduction;
+    if (initialFn) {
+      initialStockDeduction = initialFn({
+        officer: { level, stars, skills },
+        stock: p.stock,
+        catalogOfficer: cat,
+        isRetrospective: false
+      });
+      if (!initialStockDeduction.canAfford) {
+        toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
+        return;
+      }
+    }
+  }
+
   const payload = {
     catalogId,
     name: cat?.name || '',
@@ -6542,7 +6814,8 @@ async function submitAddSectorOfficer() {
     stars,
     skills,
     personalPuzzles,
-    onlyPersonalPuzzles
+    onlyPersonalPuzzles,
+    ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
   };
 
   try {
@@ -6550,14 +6823,22 @@ async function submitAddSectorOfficer() {
       method: 'POST',
       body: payload
     });
-    const p = getPlayer(addSectorOfficerPlayerId);
+
+    if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
+      await apiFetch(`/api/players/${addSectorOfficerPlayerId}`, {
+        method: 'PUT',
+        body: { stock: initialStockDeduction.newStock }
+      });
+      if (p) p.stock = initialStockDeduction.newStock;
+    }
+
     if (p) {
       p.officers = p.officers || [];
       p.officers.push(res || { id: 'o' + state.nextId++, ...payload });
     }
     if (typeof save === 'function') save();
     closeAllModals();
-    toast(`Офицер «${cat?.name || ''}» добавлен в сектор`);
+    toast(`Офицер «${cat?.name || ''}» добавлен в сектор` + (initialStockDeduction?.deductStock ? ' (ресурсы списаны со склада)' : ''));
     renderPlayerDetail(addSectorOfficerPlayerId);
   } catch (err) {
     toast('Ошибка добавления офицера: ' + (err.message || err), 'error');
@@ -6586,8 +6867,11 @@ function openEditSectorOfficerModal(playerId, officerId) {
   if (puzEl) puzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
   const soOnlyPersonal = document.getElementById('so-only-personal');
   if (soOnlyPersonal) soOnlyPersonal.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
+  const currentMode = getOfficerStockMode();
   const soRetroOn = document.getElementById('so-retro-on');
-  if (soRetroOn) soRetroOn.checked = true;
+  const soRetroOff = document.getElementById('so-retro-off');
+  if (currentMode === 'normal' && soRetroOff) soRetroOff.checked = true;
+  else if (soRetroOn) soRetroOn.checked = true;
   soSelectedStars = off.stars || 0;
   soSelectedSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
 
@@ -6663,13 +6947,40 @@ async function submitEditSectorOfficer() {
     ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
 
+  const p = getPlayer(editSectorOfficerPlayerId);
+  const oldOff = p?.officers?.find(o => String(o.id) === String(editSectorOfficerId));
+  let newStock = null;
+  if (!isRetro && p?.stock && oldOff && oldOff.level !== level) {
+    const cat = getCatalogOfficer(oldOff.catalogId);
+    const rawCost = Number(cat?.couponPerPuzzle);
+    const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
+    const upgradeType = cat?.upgradeType || 'standard';
+    const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
+    const levelStockDelta = deltaFn(oldOff.level, level, p.stock, costPerPuzzle, upgradeType);
+    if (!levelStockDelta.canAfford) {
+      toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.)`, 'error');
+      return;
+    }
+    newStock = {
+      ...p.stock,
+      coupons: Math.max(0, (p.stock.coupons || 0) + (levelStockDelta.delta.coupons || 0)),
+      puzzles: Math.max(0, (p.stock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0))
+    };
+  }
+
   const payload = { level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles };
   try {
     const res = await apiFetch(`/api/players/${editSectorOfficerPlayerId}/officers/${editSectorOfficerId}`, {
       method: 'PUT',
       body: payload
     });
-    const p = getPlayer(editSectorOfficerPlayerId);
+    if (newStock) {
+      await apiFetch(`/api/players/${editSectorOfficerPlayerId}`, {
+        method: 'PUT',
+        body: { stock: newStock }
+      });
+      if (p) p.stock = newStock;
+    }
     if (p && Array.isArray(p.officers)) {
       const off = p.officers.find(o => String(o.id) === String(editSectorOfficerId));
       if (off) {
@@ -6679,7 +6990,7 @@ async function submitEditSectorOfficer() {
     }
     if (typeof save === 'function') save();
     closeAllModals();
-    toast('Офицер сохранён');
+    toast('Офицер сохранён' + (newStock ? ' (ресурсы списаны со склада)' : ''));
     renderPlayerDetail(editSectorOfficerPlayerId);
   } catch (err) {
     toast('Ошибка сохранения офицера: ' + (err.message || err), 'error');
@@ -10183,6 +10494,26 @@ async function initApp() {
   checkPwaInstallable();
   initSmartScanner();
   initExchangeOcr();
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && currentPage === 'my_cabinet') {
+        const isConnected = Boolean(myCabinetProfile?.user?.telegram_chat_id || currentUser?.telegram_chat_id);
+        if (!isConnected) {
+          checkTelegramBindStatus(true);
+        }
+      }
+    });
+    window.addEventListener('focus', () => {
+      if (currentPage === 'my_cabinet') {
+        const isConnected = Boolean(myCabinetProfile?.user?.telegram_chat_id || currentUser?.telegram_chat_id);
+        if (!isConnected) {
+          checkTelegramBindStatus(true);
+        }
+      }
+    });
+  }
+
   checkAuth().then(isAuth => {
     if (isAuth) {
       if (currentUser?.rank === 'r3') {
@@ -10361,4 +10692,10 @@ if (typeof window !== 'undefined') {
   window.saveMieruSettings = saveMieruSettings;
   window.testMieruConnection = testMieruConnection;
   window.updateMieruStatusBadge = updateMieruStatusBadge;
+
+  window.getOfficerStockMode = getOfficerStockMode;
+  window.setOfficerStockMode = setOfficerStockMode;
+  window.updateOfficerStockModeUI = updateOfficerStockModeUI;
+  window.renderOfficerStockModeSwitcherHtml = renderOfficerStockModeSwitcherHtml;
+  window.checkTelegramBindStatus = checkTelegramBindStatus;
 }

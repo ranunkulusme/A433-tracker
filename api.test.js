@@ -3984,6 +3984,74 @@ test('API Mieru Tunnel Settings, RBAC & Connection Test', async () => {
   }
 });
 
+test('API Player Cabinet /api/my-profile preserves user telegram fields and supports retro officer operations', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Create a user and approve
+    const reg = db.registerUser({ username: 'retro_commander', password: 'password', playerName: 'Sector Retro' });
+    db.approveUser(reg.userId, 'r3');
+
+    // 2. Bind telegram
+    db.bindUserTelegram(reg.userId, 12345678, 'retro_tg');
+
+    // 3. Login
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'retro_commander', password: 'password' })
+    });
+    assert.equal(loginRes.status, 200);
+    const loginData = await loginRes.json();
+    const token = loginData.token;
+
+    // 4. GET /api/my-profile
+    const profileRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(profileRes.status, 200);
+    const profileData = await profileRes.json();
+
+    assert.ok(profileData.user, 'Profile must have user object');
+    assert.equal(profileData.user.telegram_chat_id, 12345678);
+    assert.equal(profileData.user.telegramChatId, 12345678);
+    assert.equal(profileData.user.telegram_username, 'retro_tg');
+    assert.equal(profileData.user.telegramUsername, 'retro_tg');
+
+    // 5. Add officer to my-profile
+    const initialStock = profileData.stock || {};
+    const addOffRes = await fetch(`${baseUrl}/api/my-profile/officers`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        catalogId: 'off-gen7-1',
+        name: 'Офицер VII',
+        level: 50,
+        stars: 3,
+        skills: [3, 3, 3, 3]
+      })
+    });
+    assert.equal(addOffRes.status, 200);
+
+    // Verify stock was not changed by officer creation alone (retro by default)
+    const afterProfileRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const afterProfileData = await afterProfileRes.json();
+    assert.equal(afterProfileData.stock.coupons, initialStock.coupons);
+    assert.equal(afterProfileData.stock.puzzles, initialStock.puzzles);
+    assert.equal(afterProfileData.stock.starCoupons, initialStock.starCoupons);
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 async function run() {

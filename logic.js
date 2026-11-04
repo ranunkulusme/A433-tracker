@@ -2350,6 +2350,142 @@
     };
   }
 
+  function calculateInitialOfficerStockDeduction({
+    officer = {},
+    stock = {},
+    catalogOfficer = {},
+    isRetrospective = false
+  } = {}) {
+    const normStock = normalizeStock(stock);
+
+    if (isRetrospective) {
+      return {
+        isRetrospective: true,
+        canAfford: true,
+        deductStock: false,
+        delta: {
+          coupons: 0,
+          puzzles: 0,
+          starCoupons: 0,
+          legendaryStars1: 0,
+          legendaryStars2: 0,
+          legendaryStars3: 0
+        },
+        newStock: { ...normStock },
+        invested: { ...INVESTED_ZERO }
+      };
+    }
+
+    const currentStock = { ...normStock };
+    const accumulatedInvested = { ...INVESTED_ZERO };
+    const totalDelta = {
+      coupons: 0,
+      puzzles: 0,
+      starCoupons: 0,
+      legendaryStars1: 0,
+      legendaryStars2: 0,
+      legendaryStars3: 0
+    };
+
+    const rawCost = Number(catalogOfficer?.couponPerPuzzle);
+    const costPerPuzzle = rawCost === 0 ? (catalogOfficer?.upgradeType === 'special' ? 0 : 500) : (rawCost || (catalogOfficer?.generation === 7 ? 600 : (catalogOfficer?.generation >= 8 ? 720 : 500)));
+    const upgradeType = catalogOfficer?.upgradeType || 'standard';
+    const starCouponCost = catalogOfficer?.starCouponCost || (catalogOfficer?.generation === 7 ? 300 : (catalogOfficer?.generation <= 6 ? 250 : 360));
+    const maxMedals = (catalogOfficer && (catalogOfficer.medalsBeforeTraining || catalogOfficer.medals_before_training)) || 690;
+
+    const targetLevel = Math.max(0, Math.min(180, Number(officer.level) || 0));
+    const targetStars = Math.max(0, Math.min(5, Number(officer.stars) || 0));
+    const rawSkills = Array.isArray(officer.skills) && officer.skills.length === 4 ? officer.skills : [1, 1, 1, 1];
+    const targetSkills = rawSkills.map(s => Math.max(1, Math.min(5, Number(s) || 1)));
+
+    // 1. Level deduction
+    if (targetLevel > 0) {
+      const levelRes = calculateLevelStockDelta(0, targetLevel, currentStock, costPerPuzzle, upgradeType, accumulatedInvested);
+      if (!levelRes.canAfford) {
+        return {
+          isRetrospective: false,
+          canAfford: false,
+          reason: 'level',
+          deficitPuzzles: levelRes.deficitPuzzles || 0,
+          error: `Недостаточно ресурсов на складе для уровня (не хватает ${levelRes.deficitPuzzles || 0} пазл.)`
+        };
+      }
+      currentStock.coupons = Math.max(0, currentStock.coupons + (levelRes.delta.coupons || 0));
+      currentStock.puzzles = Math.max(0, currentStock.puzzles + (levelRes.delta.puzzles || 0));
+      totalDelta.coupons += (levelRes.delta.coupons || 0);
+      totalDelta.puzzles += (levelRes.delta.puzzles || 0);
+
+      if (levelRes.newInvested) {
+        accumulatedInvested.coupons = levelRes.newInvested.coupons;
+        accumulatedInvested.puzzles = levelRes.newInvested.puzzles;
+      }
+    }
+
+    // 2. Stars deduction
+    if (targetStars > 0) {
+      const starRes = calculateStarStockDelta(0, targetStars, currentStock, starCouponCost, accumulatedInvested);
+      if (!starRes.canAfford) {
+        return {
+          isRetrospective: false,
+          canAfford: false,
+          reason: 'stars',
+          deficitPoints: starRes.deficitPoints || 0,
+          error: `Недостаточно ресурсов на складе для звёзд (не хватает ${starRes.deficitPoints || 0} очков звёзд)`
+        };
+      }
+      currentStock.starCoupons = Math.max(0, currentStock.starCoupons + (starRes.delta.starCoupons || 0));
+      currentStock.legendaryStars1 = Math.max(0, currentStock.legendaryStars1 + (starRes.delta.legendaryStars1 || 0));
+      currentStock.legendaryStars2 = Math.max(0, currentStock.legendaryStars2 + (starRes.delta.legendaryStars2 || 0));
+      currentStock.legendaryStars3 = Math.max(0, currentStock.legendaryStars3 + (starRes.delta.legendaryStars3 || 0));
+
+      totalDelta.starCoupons += (starRes.delta.starCoupons || 0);
+      totalDelta.legendaryStars1 += (starRes.delta.legendaryStars1 || 0);
+      totalDelta.legendaryStars2 += (starRes.delta.legendaryStars2 || 0);
+      totalDelta.legendaryStars3 += (starRes.delta.legendaryStars3 || 0);
+
+      if (starRes.newInvested) {
+        accumulatedInvested.starCoupons = starRes.newInvested.starCoupons;
+        accumulatedInvested.legendaryStars1 = starRes.newInvested.legendaryStars1;
+        accumulatedInvested.legendaryStars2 = starRes.newInvested.legendaryStars2;
+        accumulatedInvested.legendaryStars3 = starRes.newInvested.legendaryStars3;
+      }
+    }
+
+    // 3. Skills deduction
+    const hasSkillUpgrades = targetSkills.some(s => s > 1);
+    if (hasSkillUpgrades) {
+      const skillRes = calculateSkillStockDelta([1, 1, 1, 1], targetSkills, currentStock, costPerPuzzle, upgradeType, maxMedals, accumulatedInvested);
+      if (!skillRes.canAfford) {
+        return {
+          isRetrospective: false,
+          canAfford: false,
+          reason: 'skills',
+          deficitMedals: skillRes.deficitMedals || 0,
+          error: `Недостаточно ресурсов на складе для навыков (не хватает ${skillRes.deficitMedals || 0} медалей)`
+        };
+      }
+      currentStock.coupons = Math.max(0, currentStock.coupons + (skillRes.delta.coupons || 0));
+      currentStock.puzzles = Math.max(0, currentStock.puzzles + (skillRes.delta.puzzles || 0));
+
+      totalDelta.coupons += (skillRes.delta.coupons || 0);
+      totalDelta.puzzles += (skillRes.delta.puzzles || 0);
+
+      if (skillRes.newInvested) {
+        accumulatedInvested.coupons = skillRes.newInvested.coupons;
+        accumulatedInvested.puzzles = skillRes.newInvested.puzzles;
+      }
+    }
+
+    return {
+      isRetrospective: false,
+      canAfford: true,
+      deductStock: true,
+      delta: totalDelta,
+      newStock: currentStock,
+      invested: accumulatedInvested
+    };
+  }
+
   function filterPlayersByOfficers(players, selectedCatalogIds) {
     if (!Array.isArray(players)) return [];
     if (!Array.isArray(selectedCatalogIds) || !selectedCatalogIds.length) {
@@ -2794,5 +2930,6 @@
     DEFAULT_NOTIFICATION_TEMPLATES,
     NOTIFICATION_TEMPLATE_SAMPLE_DATA,
     renderTemplate,
+    calculateInitialOfficerStockDeduction,
   };
 });

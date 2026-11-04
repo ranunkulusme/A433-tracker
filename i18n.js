@@ -185,7 +185,21 @@ const I18N_RESOURCES = {
         "disconnect_confirm": "Вы действительно хотите отключить Telegram-уведомления?",
         "open_telegram": "Открыть Telegram",
         "pin_expires": "Код действителен 15 минут",
-        "staff_chat_hint": "Или укажите отрицательный ID супергруппы вручную"
+        "staff_chat_hint": "Или укажите отрицательный ID супергруппы вручную",
+        "btn_check_status": "🔄 Проверить статус",
+        "checking_status": "Проверка привязки...",
+        "not_connected_hint": "Привязка ещё не завершена. Отправьте боту /start в Telegram"
+      },
+      "officers": {
+        "stock_mode_title": "Режим склада:",
+        "mode_retro": "📜 Ретро-режим",
+        "mode_retro_hint": "Без списания со склада трекера",
+        "mode_normal": "⚡ Прокачка",
+        "mode_normal_hint": "Списание ресурсов со склада трекера",
+        "toast_retro_updated": "Параметры обновлены (Ретро: без списания)",
+        "toast_retro_stars_updated": "Звёзды обновлены (Ретро: без списания со склада)",
+        "toast_retro_skills_updated": "Навык обновлен (Ретро: без списания со склада)",
+        "stars_label": "Звёзды (0-5★)"
       },
       "mieru": {
         "card_title": "Туннель Mieru (обход блокировок Telegram)",
@@ -575,7 +589,21 @@ const I18N_RESOURCES = {
         "disconnect_confirm": "Are you sure you want to disconnect Telegram notifications?",
         "open_telegram": "Open Telegram",
         "pin_expires": "Code valid for 15 minutes",
-        "staff_chat_hint": "Or enter negative supergroup ID manually"
+        "staff_chat_hint": "Or enter negative supergroup ID manually",
+        "btn_check_status": "🔄 Check status",
+        "checking_status": "Checking connection...",
+        "not_connected_hint": "Binding not completed. Send /start in Telegram"
+      },
+      "officers": {
+        "stock_mode_title": "Stock mode:",
+        "mode_retro": "📜 Retrospective",
+        "mode_retro_hint": "No stock deduction",
+        "mode_normal": "⚡ Leveling",
+        "mode_normal_hint": "Deduct resources from stock",
+        "toast_retro_updated": "Updated (Retro: no stock deduction)",
+        "toast_retro_stars_updated": "Stars updated (Retro: no stock deduction)",
+        "toast_retro_skills_updated": "Skill updated (Retro: no stock deduction)",
+        "stars_label": "Stars (0-5★)"
       },
       "mieru": {
         "card_title": "Mieru Tunnel (Telegram Anti-Censorship)",
@@ -965,7 +993,21 @@ const I18N_RESOURCES = {
         "disconnect_confirm": "Möchten Sie Telegram-Benachrichtigungen wirklich trennen?",
         "open_telegram": "Telegram öffnen",
         "pin_expires": "Code 15 Minuten gültig",
-        "staff_chat_hint": "Oder negative Supergruppen-ID manuell eingeben"
+        "staff_chat_hint": "Oder negative Supergruppen-ID manuell eingeben",
+        "btn_check_status": "🔄 Status prüfen",
+        "checking_status": "Verbindung prüfen...",
+        "not_connected_hint": "Verbindung noch nicht abgeschlossen. Senden Sie /start in Telegram"
+      },
+      "officers": {
+        "stock_mode_title": "Lagermodus:",
+        "mode_retro": "📜 Rückblick",
+        "mode_retro_hint": "Kein Lagerabzug",
+        "mode_normal": "⚡ Aufwertung",
+        "mode_normal_hint": "Ressourcen aus dem Lager abziehen",
+        "toast_retro_updated": "Aktualisiert (Retro: ohne Lagerabzug)",
+        "toast_retro_stars_updated": "Sterne aktualisiert (Retro: ohne Lagerabzug)",
+        "toast_retro_skills_updated": "Fähigkeit aktualisiert (Retro: ohne Lagerabzug)",
+        "stars_label": "Sterne (0-5★)"
       },
       "mieru": {
         "card_title": "Mieru-Tunnel (Telegram-Zensurumgehung)",
