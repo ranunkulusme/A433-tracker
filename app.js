@@ -4236,13 +4236,13 @@ async function renderNotificationsPage() {
       if (enabledBox) enabledBox.checked = !!mieruSettingsCache.enabled;
       
       const serverInput = document.getElementById('mieru-setting-server');
-      if (serverInput) serverInput.value = mieruSettingsCache.serverAddress || '';
+      if (serverInput) serverInput.value = mieruSettingsCache.server || mieruSettingsCache.serverAddress || '';
 
       const portInput = document.getElementById('mieru-setting-port-range');
       if (portInput) portInput.value = mieruSettingsCache.portRange || '10000-10050';
 
       const userInput = document.getElementById('mieru-setting-username');
-      if (userInput) userInput.value = mieruSettingsCache.username || '';
+      if (userInput) userInput.value = mieruSettingsCache.user || mieruSettingsCache.username || '';
 
       const passInput = document.getElementById('mieru-setting-password');
       if (passInput) passInput.value = mieruSettingsCache.passwordMasked || '';
@@ -4255,8 +4255,9 @@ async function renderNotificationsPage() {
 
       const jsonTextarea = document.getElementById('mieru-setting-json');
       if (jsonTextarea) {
-        if (mieruSettingsCache.rawJson) {
-          jsonTextarea.value = mieruSettingsCache.rawJson;
+        const storedJson = mieruSettingsCache.configJson || mieruSettingsCache.rawJson;
+        if (storedJson) {
+          jsonTextarea.value = storedJson;
         } else {
           syncMieruFormToJson();
         }
@@ -4741,11 +4742,14 @@ async function saveMieruSettings() {
 
   const payload = {
     enabled,
+    server: serverAddress,
     serverAddress,
     portRange,
+    user: username,
     username,
     transport,
     socks5Port,
+    configJson: rawJson,
     rawJson
   };
 
