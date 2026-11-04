@@ -712,7 +712,7 @@ function addPlayerOfficer(playerId, officerData) {
   const name = officerData.name || '';
   const level = Number(officerData.level) || 0;
   const coupons = Number(officerData.coupons) || 0;
-  const stars = Number(officerData.stars) || 0;
+  const stars = Math.max(0, Math.min(5, Number(officerData.stars) || 0));
   const personalPuzzles = Number(officerData.personalPuzzles ?? officerData.personal_puzzles) || 0;
   const onlyPersonalPuzzles = Boolean(officerData.onlyPersonalPuzzles ?? officerData.only_personal_puzzles) ? 1 : 0;
   const skills = parseSkills(officerData.skills ?? officerData.skills_json);
@@ -745,7 +745,7 @@ function updatePlayerOfficer(playerId, officerId, updates) {
 
   const level = updates.level !== undefined ? Number(updates.level) : existing.level;
   const coupons = updates.coupons !== undefined ? Number(updates.coupons) : existing.coupons;
-  const stars = updates.stars !== undefined ? Number(updates.stars) : existing.stars;
+  const stars = updates.stars !== undefined ? Math.max(0, Math.min(5, Number(updates.stars) || 0)) : Math.min(5, existing.stars);
   const personalPuzzles = updates.personalPuzzles !== undefined
     ? Number(updates.personalPuzzles) || 0
     : (updates.personal_puzzles !== undefined ? Number(updates.personal_puzzles) || 0 : (existing.personal_puzzles || 0));
@@ -1721,6 +1721,9 @@ function migrateSchema(db) {
     if (!officerCols.includes('only_personal_puzzles')) {
       db.exec("ALTER TABLE player_officers ADD COLUMN only_personal_puzzles INTEGER NOT NULL DEFAULT 0;");
     }
+    try {
+      db.exec("UPDATE player_officers SET stars = 5 WHERE stars > 5;");
+    } catch (e) {}
   }
 
   const eventTypeCols = getColumns('event_types');

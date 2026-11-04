@@ -2357,7 +2357,7 @@ function renderCabinetSimulatorHtml() {
           </div>
           <div style="margin-top:4px">${renderStars(selectedOfficer.stars)}</div>
           <div style="font-size:11px;color:${def.starRequirement.isStarReady?'var(--green)':'var(--amber)'};margin-top:4px">
-            ${def.starRequirement.isStarReady ? '★ Готов к максимальной подготовке' : '☆ Для 180 уровня требуется 6★'}
+            ${def.starRequirement.isStarReady ? '★ Готов к максимальной подготовке' : '☆ Для 180 уровня требуется 5★'}
           </div>
         </div>
         <div class="stock-card">
@@ -3004,9 +3004,9 @@ async function submitAddSector() {
 }
 
 function renderOfficerStarHintText(currentStars) {
-  const count = Math.max(0, Math.min(6, Number(currentStars) || 0));
-  if (count >= 6) {
-    return typeof t === 'function' ? t('cabinet.star_max') : '6★ Максимум (98 000 звёзд)';
+  const count = Math.max(0, Math.min(5, Number(currentStars) || 0));
+  if (count >= 5) {
+    return typeof t === 'function' ? t('cabinet.star_max') : '5★ Максимум (98 000 звёзд)';
   }
   const next = count + 1;
   const cost = typeof starCostFor === 'function' ? starCostFor(next) : 0;
@@ -3029,12 +3029,12 @@ function onCabinetStarLeave(officerId, currentStars) {
 
 function renderInteractiveStars(officer) {
   const count = Number(officer.stars) || 0;
-  return `<span class="stars">${Array.from({length:6},(_,i)=>{
+  return `<span class="stars">${Array.from({length:5},(_,i)=>{
     const star = i + 1;
     const cost = starCostFor(star);
-    const tooltipText = star < 6
+    const tooltipText = star < 5
       ? (typeof t === 'function' ? t('cabinet.star_to_next', { next: star, cost: fmtNum(cost) }) : `До ${star}★: ${fmtNum(cost)} звёзд`)
-      : (typeof t === 'function' ? t('cabinet.star_max') : `Итого ${fmtNum(cost)} звёзд (6★ макс)`);
+      : (typeof t === 'function' ? t('cabinet.star_max') : `Итого ${fmtNum(cost)} звёзд (5★ макс)`);
     const newStars = star === count ? star - 1 : star;
     return `<button type="button" class="star-btn ${count>=star?'active':''}" data-tooltip="${tooltipText}" title="${tooltipText}" aria-label="${tooltipText}" onmouseenter="onCabinetStarHover('${officer.id}', ${star})" onmouseleave="onCabinetStarLeave('${officer.id}', ${count})" onclick="setMyOfficerStars('${officer.id}', ${newStars})">${count>=star?'★':'☆'}</button>`;
   }).join('')}</span>`;
@@ -3050,8 +3050,8 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
   const genBadgeText = typeof t === 'function' ? t('cabinet.gen_short', { gen: cat.generation }) : `Ген. ${cat.generation}`;
   const onlyPersonalBadge = typeof t === 'function' ? t('cabinet.only_personal') : 'Только личные';
   const starsLabel = typeof t === 'function' ? t('cabinet.stars_label') : 'Звёзды:';
-  const starReadyBadge = typeof t === 'function' ? t('cabinet.star_ready') : '6★ Готово';
-  const starNeededBadge = typeof t === 'function' ? t('cabinet.star_needed') : 'Нужно 6★';
+  const starReadyBadge = typeof t === 'function' ? t('cabinet.star_ready') : '5★ Готово';
+  const starNeededBadge = typeof t === 'function' ? t('cabinet.star_needed') : 'Нужно 5★';
   const levelLabel = typeof t === 'function' ? t('cabinet.level_label') : 'Уровень:';
   const puzzlesLabel = typeof t === 'function' ? t('cabinet.puzzles_label') : 'Пазлы:';
   const couponsLabel = typeof t === 'function' ? t('cabinet.coupons_label') : 'Купоны:';
@@ -3086,7 +3086,7 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
           <div>
             ${def.starRequirement.isStarReady
               ? `<span class="badge badge-success" style="font-size:10px">${starReadyBadge}</span>`
-              : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 6★">${starNeededBadge}</span>`}
+              : `<span class="badge badge-warning" style="font-size:10px" title="Для 180 уровня требуется 5★">${starNeededBadge}</span>`}
           </div>
         </div>
         <div class="cabinet-star-hint" id="cabinet-star-hint-${o.id}">
@@ -3225,7 +3225,7 @@ async function saveMyOfficerSubmit() {
   const coupons = Math.max(0, parseInt(document.getElementById('my-officer-coupons').value) || 0);
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('my-officer-personal-puzzles')?.value) || 0);
   const onlyPersonalPuzzles = Boolean(document.getElementById('my-officer-only-personal')?.checked);
-  const stars = Math.max(0, Math.min(6, parseInt(document.getElementById('my-officer-stars').value) || 0));
+  const stars = Math.max(0, Math.min(5, parseInt(document.getElementById('my-officer-stars').value) || 0));
   const skills = Array.isArray(myOfficerModalSkills) && myOfficerModalSkills.length === 4
     ? myOfficerModalSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
@@ -3381,7 +3381,7 @@ async function deleteMyOfficer(officerId, officerName) {
 }
 
 async function setMyOfficerStars(officerId, stars) {
-  const count = Math.max(0, Math.min(6, Number(stars) || 0));
+  const count = Math.max(0, Math.min(5, Number(stars) || 0));
   const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(officerId));
   if (!off) return;
   const oldStars = Number(off.stars) || 0;
@@ -5752,12 +5752,12 @@ function renderPlayers() {
 }
 
 function renderStars(count = 0) {
-  const c = Math.max(0, Math.min(6, Number(count) || 0));
+  const c = Math.max(0, Math.min(5, Number(count) || 0));
   const fullHint = renderOfficerStarHintText(c);
-  return `<span class="stars" data-tooltip="${fullHint}" title="${fullHint}">${Array.from({length: 6}, (_, i) => {
+  return `<span class="stars" data-tooltip="${fullHint}" title="${fullHint}">${Array.from({length: 5}, (_, i) => {
     const star = i + 1;
     const cost = starCostFor(star);
-    const label = star < 6 ? `До ${star}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (6★ макс)`;
+    const label = star < 5 ? `До ${star}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (5★ макс)`;
     return `<span class="star-readonly ${c >= star ? 'active' : ''}" data-tooltip="${label}" title="${label}">${c >= star ? '★' : '☆'}</span>`;
   }).join('')}</span>`;
 }
@@ -6206,10 +6206,10 @@ function onTableStarLeave(officerId, currentStars) {
 
 function renderSectorOfficerStars(playerId, officerId, count = 0) {
   const currentStars = Number(count) || 0;
-  const buttonsHtml = Array.from({length: 6}, (_, i) => {
+  const buttonsHtml = Array.from({length: 5}, (_, i) => {
     const star = i + 1;
     const cost = starCostFor(star);
-    const label = star < 6 ? `До ${star}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (6★ макс)`;
+    const label = star < 5 ? `До ${star}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (5★ макс)`;
     const newStars = currentStars === star ? star - 1 : star;
     return `<button type="button" class="star-btn ${currentStars >= star ? 'active' : ''}" data-tooltip="${label}" title="${label}" aria-label="${label}" onmouseenter="onTableStarHover('${officerId}', ${star})" onmouseleave="onTableStarLeave('${officerId}', ${currentStars})" onclick="handleQuickChangeStars(${playerId}, '${officerId}', ${newStars})">${currentStars >= star ? '★' : '☆'}</button>`;
   }).join('');
@@ -6225,7 +6225,7 @@ function renderSectorOfficerStars(playerId, officerId, count = 0) {
 }
 
 async function handleQuickChangeStars(playerId, officerId, stars) {
-  const s = Math.max(0, Math.min(6, parseInt(stars) || 0));
+  const s = Math.max(0, Math.min(5, parseInt(stars) || 0));
   const p = getPlayer(playerId);
   const off = p?.officers?.find(o => String(o.id) === String(officerId));
   const oldStars = off ? Number(off.stars) || 0 : 0;
@@ -6400,11 +6400,11 @@ function openAddSectorOfficerModal(playerId) {
 function renderAsoStarsPicker(stars) {
   const container = document.getElementById('aso-stars-picker');
   if (!container) return;
-  asoSelectedStars = Math.max(0, Math.min(6, parseInt(stars) || 0));
-  const buttonsHtml = Array.from({length: 6}, (_, i) => {
+  asoSelectedStars = Math.max(0, Math.min(5, parseInt(stars) || 0));
+  const buttonsHtml = Array.from({length: 5}, (_, i) => {
     const s = i + 1;
     const cost = starCostFor(s);
-    const label = s < 6 ? `До ${s}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (6★ макс)`;
+    const label = s < 5 ? `До ${s}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (5★ макс)`;
     const newStars = asoSelectedStars === s ? s - 1 : s;
     return `<button type="button" class="star-btn ${asoSelectedStars >= s ? 'active' : ''}" data-tooltip="${label}" title="${label}" aria-label="${label}" onclick="renderAsoStarsPicker(${newStars})">${asoSelectedStars >= s ? '★' : '☆'}</button>`;
   }).join('');
@@ -6466,7 +6466,7 @@ async function submitAddSectorOfficer() {
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('aso-personal-puzzles')?.value) || 0);
   const onlyPersonalPuzzles = Boolean(document.getElementById('aso-only-personal')?.checked);
   const isRetro = document.getElementById('aso-retro-on')?.checked ?? true;
-  const stars = Math.max(0, Math.min(6, parseInt(asoSelectedStars) || 0));
+  const stars = Math.max(0, Math.min(5, parseInt(asoSelectedStars) || 0));
   const skills = Array.isArray(asoSelectedSkills) && asoSelectedSkills.length === 4
     ? asoSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
@@ -6536,11 +6536,11 @@ function openEditSectorOfficerModal(playerId, officerId) {
 function renderSoStarsPicker(stars) {
   const container = document.getElementById('so-stars-picker');
   if (!container) return;
-  soSelectedStars = Math.max(0, Math.min(6, parseInt(stars) || 0));
-  const buttonsHtml = Array.from({length: 6}, (_, i) => {
+  soSelectedStars = Math.max(0, Math.min(5, parseInt(stars) || 0));
+  const buttonsHtml = Array.from({length: 5}, (_, i) => {
     const s = i + 1;
     const cost = starCostFor(s);
-    const label = s < 6 ? `До ${s}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (6★ макс)`;
+    const label = s < 5 ? `До ${s}★: ${fmtNum(cost)} звёзд` : `Итого ${fmtNum(cost)} звёзд (5★ макс)`;
     const newStars = soSelectedStars === s ? s - 1 : s;
     return `<button type="button" class="star-btn ${soSelectedStars >= s ? 'active' : ''}" data-tooltip="${label}" title="${label}" aria-label="${label}" onclick="renderSoStarsPicker(${newStars})">${soSelectedStars >= s ? '★' : '☆'}</button>`;
   }).join('');
@@ -6595,7 +6595,7 @@ async function submitEditSectorOfficer() {
   const personalPuzzles = Math.max(0, parseInt(document.getElementById('so-personal-puzzles')?.value) || 0);
   const onlyPersonalPuzzles = Boolean(document.getElementById('so-only-personal')?.checked);
   const isRetro = document.getElementById('so-retro-on')?.checked ?? true;
-  const stars = Math.max(0, Math.min(6, parseInt(soSelectedStars) || 0));
+  const stars = Math.max(0, Math.min(5, parseInt(soSelectedStars) || 0));
   const skills = Array.isArray(soSelectedSkills) && soSelectedSkills.length === 4
     ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
@@ -7323,7 +7323,7 @@ function renderPersonalSimulator() {
           </div>
           <div style="margin-top:4px">${renderStars(officer.stars)}</div>
           <div style="font-size:11px;color:${def.starRequirement.isStarReady?'var(--green)':'var(--amber)'};margin-top:4px">
-            ${def.starRequirement.isStarReady ? '★ Готов к максимальной подготовке' : '☆ Для 180 уровня требуется 6★'}
+            ${def.starRequirement.isStarReady ? '★ Готов к максимальной подготовке' : '☆ Для 180 уровня требуется 5★'}
           </div>
         </div>
         <div class="stock-card">
@@ -7652,10 +7652,10 @@ function renderOfficerRows(containerId = 'fp-officers-list') {
           </select>
           <input type="number" placeholder="Уровень" value="${o.level}" min="0" max="179" style="width:80px" oninput="officerRows[${i}].level=parseInt(this.value)||0">
           <input type="number" placeholder="Купонов" value="${o.coupons}" min="0" step="500" style="width:100px" oninput="officerRows[${i}].coupons=parseInt(this.value)||0">
-          <span class="stars">${Array.from({length:6},(_,s)=>{
+          <span class="stars">${Array.from({length:5},(_,s)=>{
             const star = s + 1;
             const cost = starCostFor(star);
-            const label = star < 6 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд`;
+            const label = star < 5 ? `${fmtNum(cost)} звезд до ${star}★` : `Итого ${fmtNum(cost)} звезд (5★ макс)`;
             return `<button type="button" class="star-btn ${(o.stars||0)>s?'active':''}" title="${label}" aria-label="${label}" onclick="setOfficerStars(${i},${star})">${(o.stars||0)>s?'★':'☆'}</button>`;
           }).join('')}</span>
           <button type="button" class="action-btn danger" onclick="officerRows.splice(${i},1);renderOfficerRows()">✕</button>
