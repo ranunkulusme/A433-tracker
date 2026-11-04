@@ -283,6 +283,50 @@ async function runTests() {
     assert.match(res.error, /ECONNREFUSED|connect|timeout/i);
   })();
 
+  // 11. mieru.testMieruConnection contract verification (ok && success flags)
+  await (async () => {
+    const mieru = require('./mieru.js');
+    const mockFetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: { id: 999, is_bot: true, username: 'test_bot' }
+      })
+    });
+
+    const origCall = telegram.callTelegramApi;
+    try {
+      telegram.callTelegramApi = async () => ({
+        ok: true,
+        result: { username: 'test_bot' }
+      });
+      const resOk = await mieru.testMieruConnection('socks5://127.0.0.1:1080', 'fake_token');
+      assert.equal(resOk.ok, true, 'resOk.ok must be true');
+      assert.equal(resOk.success, true, 'resOk.success must be true');
+      assert.equal(resOk.botUsername, 'test_bot');
+
+      telegram.callTelegramApi = async () => ({
+        ok: false,
+        errorCode: 401,
+        error: 'Unauthorized'
+      });
+      const res401 = await mieru.testMieruConnection('socks5://127.0.0.1:1080', 'fake_token');
+      assert.equal(res401.ok, true, 'res401.ok must be true');
+      assert.equal(res401.success, true, 'res401.success must be true');
+
+      telegram.callTelegramApi = async () => ({
+        ok: false,
+        error: 'Proxy timeout'
+      });
+      const resFail = await mieru.testMieruConnection('socks5://127.0.0.1:1080', 'fake_token');
+      assert.equal(resFail.ok, false, 'resFail.ok must be false');
+      assert.equal(resFail.success, false, 'resFail.success must be false');
+    } finally {
+      telegram.callTelegramApi = origCall;
+    }
+  })();
+
   console.log('ok - all telegram.js unit tests passed');
 }
 

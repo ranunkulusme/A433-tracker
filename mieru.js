@@ -285,6 +285,7 @@ async function testMieruConnection(proxyUrl, botToken) {
     if (res.ok) {
       return {
         ok: true,
+        success: true,
         latencyMs,
         botUsername: res.result?.username || null
       };
@@ -294,6 +295,7 @@ async function testMieruConnection(proxyUrl, botToken) {
     if (res.errorCode === 401 || (res.error && res.error.includes('Unauthorized'))) {
       return {
         ok: true,
+        success: true,
         latencyMs,
         botUsername: null,
         note: 'Туннель работает (сервер Telegram ответил, но токен бота не настроен)'
@@ -302,6 +304,7 @@ async function testMieruConnection(proxyUrl, botToken) {
 
     return {
       ok: false,
+      success: false,
       latencyMs,
       error: res.error || 'Ошибка проверки туннеля'
     };
@@ -324,6 +327,7 @@ async function testMieruConnection(proxyUrl, botToken) {
 
     return {
       ok: false,
+      success: false,
       latencyMs: Date.now() - start,
       error: errMsg
     };

@@ -4803,13 +4803,15 @@ async function testMieruConnection() {
     const res = await apiFetch('/api/mieru/test', {
       method: 'POST'
     });
-    if (res && res.success) {
+    if (res && (res.success || res.ok)) {
       const ms = res.latencyMs || 0;
-      const successMsg = typeof t === 'function' ? t('mieru.test_success', { ms }) : `Туннель Mieru работает! Telegram ответил за ${ms}мс`;
+      const botSuffix = res.botUsername ? ` (@${res.botUsername})` : '';
+      const noteSuffix = res.note ? ` — ${res.note}` : '';
+      const successMsg = typeof t === 'function' ? t('mieru.test_success', { ms }) : `Туннель Mieru работает! Telegram ответил за ${ms}мс${botSuffix}`;
       showToast(successMsg, 'success');
       if (resultSpan) {
         resultSpan.className = 'mieru-test-result success';
-        resultSpan.textContent = `✅ Доступно (${ms}мс)`;
+        resultSpan.textContent = `✅ Доступно (${ms}мс${botSuffix})${noteSuffix}`;
       }
     } else {
       const errMsg = (res && res.error) || 'Не удалось подключиться к Telegram через туннель';
