@@ -216,7 +216,10 @@
 
               <div class="form-row form-row-2" style="margin-top:10px">
                 <div class="form-group">
-                  <label for="mieru-setting-socks5-port" data-i18n="mieru.socks5_port">Локальный SOCKS5 порт</label>
+                  <label for="mieru-setting-socks5-port">
+                    <span data-i18n="mieru.socks5_port">Локальный SOCKS5 порт</span>
+                    <small style="color:var(--text2);margin-left:4px" data-i18n="mieru.socks5_port_hint">(на этом сервере, обычно 1080, не путайте с портами VPS)</small>
+                  </label>
                   <input type="number" id="mieru-setting-socks5-port" value="1080" placeholder="1080" autocomplete="off" oninput="syncMieruFormToJson()">
                 </div>
               </div>
@@ -233,19 +236,27 @@
                 <pre>{
   "profiles": [
     {
-      "profileName": "kow_profile",
-      "serverAddress": "1.2.3.4",
-      "portRanges": ["10000-10050"],
-      "user": "username",
-      "password": "password",
-      "transport": "TCP",
-      "multiplexing": "MULTIPLEXING_LOW"
+      "profileName": "default",
+      "user": {
+        "name": "username",
+        "password": "password"
+      },
+      "servers": [
+        {
+          "ipAddress": "194.87.100.200",
+          "portBindings": [
+            {
+              "portRange": "10000-10060",
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ]
     }
   ],
-  "activeProfile": "kow_profile",
+  "activeProfile": "default",
   "socks5Port": 1080,
-  "httpPort": 0,
-  "logging": { "level": "INFO" }
+  "loggingLevel": "INFO"
 }</pre>
               </div>
             </div>
