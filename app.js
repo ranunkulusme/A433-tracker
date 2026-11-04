@@ -1791,21 +1791,27 @@ async function renderMyCabinet() {
           <span>⚙️ ${typeof t === 'function' ? t('cabinet.sector_params') : 'Параметры сектора'}</span>
           <span class="badge badge-none">${typeof t === 'function' ? t('cabinet.puzzles_per_day', { count: fmtNum(rewards.puzzlesPerDay, 2) }) : `+${fmtNum(rewards.puzzlesPerDay, 2)} пазл/день`}</span>
         </div>
-        <div class="form-row form-row-3">
+        <div class="form-row form-row-2">
           <div class="form-group">
-            <label for="my-sector-vip">${typeof t === 'function' ? t('cabinet.vip_level_label') : 'Уровень VIP (0-30)'}</label>
-            <input type="number" id="my-sector-vip" min="0" max="30" value="${profile.sector.vipLevel}" oninput="updateCabinetVipProgressHint()">
+            <label for="my-sector-vip">${typeof t === 'function' ? t('cabinet.vip_level_label') : 'Уровень VIP (0-17)'}</label>
+            <input type="number" id="my-sector-vip" min="0" max="17" value="${profile.sector.vipLevel}" oninput="updateCabinetVipProgressHint()">
           </div>
           <div class="form-group">
             <label for="my-sector-vip-points">${typeof t === 'function' ? t('cabinet.vip_points_label') : 'Очки VIP'}</label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="my-sector-vip-points" value="${formatInputNumber(profile.sector.vipPoints || 0)}" oninput="updateCabinetVipProgressHint()">
+          </div>
+        </div>
+        <div id="my-cabinet-vip-progress-hint" class="vip-progress-hint" style="margin-bottom:12px"></div>
+        <div class="form-row form-row-2">
+          <div class="form-group">
+            <label for="my-sector-hq">${typeof t === 'function' ? t('cabinet.hq_level_label') : 'Ур. штаба'}</label>
+            <input type="number" id="my-sector-hq" min="1" max="50" placeholder="${typeof t === 'function' ? t('cabinet.hq_level_placeholder') : 'не указан'}" value="${profile.sector.hqLevel ?? ''}">
           </div>
           <div class="form-group">
             <label for="my-sector-conf">${typeof t === 'function' ? t('cabinet.confidentiality_label') : 'Конфиденциальность'}</label>
             <input type="number" id="my-sector-conf" min="0" value="${profile.sector.confidentialityLevel}">
           </div>
         </div>
-        <div id="my-cabinet-vip-progress-hint" class="vip-progress-hint" style="margin-bottom:12px"></div>
         <div class="form-row form-row-3">
           <div class="form-group">
             <label for="my-sector-power">${typeof t === 'function' ? t('cabinet.power_label') : 'Мощь / Сила'}</label>
@@ -1928,7 +1934,8 @@ async function connectUserTelegram() {
   try {
     const data = await apiFetch('/api/telegram/bind-token', { method: 'POST' });
     if (data && data.deepLink) {
-      window.open(data.deepLink, '_blank');
+      const cleanDeepLink = data.deepLink.replace('t.me/@', 't.me/');
+      window.open(cleanDeepLink, '_blank');
       showToast(typeof t === 'function' ? t('telegram.open_telegram') : 'Откройте бота в Telegram и нажмите Start', 'info');
     }
   } catch (err) {
@@ -2569,8 +2576,10 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
 }
 
 async function saveMySector() {
-  const vipLevel = Math.max(0, parseInt(document.getElementById('my-sector-vip').value) || 0);
+  const vipLevel = Math.max(0, Math.min(17, parseInt(document.getElementById('my-sector-vip').value) || 0));
   const vipPoints = Math.max(0, parseInputNumber(document.getElementById('my-sector-vip-points')?.value));
+  const hqVal = document.getElementById('my-sector-hq')?.value;
+  const hqLevel = (hqVal !== undefined && hqVal !== '' && !isNaN(parseInt(hqVal, 10))) ? Math.max(1, parseInt(hqVal, 10)) : null;
   const confidentialityLevel = Math.max(0, parseInt(document.getElementById('my-sector-conf').value) || 0);
   const power = Math.max(0, parseInputNumber(document.getElementById('my-sector-power').value));
   const kills = Math.max(0, parseInputNumber(document.getElementById('my-sector-kills').value));
@@ -2580,7 +2589,7 @@ async function saveMySector() {
     await apiFetch('/api/my-profile', {
       method: 'PUT',
       body: {
-        sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
+        sector: { vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
       }
     });
     toast(t('toasts.saved_success', 'Параметры сектора успешно сохранены'));
@@ -2603,8 +2612,12 @@ function updateCabinetTotalStarPoints() {
 
 async function saveMyCabinetProfile() {
   if (!myCabinetProfile) return;
-  const vipLevel = Math.max(0, parseInt(document.getElementById('my-sector-vip')?.value) || myCabinetProfile.sector?.vipLevel || 0);
+  const vipLevel = Math.max(0, Math.min(17, parseInt(document.getElementById('my-sector-vip')?.value) || myCabinetProfile.sector?.vipLevel || 0));
   const vipPoints = Math.max(0, parseInputNumber(document.getElementById('my-sector-vip-points')?.value || document.getElementById('fp-vip-points')?.value) || myCabinetProfile.sector?.vipPoints || 0);
+  const hqVal = document.getElementById('my-sector-hq')?.value;
+  const hqLevel = (hqVal !== undefined && hqVal !== '' && !isNaN(parseInt(hqVal, 10)))
+    ? Math.max(1, parseInt(hqVal, 10))
+    : (myCabinetProfile?.sector?.hqLevel ?? null);
   const confidentialityLevel = Math.max(0, parseInt(document.getElementById('my-sector-conf')?.value) || myCabinetProfile.sector?.confidentialityLevel || 0);
   const power = Math.max(0, parseInputNumber(document.getElementById('my-sector-power')?.value) || myCabinetProfile.sector?.power || 0);
   const kills = Math.max(0, parseInputNumber(document.getElementById('my-sector-kills')?.value) || myCabinetProfile.sector?.kills || 0);
@@ -2622,7 +2635,7 @@ async function saveMyCabinetProfile() {
     const res = await apiFetch('/api/my-profile', {
       method: 'PUT',
       body: {
-        sector: { vipLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
+        sector: { vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints },
         stock: { coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests }
       }
     });
@@ -2920,6 +2933,8 @@ function openAddSectorModal() {
   if (rnInput) rnInput.value = '';
   const vipInput = document.getElementById('as-vip');
   if (vipInput) vipInput.value = 0;
+  const hqInput = document.getElementById('as-hq');
+  if (hqInput) hqInput.value = '';
   const powerInput = document.getElementById('as-power');
   if (powerInput) powerInput.value = formatInputNumber(0);
   const killsInput = document.getElementById('as-kills');
@@ -2941,7 +2956,9 @@ async function submitAddSector() {
     return;
   }
   const realName = document.getElementById('as-real-name')?.value?.trim() || '';
-  const vipLevel = Math.max(0, parseInt(document.getElementById('as-vip')?.value) || 0);
+  const vipLevel = Math.max(0, Math.min(17, parseInt(document.getElementById('as-vip')?.value) || 0));
+  const hqVal = document.getElementById('as-hq')?.value;
+  const hqLevel = (hqVal !== undefined && hqVal !== '' && !isNaN(parseInt(hqVal, 10))) ? Math.max(1, parseInt(hqVal, 10)) : null;
   const power = Math.max(0, parseInputNumber(document.getElementById('as-power')?.value || 0));
   const kills = Math.max(0, parseInputNumber(document.getElementById('as-kills')?.value || 0));
 
@@ -2953,6 +2970,7 @@ async function submitAddSector() {
         realName,
         sector: {
           vipLevel,
+          hqLevel,
           power,
           kills,
           killPoints: kills
@@ -5691,7 +5709,7 @@ function renderPlayers() {
               </td>
               <td>${ownerHtml}</td>
               <td><span class="badge badge-none">${p.rank}</span></td>
-              <td style="color:var(--text2);font-size:12px">VIP ${fmtNum(p.sector.vipLevel)} · Конф. ${fmtNum(p.sector.confidentialityLevel)}<br>Сила ${fmtNum(p.sector.power)} · убийств ${fmtNum(p.sector.kills)} · очки ${fmtOne(p.sector.killPoints)}<br>+${fmtNum(rewards.puzzlesPerDay, 2)} пазл./день</td>
+              <td style="color:var(--text2);font-size:12px">VIP ${fmtNum(p.sector.vipLevel)}${p.sector.hqLevel ? ` · Штаб ${fmtNum(p.sector.hqLevel)}` : ''} · Конф. ${fmtNum(p.sector.confidentialityLevel)}<br>Сила ${fmtNum(p.sector.power)} · убийств ${fmtNum(p.sector.kills)} · очки ${fmtOne(p.sector.killPoints)}<br>+${fmtNum(rewards.puzzlesPerDay, 2)} пазл./день</td>
               <td>
                 <div style="display:flex;flex-direction:column;gap:5px">
                   ${topOfficers.map(o => {
@@ -5770,7 +5788,7 @@ function renderPlayerDetail(playerId) {
     </div>
     <div class="section-header">
       <div>
-        <div class="section-title">${escapeHtml(p.name)} ${p.realName ? `<span style="color:var(--text3)">· ${escapeHtml(p.realName)}</span>` : ''} <span class="player-meta-pill">VIP ${fmtNum(p.sector.vipLevel)}</span> <span class="player-meta-pill">Конф. ${fmtNum(p.sector.confidentialityLevel)}</span> <span class="player-meta-pill">Сила ${fmtNum(p.sector.power)}</span></div>
+        <div class="section-title">${escapeHtml(p.name)} ${p.realName ? `<span style="color:var(--text3)">· ${escapeHtml(p.realName)}</span>` : ''} <span class="player-meta-pill">VIP ${fmtNum(p.sector.vipLevel)}</span> ${p.sector.hqLevel ? `<span class="player-meta-pill">Штаб ${fmtNum(p.sector.hqLevel)}</span>` : ''} <span class="player-meta-pill">Конф. ${fmtNum(p.sector.confidentialityLevel)}</span> <span class="player-meta-pill">Сила ${fmtNum(p.sector.power)}</span></div>
         <div style="color:var(--text3);font-size:12px;margin-top:4px">Ранг ${p.rank} · убито ${fmtNum(p.sector.kills)} · очки за убийство ${fmtOne(p.sector.killPoints)}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
           ${ownerBadge}
@@ -7596,6 +7614,8 @@ function openPlayerModal(playerId=null) {
   if (vipEl) vipEl.value = p?.sector?.vipLevel || 0;
   const vipPointsEl = document.getElementById('fp-vip-points');
   if (vipPointsEl) vipPointsEl.value = formatInputNumber(p?.sector?.vipPoints || 0);
+  const hqEl = document.getElementById('fp-hq');
+  if (hqEl) hqEl.value = (p?.sector?.hqLevel !== null && p?.sector?.hqLevel !== undefined) ? p.sector.hqLevel : '';
   const confEl = document.getElementById('fp-conf');
   if (confEl) confEl.value = p?.sector?.confidentialityLevel || 0;
   const powerEl = document.getElementById('fp-power');
@@ -7695,8 +7715,11 @@ async function savePlayer() {
   if (!name) { toast('Введите название сектора', 'error'); return; }
   const realName = document.getElementById('fp-real-name').value.trim();
   const rank = document.getElementById('fp-rank').value;
+  const hqVal = document.getElementById('fp-hq')?.value;
+  const hqLevel = (hqVal !== undefined && hqVal !== '' && !isNaN(parseInt(hqVal, 10))) ? Math.max(1, parseInt(hqVal, 10)) : null;
   const sector = {
-    vipLevel: Math.max(0, parseInt(document.getElementById('fp-vip').value) || 0),
+    vipLevel: Math.max(0, Math.min(17, parseInt(document.getElementById('fp-vip').value) || 0)),
+    hqLevel,
     vipPoints: Math.max(0, parseInputNumber(document.getElementById('fp-vip-points')?.value)),
     confidentialityLevel: Math.max(0, parseInt(document.getElementById('fp-conf').value) || 0),
     power: Math.max(0, parseInputNumber(document.getElementById('fp-power').value)),
@@ -7921,14 +7944,16 @@ function renderVipTiersEditor() {
   const tbody = document.getElementById('vip-tiers-editor-body');
   if (!tbody) return;
 
-  const tiers = (state.vipTiers && state.vipTiers.length === 30)
+  const tiers = (state.vipTiers && state.vipTiers.length === 17)
     ? state.vipTiers
-    : Array.from({ length: 30 }, (_, i) => ({
-        level: i + 1,
-        points: (i + 1 === 14) ? 750000 : ((i + 1) * 50000),
-        dailyPuzzles: (i + 1 > 10 ? Math.min(20, Math.max(2, i + 1 - 9)) : 0),
-        dailyChests: 1
-      }));
+    : (Array.isArray(state.vipTiers) && state.vipTiers.length > 0
+        ? state.vipTiers.filter(t => Number(t.level) <= 17)
+        : Array.from({ length: 17 }, (_, i) => ({
+            level: i + 1,
+            points: (i + 1 === 14) ? 750000 : ((i + 1) * 50000),
+            dailyPuzzles: (i + 1 > 10 ? Math.min(20, Math.max(2, i + 1 - 9)) : 0),
+            dailyChests: 1
+          })));
 
   tbody.innerHTML = tiers.map(t => {
     const isVip14 = Number(t.level) === 14;
@@ -7953,7 +7978,7 @@ function renderVipTiersEditor() {
 
 async function submitVipTiers() {
   const tiers = [];
-  for (let lvl = 1; lvl <= 30; lvl++) {
+  for (let lvl = 1; lvl <= 17; lvl++) {
     const pts = Math.max(0, parseInt(document.getElementById(`vip-tier-pts-${lvl}`)?.value) || 0);
     const puz = Math.max(0, parseFloat(document.getElementById(`vip-tier-puz-${lvl}`)?.value) || 0);
     const chst = Math.max(0, parseFloat(document.getElementById(`vip-tier-chst-${lvl}`)?.value) || 1);
@@ -9265,8 +9290,8 @@ function exportExcel() {
   const wb = XLSX.utils.book_new();
 
   // Players sheet
-  const pData = [['Игрок','Имя','Ранг','VIP','Конфиденциальность','Купоны','Пазлы','Сундуки','Сила','Убито','Очки за убийство']];
-  state.players.forEach(p=>pData.push([p.name,p.realName,p.rank,p.sector.vipLevel,p.sector.confidentialityLevel,p.stock.coupons,p.stock.puzzles,p.stock.chests,p.sector.power,p.sector.kills,p.sector.killPoints]));
+  const pData = [['Игрок','Имя','Ранг','VIP','Ур. штаба','Конфиденциальность','Купоны','Пазлы','Сундуки','Сила','Убито','Очки за убийство']];
+  state.players.forEach(p=>pData.push([p.name,p.realName,p.rank,p.sector.vipLevel,p.sector.hqLevel || '',p.sector.confidentialityLevel,p.stock.coupons,p.stock.puzzles,p.stock.chests,p.sector.power,p.sector.kills,p.sector.killPoints]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pData), 'Игроки');
 
   const oData = [['Игрок','Офицер','Тип','Поколение','Уровень','Купонов','Звезды','Купонов за пазл']];

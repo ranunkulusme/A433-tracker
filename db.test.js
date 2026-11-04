@@ -994,13 +994,13 @@ test('importKowJson safely handles sector with non-existent userId without crash
   assert.equal(imported.userId, null);
 });
 
-test('vip tiers initialized by default with 30 levels and VIP 14 is 750000 points', () => {
+test('vip tiers initialized by default with 17 levels and VIP 14 is 750000 points', () => {
   const dbModule = require('./db.js');
   dbModule.initDb(':memory:');
 
   const tiers = dbModule.getVipTiers();
   assert.equal(Array.isArray(tiers), true);
-  assert.equal(tiers.length, 30);
+  assert.equal(tiers.length, 17, 'There must be exactly 17 VIP levels');
 
   const vip14 = tiers.find(t => t.level === 14);
   assert(vip14);
@@ -1011,19 +1011,22 @@ test('vip tiers initialized by default with 30 levels and VIP 14 is 750000 point
   const vip1 = tiers.find(t => t.level === 1);
   assert.equal(vip1.points, 0);
 
-  const vip30 = tiers.find(t => t.level === 30);
-  assert(vip30);
-  assert(vip30.points > 750000);
+  const vip17 = tiers.find(t => t.level === 17);
+  assert(vip17);
+  assert.equal(vip17.points, 1700000);
+
+  const vip18 = tiers.find(t => t.level === 18);
+  assert.equal(vip18, undefined, 'VIP levels > 17 must not exist');
 });
 
-test('setVipTiers validates and updates VIP tiers points and daily rewards', () => {
+test('setVipTiers validates and updates VIP tiers up to level 17', () => {
   const dbModule = require('./db.js');
   dbModule.initDb(':memory:');
 
   const updatedTiers = [
     { level: 1, points: 0, dailyPuzzles: 0, dailyChests: 1 },
     { level: 14, points: 760000, dailyPuzzles: 4, dailyChests: 1 },
-    { level: 30, points: 50000000, dailyPuzzles: 15, dailyChests: 2 }
+    { level: 17, points: 2000000, dailyPuzzles: 5, dailyChests: 1 }
   ];
 
   dbModule.setVipTiers(updatedTiers);
@@ -1031,6 +1034,9 @@ test('setVipTiers validates and updates VIP tiers points and daily rewards', () 
   const v14 = tiers.find(t => t.level === 14);
   assert.equal(v14.points, 760000);
   assert.equal(v14.dailyPuzzles, 4);
+
+  const v17 = tiers.find(t => t.level === 17);
+  assert.equal(v17.points, 2000000);
 });
 
 test('catalog officer supports star_coupon_cost, medals before/training, total sum and default values (480, 900, 1380)', () => {
@@ -1760,6 +1766,115 @@ test('staff chat binding lifecycle with PIN verification', () => {
   const expiredRes = dbModule.verifyAndBindStaffChat('KOW-STAFF-EXP', -100123456);
   assert.equal(expiredRes.success, false);
   assert.equal(expiredRes.reason, 'expired');
+});
+
+test('db handles hq_level attribute in sectors and softly migrates vip > 17 to hq_level', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const dbModule = require('./db.js');
+
+  const testDbDir = path.join(__dirname, 'data', `test-hq-${Date.now()}`);
+  fs.mkdirSync(testDbDir, { recursive: true });
+  const testDbPath = path.join(testDbDir, 'kow.db');
+
+  try {
+    // 1. Создаем вручную старую базу с VIP 29 и уровнями VIP 1..30
+    const rawDb = new DatabaseSync(testDbPath);
+    rawDb.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        rank TEXT NOT NULL DEFAULT 'r3',
+        is_approved INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO users (username, password_hash, created_at) VALUES ('admin', 'hash', '2026-11-04');
+      CREATE TABLE players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        real_name TEXT DEFAULT '',
+        rank TEXT NOT NULL DEFAULT 'r3',
+        user_id INTEGER NULL,
+        vip_level INTEGER DEFAULT 0,
+        vip_points INTEGER NOT NULL DEFAULT 0,
+        confidentiality_level INTEGER DEFAULT 0,
+        power REAL DEFAULT 0,
+        kills REAL DEFAULT 0,
+        kill_points REAL DEFAULT 0,
+        stock_coupons INTEGER DEFAULT 0,
+        stock_puzzles INTEGER DEFAULT 0,
+        stock_star_coupons INTEGER NOT NULL DEFAULT 0,
+        stock_legendary_stars_1 INTEGER NOT NULL DEFAULT 0,
+        stock_legendary_stars_2 INTEGER NOT NULL DEFAULT 0,
+        stock_legendary_stars_3 INTEGER NOT NULL DEFAULT 0,
+        stock_chests INTEGER DEFAULT 0,
+        stock_updated_at TEXT NULL,
+        stock_update_source TEXT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE vip_tiers (
+        level INTEGER PRIMARY KEY,
+        points INTEGER NOT NULL DEFAULT 0,
+        daily_puzzles REAL NOT NULL DEFAULT 0,
+        daily_chests REAL NOT NULL DEFAULT 1
+      );
+    `);
+
+    // Вставляем VIP tiers 1..30
+    for (let l = 1; l <= 30; l++) {
+      rawDb.prepare('INSERT INTO vip_tiers (level, points, daily_puzzles, daily_chests) VALUES (?, ?, ?, ?)').run(l, l * 1000, 1, 1);
+    }
+
+    // Игрок 1: нормальный VIP 13
+    rawDb.prepare('INSERT INTO players (id, name, vip_level, updated_at) VALUES (?, ?, ?, ?)').run(1, 'Командор', 13, '2026-11-04');
+    // Игрок 2: перепутал VIP и уровень штаба (указал VIP 29)
+    rawDb.prepare('INSERT INTO players (id, name, vip_level, updated_at) VALUES (?, ?, ?, ?)').run(2, 'РомаЗЗЗЗ', 29, '2026-11-04');
+    rawDb.close();
+
+    // 2. Инициализируем через initDb — должна произойти миграция
+    dbModule.initDb(testDbPath);
+
+    // Проверяем игрока 2: 29 перенесено в hqLevel, vipLevel сброшен в 0
+    const player2 = dbModule.getPlayerById(2);
+    assert.strictEqual(player2.sector.hqLevel, 29, 'HQ level must receive former vip level 29');
+    assert.strictEqual(player2.sector.vipLevel, 0, 'VIP level > 17 must be softly reset to 0');
+
+    // Проверяем игрока 1: vipLevel 13 остался 13, hqLevel остался null
+    const player1 = dbModule.getPlayerById(1);
+    assert.strictEqual(player1.sector.vipLevel, 13);
+    assert.strictEqual(player1.sector.hqLevel, null, 'HQ level for normal players must be null initially');
+
+    // Проверяем, что уровни VIP > 17 удалены из vip_tiers
+    const tiers = dbModule.getVipTiers();
+    assert.strictEqual(tiers.length, 17);
+    assert.strictEqual(tiers[tiers.length - 1].level, 17);
+
+    // Проверяем сохранение нового сектора с hqLevel
+    const newPlayer = dbModule.createPlayer({
+      name: 'Сектор с штабом',
+      sector: {
+        vipLevel: 15,
+        hqLevel: 30
+      }
+    });
+    const fetched = dbModule.getPlayerById(newPlayer.id);
+    assert.strictEqual(fetched.sector.vipLevel, 15);
+    assert.strictEqual(fetched.sector.hqLevel, 30);
+
+    // Проверяем обновление hqLevel
+    dbModule.updatePlayer(newPlayer.id, {
+      sector: { hqLevel: 32 }
+    });
+    const updated = dbModule.getPlayerById(newPlayer.id);
+    assert.strictEqual(updated.sector.hqLevel, 32);
+
+  } finally {
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
 });
 
 

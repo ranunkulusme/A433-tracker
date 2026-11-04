@@ -448,13 +448,14 @@ test('API Player Cabinet /api/my-profile: read, update sector/stock, and officer
       method: 'PUT',
       headers: { Authorization: `Bearer ${soldierLogin.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sector: { vipLevel: 12, confidentialityLevel: 5, power: 15000000, kills: 250000, killPoints: 250000 },
+        sector: { vipLevel: 12, hqLevel: 28, confidentialityLevel: 5, power: 15000000, kills: 250000, killPoints: 250000 },
         stock: { coupons: 15000, puzzles: 120, chests: 10 }
       })
     });
     assert.equal(putProfRes.status, 200);
     const updatedProf = await putProfRes.json();
     assert.equal(updatedProf.sector.vipLevel, 12);
+    assert.equal(updatedProf.sector.hqLevel, 28);
     assert.equal(updatedProf.stock.coupons, 15000);
 
     // 2b. PUT /api/my-profile should ignore sensitive fields like rank and id
@@ -1680,7 +1681,7 @@ test('API VIP tiers GET /api/vip-tiers and PUT /api/vip-tiers with RBAC', async 
     assert.equal(getRes.status, 200);
     const tiers = await getRes.json();
     assert.equal(Array.isArray(tiers), true);
-    assert.equal(tiers.length, 30);
+    assert.equal(tiers.length, 17);
     const v14 = tiers.find(t => t.level === 14);
     assert.equal(v14.points, 750000);
 
@@ -3183,14 +3184,14 @@ test('API Telegram Bot Settings & Bind Token Lifecycle (RBAC)', async () => {
     });
     assert.equal(r3UpdateRes.status, 403);
 
-    // 3. R5 updates settings
+    // 3. R5 updates settings (with @ prefix to ensure stripping)
     const updateRes = await fetch(`${baseUrl}/api/telegram/settings`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         token: '123456789:ABC_TEST_BOT_TOKEN_XYZ',
         staffChatId: '-1001987654321',
-        botUsername: 'KoWTestBot'
+        botUsername: '@KoWTestBot'
       })
     });
     assert.equal(updateRes.status, 200);

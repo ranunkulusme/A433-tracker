@@ -2112,7 +2112,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       if (body.botUsername !== undefined) {
-        db.setAppSetting('telegram_bot_username', String(body.botUsername).trim());
+        const cleanBotUsername = String(body.botUsername).replace(/^@+/, '').trim();
+        db.setAppSetting('telegram_bot_username', cleanBotUsername);
       }
 
       const token = db.getAppSetting('telegram_bot_token');
@@ -2264,7 +2265,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
       db.createTelegramBindToken(req.user.id, token, expiresAt);
 
-      const botUsername = db.getAppSetting('telegram_bot_username') || 'KoWTrackerBot';
+      const rawBotUsername = db.getAppSetting('telegram_bot_username') || 'KoWTrackerBot';
+      const botUsername = String(rawBotUsername).replace(/^@+/, '').trim() || 'KoWTrackerBot';
       const deepLink = `https://t.me/${botUsername}?start=bind_${token}`;
 
       return sendJson(res, 200, {

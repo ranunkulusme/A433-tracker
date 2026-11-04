@@ -88,19 +88,6 @@
     { level: 15, points: 1000000, dailyPuzzles: 3 },
     { level: 16, points: 1300000, dailyPuzzles: 4 },
     { level: 17, points: 1700000, dailyPuzzles: 4 },
-    { level: 18, points: 2200000, dailyPuzzles: 5 },
-    { level: 19, points: 2800000, dailyPuzzles: 5 },
-    { level: 20, points: 3500000, dailyPuzzles: 6 },
-    { level: 21, points: 4300000, dailyPuzzles: 6 },
-    { level: 22, points: 5200000, dailyPuzzles: 7 },
-    { level: 23, points: 6200000, dailyPuzzles: 7 },
-    { level: 24, points: 7300000, dailyPuzzles: 8 },
-    { level: 25, points: 8500000, dailyPuzzles: 8 },
-    { level: 26, points: 10000000, dailyPuzzles: 9 },
-    { level: 27, points: 12000000, dailyPuzzles: 9 },
-    { level: 28, points: 15000000, dailyPuzzles: 10 },
-    { level: 29, points: 19000000, dailyPuzzles: 10 },
-    { level: 30, points: 24000000, dailyPuzzles: 12 },
   ];
 
   const SKILL_UPGRADE_COSTS = [
