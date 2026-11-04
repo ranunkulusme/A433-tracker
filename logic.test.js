@@ -2740,3 +2740,39 @@ test('calculateInitialOfficerStockDeduction handles retro and normal leveling on
   assert.ok(poorRes.error);
 });
 
+test('per-officer mode helpers: normalizeOfficerMode, getOfficerModeFromStore, setOfficerModeInStore', () => {
+  const {
+    normalizeOfficerMode,
+    getOfficerModeFromStore,
+    setOfficerModeInStore
+  } = require('./logic.js');
+
+  assert.equal(typeof normalizeOfficerMode, 'function');
+  assert.equal(normalizeOfficerMode('normal'), 'normal');
+  assert.equal(normalizeOfficerMode('leveling'), 'normal');
+  assert.equal(normalizeOfficerMode('retro'), 'retro');
+  assert.equal(normalizeOfficerMode(''), 'retro');
+  assert.equal(normalizeOfficerMode(null), 'retro');
+  assert.equal(normalizeOfficerMode(undefined), 'retro');
+  assert.equal(normalizeOfficerMode('unknown'), 'retro');
+
+  const store = {};
+  // Default mode for any officer should be retro
+  assert.equal(getOfficerModeFromStore(store, 'off-1'), 'retro');
+  assert.equal(getOfficerModeFromStore(store, 105), 'retro');
+
+  // Set mode for off-1 to normal (leveling)
+  setOfficerModeInStore(store, 'off-1', 'normal');
+  assert.equal(getOfficerModeFromStore(store, 'off-1'), 'normal');
+
+  // Other officers must remain isolated and default to retro
+  assert.equal(getOfficerModeFromStore(store, 'off-2'), 'retro');
+
+  // Set off-2 to normal, and switch off-1 back to retro
+  setOfficerModeInStore(store, 'off-2', 'normal');
+  setOfficerModeInStore(store, 'off-1', 'retro');
+  assert.equal(getOfficerModeFromStore(store, 'off-1'), 'retro');
+  assert.equal(getOfficerModeFromStore(store, 'off-2'), 'normal');
+});
+
+

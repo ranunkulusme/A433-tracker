@@ -1917,7 +1917,6 @@ async function renderMyCabinet() {
     <div class="section-header" style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div class="section-title">🎖️ ${typeof t === 'function' ? t('cabinet.my_officers') : 'Мои офицеры'} (${profile.officers.length})</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        ${renderOfficerStockModeSwitcherHtml()}
         <button class="btn-primary btn-sm" onclick="openAddMyOfficerModal()">${typeof t === 'function' ? t('cabinet.btn_add_officer') : '+ Добавить офицера'}</button>
       </div>
     </div>
@@ -2536,7 +2535,7 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
   const newLevel = Math.max(1, Math.min(5, Number(level) || 1));
   if (oldLevel === newLevel) return;
 
-  const stockMode = getOfficerStockMode();
+  const stockMode = getOfficerMode(officerId);
   if (stockMode === 'retro') {
     const newSkills = [...currentSkills];
     newSkills[skillIndex] = newLevel;
@@ -3192,6 +3191,9 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
         </div>
       </div>
 
+      <!-- Mode Selector: Retro vs Leveling (Radio buttons) -->
+      ${renderOfficerCardModeSelectorHtml(o.id)}
+
       <!-- Interactive Stars with dynamic hint -->
       <div class="cabinet-officer-stars-box">
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -3277,6 +3279,129 @@ function renderMyOfficerModalSkills() {
   `;
 }
 
+function getOfficerModesMap() {
+  try {
+    const raw = localStorage.getItem('kow_officer_modes');
+    if (raw) return JSON.parse(raw) || {};
+  } catch (_) {}
+  return {};
+}
+
+function setOfficerModesMap(map) {
+  try {
+    localStorage.setItem('kow_officer_modes', JSON.stringify(map));
+  } catch (_) {}
+}
+
+function getOfficerMode(officerId) {
+  if (!officerId) return 'retro';
+  const normFn = (typeof logic !== 'undefined' && logic.getOfficerModeFromStore)
+    ? logic.getOfficerModeFromStore
+    : null;
+  const map = getOfficerModesMap();
+  if (normFn) return normFn(map, officerId);
+  const m = map[String(officerId)];
+  return (m === 'normal' || m === 'retro') ? m : 'retro';
+}
+
+function setOfficerMode(officerId, mode, options = {}) {
+  if (!officerId) return 'retro';
+  const clean = (mode === 'normal' || mode === 'leveling') ? 'normal' : 'retro';
+  const map = getOfficerModesMap();
+  map[String(officerId)] = clean;
+  setOfficerModesMap(map);
+
+  updateOfficerCardModeUI(officerId, clean);
+
+  if (!options.silent) {
+    const toastMsg = clean === 'normal'
+      ? (typeof t === 'function' ? t('officers.mode_officer_normal_toast') : '⚡ Режим прокачки для офицера (списание со склада)')
+      : (typeof t === 'function' ? t('officers.mode_officer_retro_toast') : '📜 Ретро-режим для офицера (без списания со склада)');
+    toast(toastMsg, 'info');
+  }
+  return clean;
+}
+
+function updateOfficerCardModeUI(officerId, mode) {
+  const clean = mode || getOfficerMode(officerId);
+
+  // Update in cabinet card
+  const cabinetWrap = document.getElementById(`officer-mode-selector-${officerId}`);
+  if (cabinetWrap) {
+    cabinetWrap.querySelectorAll('.officer-mode-radio').forEach(lbl => {
+      const input = lbl.querySelector('input[type="radio"]');
+      if (input) {
+        input.checked = (input.value === clean);
+      }
+      lbl.classList.toggle('active', input && input.value === clean);
+    });
+  }
+
+  // Update in sector table row
+  const sectorCell = document.getElementById(`sector-officer-mode-cell-${officerId}`);
+  if (sectorCell) {
+    sectorCell.querySelectorAll('.officer-mode-radio').forEach(lbl => {
+      const input = lbl.querySelector('input[type="radio"]');
+      if (input) {
+        input.checked = (input.value === clean);
+      }
+      lbl.classList.toggle('active', input && input.value === clean);
+    });
+  }
+}
+
+function renderOfficerCardModeSelectorHtml(officerId) {
+  const currentMode = getOfficerMode(officerId);
+  const title = typeof t === 'function' ? t('officers.mode_label') : 'Режим:';
+  const retroLabel = typeof t === 'function' ? t('officers.mode_retro_short') : '📜 Ретро';
+  const retroHint = typeof t === 'function' ? t('officers.mode_retro_hint') : 'Без списания со склада трекера';
+  const normalLabel = typeof t === 'function' ? t('officers.mode_normal_short') : '⚡ Прокачка';
+  const normalHint = typeof t === 'function' ? t('officers.mode_normal_hint') : 'Списание ресурсов со склада трекера';
+
+  return `
+    <div class="officer-card-mode-selector" id="officer-mode-selector-${officerId}">
+      <span class="officer-card-mode-label">${title}</span>
+      <div class="officer-card-mode-radios">
+        <label class="officer-mode-radio mode-retro ${currentMode === 'retro' ? 'active' : ''}" title="${retroHint}">
+          <input type="radio" name="officer_mode_${officerId}" value="retro" ${currentMode === 'retro' ? 'checked' : ''} onchange="setOfficerMode('${officerId}', 'retro')">
+          <span class="mode-text">${retroLabel}</span>
+        </label>
+        <label class="officer-mode-radio mode-normal ${currentMode === 'normal' ? 'active' : ''}" title="${normalHint}">
+          <input type="radio" name="officer_mode_${officerId}" value="normal" ${currentMode === 'normal' ? 'checked' : ''} onchange="setOfficerMode('${officerId}', 'normal')">
+          <span class="mode-text">${normalLabel}</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function renderSectorOfficerModeSelectorHtml(playerId, officerId, canEdit = true) {
+  const currentMode = getOfficerMode(officerId);
+  const retroLabel = typeof t === 'function' ? t('officers.mode_retro_short') : '📜 Ретро';
+  const retroHint = typeof t === 'function' ? t('officers.mode_retro_hint') : 'Без списания со склада трекера';
+  const normalLabel = typeof t === 'function' ? t('officers.mode_normal_short') : '⚡ Прокачка';
+  const normalHint = typeof t === 'function' ? t('officers.mode_normal_hint') : 'Списание ресурсов со склада трекера';
+
+  if (!canEdit) {
+    return `<span class="badge ${currentMode === 'normal' ? 'badge-warning' : 'badge-info'}" style="font-size:11px">${currentMode === 'normal' ? normalLabel : retroLabel}</span>`;
+  }
+
+  return `
+    <div class="sector-officer-mode-wrap">
+      <div class="officer-card-mode-radios compact">
+        <label class="officer-mode-radio mode-retro ${currentMode === 'retro' ? 'active' : ''}" title="${retroHint}">
+          <input type="radio" name="sector_off_mode_${officerId}" value="retro" ${currentMode === 'retro' ? 'checked' : ''} onchange="setOfficerMode('${officerId}', 'retro')">
+          <span class="mode-text">${retroLabel}</span>
+        </label>
+        <label class="officer-mode-radio mode-normal ${currentMode === 'normal' ? 'active' : ''}" title="${normalHint}">
+          <input type="radio" name="sector_off_mode_${officerId}" value="normal" ${currentMode === 'normal' ? 'checked' : ''} onchange="setOfficerMode('${officerId}', 'normal')">
+          <span class="mode-text">${normalLabel}</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
 function getOfficerStockMode() {
   try {
     const m = localStorage.getItem('kow_officer_stock_mode');
@@ -3291,10 +3416,6 @@ function setOfficerStockMode(mode) {
     localStorage.setItem('kow_officer_stock_mode', clean);
   } catch (_) {}
   updateOfficerStockModeUI(clean);
-  const toastMsg = clean === 'normal'
-    ? (typeof t === 'function' ? t('officers.mode_normal_hint') : 'Режим прокачки со склада включен')
-    : (typeof t === 'function' ? t('officers.mode_retro_hint') : 'Ретро-режим без списания со склада включен');
-  toast((clean === 'normal' ? '⚡ ' : '📜 ') + toastMsg, 'info');
 }
 
 function updateOfficerStockModeUI(mode) {
@@ -3306,22 +3427,7 @@ function updateOfficerStockModeUI(mode) {
 }
 
 function renderOfficerStockModeSwitcherHtml() {
-  const currentMode = getOfficerStockMode();
-  const title = typeof t === 'function' ? t('officers.stock_mode_title') : 'Режим склада:';
-  const retroLabel = typeof t === 'function' ? t('officers.mode_retro') : '📜 Ретро-режим';
-  const retroHint = typeof t === 'function' ? t('officers.mode_retro_hint') : 'Без списания со склада трекера';
-  const normalLabel = typeof t === 'function' ? t('officers.mode_normal') : '⚡ Прокачка';
-  const normalHint = typeof t === 'function' ? t('officers.mode_normal_hint') : 'Списание ресурсов со склада трекера';
-
-  return `
-    <div class="officer-stock-mode-wrap">
-      <span class="officer-stock-mode-title">${title}</span>
-      <div class="officer-stock-mode-pills">
-        <button type="button" class="officer-stock-mode-pill mode-retro ${currentMode === 'retro' ? 'active' : ''}" data-mode="retro" title="${retroHint}" onclick="setOfficerStockMode('retro')">${retroLabel}</button>
-        <button type="button" class="officer-stock-mode-pill mode-normal ${currentMode === 'normal' ? 'active' : ''}" data-mode="normal" title="${normalHint}" onclick="setOfficerStockMode('normal')">${normalLabel}</button>
-      </div>
-    </div>
-  `;
+  return '';
 }
 
 function setMyOfficerModalSkill(sIdx, lvl) {
@@ -3378,7 +3484,7 @@ function openEditMyOfficerModal(officerId) {
   const editOnlyPersonalEl = document.getElementById('my-officer-only-personal');
   if (editOnlyPersonalEl) editOnlyPersonalEl.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
   document.getElementById('my-officer-stars').value = off.stars || 0;
-  const currentMode = getOfficerStockMode();
+  const currentMode = getOfficerMode(officerId);
   const editRetroRadioOn = document.getElementById('my-officer-retro-on');
   const editRetroRadioOff = document.getElementById('my-officer-retro-off');
   if (currentMode === 'normal' && editRetroRadioOff) editRetroRadioOff.checked = true;
@@ -3478,6 +3584,9 @@ async function saveMyOfficerSubmit() {
         }
       }
 
+      if (myOfficerEditId) {
+        setOfficerMode(myOfficerEditId, isRetro ? 'retro' : 'normal', { silent: true });
+      }
       closeAllModals();
       toast('Офицер обновлен');
 
@@ -3537,10 +3646,14 @@ async function saveMyOfficerSubmit() {
         ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
       };
 
-      await apiFetch('/api/my-profile/officers', {
+      const createdOff = await apiFetch('/api/my-profile/officers', {
         method: 'POST',
         body: payload
       });
+
+      if (createdOff && createdOff.id) {
+        setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
+      }
 
       if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
         await apiFetch('/api/my-profile', {
@@ -3601,7 +3714,7 @@ async function setMyOfficerStars(officerId, stars) {
   const oldStars = Number(off.stars) || 0;
   if (oldStars === count) return;
 
-  const stockMode = getOfficerStockMode();
+  const stockMode = getOfficerMode(officerId);
   if (stockMode === 'retro') {
     try {
       await apiFetch(`/api/my-profile/officers/${officerId}`, {
@@ -6208,15 +6321,14 @@ function renderPlayerDetail(playerId) {
     <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div class="section-title">Офицеры сектора (${(p.officers || []).length})</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        ${renderOfficerStockModeSwitcherHtml()}
         ${canEditSector ? `<button class="btn-primary btn-sm" onclick="openAddSectorOfficerModal(${p.id})">+ Добавить офицера</button>` : ''}
       </div>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Офицер</th><th>Тип</th><th>Поколение</th><th>Уровень</th><th>Звёзды</th><th>Навыки</th><th>До максимума</th><th>Действия</th></tr></thead>
+        <thead><tr><th>Офицер</th><th>Тип</th><th>Поколение</th><th>Уровень</th><th>Режим</th><th>Звёзды</th><th>Навыки</th><th>До максимума</th><th>Действия</th></tr></thead>
         <tbody>
-          ${!(p.officers || []).length ? `<tr><td colspan="8" class="empty-state">Нет офицеров в этом секторе</td></tr>` : ''}
+          ${!(p.officers || []).length ? `<tr><td colspan="9" class="empty-state">Нет офицеров в этом секторе</td></tr>` : ''}
           ${(() => {
             const sortFn = (typeof logic !== 'undefined' && logic.sortOfficersByGeneration)
               ? logic.sortOfficersByGeneration
@@ -6232,6 +6344,7 @@ function renderPlayerDetail(playerId) {
             const skills = Array.isArray(o.skills) && o.skills.length === 4 ? o.skills : [1, 1, 1, 1];
             const skillsBadge = `<span class="badge badge-info" style="font-family:var(--mono);font-size:11px">[${skills.join('-')}]</span>`;
             const starsHtml = canEditSector ? renderSectorOfficerStars(p.id, o.id, o.stars) : renderStars(o.stars);
+            const modeHtml = renderSectorOfficerModeSelectorHtml(p.id, o.id, canEditSector);
             const actionsHtml = canEditSector ? `
               <div style="display:flex;gap:4px">
                 <button class="action-btn" title="Редактировать" onclick="openEditSectorOfficerModal(${p.id}, '${o.id}')">✏️</button>
@@ -6246,6 +6359,7 @@ function renderPlayerDetail(playerId) {
               <td>${cat ? troopBadge(cat.type) : '—'}</td>
               <td style="font-family:var(--mono)">${cat ? fmtNum(cat.generation) : '—'}</td>
               <td style="font-family:var(--mono)">${fmtNum(o.level)}</td>
+              <td id="sector-officer-mode-cell-${o.id}">${modeHtml}</td>
               <td id="sector-officer-stars-cell-${o.id}">${starsHtml}</td>
               <td>${skillsBadge}</td>
               <td>${maxLabel}</td>
@@ -6624,7 +6738,7 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
   const oldStars = off ? Number(off.stars) || 0 : 0;
   if (oldStars === s) return;
 
-  const stockMode = getOfficerStockMode();
+  const stockMode = getOfficerMode(officerId);
   if (stockMode === 'retro') {
     try {
       const res = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
@@ -6809,11 +6923,9 @@ function openAddSectorOfficerModal(playerId) {
   if (puzEl) puzEl.value = 0;
   const asoOnlyPersonal = document.getElementById('aso-only-personal');
   if (asoOnlyPersonal) asoOnlyPersonal.checked = false;
-  const currentMode = getOfficerStockMode();
   const asoRetroOn = document.getElementById('aso-retro-on');
   const asoRetroOff = document.getElementById('aso-retro-off');
-  if (currentMode === 'normal' && asoRetroOff) asoRetroOff.checked = true;
-  else if (asoRetroOn) asoRetroOn.checked = true;
+  if (asoRetroOn) asoRetroOn.checked = true;
 
   renderAsoStarsPicker(asoSelectedStars);
   renderAsoSkillsPicker(asoSelectedSkills);
@@ -6943,7 +7055,11 @@ async function submitAddSectorOfficer() {
 
     if (p) {
       p.officers = p.officers || [];
-      p.officers.push(res || { id: 'o' + state.nextId++, ...payload });
+      const newSectorOff = res || { id: 'o' + state.nextId++, ...payload };
+      p.officers.push(newSectorOff);
+      if (newSectorOff && newSectorOff.id) {
+        setOfficerMode(newSectorOff.id, isRetro ? 'retro' : 'normal', { silent: true });
+      }
     }
     if (typeof save === 'function') save();
     closeAllModals();
@@ -6976,7 +7092,7 @@ function openEditSectorOfficerModal(playerId, officerId) {
   if (puzEl) puzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
   const soOnlyPersonal = document.getElementById('so-only-personal');
   if (soOnlyPersonal) soOnlyPersonal.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
-  const currentMode = getOfficerStockMode();
+  const currentMode = getOfficerMode(officerId);
   const soRetroOn = document.getElementById('so-retro-on');
   const soRetroOff = document.getElementById('so-retro-off');
   if (currentMode === 'normal' && soRetroOff) soRetroOff.checked = true;
@@ -7098,6 +7214,7 @@ async function submitEditSectorOfficer() {
       }
     }
     if (typeof save === 'function') save();
+    setOfficerMode(editSectorOfficerId, isRetro ? 'retro' : 'normal', { silent: true });
     closeAllModals();
     toast('Офицер сохранён' + (newStock ? ' (ресурсы списаны со склада)' : ''));
     renderPlayerDetail(editSectorOfficerPlayerId);
@@ -10810,5 +10927,10 @@ if (typeof window !== 'undefined') {
   window.setOfficerStockMode = setOfficerStockMode;
   window.updateOfficerStockModeUI = updateOfficerStockModeUI;
   window.renderOfficerStockModeSwitcherHtml = renderOfficerStockModeSwitcherHtml;
+  window.getOfficerMode = getOfficerMode;
+  window.setOfficerMode = setOfficerMode;
+  window.updateOfficerCardModeUI = updateOfficerCardModeUI;
+  window.renderOfficerCardModeSelectorHtml = renderOfficerCardModeSelectorHtml;
+  window.renderSectorOfficerModeSelectorHtml = renderSectorOfficerModeSelectorHtml;
   window.checkTelegramBindStatus = checkTelegramBindStatus;
 }

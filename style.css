@@ -3293,6 +3293,101 @@ tr.row-blocked:hover {
   background: rgba(56, 139, 253, 0.1);
 }
 
+/* ── PER-OFFICER STOCK MODE RADIOS (CARD & TABLE) ── */
+.officer-card-mode-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  margin: 6px 0 8px 0;
+}
+
+.officer-card-mode-label {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.officer-card-mode-radios {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.officer-card-mode-radios.compact {
+  gap: 4px;
+}
+
+.officer-mode-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.officer-mode-radio input[type="radio"] {
+  appearance: auto;
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+  width: 12px;
+  height: 12px;
+}
+
+.officer-mode-radio:hover {
+  background: var(--bg1);
+  color: var(--text);
+  border-color: var(--border-light, #444);
+}
+
+.officer-mode-radio.active,
+.officer-mode-radio:has(input[type="radio"]:checked) {
+  font-weight: 600;
+}
+
+.officer-mode-radio.mode-retro.active,
+.officer-mode-radio.mode-retro:has(input[type="radio"]:checked) {
+  border-color: rgba(227, 179, 65, 0.45);
+  background: rgba(227, 179, 65, 0.12);
+  color: #f1c40f;
+}
+
+.officer-mode-radio.mode-retro input[type="radio"]:checked {
+  accent-color: #f1c40f;
+}
+
+.officer-mode-radio.mode-normal.active,
+.officer-mode-radio.mode-normal:has(input[type="radio"]:checked) {
+  border-color: rgba(56, 139, 253, 0.45);
+  background: rgba(56, 139, 253, 0.12);
+  color: #58a6ff;
+}
+
+.officer-mode-radio.mode-normal input[type="radio"]:checked {
+  accent-color: #58a6ff;
+}
+
+.sector-officer-mode-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+
 .tg-btn-group {
   display: inline-flex;
   gap: 8px;
