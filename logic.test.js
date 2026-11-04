@@ -2657,3 +2657,86 @@ test('renderTemplate safely replaces tokens, preserves HTML, and handles missing
     assert.ok(!/\{[a-zA-Z0-9_]+\}/.test(out), `Rendered ${key} should not have any remaining unrendered placeholders: ${out}`);
   }
 });
+
+test('calculateInitialOfficerStockDeduction handles retro and normal leveling on new officer creation', () => {
+  const { calculateInitialOfficerStockDeduction, INVESTED_ZERO } = require('./logic.js');
+  assert.equal(typeof calculateInitialOfficerStockDeduction, 'function');
+
+  const catalogOff = {
+    id: 'off-gen7-1',
+    name: 'Генерал VII',
+    generation: 7,
+    couponPerPuzzle: 600,
+    upgradeType: 'standard',
+    starCouponCost: 300,
+    medalsBeforeTraining: 690
+  };
+
+  const initialStock = {
+    coupons: 500000,
+    puzzles: 1000,
+    starCoupons: 100000,
+    legendaryStars1: 5,
+    legendaryStars2: 2,
+    legendaryStars3: 1
+  };
+
+  // 1. In retrospective mode: zero deduction, stock untouched, invested is zero
+  const retroRes = calculateInitialOfficerStockDeduction({
+    officer: { level: 50, stars: 3, skills: [3, 3, 3, 3] },
+    stock: initialStock,
+    catalogOfficer: catalogOff,
+    isRetrospective: true
+  });
+
+  assert.equal(retroRes.canAfford, true);
+  assert.equal(retroRes.deductStock, false);
+  assert.equal(retroRes.isRetrospective, true);
+  assert.deepEqual(retroRes.delta, {
+    coupons: 0,
+    puzzles: 0,
+    starCoupons: 0,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 0
+  });
+  assert.deepEqual(retroRes.invested, INVESTED_ZERO);
+  assert.equal(retroRes.newStock.coupons, initialStock.coupons);
+
+  // 2. In normal mode (прокачка): checks affordability and deducts accurately
+  const normalRes = calculateInitialOfficerStockDeduction({
+    officer: { level: 50, stars: 3, skills: [3, 3, 3, 3] },
+    stock: initialStock,
+    catalogOfficer: catalogOff,
+    isRetrospective: false
+  });
+
+  assert.equal(normalRes.canAfford, true);
+  assert.equal(normalRes.deductStock, true);
+  assert.equal(normalRes.isRetrospective, false);
+  assert.ok(normalRes.delta.coupons < 0 || normalRes.delta.puzzles < 0, 'Should deduct coupons or puzzles for level/skills');
+  assert.ok(normalRes.delta.starCoupons < 0 || normalRes.delta.legendaryStars3 < 0, 'Should deduct stars');
+  assert.ok(normalRes.invested.starCoupons > 0 || normalRes.invested.legendaryStars3 > 0, 'Should populate invested stars');
+  assert.ok(normalRes.newStock.coupons <= initialStock.coupons);
+
+  // 3. In normal mode with insufficient resources: canAfford is false
+  const poorStock = {
+    coupons: 0,
+    puzzles: 0,
+    starCoupons: 0,
+    legendaryStars1: 0,
+    legendaryStars2: 0,
+    legendaryStars3: 0
+  };
+
+  const poorRes = calculateInitialOfficerStockDeduction({
+    officer: { level: 50, stars: 3, skills: [3, 3, 3, 3] },
+    stock: poorStock,
+    catalogOfficer: catalogOff,
+    isRetrospective: false
+  });
+
+  assert.equal(poorRes.canAfford, false);
+  assert.ok(poorRes.error);
+});
+
