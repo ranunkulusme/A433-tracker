@@ -2202,8 +2202,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (updated.enabled && (updated.server || updated.configJson)) {
         const dataDir = path.join(__dirname, 'data');
         mieru.startMieruProcess(configToApply, dataDir);
+        telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${updated.socks5Port || 1080}`);
       } else {
         mieru.stopMieruProcess();
+        telegram.setDefaultProxyUrl(null);
       }
 
       const status = mieru.getMieruStatus();
@@ -2497,6 +2499,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
         ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
         : mieru.formatMieruConfig(mieruSettings);
       mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+      telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}`);
     }
   } catch (mErr) {
     console.warn('[Mieru] Auto-start on boot warning:', mErr.message);
@@ -2511,6 +2514,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     clearInterval(retentionInterval);
     clearInterval(staleReminderInterval);
     mieru.stopMieruProcess();
+    telegram.setDefaultProxyUrl(null);
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);
