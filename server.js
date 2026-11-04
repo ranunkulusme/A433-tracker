@@ -433,6 +433,225 @@ async function checkStaleStockReminders(req = null) {
   }
 }
 
+// ─── TELEGRAM BOT MESSAGE & UPDATE PROCESSOR ─────────────────────────
+
+async function handleTelegramUpdate(update) {
+  if (!update || typeof update !== 'object') {
+    return { ok: false, error: 'INVALID_UPDATE' };
+  }
+
+  const token = db.getAppSetting('telegram_bot_token');
+
+  // 1. Message update
+  if (update.message) {
+    const msg = update.message;
+    const text = (msg.text || '').trim();
+    const chatId = msg.chat?.id;
+
+    if (!chatId) return { ok: true, ignored: true };
+
+    // A) /start bind_<token> (also supports /start@bot bind_<token>)
+    const bindMatch = text.match(/^\/start(?:@\w+)?\s+bind_([a-zA-Z0-9_-]+)/i);
+    if (bindMatch) {
+      const bindToken = bindMatch[1];
+      const user = db.findUserByTelegramBindToken(bindToken);
+      if (user) {
+        const username = msg.from?.username || msg.from?.first_name || '';
+        db.bindUserTelegram(user.id, chatId, username);
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '✅ <b>Ваш аккаунт KoW Tracker успешно подключен!</b>\nТеперь вы будете получать персональные уведомления о распределении мест и событиях альянса.'
+          });
+        }
+        return { ok: true, bound: true, userId: user.id };
+      } else {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '❌ <b>Срок действия ссылки истек или токен недействителен.</b>\nПожалуйста, сгенерируйте новую ссылку для привязки в Личном кабинете KoW Tracker.'
+          });
+        }
+        return { ok: true, bound: false, reason: 'token_expired_or_invalid' };
+      }
+    }
+
+    // B) /connect_staff <PIN> (also supports /connect_staff@bot <PIN>)
+    const staffMatch = text.match(/^\/connect_staff(?:@\w+)?\s+([a-zA-Z0-9_-]+)/i);
+    if (staffMatch) {
+      const pin = staffMatch[1].trim().toUpperCase();
+      const bindRes = db.verifyAndBindStaffChat(pin, chatId);
+      if (bindRes.success) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '✅ <b>Чат штаба успешно подключен к KoW Tracker!</b>\nОповещения для офицеров Р4/Р5 активированы.'
+          });
+        }
+        return { ok: true, staffConnected: true, chatId };
+      } else {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '❌ <b>Неверный или истекший код привязки штаба.</b>\nСгенерируйте свежий PIN в настройках KoW Tracker (раздел Настройки ➔ Уведомления).'
+          });
+        }
+        return { ok: true, staffConnected: false, reason: bindRes.reason };
+      }
+    }
+
+    // C) /ping or /status
+    if (/^\/(?:ping|status)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      if (token) {
+        const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+        const isStaffChat = String(staffChatId) === String(chatId);
+        const roleDesc = isStaffChat ? 'Чат штаба (Р4/Р5)' : (msg.chat?.type === 'private' ? 'Личный диалог' : 'Групповой чат');
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: `🏓 <b>KoW Tracker Bot онлайн!</b>\n• Статус: 🟢 Активен (Long Polling)\n• Чат ID: <code>${chatId}</code>\n• Тип: ${roleDesc}`
+        });
+      }
+      return { ok: true, command: 'ping', chatId };
+    }
+
+    // D) /start or /help (without bind token)
+    if (/^\/(?:start|help)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      if (token && msg.chat?.type === 'private') {
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: '👋 <b>Здравствуйте! Я официальный Telegram-бот KoW Tracker.</b>\n\n' +
+                '📱 <b>Подключение персональных уведомлений:</b>\n' +
+                '1. Откройте KoW Tracker ➔ <b>Личный кабинет</b>\n' +
+                '2. Нажмите <b>«Подключить Telegram»</b>\n' +
+                '3. Бот автоматически привяжет ваш игровой профиль.\n\n' +
+                '🛡️ <b>Подключение чата штаба:</b>\n' +
+                'Добавьте бота в группу офицеров и выполните команду:\n' +
+                '<code>/connect_staff &lt;PIN&gt;</code>\n' +
+                '(PIN генерируется в разделе Настройки ➔ Уведомления).'
+        });
+      }
+      return { ok: true, command: 'help', chatId };
+    }
+  }
+
+  // 2. Callback query update (interactive buttons)
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    const cqId = cq.id;
+    const data = cq.data || '';
+    const fromId = cq.from?.id;
+    const chatMsg = cq.message;
+
+    const approveMatch = data.match(/^approve_user:(\d+)$/);
+    const rejectMatch = data.match(/^reject_user:(\d+)$/);
+
+    if (approveMatch || rejectMatch) {
+      const targetUserId = Number((approveMatch || rejectMatch)[1]);
+      const isApprove = Boolean(approveMatch);
+
+      const officer = db.findUserByTelegramChatId(fromId);
+      const isStaff = officer && (officer.rank === 'r5' || officer.rank === 'r4' || logic.hasUserPermission(officer, 'approve_users'));
+
+      if (!isStaff) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⛔ Доступ запрещен. У вас нет прав офицера для одобрения новичков.',
+            showAlert: true
+          });
+        }
+        return { ok: true, authorized: false };
+      }
+
+      const targetUser = db.findUserById(targetUserId);
+      const targetName = targetUser?.username || `ID ${targetUserId}`;
+      const officerHandle = cq.from?.username ? `@${cq.from.username}` : (officer.username || 'Офицер');
+      const officerRank = (officer.rank || 'r4').toUpperCase();
+
+      if (isApprove) {
+        db.approveUser(targetUserId, 'r3');
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '✅ Пользователь одобрен (Р3)'
+          });
+          if (chatMsg?.chat?.id && chatMsg?.message_id) {
+            await telegram.editTelegramMessageText({
+              token,
+              chatId: chatMsg.chat.id,
+              messageId: chatMsg.message_id,
+              text: `✅ Пользователь <b>@${targetName}</b> одобрен офицером <b>${officerHandle}</b> (${officerRank})`,
+              replyMarkup: { inline_keyboard: [] }
+            });
+          }
+        }
+        return { ok: true, action: 'approved', userId: targetUserId };
+      } else {
+        db.rejectUser(targetUserId);
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '❌ Пользователь отклонен'
+          });
+          if (chatMsg?.chat?.id && chatMsg?.message_id) {
+            await telegram.editTelegramMessageText({
+              token,
+              chatId: chatMsg.chat.id,
+              messageId: chatMsg.message_id,
+              text: `❌ Пользователь <b>@${targetName}</b> отклонен офицером <b>${officerHandle}</b> (${officerRank})`,
+              replyMarkup: { inline_keyboard: [] }
+            });
+          }
+        }
+        return { ok: true, action: 'rejected', userId: targetUserId };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+async function syncTelegramBotInfoAndPolling() {
+  const token = db.getAppSetting('telegram_bot_token');
+  if (!token) {
+    telegram.stopTelegramPolling();
+    return;
+  }
+
+  try {
+    const meRes = await telegram.getTelegramMe(token);
+    if (meRes.ok && meRes.result && meRes.result.username) {
+      const liveUsername = meRes.result.username.replace(/^@+/, '');
+      const existingUsername = db.getAppSetting('telegram_bot_username');
+      if (!existingUsername || existingUsername !== liveUsername) {
+        db.setAppSetting('telegram_bot_username', liveUsername);
+      }
+    }
+  } catch (err) {
+    console.warn('[Telegram] Could not sync bot info:', err.message);
+  }
+
+  telegram.startTelegramPolling({
+    getBotToken: () => db.getAppSetting('telegram_bot_token'),
+    getProxyUrl: () => telegram.getDefaultProxyUrl(),
+    onUpdate: async (update) => {
+      await handleTelegramUpdate(update);
+    },
+    onError: (err) => {
+      console.warn('[Telegram Polling] Warning:', err.message || err);
+    }
+  });
+}
+
 const FORBIDDEN_FILES = new Set([
   'package.json',
   'package-lock.json',
@@ -1916,148 +2135,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
-      const update = body || {};
-      const token = db.getAppSetting('telegram_bot_token');
-
-      // 1. Message update
-      if (update.message) {
-        const msg = update.message;
-        const text = (msg.text || '').trim();
-        const chatId = msg.chat?.id;
-
-        // A) /start bind_<token>
-        const bindMatch = text.match(/^\/start(?:\s+|@\w+\s+)bind_([a-zA-Z0-9_-]+)/i);
-        if (bindMatch) {
-          const bindToken = bindMatch[1];
-          const user = db.findUserByTelegramBindToken(bindToken);
-          if (user) {
-            const username = msg.from?.username || msg.from?.first_name || '';
-            db.bindUserTelegram(user.id, chatId, username);
-            if (token) {
-              await telegram.sendTelegramMessage({
-                token,
-                chatId,
-                text: '✅ <b>Ваш аккаунт KoW Tracker успешно подключен!</b>\nТеперь вы будете получать персональные уведомления о распределении мест и событиях альянса.'
-              });
-            }
-            return sendJson(res, 200, { ok: true, bound: true, userId: user.id });
-          } else {
-            if (token) {
-              await telegram.sendTelegramMessage({
-                token,
-                chatId,
-                text: '❌ <b>Срок действия ссылки истек или токен недействителен.</b>\nПожалуйста, сгенерируйте новую ссылку для привязки в Личном кабинете KoW Tracker.'
-              });
-            }
-            return sendJson(res, 200, { ok: true, bound: false, reason: 'token_expired_or_invalid' });
-          }
-        }
-
-        // B) /connect_staff <PIN>
-        const staffMatch = text.match(/^\/connect_staff(?:\s+|@\w+\s+)(KOW-STAFF-[A-Z0-9-]+)/i);
-        if (staffMatch) {
-          const pin = staffMatch[1].trim().toUpperCase();
-          const bindRes = db.verifyAndBindStaffChat(pin, chatId);
-          if (bindRes.success) {
-            if (token) {
-              await telegram.sendTelegramMessage({
-                token,
-                chatId,
-                text: '✅ <b>Чат штаба успешно подключен к KoW Tracker!</b>\nОповещения для офицеров Р4/Р5 активированы.'
-              });
-            }
-            return sendJson(res, 200, { ok: true, staffConnected: true, chatId });
-          } else {
-            if (token) {
-              await telegram.sendTelegramMessage({
-                token,
-                chatId,
-                text: '❌ <b>Неверный или истекший код привязки штаба.</b>\nСгенерируйте свежий PIN в настройках KoW Tracker (раздел Настройки ➔ Уведомления).'
-              });
-            }
-            return sendJson(res, 200, { ok: true, staffConnected: false, reason: bindRes.reason });
-          }
-        }
-      }
-
-      // 2. Callback query update (interactive buttons)
-      if (update.callback_query) {
-        const cq = update.callback_query;
-        const cqId = cq.id;
-        const data = cq.data || '';
-        const fromId = cq.from?.id;
-        const chatMsg = cq.message;
-
-        const approveMatch = data.match(/^approve_user:(\d+)$/);
-        const rejectMatch = data.match(/^reject_user:(\d+)$/);
-
-        if (approveMatch || rejectMatch) {
-          const targetUserId = Number((approveMatch || rejectMatch)[1]);
-          const isApprove = Boolean(approveMatch);
-
-          const officer = db.findUserByTelegramChatId(fromId);
-          const isStaff = officer && (officer.rank === 'r5' || officer.rank === 'r4' || logic.hasUserPermission(officer, 'approve_users'));
-
-          if (!isStaff) {
-            if (token) {
-              await telegram.answerTelegramCallback({
-                token,
-                callbackQueryId: cqId,
-                text: '⛔ Доступ запрещен. У вас нет прав офицера для одобрения новичков.',
-                showAlert: true
-              });
-            }
-            return sendJson(res, 200, { ok: true, authorized: false });
-          }
-
-          const targetUser = db.findUserById(targetUserId);
-          const targetName = targetUser?.username || `ID ${targetUserId}`;
-          const officerHandle = cq.from?.username ? `@${cq.from.username}` : (officer.username || 'Офицер');
-          const officerRank = (officer.rank || 'r4').toUpperCase();
-
-          if (isApprove) {
-            db.approveUser(targetUserId, 'r3');
-            if (token) {
-              await telegram.answerTelegramCallback({
-                token,
-                callbackQueryId: cqId,
-                text: '✅ Пользователь одобрен (Р3)'
-              });
-              if (chatMsg?.chat?.id && chatMsg?.message_id) {
-                await telegram.editTelegramMessageText({
-                  token,
-                  chatId: chatMsg.chat.id,
-                  messageId: chatMsg.message_id,
-                  text: `✅ Пользователь <b>@${targetName}</b> одобрен офицером <b>${officerHandle}</b> (${officerRank})`,
-                  replyMarkup: { inline_keyboard: [] }
-                });
-              }
-            }
-            return sendJson(res, 200, { ok: true, action: 'approved', userId: targetUserId });
-          } else {
-            db.rejectUser(targetUserId);
-            if (token) {
-              await telegram.answerTelegramCallback({
-                token,
-                callbackQueryId: cqId,
-                text: '❌ Пользователь отклонен'
-              });
-              if (chatMsg?.chat?.id && chatMsg?.message_id) {
-                await telegram.editTelegramMessageText({
-                  token,
-                  chatId: chatMsg.chat.id,
-                  messageId: chatMsg.message_id,
-                  text: `❌ Пользователь <b>@${targetName}</b> отклонен офицером <b>${officerHandle}</b> (${officerRank})`,
-                  replyMarkup: { inline_keyboard: [] }
-                });
-              }
-            }
-            return sendJson(res, 200, { ok: true, action: 'rejected', userId: targetUserId });
-          }
-        }
-      }
-
-      return sendJson(res, 200, { ok: true });
+      const result = await handleTelegramUpdate(body || {});
+      return sendJson(res, 200, result);
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'GET') {
@@ -2071,6 +2150,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const token = db.getAppSetting('telegram_bot_token');
       const staffChatId = db.getAppSetting('telegram_staff_chat_id');
       const botUsername = db.getAppSetting('telegram_bot_username');
+      const pollingStatus = telegram.getTelegramPollingStatus();
 
       let tokenMasked = null;
       if (token && typeof token === 'string') {
@@ -2090,7 +2170,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
         hasToken: Boolean(token),
         tokenMasked,
         staffChatId: staffChatId || null,
-        botUsername: botUsername || null
+        botUsername: botUsername || null,
+        polling: pollingStatus
       });
     }
 
@@ -2120,11 +2201,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const staffChatId = db.getAppSetting('telegram_staff_chat_id');
       const botUsername = db.getAppSetting('telegram_bot_username');
 
+      syncTelegramBotInfoAndPolling().catch(err => {
+        console.warn('[Telegram] Sync error on settings save:', err.message);
+      });
+
       return sendJson(res, 200, {
         success: true,
         hasToken: Boolean(token),
         staffChatId: staffChatId || null,
-        botUsername: botUsername || null
+        botUsername: botUsername || null,
+        polling: telegram.getTelegramPollingStatus()
       });
     }
 
@@ -2209,6 +2295,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
         telegram.setDefaultProxyUrl(null);
       }
 
+      // Re-sync Telegram polling with new proxy setting
+      syncTelegramBotInfoAndPolling().catch(err => {
+        console.warn('[Telegram] Sync error on Mieru update:', err.message);
+      });
+
       const status = mieru.getMieruStatus();
       return sendJson(res, 200, {
         success: true,
@@ -2265,8 +2356,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
       db.createTelegramBindToken(req.user.id, token, expiresAt);
 
-      const rawBotUsername = db.getAppSetting('telegram_bot_username') || 'KoWTrackerBot';
-      const botUsername = String(rawBotUsername).replace(/^@+/, '').trim() || 'KoWTrackerBot';
+      const rawBotUsername = db.getAppSetting('telegram_bot_username');
+      let botUsername = String(rawBotUsername || '').replace(/^@+/, '').trim();
+      if (!botUsername) {
+        const botToken = db.getAppSetting('telegram_bot_token');
+        if (botToken) {
+          try {
+            const me = await telegram.getTelegramMe(botToken);
+            if (me.ok && me.result && me.result.username) {
+              botUsername = me.result.username.replace(/^@+/, '');
+              db.setAppSetting('telegram_bot_username', botUsername);
+            }
+          } catch (_) {}
+        }
+      }
+      botUsername = botUsername || 'KoWTrackerBot';
       const deepLink = `https://t.me/${botUsername}?start=bind_${token}`;
 
       return sendJson(res, 200, {
@@ -2507,6 +2611,15 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     console.warn('[Mieru] Auto-start on boot warning:', mErr.message);
   }
 
+  // Auto-sync Telegram Bot and start Long Polling
+  try {
+    syncTelegramBotInfoAndPolling().catch(err => {
+      console.warn('[Telegram] Startup polling warning:', err.message);
+    });
+  } catch (tErr) {
+    console.warn('[Telegram] Startup warning:', tErr.message);
+  }
+
   const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
   server.s3Manager = activeS3Manager;
 
@@ -2516,6 +2629,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     clearInterval(retentionInterval);
     clearInterval(staleReminderInterval);
     mieru.stopMieruProcess();
+    telegram.stopTelegramPolling();
     telegram.setDefaultProxyUrl(null);
     return new Promise((resolve, reject) => {
       originalClose(err => {
@@ -2600,5 +2714,7 @@ module.exports = {
   createRequestHandler,
   MIME_TYPES,
   dispatchNotification,
-  checkStaleStockReminders
+  checkStaleStockReminders,
+  handleTelegramUpdate,
+  syncTelegramBotInfoAndPolling
 };

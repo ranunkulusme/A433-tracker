@@ -3209,6 +3209,7 @@ test('API Telegram Bot Settings & Bind Token Lifecycle (RBAC)', async () => {
     assert.ok(readBack.tokenMasked.includes('***'));
     assert.equal(readBack.staffChatId, '-1001987654321');
     assert.equal(readBack.botUsername, 'KoWTestBot');
+    assert.ok(readBack.polling && typeof readBack.polling.running === 'boolean');
 
     // 5. User generates personal bind token
     const bindTokenRes = await fetch(`${baseUrl}/api/telegram/bind-token`, {
@@ -3355,6 +3356,56 @@ test('API Telegram Webhook: /start bind, /connect_staff, and inline callbacks', 
     assert.equal(staffWebhookRes.status, 200);
     assert.ok(sentMessages.some(m => m.chat_id === -100888999 && m.text.includes('Чат штаба успешно подключен')));
     assert.equal(db.getAppSetting('telegram_staff_chat_id'), '-100888999');
+
+    // 3b. Test /connect_staff@BotHandle <PIN> in group
+    const staffPin2 = 'KOW-STAFF-8888';
+    db.createStaffBindToken(staffPin2, new Date(Date.now() + 600000).toISOString());
+    const staffWebhookRes2 = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 11,
+        message: {
+          chat: { id: -100555666 },
+          from: { id: 555 },
+          text: `/connect_staff@KoWTestBot ${staffPin2}`
+        }
+      })
+    });
+    assert.equal(staffWebhookRes2.status, 200);
+    assert.equal(db.getAppSetting('telegram_staff_chat_id'), '-100555666');
+
+    // 3c. Test /ping command
+    const pingWebhookRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 12,
+        message: {
+          chat: { id: 777888, type: 'private' },
+          from: { id: 777888 },
+          text: '/ping'
+        }
+      })
+    });
+    assert.equal(pingWebhookRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 777888 && m.text.includes('KoW Tracker Bot онлайн')));
+
+    // 3d. Test /start without token (help/welcome)
+    const helpWebhookRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 13,
+        message: {
+          chat: { id: 777888, type: 'private' },
+          from: { id: 777888 },
+          text: '/start'
+        }
+      })
+    });
+    assert.equal(helpWebhookRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 777888 && m.text.includes('официальный Telegram-бот')));
 
     // 4. Test callback queries: approve_user and reject_user
     // Register pending rookie

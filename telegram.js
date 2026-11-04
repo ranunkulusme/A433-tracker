@@ -509,12 +509,250 @@ async function answerTelegramCallback({
   return callTelegramApi(token, 'answerCallbackQuery', payload, options);
 }
 
+/**
+ * Retrieve updates via long polling (getUpdates).
+ */
+async function getTelegramUpdates(token, {
+  offset = 0,
+  limit = 100,
+  timeout = 20,
+  allowedUpdates = ['message', 'callback_query']
+} = {}, options = {}) {
+  const payload = {
+    timeout: Math.max(0, parseInt(timeout, 10) || 0),
+    limit: Math.min(100, Math.max(1, parseInt(limit, 10) || 100))
+  };
+  if (offset !== undefined && offset !== null) {
+    payload.offset = Number(offset);
+  }
+  if (Array.isArray(allowedUpdates)) {
+    payload.allowed_updates = allowedUpdates;
+  }
+
+  // HTTP timeout must be larger than long polling timeout (timeout + 15 seconds)
+  const reqTimeoutMs = options.timeoutMs || ((payload.timeout + 15) * 1000);
+
+  return callTelegramApi(token, 'getUpdates', payload, {
+    timeoutMs: reqTimeoutMs,
+    ...options
+  });
+}
+
+/**
+ * Delete webhook to enable long polling.
+ */
+async function deleteTelegramWebhook(token, { dropPendingUpdates = false } = {}, options = {}) {
+  const payload = {
+    drop_pending_updates: Boolean(dropPendingUpdates)
+  };
+  return callTelegramApi(token, 'deleteWebhook', payload, options);
+}
+
+/**
+ * Set webhook.
+ */
+async function setTelegramWebhook(token, { url, secretToken = null, dropPendingUpdates = false } = {}, options = {}) {
+  if (!url) return { ok: false, error: 'MISSING_WEBHOOK_URL' };
+  const payload = {
+    url,
+    drop_pending_updates: Boolean(dropPendingUpdates)
+  };
+  if (secretToken) {
+    payload.secret_token = secretToken;
+  }
+  return callTelegramApi(token, 'setWebhook', payload, options);
+}
+
+/**
+ * Get webhook info.
+ */
+async function getTelegramWebhookInfo(token, options = {}) {
+  return callTelegramApi(token, 'getWebhookInfo', null, options);
+}
+
+// ─── TELEGRAM LONG POLLING RUNNER ──────────────────────────────────────────
+
+let pollingActive = false;
+let pollingAbortController = null;
+let pollingTimer = null;
+let pollingOffset = 0;
+let pollingInFlight = false;
+const pollingStatus = {
+  running: false,
+  lastPollTime: null,
+  lastSuccessTime: null,
+  lastError: null,
+  updatesCount: 0,
+  consecutiveErrors: 0
+};
+
+function getTelegramPollingStatus() {
+  return {
+    running: pollingActive,
+    lastPollTime: pollingStatus.lastPollTime,
+    lastSuccessTime: pollingStatus.lastSuccessTime,
+    lastError: pollingStatus.lastError,
+    updatesCount: pollingStatus.updatesCount,
+    consecutiveErrors: pollingStatus.consecutiveErrors
+  };
+}
+
+function stopTelegramPolling() {
+  pollingActive = false;
+  if (pollingTimer) {
+    clearTimeout(pollingTimer);
+    pollingTimer = null;
+  }
+  if (pollingAbortController) {
+    try {
+      pollingAbortController.abort();
+    } catch (_) {}
+    pollingAbortController = null;
+  }
+  pollingInFlight = false;
+  pollingStatus.running = false;
+}
+
+function startTelegramPolling({
+  getBotToken,
+  getProxyUrl,
+  onUpdate,
+  onError,
+  timeoutSec = 20,
+  intervalMs = 500
+}) {
+  stopTelegramPolling();
+
+  pollingActive = true;
+  pollingStatus.running = true;
+  pollingStatus.consecutiveErrors = 0;
+  let webhookDeleted = false;
+
+  async function pollLoop() {
+    if (!pollingActive) return;
+
+    const token = typeof getBotToken === 'function' ? getBotToken() : getBotToken;
+    if (!token) {
+      pollingTimer = setTimeout(pollLoop, 5000);
+      return;
+    }
+
+    const proxy = typeof getProxyUrl === 'function' ? getProxyUrl() : (getProxyUrl || getDefaultProxyUrl());
+
+    // 1. Delete any existing webhook once on startup so getUpdates works
+    if (!webhookDeleted) {
+      try {
+        const delRes = await deleteTelegramWebhook(token, { dropPendingUpdates: false }, { proxyUrl: proxy, timeoutMs: 10000 });
+        if (delRes.ok) {
+          webhookDeleted = true;
+        }
+      } catch (e) {
+        // Continue anyway; error handled in getUpdates if conflict
+      }
+    }
+
+    pollingStatus.lastPollTime = new Date().toISOString();
+    pollingAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    pollingInFlight = true;
+
+    try {
+      const res = await getTelegramUpdates(
+        token,
+        {
+          offset: pollingOffset,
+          timeout: timeoutSec,
+          allowedUpdates: ['message', 'callback_query']
+        },
+        {
+          proxyUrl: proxy,
+          signal: pollingAbortController ? pollingAbortController.signal : undefined
+        }
+      );
+
+      pollingInFlight = false;
+      if (!pollingActive) return;
+
+      if (res.ok && Array.isArray(res.result)) {
+        pollingStatus.lastSuccessTime = new Date().toISOString();
+        pollingStatus.lastError = null;
+        pollingStatus.consecutiveErrors = 0;
+
+        for (const update of res.result) {
+          if (!pollingActive) break;
+          if (update && typeof update.update_id === 'number') {
+            pollingOffset = Math.max(pollingOffset, update.update_id + 1);
+            pollingStatus.updatesCount++;
+            if (typeof onUpdate === 'function') {
+              try {
+                await onUpdate(update);
+              } catch (updErr) {
+                if (typeof onError === 'function') onError(updErr);
+              }
+            }
+          }
+        }
+
+        if (pollingActive) {
+          pollingTimer = setTimeout(pollLoop, intervalMs);
+        }
+      } else {
+        const errDesc = res.error || 'Unknown getUpdates error';
+        pollingStatus.lastError = errDesc;
+        pollingStatus.consecutiveErrors++;
+
+        if (String(errDesc).toLowerCase().includes('webhook') || res.errorCode === 409) {
+          webhookDeleted = false;
+        }
+
+        if (typeof onError === 'function') {
+          onError(new Error(errDesc));
+        }
+
+        const delay = Math.min(10000, 2000 * Math.min(5, pollingStatus.consecutiveErrors));
+        if (pollingActive) {
+          pollingTimer = setTimeout(pollLoop, delay);
+        }
+      }
+    } catch (err) {
+      pollingInFlight = false;
+      if (!pollingActive) return;
+
+      if (err.name === 'AbortError') return;
+
+      pollingStatus.lastError = err.message;
+      pollingStatus.consecutiveErrors++;
+
+      if (typeof onError === 'function') {
+        onError(err);
+      }
+
+      const delay = Math.min(10000, 2000 * Math.min(5, pollingStatus.consecutiveErrors));
+      if (pollingActive) {
+        pollingTimer = setTimeout(pollLoop, delay);
+      }
+    }
+  }
+
+  pollingTimer = setTimeout(pollLoop, 100);
+  return {
+    stop: stopTelegramPolling,
+    getStatus: getTelegramPollingStatus
+  };
+}
+
 module.exports = {
   callTelegramApi,
   getTelegramMe,
   sendTelegramMessage,
   editTelegramMessageText,
   answerTelegramCallback,
+  getTelegramUpdates,
+  deleteTelegramWebhook,
+  setTelegramWebhook,
+  getTelegramWebhookInfo,
+  startTelegramPolling,
+  stopTelegramPolling,
+  getTelegramPollingStatus,
   setTelegramFetch,
   setDefaultProxyUrl,
   getDefaultProxyUrl,
