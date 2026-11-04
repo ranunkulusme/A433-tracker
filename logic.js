@@ -2486,6 +2486,25 @@
     };
   }
 
+  function normalizeOfficerMode(mode) {
+    if (mode === 'normal' || mode === 'leveling') return 'normal';
+    return 'retro';
+  }
+
+  function getOfficerModeFromStore(store, officerId) {
+    if (!store || !officerId) return 'retro';
+    const key = String(officerId);
+    return normalizeOfficerMode(store[key]);
+  }
+
+  function setOfficerModeInStore(store, officerId, mode) {
+    if (!store || !officerId) return 'retro';
+    const key = String(officerId);
+    const clean = normalizeOfficerMode(mode);
+    store[key] = clean;
+    return clean;
+  }
+
   function filterPlayersByOfficers(players, selectedCatalogIds) {
     if (!Array.isArray(players)) return [];
     if (!Array.isArray(selectedCatalogIds) || !selectedCatalogIds.length) {
@@ -2931,5 +2950,8 @@
     NOTIFICATION_TEMPLATE_SAMPLE_DATA,
     renderTemplate,
     calculateInitialOfficerStockDeduction,
+    normalizeOfficerMode,
+    getOfficerModeFromStore,
+    setOfficerModeInStore,
   };
 });
