@@ -4054,7 +4054,6 @@ async function renderUsers() {
                 permsHtml = `
                   <div class="permissions-cell">
                     <span class="badge badge-perm badge-perm-all" title="Р4/Р5 имеют полный доступ ко всем разделам">${typeof t === 'function' ? t('users.full_access') : '⚡ Полный доступ'}</span>
-                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                   </div>
                 `;
               } else if (uPerms.length > 0) {
@@ -4067,14 +4066,12 @@ async function renderUsers() {
                     <div class="permissions-tags">
                       ${tags}
                     </div>
-                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                   </div>
                 `;
               } else {
                 permsHtml = `
                   <div class="permissions-cell">
                     <span class="badge-perm-none">${typeof t === 'function' ? t('users.basic_r3') : 'Базовые (Р3)'}</span>
-                    <button class="btn-perm-edit" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
                   </div>
                 `;
               }
@@ -4109,7 +4106,7 @@ async function renderUsers() {
                 <tr class="${isBlocked ? 'row-blocked' : ''}">
                   <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
                   <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
-                  <td>${u.playerName ? escapeHtml(u.playerName) : '<span style="color:var(--text3)">—</span>'}</td>
+                  <td>${u.playerName ? (u.playerId ? `<a href="#player-${u.playerId}" style="color:var(--accent);font-weight:600;text-decoration:none" title="Перейти к сектору" onclick="event.preventDefault();navigate('player_detail',{id:${u.playerId}})">${escapeHtml(u.playerName)}</a>` : escapeHtml(u.playerName)) : '<span style="color:var(--text3)">—</span>'}</td>
                   <td>
                     <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
                       <option value="r3" ${rank === 'r3' ? 'selected' : ''}>${typeof t === 'function' ? t('users.rank_r3') : 'Р3 (Боец)'}</option>

@@ -4216,6 +4216,66 @@ test('API User Management: blocking, deletion, and registration sector linking (
   }
 });
 
+test('API User Management: resolves character name for sector owners in GET /api/users', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Admin login
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // 2. Register user without sector initially
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'commander_tanya', password: 'password123', playerName: '' })
+    });
+    const regData = await regRes.json();
+    const userId = regData.userId;
+
+    // Approve user
+    db.approveUser(userId, 'r4');
+
+    // 3. Create a sector and assign userId
+    const createSectorRes = await fetch(`${baseUrl}/api/players`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: 'Tanya ПВ',
+        rank: 'r4',
+        userId: userId
+      })
+    });
+    assert.equal(createSectorRes.status, 200);
+    const sectorData = await createSectorRes.json();
+    assert.equal(sectorData.userId, userId);
+
+    // 4. GET /api/users must return playerName = 'Tanya ПВ' and playerId = sectorData.id
+    const usersRes = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(usersRes.status, 200);
+    const usersList = await usersRes.json();
+    const tanyaUser = usersList.find(u => u.id === userId);
+    assert.ok(tanyaUser, 'User must exist in /api/users');
+    assert.equal(tanyaUser.playerName, 'Tanya ПВ', 'Character name must be resolved in /api/users');
+    assert.equal(tanyaUser.playerId, sectorData.id, 'playerId must match sector id in /api/users');
+  } finally {
+    await server.close();
+  }
+});
+
+
 
 
 async function run() {
