@@ -4096,7 +4096,10 @@ async function renderNotificationsPage() {
 
               <div class="form-row form-row-2" style="margin-top:10px">
                 <div class="form-group">
-                  <label for="mieru-setting-socks5-port">${typeof t === 'function' ? t('mieru.socks5_port') : 'Локальный SOCKS5 порт'}</label>
+                  <label for="mieru-setting-socks5-port">
+                    <span>${typeof t === 'function' ? t('mieru.socks5_port') : 'Локальный SOCKS5 порт'}</span>
+                    <small style="color:var(--text2);margin-left:4px">${typeof t === 'function' ? t('mieru.socks5_port_hint') : '(на этом сервере, обычно 1080, не путайте с портами VPS)'}</small>
+                  </label>
                   <input type="number" id="mieru-setting-socks5-port" value="1080" placeholder="1080" autocomplete="off" oninput="syncMieruFormToJson()">
                 </div>
               </div>
@@ -4113,19 +4116,27 @@ async function renderNotificationsPage() {
                 <pre>{
   "profiles": [
     {
-      "profileName": "kow_profile",
-      "serverAddress": "1.2.3.4",
-      "portRanges": ["10000-10050"],
-      "user": "username",
-      "password": "password",
-      "transport": "TCP",
-      "multiplexing": "MULTIPLEXING_LOW"
+      "profileName": "default",
+      "user": {
+        "name": "username",
+        "password": "password"
+      },
+      "servers": [
+        {
+          "ipAddress": "194.87.100.200",
+          "portBindings": [
+            {
+              "portRange": "10000-10060",
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ]
     }
   ],
-  "activeProfile": "kow_profile",
+  "activeProfile": "default",
   "socks5Port": 1080,
-  "httpPort": 0,
-  "logging": { "level": "INFO" }
+  "loggingLevel": "INFO"
 }</pre>
               </div>
             </div>
@@ -4550,6 +4561,10 @@ function switchMieruTab(tab) {
   }
 }
 
+function isMieruIpAddress(str) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(str) || (typeof str === 'string' && str.includes(':'));
+}
+
 function syncMieruFormToJson() {
   const serverInput = document.getElementById('mieru-setting-server');
   const portInput = document.getElementById('mieru-setting-port-range');
@@ -4573,26 +4588,36 @@ function syncMieruFormToJson() {
     actualPassword = mieruSettingsCache.passwordMasked;
   }
 
-  const portRanges = portRange ? [portRange] : ['10000-10050'];
+  const serverObj = isMieruIpAddress(serverAddress)
+    ? { ipAddress: serverAddress }
+    : { domainName: serverAddress };
+
+  const portBinding = {
+    protocol: transport || 'TCP'
+  };
+  if (portRange.includes('-')) {
+    portBinding.portRange = portRange;
+  } else if (/^\d+$/.test(portRange)) {
+    portBinding.port = parseInt(portRange, 10);
+  } else {
+    portBinding.portRange = portRange || '10000-10050';
+  }
+  serverObj.portBindings = [portBinding];
 
   const configObj = {
     profiles: [
       {
-        profileName: 'kow_profile',
-        serverAddress: serverAddress,
-        portRanges: portRanges,
-        user: username,
-        password: actualPassword,
-        transport: transport || 'TCP',
-        multiplexing: 'MULTIPLEXING_LOW'
+        profileName: 'default',
+        user: {
+          name: username,
+          password: actualPassword
+        },
+        servers: [serverObj]
       }
     ],
-    activeProfile: 'kow_profile',
+    activeProfile: 'default',
     socks5Port: socks5Port,
-    httpPort: 0,
-    logging: {
-      level: 'INFO'
-    }
+    loggingLevel: 'INFO'
   };
 
   jsonTextarea.value = JSON.stringify(configObj, null, 2);
@@ -4616,20 +4641,50 @@ function syncMieruJsonToForm() {
     const transportInput = document.getElementById('mieru-setting-transport');
     const socks5Input = document.getElementById('mieru-setting-socks5-port');
 
-    if (serverInput && profile.serverAddress !== undefined && document.activeElement !== serverInput) {
-      serverInput.value = profile.serverAddress;
+    let srvAddr = '';
+    let prange = '';
+    let trProto = 'TCP';
+
+    if (Array.isArray(profile.servers) && profile.servers[0]) {
+      const srv = profile.servers[0];
+      srvAddr = srv.ipAddress || srv.domainName || '';
+      if (Array.isArray(srv.portBindings) && srv.portBindings[0]) {
+        const pb = srv.portBindings[0];
+        prange = pb.portRange || (pb.port !== undefined ? String(pb.port) : '');
+        trProto = (pb.protocol || 'TCP').toUpperCase();
+      }
+    } else {
+      srvAddr = profile.serverAddress || '';
+      if (Array.isArray(profile.portRanges)) {
+        prange = profile.portRanges[0] || '';
+      }
+      trProto = (profile.transport || 'TCP').toUpperCase();
     }
-    if (portInput && Array.isArray(profile.portRanges) && document.activeElement !== portInput) {
-      portInput.value = profile.portRanges.join(', ');
+
+    let uName = '';
+    let uPass = '';
+    if (typeof profile.user === 'object' && profile.user !== null) {
+      uName = profile.user.name || profile.user.user || '';
+      uPass = profile.user.password || '';
+    } else {
+      uName = profile.user || '';
+      uPass = profile.password || '';
     }
-    if (userInput && profile.user !== undefined && document.activeElement !== userInput) {
-      userInput.value = profile.user;
+
+    if (serverInput && srvAddr !== undefined && document.activeElement !== serverInput) {
+      serverInput.value = srvAddr;
     }
-    if (passInput && profile.password !== undefined && document.activeElement !== passInput) {
-      passInput.value = profile.password;
+    if (portInput && prange !== undefined && document.activeElement !== portInput) {
+      portInput.value = prange;
     }
-    if (transportInput && profile.transport && document.activeElement !== transportInput) {
-      transportInput.value = (profile.transport || '').toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
+    if (userInput && uName !== undefined && document.activeElement !== userInput) {
+      userInput.value = uName;
+    }
+    if (passInput && uPass !== undefined && document.activeElement !== passInput) {
+      passInput.value = uPass;
+    }
+    if (transportInput && trProto && document.activeElement !== transportInput) {
+      transportInput.value = trProto === 'UDP' ? 'UDP' : 'TCP';
     }
     if (socks5Input && parsed.socks5Port && document.activeElement !== socks5Input) {
       socks5Input.value = parsed.socks5Port;

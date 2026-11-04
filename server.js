@@ -2229,6 +2229,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const socksPort = settings.socks5Port || 1080;
       const proxyUrl = `socks5://127.0.0.1:${socksPort}`;
 
+      // If mieru binary is available and not running, ensure process is started before test
+      const status = mieru.getMieruStatus();
+      if (!status.running && (settings.server || settings.configJson)) {
+        const fullConfig = settings.configJson
+          ? (mieru.parseMieruConfig(settings.configJson).config || mieru.formatMieruConfig(settings))
+          : mieru.formatMieruConfig(settings);
+        mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+        await new Promise(r => setTimeout(r, 600));
+      }
+
       const testResult = await mieru.testMieruConnection(proxyUrl, botToken);
       return sendJson(res, 200, testResult);
     }

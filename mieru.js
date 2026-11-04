@@ -18,8 +18,23 @@ let mieruStatus = {
   error: null
 };
 
+function isIpAddress(str) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(str) || (typeof str === 'string' && str.includes(':'));
+}
+
+function isMieruBinaryAvailable() {
+  try {
+    const { execSync } = require('node:child_process');
+    execSync('which mieru || where mieru', { stdio: 'ignore' });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /**
  * Format individual connection settings into a standard Mieru client JSON object.
+ * Strictly compliant with official Mieru v3 client schema.
  */
 function formatMieruConfig({
   server = '',
@@ -36,29 +51,42 @@ function formatMieruConfig({
   const cleanTransport = String(transport || 'TCP').trim().toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
   const cleanSocksPort = parseInt(socks5Port, 10) || 1080;
 
+  const serverObj = isIpAddress(cleanServer)
+    ? { ipAddress: cleanServer }
+    : { domainName: cleanServer };
+
+  const portBinding = {
+    protocol: cleanTransport
+  };
+  if (cleanPortRange.includes('-')) {
+    portBinding.portRange = cleanPortRange;
+  } else if (/^\d+$/.test(cleanPortRange)) {
+    portBinding.port = parseInt(cleanPortRange, 10);
+  } else {
+    portBinding.portRange = cleanPortRange || '10000-10050';
+  }
+  serverObj.portBindings = [portBinding];
+
   return {
     profiles: [
       {
         profileName: 'default',
-        serverAddress: cleanServer,
-        portRanges: [cleanPortRange],
-        user: cleanUser,
-        password: cleanPassword,
-        transport: cleanTransport,
-        multiplexing: 'MULTIPLEXING_MIDDLE'
+        user: {
+          name: cleanUser,
+          password: cleanPassword
+        },
+        servers: [serverObj]
       }
     ],
     activeProfile: 'default',
     socks5Port: cleanSocksPort,
-    httpPort: 0,
-    logging: {
-      level: 'INFO'
-    }
+    loggingLevel: 'INFO'
   };
 }
 
 /**
  * Parse raw Mieru JSON string or validate an existing object.
+ * Supports both official v3 format and legacy profile format.
  */
 function parseMieruConfig(jsonInput) {
   let parsed = null;
@@ -78,12 +106,37 @@ function parseMieruConfig(jsonInput) {
   const activeProfileName = parsed.activeProfile || (profiles[0]?.profileName);
   const activeProfile = profiles.find(p => p.profileName === activeProfileName) || profiles[0] || {};
 
-  const server = activeProfile.serverAddress || '';
-  const portRanges = Array.isArray(activeProfile.portRanges) ? activeProfile.portRanges : [];
-  const portRange = portRanges[0] || '';
-  const user = activeProfile.user || '';
-  const password = activeProfile.password || '';
-  const transport = (activeProfile.transport || 'TCP').toUpperCase();
+  // Server address and port bindings
+  let server = '';
+  let portRange = '';
+  let transport = 'TCP';
+
+  if (Array.isArray(activeProfile.servers) && activeProfile.servers[0]) {
+    const srv = activeProfile.servers[0];
+    server = srv.ipAddress || srv.domainName || '';
+    if (Array.isArray(srv.portBindings) && srv.portBindings[0]) {
+      const pb = srv.portBindings[0];
+      portRange = pb.portRange || (pb.port !== undefined ? String(pb.port) : '');
+      transport = (pb.protocol || 'TCP').toUpperCase();
+    }
+  } else {
+    server = activeProfile.serverAddress || '';
+    const portRanges = Array.isArray(activeProfile.portRanges) ? activeProfile.portRanges : [];
+    portRange = portRanges[0] || '';
+    transport = (activeProfile.transport || 'TCP').toUpperCase();
+  }
+
+  // User and Password (object or string)
+  let user = '';
+  let password = '';
+  if (typeof activeProfile.user === 'object' && activeProfile.user !== null) {
+    user = activeProfile.user.name || activeProfile.user.user || '';
+    password = activeProfile.user.password || '';
+  } else {
+    user = activeProfile.user || '';
+    password = activeProfile.password || '';
+  }
+
   const socks5Port = parseInt(parsed.socks5Port, 10) || 1080;
 
   return {
@@ -127,9 +180,13 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, 'data')) {
 
     // Check if mieru binary is available in PATH
     try {
-      const proc = spawn('mieru', ['run', '-c', configPath], {
+      const proc = spawn('mieru', ['run'], {
         detached: false,
-        stdio: 'pipe'
+        stdio: 'pipe',
+        env: {
+          ...process.env,
+          MIERU_CONFIG_JSON_FILE: configPath
+        }
       });
 
       proc.stdout.on('data', chunk => {
@@ -161,7 +218,8 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, 'data')) {
         pid: proc.pid,
         startedAt: new Date().toISOString(),
         port,
-        error: null
+        error: null,
+        binaryAvailable: true
       };
 
       console.log(`[Mieru] Client process started (PID: ${proc.pid}, SOCKS5: 127.0.0.1:${port})`);
@@ -173,7 +231,8 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, 'data')) {
         pid: null,
         startedAt: null,
         port,
-        error: spawnErr.message
+        error: spawnErr.message,
+        binaryAvailable: isMieruBinaryAvailable()
       };
       return { success: false, error: spawnErr.message, status: mieruStatus };
     }
@@ -202,7 +261,10 @@ function stopMieruProcess() {
 }
 
 function getMieruStatus() {
-  return { ...mieruStatus };
+  return {
+    ...mieruStatus,
+    binaryAvailable: isMieruBinaryAvailable()
+  };
 }
 
 /**
@@ -244,10 +306,26 @@ async function testMieruConnection(proxyUrl, botToken) {
       error: res.error || 'Ошибка проверки туннеля'
     };
   } catch (err) {
+    let errMsg = err.message || 'Ошибка сети через прокси';
+    if (errMsg.includes('ECONNREFUSED')) {
+      const port = proxyUrl ? proxyUrl.replace(/.*:/, '') : '1080';
+      if (!mieruStatus.running) {
+        if (mieruStatus.error && mieruStatus.error.includes('ENOENT')) {
+          errMsg = `Бинарный файл mieru не найден в системе. Убедитесь, что Mieru установлен или запущен на 127.0.0.1:${port}.`;
+        } else if (mieruStatus.error) {
+          errMsg = `Клиент Mieru не смог запуститься (${mieruStatus.error}).`;
+        } else {
+          errMsg = `Клиент Mieru не запущен на 127.0.0.1:${port}. Проверьте локальный SOCKS5 порт (стандартный: 1080, не указывайте порт удаленного сервера).`;
+        }
+      } else {
+        errMsg = `Соединение с локальным прокси 127.0.0.1:${port} отклонено (ECONNREFUSED). Проверьте локальный SOCKS5 порт (стандартный: 1080).`;
+      }
+    }
+
     return {
       ok: false,
       latencyMs: Date.now() - start,
-      error: err.message || 'Ошибка сети через прокси'
+      error: errMsg
     };
   }
 }
@@ -259,5 +337,6 @@ module.exports = {
   startMieruProcess,
   stopMieruProcess,
   getMieruStatus,
-  testMieruConnection
+  testMieruConnection,
+  isMieruBinaryAvailable
 };
