@@ -2145,13 +2145,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, {
         enabled: settings.enabled,
         server: settings.server,
+        serverAddress: settings.server,
         portRange: settings.portRange,
         user: settings.user,
+        username: settings.user,
         passwordMasked: mieru.maskSecret(settings.password),
         hasPassword: Boolean(settings.password),
         transport: settings.transport,
         socks5Port: settings.socks5Port,
         configJson: settings.configJson,
+        rawJson: settings.configJson,
         isRunning: status.running,
         status
       });
@@ -2165,9 +2168,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки туннеля Mieru');
       }
 
+      const rawJsonInput = body.configJson || body.rawJson;
+      const serverInput = body.server || body.serverAddress;
+      const userInput = body.user || body.username;
+
       let configToApply = null;
-      if (body.configJson && String(body.configJson).trim()) {
-        const parsed = mieru.parseMieruConfig(body.configJson);
+      if (rawJsonInput && String(rawJsonInput).trim()) {
+        const parsed = mieru.parseMieruConfig(rawJsonInput);
         if (!parsed.ok) {
           return sendError(res, 400, 'INVALID_MIERU_JSON', parsed.message);
         }
@@ -2175,18 +2182,18 @@ function createRequestHandler(staticDir, s3Manager = null) {
         db.saveMieruSettings({
           ...parsed.fields,
           enabled: body.enabled !== undefined ? Boolean(body.enabled) : true,
-          configJson: body.configJson
+          configJson: rawJsonInput
         });
       } else {
         const saved = db.saveMieruSettings({
           enabled: body.enabled !== undefined ? Boolean(body.enabled) : undefined,
-          server: body.server,
+          server: serverInput,
           portRange: body.portRange,
-          user: body.user,
+          user: userInput,
           password: body.password,
           transport: body.transport,
           socks5Port: body.socks5Port,
-          configJson: body.configJson || ''
+          configJson: rawJsonInput || ''
         });
         configToApply = mieru.formatMieruConfig(saved);
       }
@@ -2204,13 +2211,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
         success: true,
         enabled: updated.enabled,
         server: updated.server,
+        serverAddress: updated.server,
         portRange: updated.portRange,
         user: updated.user,
+        username: updated.user,
         passwordMasked: mieru.maskSecret(updated.password),
         hasPassword: Boolean(updated.password),
         transport: updated.transport,
         socks5Port: updated.socks5Port,
         configJson: updated.configJson,
+        rawJson: updated.configJson,
         isRunning: status.running,
         status
       });
