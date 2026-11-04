@@ -303,15 +303,20 @@ function deleteUser(userId, { deleteSectors = false } = {}) {
 function getPendingUsers() {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT u.id, u.username, u.rank, u.is_approved, u.is_blocked, u.player_id as playerId, u.player_id,
+    SELECT u.id, u.username, u.rank, u.is_approved, u.is_blocked,
+           COALESCE(u.player_id, p_owner.id) as playerId,
+           COALESCE(u.player_id, p_owner.id) as player_id,
            u.permissions,
            u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
            u.telegram_username as telegramUsername, u.telegram_username,
            u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
            u.created_at as createdAt, u.created_at,
-           p.name as playerName
+           COALESCE(p_direct.name, p_owner.name) as playerName
     FROM users u
-    LEFT JOIN players p ON u.player_id = p.id
+    LEFT JOIN players p_direct ON u.player_id = p_direct.id
+    LEFT JOIN players p_owner ON p_owner.id = (
+      SELECT id FROM players WHERE user_id = u.id ORDER BY id ASC LIMIT 1
+    )
     WHERE u.is_approved = 0
     ORDER BY u.id ASC
   `).all();
@@ -327,15 +332,20 @@ function getPendingUsers() {
 function getUsers() {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT u.id, u.username, u.rank, u.is_approved, u.is_blocked, u.player_id as playerId, u.player_id,
+    SELECT u.id, u.username, u.rank, u.is_approved, u.is_blocked,
+           COALESCE(u.player_id, p_owner.id) as playerId,
+           COALESCE(u.player_id, p_owner.id) as player_id,
            u.permissions,
            u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
            u.telegram_username as telegramUsername, u.telegram_username,
            u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
            u.created_at as createdAt, u.created_at,
-           p.name as playerName
+           COALESCE(p_direct.name, p_owner.name) as playerName
     FROM users u
-    LEFT JOIN players p ON u.player_id = p.id
+    LEFT JOIN players p_direct ON u.player_id = p_direct.id
+    LEFT JOIN players p_owner ON p_owner.id = (
+      SELECT id FROM players WHERE user_id = u.id ORDER BY id ASC LIMIT 1
+    )
     ORDER BY u.id ASC
   `).all();
   return rows.map(r => ({
@@ -684,6 +694,10 @@ function createPlayer(data = {}) {
     }
   }
 
+  if (userId && playerId) {
+    db.prepare('UPDATE users SET player_id = ? WHERE id = ? AND player_id IS NULL').run(playerId, userId);
+  }
+
   return getPlayerById(playerId);
 }
 
@@ -775,6 +789,16 @@ function updatePlayer(id, updates = {}) {
         stock_updated_at = ?, stock_update_source = ?, updated_at = ?
     WHERE id = ?
   `).run(name, realName, rank, userId, vipLevel, hqLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, stockUpdatedAt, stockUpdateSource, now, id);
+
+  if (updates.userId !== undefined || updates.user_id !== undefined) {
+    if (userId) {
+      db.prepare('UPDATE users SET player_id = ? WHERE id = ? AND player_id IS NULL').run(id, userId);
+    }
+    if (existing.userId && existing.userId !== userId) {
+      const otherSector = db.prepare('SELECT id FROM players WHERE user_id = ? AND id != ? ORDER BY id ASC LIMIT 1').get(existing.userId);
+      db.prepare('UPDATE users SET player_id = ? WHERE id = ? AND player_id = ?').run(otherSector ? otherSector.id : null, existing.userId, id);
+    }
+  }
 
   return getPlayerById(id);
 }
@@ -2103,12 +2127,16 @@ function initDb(filePath) {
     seedDemoData(db);
   }
 
-  // Safe backfill for links from users.player_id -> players.user_id
+  // Safe backfill for links between users and players
   try {
     db.exec(`
       UPDATE players
       SET user_id = (SELECT id FROM users WHERE users.player_id = players.id)
       WHERE user_id IS NULL AND id IN (SELECT player_id FROM users WHERE player_id IS NOT NULL);
+
+      UPDATE users
+      SET player_id = (SELECT id FROM players WHERE players.user_id = users.id ORDER BY id ASC LIMIT 1)
+      WHERE player_id IS NULL AND id IN (SELECT user_id FROM players WHERE user_id IS NOT NULL);
     `);
   } catch (e) {}
 

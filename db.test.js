@@ -2060,6 +2060,49 @@ test('rejectUser cleans up unapproved player created during registration if unpo
   assert.equal(dbModule.getPlayerById(playerId), null, 'Unapproved empty player must be cleaned up');
 });
 
+test('getUsers resolves character name when sector is linked via players.user_id and syncs users.player_id', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // 1. Create a user without a player_id initially
+  const reg = dbModule.registerUser({ username: 'tanya_pv', password: 'password123', playerName: null });
+  assert.equal(reg.playerId, null);
+  const uId = reg.userId;
+
+  // 2. Later, create a player sector and link via user_id (e.g. Tanya ПВ)
+  const player = dbModule.createPlayer({
+    name: 'Tanya ПВ',
+    userId: uId,
+    rank: 'r4'
+  });
+  assert.ok(player.id);
+
+  // 3. Check getUsers(): must find character name even if users.player_id was null
+  const users = dbModule.getUsers();
+  const tanya = users.find(u => u.id === uId);
+  assert.ok(tanya, 'User must exist in getUsers()');
+  assert.equal(tanya.playerName, 'Tanya ПВ', 'getUsers must resolve character name for linked sector');
+  assert.equal(tanya.playerId, player.id, 'getUsers must return playerId');
+
+  // 4. Check that users.player_id in users table was synced
+  const userRow = dbModule.findUserById(uId);
+  assert.equal(userRow.player_id, player.id, 'users.player_id must be synchronized with player.id');
+
+  // 5. Test updatePlayer changing owner to another user
+  const reg2 = dbModule.registerUser({ username: 'new_owner', password: 'password123', playerName: null });
+  dbModule.updatePlayer(player.id, { userId: reg2.userId });
+
+  const updatedUsers = dbModule.getUsers();
+  const newOwnerUser = updatedUsers.find(u => u.id === reg2.userId);
+  assert.equal(newOwnerUser.playerName, 'Tanya ПВ');
+  assert.equal(newOwnerUser.playerId, player.id);
+
+  const oldOwnerUser = updatedUsers.find(u => u.id === uId);
+  assert.equal(oldOwnerUser.playerName, null);
+  assert.equal(oldOwnerUser.playerId, null);
+});
+
+
 
 
 

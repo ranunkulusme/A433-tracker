@@ -2378,9 +2378,8 @@ tr.row-blocked:hover {
 .permissions-cell {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 220px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .permissions-tags {
