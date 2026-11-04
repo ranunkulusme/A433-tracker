@@ -375,7 +375,8 @@ function getPlayers() {
       confidentialityLevel: p.confidentiality_level || 0,
       power: p.power || 0,
       kills: p.kills || 0,
-      killPoints: p.kill_points || p.kills || 0
+      killPoints: p.kill_points || p.kills || 0,
+      hqLevel: (p.hq_level !== null && p.hq_level !== undefined) ? Number(p.hq_level) : null
     },
     stock: {
       coupons: p.stock_coupons || 0,
@@ -416,7 +417,8 @@ function getPlayerById(id) {
       confidentialityLevel: p.confidentiality_level || 0,
       power: p.power || 0,
       kills: p.kills || 0,
-      killPoints: p.kill_points || p.kills || 0
+      killPoints: p.kill_points || p.kills || 0,
+      hqLevel: (p.hq_level !== null && p.hq_level !== undefined) ? Number(p.hq_level) : null
     },
     stock: {
       coupons: p.stock_coupons || 0,
@@ -495,7 +497,8 @@ function getPlayersByUserId(userId) {
       confidentialityLevel: p.confidentiality_level || 0,
       power: p.power || 0,
       kills: p.kills || 0,
-      killPoints: p.kill_points || p.kills || 0
+      killPoints: p.kill_points || p.kills || 0,
+      hqLevel: (p.hq_level !== null && p.hq_level !== undefined) ? Number(p.hq_level) : null
     },
     stock: {
       coupons: p.stock_coupons || 0,
@@ -541,7 +544,10 @@ function createPlayer(data = {}) {
     }
   }
   const sector = data.sector || {};
-  const vipLevel = sector.vipLevel ?? data.vipLevel ?? data.vip_level ?? 0;
+  const vipLevel = Math.max(0, Math.min(17, Number(sector.vipLevel ?? data.vipLevel ?? data.vip_level ?? 0) || 0));
+  const hqLevel = (sector.hqLevel !== undefined)
+    ? (sector.hqLevel === null || sector.hqLevel === '' ? null : Math.max(1, parseInt(sector.hqLevel, 10)))
+    : (data.hqLevel !== undefined ? (data.hqLevel === null || data.hqLevel === '' ? null : Math.max(1, parseInt(data.hqLevel, 10))) : null);
   const vipPoints = Number(sector.vipPoints ?? data.vipPoints ?? data.vip_points ?? 0) || 0;
   const confLevel = sector.confidentialityLevel ?? data.confidentialityLevel ?? data.confidentiality_level ?? 0;
   const power = sector.power ?? data.power ?? 0;
@@ -560,14 +566,15 @@ function createPlayer(data = {}) {
   let playerId = data.id ? Number(data.id) : null;
   if (playerId) {
     db.prepare(`
-      INSERT INTO players (id, name, real_name, rank, user_id, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO players (id, name, real_name, rank, user_id, vip_level, hq_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         real_name = excluded.real_name,
         rank = excluded.rank,
         user_id = excluded.user_id,
         vip_level = excluded.vip_level,
+        hq_level = excluded.hq_level,
         vip_points = excluded.vip_points,
         confidentiality_level = excluded.confidentiality_level,
         power = excluded.power,
@@ -581,12 +588,12 @@ function createPlayer(data = {}) {
         stock_legendary_stars_3 = excluded.stock_legendary_stars_3,
         stock_chests = excluded.stock_chests,
         updated_at = excluded.updated_at
-    `).run(playerId, name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
+    `).run(playerId, name, realName, rank, userId, vipLevel, hqLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
   } else {
     const res = db.prepare(`
-      INSERT INTO players (name, real_name, rank, user_id, vip_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
+      INSERT INTO players (name, real_name, rank, user_id, vip_level, hq_level, vip_points, confidentiality_level, power, kills, kill_points, stock_coupons, stock_puzzles, stock_star_coupons, stock_legendary_stars_1, stock_legendary_stars_2, stock_legendary_stars_3, stock_chests, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, realName, rank, userId, vipLevel, hqLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, now);
     playerId = Number(res.lastInsertRowid);
   }
 
@@ -620,7 +627,10 @@ function updatePlayer(id, updates = {}) {
   }
 
   const sec = updates.sector || {};
-  const vipLevel = sec.vipLevel !== undefined ? sec.vipLevel : (updates.vipLevel !== undefined ? updates.vipLevel : (updates.vip_level !== undefined ? updates.vip_level : existing.sector.vipLevel));
+  const vipLevel = Math.max(0, Math.min(17, Number(sec.vipLevel !== undefined ? sec.vipLevel : (updates.vipLevel !== undefined ? updates.vipLevel : (updates.vip_level !== undefined ? updates.vip_level : existing.sector.vipLevel))) || 0));
+  const hqLevel = sec.hqLevel !== undefined
+    ? (sec.hqLevel === null || sec.hqLevel === '' ? null : Math.max(1, parseInt(sec.hqLevel, 10)))
+    : (updates.hqLevel !== undefined ? (updates.hqLevel === null || updates.hqLevel === '' ? null : Math.max(1, parseInt(updates.hqLevel, 10))) : (existing.sector.hqLevel ?? null));
   const vipPoints = sec.vipPoints !== undefined ? Number(sec.vipPoints) || 0 : (updates.vipPoints !== undefined ? Number(updates.vipPoints) || 0 : (updates.vip_points !== undefined ? Number(updates.vip_points) || 0 : (existing.sector.vipPoints || 0)));
   const confLevel = sec.confidentialityLevel !== undefined ? sec.confidentialityLevel : (updates.confidentialityLevel !== undefined ? updates.confidentialityLevel : (updates.confidentiality_level !== undefined ? updates.confidentiality_level : existing.sector.confidentialityLevel));
   const power = sec.power !== undefined ? sec.power : (updates.power !== undefined ? updates.power : existing.sector.power);
@@ -679,11 +689,11 @@ function updatePlayer(id, updates = {}) {
   db.prepare(`
     UPDATE players
     SET name = ?, real_name = ?, rank = ?, user_id = ?,
-        vip_level = ?, vip_points = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
+        vip_level = ?, hq_level = ?, vip_points = ?, confidentiality_level = ?, power = ?, kills = ?, kill_points = ?,
         stock_coupons = ?, stock_puzzles = ?, stock_star_coupons = ?, stock_legendary_stars_1 = ?, stock_legendary_stars_2 = ?, stock_legendary_stars_3 = ?, stock_chests = ?,
         stock_updated_at = ?, stock_update_source = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, realName, rank, userId, vipLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, stockUpdatedAt, stockUpdateSource, now, id);
+  `).run(name, realName, rank, userId, vipLevel, hqLevel, vipPoints, confLevel, power, kills, killPoints, coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3, chests, stockUpdatedAt, stockUpdateSource, now, id);
 
   return getPlayerById(id);
 }
@@ -805,24 +815,11 @@ const DEFAULT_VIP_TIERS = [
   { level: 15, points: 1000000, dailyPuzzles: 3, dailyChests: 1 },
   { level: 16, points: 1300000, dailyPuzzles: 4, dailyChests: 1 },
   { level: 17, points: 1700000, dailyPuzzles: 4, dailyChests: 1 },
-  { level: 18, points: 2200000, dailyPuzzles: 5, dailyChests: 1 },
-  { level: 19, points: 2800000, dailyPuzzles: 5, dailyChests: 1 },
-  { level: 20, points: 3500000, dailyPuzzles: 6, dailyChests: 1 },
-  { level: 21, points: 4300000, dailyPuzzles: 6, dailyChests: 1 },
-  { level: 22, points: 5200000, dailyPuzzles: 7, dailyChests: 1 },
-  { level: 23, points: 6200000, dailyPuzzles: 7, dailyChests: 1 },
-  { level: 24, points: 7300000, dailyPuzzles: 8, dailyChests: 1 },
-  { level: 25, points: 8500000, dailyPuzzles: 8, dailyChests: 1 },
-  { level: 26, points: 10000000, dailyPuzzles: 9, dailyChests: 1 },
-  { level: 27, points: 12000000, dailyPuzzles: 9, dailyChests: 1 },
-  { level: 28, points: 15000000, dailyPuzzles: 10, dailyChests: 1 },
-  { level: 29, points: 19000000, dailyPuzzles: 10, dailyChests: 1 },
-  { level: 30, points: 24000000, dailyPuzzles: 12, dailyChests: 1 },
 ];
 
 function getVipTiers() {
   const db = getDb();
-  const rows = db.prepare('SELECT level, points, daily_puzzles as dailyPuzzles, daily_chests as dailyChests FROM vip_tiers ORDER BY level ASC').all();
+  const rows = db.prepare('SELECT level, points, daily_puzzles as dailyPuzzles, daily_chests as dailyChests FROM vip_tiers WHERE level <= 17 ORDER BY level ASC').all();
   return rows;
 }
 
@@ -839,8 +836,9 @@ function setVipTiers(tiers) {
   `);
   db.exec('BEGIN TRANSACTION');
   try {
+    db.prepare('DELETE FROM vip_tiers WHERE level > 17').run();
     for (const t of tiers) {
-      const level = Math.max(1, Math.min(30, parseInt(t.level) || 1));
+      const level = Math.max(1, Math.min(17, parseInt(t.level) || 1));
       const points = Math.max(0, parseInt(t.points) || 0);
       const dailyPuzzles = Math.max(0, parseFloat(t.dailyPuzzles ?? t.daily_puzzles) || 0);
       const dailyChests = Math.max(0, parseFloat(t.dailyChests ?? t.daily_chests) || 1);
@@ -1685,7 +1683,29 @@ function migrateSchema(db) {
     if (!playerCols.includes('stock_update_source')) {
       db.exec("ALTER TABLE players ADD COLUMN stock_update_source TEXT NULL;");
     }
+    if (!playerCols.includes('hq_level')) {
+      db.exec("ALTER TABLE players ADD COLUMN hq_level INTEGER NULL DEFAULT NULL;");
+    }
+
+    // Soft migration for VIP > 17 (e.g. players who entered HQ level into VIP level)
+    if (playerCols.includes('vip_level')) {
+      try {
+        db.exec(`
+          UPDATE players
+          SET hq_level = vip_level, vip_level = 0
+          WHERE vip_level > 17 AND (hq_level IS NULL OR hq_level = 0);
+        `);
+        db.exec("UPDATE players SET vip_level = 17 WHERE vip_level > 17;");
+      } catch (e) {
+        console.error('[VIP migration error]:', e);
+      }
+    }
   }
+
+  // Ensure vip_tiers only keeps levels <= 17
+  try {
+    db.exec("DELETE FROM vip_tiers WHERE level > 17;");
+  } catch (e) {}
 
   const officerCols = getColumns('player_officers');
   if (officerCols.length > 0) {
@@ -1856,6 +1876,7 @@ function initDb(filePath) {
       rank TEXT NOT NULL DEFAULT 'r3',
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
       vip_level INTEGER DEFAULT 0,
+      hq_level INTEGER NULL DEFAULT NULL,
       vip_points INTEGER NOT NULL DEFAULT 0,
       confidentiality_level INTEGER DEFAULT 0,
       power REAL DEFAULT 0,

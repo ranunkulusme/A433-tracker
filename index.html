@@ -428,21 +428,27 @@
         </select>
       </div>
     </div>
-    <div class="form-row form-row-3">
+    <div class="form-row form-row-2">
       <div class="form-group">
-        <label for="fp-vip">VIP (0-30)</label>
-        <input type="number" id="fp-vip" min="0" max="30" value="0" oninput="updateVipProgressHint()">
+        <label for="fp-vip">VIP (0-17)</label>
+        <input type="number" id="fp-vip" min="0" max="17" value="0" oninput="updateVipProgressHint()">
       </div>
       <div class="form-group">
         <label for="fp-vip-points">Очки VIP</label>
         <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="fp-vip-points" value="0" oninput="updateVipProgressHint()">
+      </div>
+    </div>
+    <div id="vip-progress-hint" class="vip-progress-hint" style="display:none;margin-bottom:12px"></div>
+    <div class="form-row form-row-2">
+      <div class="form-group">
+        <label for="fp-hq">Ур. штаба</label>
+        <input type="number" id="fp-hq" min="1" max="50" placeholder="не указан" value="">
       </div>
       <div class="form-group">
         <label for="fp-conf">Конфиденциальность</label>
         <input type="number" id="fp-conf" min="0" value="0">
       </div>
     </div>
-    <div id="vip-progress-hint" class="vip-progress-hint" style="display:none;margin-bottom:12px"></div>
     <div class="form-row form-row-3">
       <div class="form-group">
         <label>Сила</label>
@@ -1059,11 +1065,17 @@
       <label for="as-real-name">Реальное имя игрока</label>
       <input type="text" id="as-real-name" placeholder="Имя владельца (опционально)">
     </div>
-    <div class="form-row form-row-3">
+    <div class="form-row form-row-2">
       <div class="form-group">
-        <label for="as-vip">Уровень VIP</label>
-        <input type="number" id="as-vip" min="0" max="30" value="0">
+        <label for="as-vip">Уровень VIP (0-17)</label>
+        <input type="number" id="as-vip" min="0" max="17" value="0">
       </div>
+      <div class="form-group">
+        <label for="as-hq">Ур. штаба</label>
+        <input type="number" id="as-hq" min="1" max="50" placeholder="не указан" value="">
+      </div>
+    </div>
+    <div class="form-row form-row-2">
       <div class="form-group">
         <label for="as-power">Мощь / Сила</label>
         <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="as-power" value="0">

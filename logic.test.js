@@ -1313,6 +1313,9 @@ test('parseExchangeShopScreenshotText handles Cyrillic C8 badges and OCR variati
 test('calculateVipDeficit and dailyRewards support dynamic vipTiers and default VIP 14 is 750000', () => {
   const { calculateVipDeficit, VIP_TIERS_DATA, dailyRewards } = require('./logic.js');
 
+  assert.strictEqual(VIP_TIERS_DATA.length, 17, 'VIP_TIERS_DATA must have exactly 17 levels');
+  assert.strictEqual(VIP_TIERS_DATA[VIP_TIERS_DATA.length - 1].level, 17);
+
   // Default VIP 14 points check
   const def14 = VIP_TIERS_DATA.find(t => t.level === 14);
   assert.ok(def14);
