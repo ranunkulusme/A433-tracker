@@ -53,7 +53,8 @@ const I18N_RESOURCES = {
       },
       "auth": {
         "login": "Вход",
-        "register": "Регистрация"
+        "register": "Регистрация",
+        "account_blocked": "Доступ к аккаунту заблокирован руководством гильдии"
       },
       "nav": {
         "calendar": "Календарь",
@@ -405,7 +406,17 @@ const I18N_RESOURCES = {
         "pending": "⏳ Ожидает",
         "rank_r3": "Р3 (Боец)",
         "rank_r4": "Р4 (Чиновник)",
-        "rank_r5": "Р5 (Глава)"
+        "rank_r5": "Р5 (Глава)",
+        "btn_block": "⛔ Заблокировать",
+        "btn_unblock": "✅ Разблокировать",
+        "btn_delete": "🗑️ Удалить",
+        "status_blocked": "⛔ Заблокирован",
+        "confirm_block": "Заблокировать доступ пользователю {{username}}? Все активные сессии будут немедленно прекращены.",
+        "confirm_unblock": "Разблокировать доступ пользователю {{username}}?",
+        "confirm_delete_title": "Удаление пользователя",
+        "confirm_delete_desc": "Вы собираетесь удалить пользователя @{{username}}.",
+        "delete_remove_sector": "Удалить сектор игрока вместе с аккаунтом",
+        "delete_remove_sector_hint": "Если не ставить галочку, сектор останется в гильдии как свободный (без владельца)."
       }
     }
   },
@@ -457,7 +468,8 @@ const I18N_RESOURCES = {
       },
       "auth": {
         "login": "Login",
-        "register": "Register"
+        "register": "Register",
+        "account_blocked": "Account access has been blocked by guild leadership"
       },
       "nav": {
         "calendar": "Calendar",
@@ -809,7 +821,17 @@ const I18N_RESOURCES = {
         "pending": "⏳ Pending",
         "rank_r3": "R3 (Member)",
         "rank_r4": "R4 (Officer)",
-        "rank_r5": "R5 (Leader)"
+        "rank_r5": "R5 (Leader)",
+        "btn_block": "⛔ Block",
+        "btn_unblock": "✅ Unblock",
+        "btn_delete": "🗑️ Delete",
+        "status_blocked": "⛔ Blocked",
+        "confirm_block": "Block user {{username}}? All active sessions will be terminated immediately.",
+        "confirm_unblock": "Unblock user {{username}}?",
+        "confirm_delete_title": "Delete User",
+        "confirm_delete_desc": "You are about to delete user @{{username}}.",
+        "delete_remove_sector": "Delete player sector along with account",
+        "delete_remove_sector_hint": "If unchecked, the sector will remain in the guild as unassigned (without an owner)."
       }
     }
   },
@@ -861,7 +883,8 @@ const I18N_RESOURCES = {
       },
       "auth": {
         "login": "Anmelden",
-        "register": "Registrieren"
+        "register": "Registrieren",
+        "account_blocked": "Der Kontozugriff wurde von der Gildenleitung gesperrt"
       },
       "nav": {
         "calendar": "Kalender",
@@ -1213,7 +1236,17 @@ const I18N_RESOURCES = {
         "pending": "⏳ Ausstehend",
         "rank_r3": "R3 (Mitglied)",
         "rank_r4": "R4 (Offizier)",
-        "rank_r5": "R5 (Anführer)"
+        "rank_r5": "R5 (Anführer)",
+        "btn_block": "⛔ Sperren",
+        "btn_unblock": "✅ Entsperren",
+        "btn_delete": "🗑️ Löschen",
+        "status_blocked": "⛔ Gesperrt",
+        "confirm_block": "Benutzer {{username}} sperren? Alle aktiven Sitzungen werden sofort beendet.",
+        "confirm_unblock": "Benutzer {{username}} entsperren?",
+        "confirm_delete_title": "Benutzer löschen",
+        "confirm_delete_desc": "Sie sind im Begriff, Benutzer @{{username}} zu löschen.",
+        "delete_remove_sector": "Sektor des Spielers zusammen mit dem Konto löschen",
+        "delete_remove_sector_hint": "Wenn nicht ausgewählt, verbleibt der Sektor in der Gilde als frei (ohne Besitzer)."
       }
     }
   }

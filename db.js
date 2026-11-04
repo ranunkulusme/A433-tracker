@@ -54,7 +54,7 @@ function verifySession(token) {
   if (!token) return null;
   const row = getDb().prepare(`
     SELECT s.token, s.user_id, s.created_at, s.expires_at,
-           u.id, u.username, u.rank, u.is_approved, u.player_id, u.permissions,
+           u.id, u.username, u.rank, u.is_approved, u.is_blocked, u.player_id, u.permissions,
            u.telegram_chat_id, u.telegram_username, u.telegram_notifications_enabled,
            p.name as player_name
     FROM sessions s
@@ -62,12 +62,14 @@ function verifySession(token) {
     LEFT JOIN players p ON u.player_id = p.id
     WHERE s.token = ?
   `).get(token);
-  if (!row || row.is_approved !== 1) return null;
+  if (!row || row.is_approved !== 1 || row.is_blocked === 1) return null;
   return {
     id: row.id,
     username: row.username,
     rank: row.rank,
     is_approved: row.is_approved,
+    is_blocked: row.is_blocked || 0,
+    isBlocked: Boolean(row.is_blocked),
     playerId: row.player_id,
     player_id: row.player_id,
     playerName: row.player_name || '',
@@ -144,21 +146,34 @@ function registerUser({ username, password, playerId, playerName }) {
   const hash = hashPassword(password);
   const now = new Date().toISOString();
   const res = db.prepare(`
-    INSERT INTO users (username, password_hash, rank, is_approved, player_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO users (username, password_hash, rank, is_approved, is_blocked, player_id, created_at)
+    VALUES (?, ?, ?, ?, 0, ?, ?)
   `).run(username, hash, rank, isApproved, assignedPlayerId, now);
 
   const userId = Number(res.lastInsertRowid);
 
   if (assignedPlayerId) {
     db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(userId, assignedPlayerId);
-  } else if (playerName) {
-    const createdPlayer = createPlayer({
-      name: playerName,
-      rank,
-      userId
-    });
-    assignedPlayerId = createdPlayer.id;
+  } else if (playerName && String(playerName).trim()) {
+    const trimmedName = String(playerName).trim();
+    // 1. Проверяем, существует ли уже свободный сектор с таким именем (регистронезависимо)
+    const existingPlayer = db.prepare(`
+      SELECT id FROM players
+      WHERE LOWER(TRIM(name)) = LOWER(?) AND (user_id IS NULL OR user_id = '')
+      ORDER BY id ASC
+    `).get(trimmedName);
+
+    if (existingPlayer) {
+      assignedPlayerId = existingPlayer.id;
+      db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(userId, assignedPlayerId);
+    } else {
+      const createdPlayer = createPlayer({
+        name: trimmedName,
+        rank,
+        userId
+      });
+      assignedPlayerId = createdPlayer.id;
+    }
     db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(assignedPlayerId, userId);
   }
 
@@ -168,6 +183,7 @@ function registerUser({ username, password, playerId, playerName }) {
     username,
     rank,
     is_approved: isApproved,
+    is_blocked: 0,
     playerId: assignedPlayerId,
     player_id: assignedPlayerId,
     pendingApproval: isApproved === 0,
@@ -182,6 +198,9 @@ function loginUser(username, password) {
   }
   if (!verifyPassword(password, user.password_hash)) {
     return { error: 'INVALID_CREDENTIALS' };
+  }
+  if (user.is_blocked === 1) {
+    return { error: 'ACCOUNT_BLOCKED' };
   }
   if (user.is_approved === 0) {
     return { error: 'PENDING_APPROVAL' };
@@ -199,6 +218,7 @@ function loginUser(username, password) {
       username: user.username,
       rank: user.rank,
       is_approved: user.is_approved,
+      is_blocked: user.is_blocked || 0,
       playerId: user.player_id,
       player_id: user.player_id,
       playerName,
@@ -212,21 +232,78 @@ function approveUser(userId, rank = 'r3') {
   db.prepare('UPDATE users SET is_approved = 1, rank = ? WHERE id = ?').run(rank, userId);
   const user = findUserById(userId);
   if (user && user.player_id) {
-    db.prepare('UPDATE players SET rank = ? WHERE id = ?').run(rank, user.player_id);
+    db.prepare('UPDATE players SET rank = ?, user_id = ? WHERE id = ?').run(rank, userId, user.player_id);
   }
   return user;
 }
 
 function rejectUser(userId) {
   const db = getDb();
+  const user = findUserById(userId);
+  if (user && user.player_id) {
+    const p = getPlayerById(user.player_id);
+    if (p && p.userId === userId) {
+      let hasHistory = 0;
+      let hasRegs = 0;
+      try {
+        hasHistory = db.prepare('SELECT COUNT(*) as count FROM stock_history_records WHERE player_id = ?').get(p.id)?.count || 0;
+      } catch (e) {}
+      try {
+        hasRegs = db.prepare('SELECT COUNT(*) as count FROM event_registrations WHERE player_id = ?').get(p.id)?.count || 0;
+      } catch (e) {}
+      // Если сектор создан только для этой заявки без истории и регистраций — удаляем его
+      if (hasHistory === 0 && hasRegs === 0) {
+        deletePlayer(p.id);
+      } else {
+        db.prepare('UPDATE players SET user_id = NULL WHERE id = ?').run(p.id);
+      }
+    }
+  }
+  clearUserSessions(userId);
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   return true;
+}
+
+function blockUser(userId, isBlocked = true) {
+  const db = getDb();
+  const flag = isBlocked ? 1 : 0;
+  db.prepare('UPDATE users SET is_blocked = ? WHERE id = ?').run(flag, userId);
+  if (flag === 1) {
+    clearUserSessions(userId);
+  }
+  return findUserById(userId);
+}
+
+function deleteUser(userId, { deleteSectors = false } = {}) {
+  const db = getDb();
+  const user = findUserById(userId);
+  if (!user) return { success: false, error: 'USER_NOT_FOUND' };
+
+  clearUserSessions(userId);
+
+  if (deleteSectors) {
+    const sectors = getPlayersByUserId(userId);
+    for (const s of sectors) {
+      deletePlayer(s.id);
+    }
+    if (user.player_id) {
+      deletePlayer(user.player_id);
+    }
+  } else {
+    db.prepare('UPDATE players SET user_id = NULL WHERE user_id = ?').run(userId);
+    if (user.player_id) {
+      db.prepare('UPDATE players SET user_id = NULL WHERE id = ?').run(user.player_id);
+    }
+  }
+
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  return { success: true };
 }
 
 function getPendingUsers() {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
+    SELECT u.id, u.username, u.rank, u.is_approved, u.is_blocked, u.player_id as playerId, u.player_id,
            u.permissions,
            u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
            u.telegram_username as telegramUsername, u.telegram_username,
@@ -240,6 +317,8 @@ function getPendingUsers() {
   `).all();
   return rows.map(r => ({
     ...r,
+    is_blocked: r.is_blocked || 0,
+    isBlocked: Boolean(r.is_blocked),
     permissions: parsePermissions(r.permissions),
     telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0
   }));
@@ -248,7 +327,7 @@ function getPendingUsers() {
 function getUsers() {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT u.id, u.username, u.rank, u.is_approved, u.player_id as playerId, u.player_id,
+    SELECT u.id, u.username, u.rank, u.is_approved, u.is_blocked, u.player_id as playerId, u.player_id,
            u.permissions,
            u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
            u.telegram_username as telegramUsername, u.telegram_username,
@@ -261,6 +340,8 @@ function getUsers() {
   `).all();
   return rows.map(r => ({
     ...r,
+    is_blocked: r.is_blocked || 0,
+    isBlocked: Boolean(r.is_blocked),
     permissions: parsePermissions(r.permissions),
     telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0
   }));
@@ -1637,6 +1718,9 @@ function migrateSchema(db) {
 
   const userCols = getColumns('users');
   if (userCols.length > 0) {
+    if (!userCols.includes('is_blocked')) {
+      db.exec("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;");
+    }
     if (!userCols.includes('permissions')) {
       db.exec("ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]';");
     }
@@ -1862,6 +1946,7 @@ function initDb(filePath) {
       password_hash TEXT NOT NULL,
       rank TEXT NOT NULL DEFAULT 'r3',
       is_approved INTEGER NOT NULL DEFAULT 0,
+      is_blocked INTEGER NOT NULL DEFAULT 0,
       player_id INTEGER NULL REFERENCES players(id) ON DELETE SET NULL,
       permissions TEXT NOT NULL DEFAULT '[]',
       telegram_chat_id INTEGER NULL,
@@ -2242,6 +2327,8 @@ module.exports = {
   loginUser,
   approveUser,
   rejectUser,
+  blockUser,
+  deleteUser,
   getPendingUsers,
   getUsers,
   updateUser,
