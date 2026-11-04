@@ -352,8 +352,8 @@ async function runTests() {
     assert.equal(t('cabinet.title'), 'Личный кабинет');
     assert.equal(t('cabinet.sector_params'), 'Параметры сектора');
     assert.equal(t('cabinet.stocks_title'), 'Запасы гильдейца');
-    assert.equal(t('cabinet.star_ready'), '6★ Готово');
-    assert.equal(t('cabinet.star_needed'), 'Нужно 6★');
+    assert.equal(t('cabinet.star_ready'), '5★ Готово');
+    assert.equal(t('cabinet.star_needed'), 'Нужно 5★');
     assert.equal(t('events.title'), 'Ивенты');
     assert.equal(t('events.btn_create_season'), '⚡ Создать сезон');
     assert.equal(t('events.btn_create_event'), '+ Создать ивент');
@@ -366,8 +366,8 @@ async function runTests() {
     assert.equal(t('cabinet.title'), 'My Cabinet');
     assert.equal(t('cabinet.sector_params'), 'Sector Parameters');
     assert.equal(t('cabinet.stocks_title'), 'Member Stocks');
-    assert.equal(t('cabinet.star_ready'), '6★ Ready');
-    assert.equal(t('cabinet.star_needed'), 'Need 6★');
+    assert.equal(t('cabinet.star_ready'), '5★ Ready');
+    assert.equal(t('cabinet.star_needed'), 'Need 5★');
     assert.equal(t('events.title'), 'Events');
     assert.equal(t('events.btn_create_season'), '⚡ Create Season');
     assert.equal(t('events.btn_create_event'), '+ Create Event');
@@ -380,8 +380,8 @@ async function runTests() {
     assert.equal(t('cabinet.title'), 'Mein Kabinett');
     assert.equal(t('cabinet.sector_params'), 'Sektor-Parameter');
     assert.equal(t('cabinet.stocks_title'), 'Mitglieds-Vorräte');
-    assert.equal(t('cabinet.star_ready'), '6★ Bereit');
-    assert.equal(t('cabinet.star_needed'), '6★ Benötigt');
+    assert.equal(t('cabinet.star_ready'), '5★ Bereit');
+    assert.equal(t('cabinet.star_needed'), '5★ Benötigt');
     assert.equal(t('events.title'), 'Events');
     assert.equal(t('events.btn_create_season'), '⚡ Saison erstellen');
     assert.equal(t('events.btn_create_event'), '+ Event erstellen');

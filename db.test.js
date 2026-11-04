@@ -1140,7 +1140,7 @@ test('player officers store and retrieve invested resources across CRUD and expo
   const p = dbModule.createPlayer({ name: 'Тестовый сектор' });
   assert.ok(p && p.id);
 
-  // Добавляем офицера с вложенными ресурсами
+  // Добавляем офицера с вложенными ресурсами (stars: 6 должно быть ограничено 5)
   const off = dbModule.addPlayerOfficer(p.id, {
     catalogId: 'admiral-nathon',
     name: 'Адмирал Нейтон',
@@ -1155,6 +1155,7 @@ test('player officers store and retrieve invested resources across CRUD and expo
     }
   });
 
+  assert.strictEqual(off.stars, 5); // 5★ max
   assert.strictEqual(off.invested.starCoupons, 253000);
   assert.strictEqual(off.invested.legendaryStars3, 6);
   assert.strictEqual(off.invested.coupons, 12000);
@@ -1876,6 +1877,68 @@ test('db handles hq_level attribute in sectors and softly migrates vip > 17 to h
     } catch (e) {}
   }
 });
+
+test('db clamps officer stars to 5 and softly migrates stars > 5 to 5 on initDb', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const dbModule = require('./db.js');
+  const testDbDir = path.join(__dirname, 'data_test_stars_' + Date.now());
+  const testDbPath = path.join(testDbDir, 'test.db');
+  fs.mkdirSync(testDbDir, { recursive: true });
+
+  try {
+    const rawDb = new DatabaseSync(testDbPath);
+    rawDb.exec(`
+      CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password_hash TEXT, salt TEXT, rank TEXT, permissions TEXT, is_approved INTEGER, player_id INTEGER, created_at TEXT);
+      INSERT INTO users (id, username, password_hash, salt, rank, permissions, is_approved, created_at)
+      VALUES (1, 'admin', 'hash', 'salt', 'r5', '[]', 1, '2026-01-01');
+
+      CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT);
+      INSERT INTO players (id, name) VALUES (1, 'Игрок 1');
+
+      CREATE TABLE player_officers (
+        id TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL,
+        catalog_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        level INTEGER NOT NULL DEFAULT 0,
+        coupons INTEGER NOT NULL DEFAULT 0,
+        stars INTEGER NOT NULL DEFAULT 0,
+        personal_puzzles INTEGER NOT NULL DEFAULT 0,
+        only_personal_puzzles INTEGER NOT NULL DEFAULT 0,
+        skills_json TEXT NOT NULL DEFAULT '[1,1,1,1]',
+        invested_json TEXT NOT NULL DEFAULT '{}'
+      );
+      INSERT INTO player_officers (id, player_id, catalog_id, name, level, coupons, stars)
+      VALUES ('po-test-6stars', 1, 'general-rex', 'Генерал Рекс', 100, 0, 6);
+    `);
+    rawDb.close();
+
+    // Запуск initDb должен выполнить миграцию stars > 5 -> 5
+    dbModule.initDb(testDbPath);
+    const player = dbModule.getPlayerById(1);
+    const officer = player.officers.find(o => o.id === 'po-test-6stars');
+    assert.ok(officer);
+    assert.strictEqual(officer.stars, 5, 'Звёзды > 5 должны быть мягко сброшены до 5★');
+
+    // Проверяем сохранение нового офицера со stars: 6 -> должно сохраниться как 5
+    const added = dbModule.addPlayerOfficer(1, {
+      catalogId: 'admiral-nathon',
+      name: 'Адмирал Нейтон',
+      stars: 6
+    });
+    assert.strictEqual(added.stars, 5);
+
+    // Проверяем обновление офицера stars: 10 -> должно сохраниться как 5
+    const updated = dbModule.updatePlayerOfficer(1, added.id, { stars: 10 });
+    assert.strictEqual(updated.stars, 5);
+
+  } finally {
+    try {
+      fs.rmSync(testDbDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
+});
+
 
 
 

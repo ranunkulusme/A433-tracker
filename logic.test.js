@@ -228,23 +228,23 @@ test('allows r3 result submission only after next UTC midnight when empty', () =
   assert.equal(canR3SubmitResult({ event, place: 1, nowIso: '2026-06-26T00:00:00Z', players: [{ id: 7 }] }), true);
 });
 
-test('returns officer star tooltip costs including total sixth marker', () => {
+test('returns officer star tooltip costs for 5 star levels', () => {
   assert.equal(starCostFor(1), 500);
   assert.equal(starCostFor(2), 1000);
   assert.equal(starCostFor(3), 6500);
   assert.equal(starCostFor(4), 25000);
   assert.equal(starCostFor(5), 65000);
-  assert.equal(starCostFor(6), 98000);
+  assert.equal(starCostFor(6), 65000); // clamped to max 5★
 });
 
-test('formatOfficerStarHint formats correct hint for star levels 0 to 6', () => {
+test('formatOfficerStarHint formats correct hint for star levels 0 to 5', () => {
   assert.equal(formatOfficerStarHint(0), 'До 1★: 500 звёзд');
   assert.equal(formatOfficerStarHint(1), 'До 2★: 1 000 звёзд');
   assert.equal(formatOfficerStarHint(2), 'До 3★: 6 500 звёзд');
   assert.equal(formatOfficerStarHint(3), 'До 4★: 25 000 звёзд');
   assert.equal(formatOfficerStarHint(4), 'До 5★: 65 000 звёзд');
-  assert.equal(formatOfficerStarHint(5), 'До 6★: 98 000 звёзд');
-  assert.equal(formatOfficerStarHint(6), '6★ Максимум (98 000 звёзд)');
+  assert.equal(formatOfficerStarHint(5), '5★ Максимум (98 000 звёзд)');
+  assert.equal(formatOfficerStarHint(6), '5★ Максимум (98 000 звёзд)');
 });
 
 test('exports full list of 5 officer types', () => {
@@ -264,13 +264,13 @@ test('calculates officer deficit and star requirement for standard and puzzle-on
   assert.equal(defStandard.stockPuzzles, 55);
   assert.equal(defStandard.deficitPuzzles, 343);
   assert.equal(defStandard.deficitCoupons, 171500);
-  assert.equal(defStandard.starRequirement.requiredStars, 6);
+  assert.equal(defStandard.starRequirement.requiredStars, 5);
   assert.equal(defStandard.starRequirement.isStarReady, false);
   assert.ok(defStandard.daysWithoutEvents > 0);
   assert.ok(typeof defStandard.dateWithoutEvents === 'string');
 
   const defPuzzleOnly = calculateOfficerDeficit({
-    officer: { level: 170, coupons: 0, stars: 6 },
+    officer: { level: 170, coupons: 0, stars: 5 },
     catalogItem: { couponPerPuzzle: 0 },
     player: { stock: { puzzles: 10, coupons: 100000 }, sector: { vipLevel: 10 } },
     targetLevel: 180,
@@ -1629,7 +1629,7 @@ test('calculateStarStockDelta tracks invested resources and refunds exact stars 
   // Сценарий пользователя:
   // Было купонов звезды: 253 000 (по курсу 300 за 110 это ~92 766 очков)
   // Было звёзд III (960): 200 шт (192 000 очков)
-  // Качаем офицера 0★ -> 6★ (требуется 98 000 очков звёзд)
+  // Качаем офицера 0★ -> 5★ (требуется 98 000 очков звёзд)
   const stock = {
     starCoupons: 253000,
     legendaryStars1: 0,
@@ -1639,11 +1639,11 @@ test('calculateStarStockDelta tracks invested resources and refunds exact stars 
 
   const initialInvested = { ...INVESTED_ZERO };
 
-  // 1. Повышение 0★ -> 6★:
+  // 1. Повышение 0★ -> 5★:
   // Все 253 000 купонов звезды списываются (покрывают 92 766 очков).
   // Остаток очков 98 000 - 92 766 = 5 234 очка покрывается звёздами III.
   // 5234 / 960 = 5.45 -> списывается 6 звёзд III (или 5 звёзд III и остаток).
-  const upgradeRes = calculateStarStockDelta(0, 6, stock, 300, initialInvested);
+  const upgradeRes = calculateStarStockDelta(0, 5, stock, 300, initialInvested);
   assert.strictEqual(upgradeRes.canAfford, true);
   assert.strictEqual(upgradeRes.delta.starCoupons, -253000);
   assert.ok(upgradeRes.delta.legendaryStars3 < 0, 'Звёзды III должны списаться');
@@ -1651,9 +1651,9 @@ test('calculateStarStockDelta tracks invested resources and refunds exact stars 
   assert.strictEqual(upgradeRes.newInvested.starCoupons, 253000);
   assert.strictEqual(upgradeRes.newInvested.legendaryStars3, Math.abs(upgradeRes.delta.legendaryStars3));
 
-  // 2. Понижение 6★ -> 0★ с учётом invested:
+  // 2. Понижение 5★ -> 0★ с учётом invested:
   // Должны вернуться ровно 253 000 купонов и ровно списанные звёзды III!
-  const refundRes = calculateStarStockDelta(6, 0, stock, 300, upgradeRes.newInvested);
+  const refundRes = calculateStarStockDelta(5, 0, stock, 300, upgradeRes.newInvested);
   assert.strictEqual(refundRes.canAfford, true);
   assert.strictEqual(refundRes.delta.starCoupons, 253000, 'Купоны звезды должны вернуться в исходном объеме');
   assert.strictEqual(refundRes.delta.legendaryStars3, upgradeRes.newInvested.legendaryStars3, 'Списанные звёзды III должны вернуться на склад!');
@@ -1663,8 +1663,8 @@ test('calculateStarStockDelta tracks invested resources and refunds exact stars 
   assert.strictEqual(refundRes.newInvested.legendaryStars3, 0);
 
   // 3. Офицер вне трекера (invested = 0):
-  // При понижении 6★ -> 0★ ресурсы на склад НЕ возвращаются (delta = 0)
-  const untrackedRefund = calculateStarStockDelta(6, 0, stock, 300, INVESTED_ZERO);
+  // При понижении 5★ -> 0★ ресурсы на склад НЕ возвращаются (delta = 0)
+  const untrackedRefund = calculateStarStockDelta(5, 0, stock, 300, INVESTED_ZERO);
   assert.strictEqual(untrackedRefund.canAfford, true);
   assert.strictEqual(untrackedRefund.delta.starCoupons, 0, 'Для офицера вне трекера купоны не начисляются');
   assert.strictEqual(untrackedRefund.delta.legendaryStars3, 0, 'Для офицера вне трекера звёзды не начисляются');

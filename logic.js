@@ -9,7 +9,7 @@
   const COUPON_PER_PUZZLE = 500;
   const PUZZLES_PER_LEVEL = 5;
   const MAX_LEVEL = 180;
-  const STAR_COSTS = [500, 1000, 6500, 25000, 65000, 98000];
+  const STAR_COSTS = [500, 1000, 6500, 25000, 65000];
   const STAR_ITEM_VALUES = {
     legendaryStars1: 110,
     legendaryStars2: 420,
@@ -101,7 +101,7 @@
     10, 10, 15, 15, 30, 30, 40, 40, 45, 45, 50, 50, 75, 75, 80, 80
   ];
 
-  const STAR_CUMULATIVE_COSTS = [0, 500, 1500, 8000, 33000, 98000, 98000];
+  const STAR_CUMULATIVE_COSTS = [0, 500, 1500, 8000, 33000, 98000];
 
   const OFFICER_PAIRINGS = {
     'general-rex': [
@@ -619,7 +619,7 @@
           name: officer.name || catalog?.name || '',
           level: Math.max(0, Math.min(MAX_LEVEL - 1, Number(officer.level) || 0)),
           coupons: Math.max(0, Number(officer.coupons) || 0),
-          stars: Math.max(0, Math.min(6, Number(officer.stars) || 0)),
+          stars: Math.max(0, Math.min(5, Number(officer.stars) || 0)),
         };
       }),
     }));
@@ -671,13 +671,13 @@
   }
 
   function starCostFor(stars) {
-    return STAR_COSTS[Math.max(1, Math.min(6, Number(stars) || 1)) - 1];
+    return STAR_COSTS[Math.max(1, Math.min(5, Number(stars) || 1)) - 1];
   }
 
   function formatOfficerStarHint(currentStars) {
-    const count = Math.max(0, Math.min(6, Number(currentStars) || 0));
-    if (count >= 6) {
-      return '6★ Максимум (98 000 звёзд)';
+    const count = Math.max(0, Math.min(5, Number(currentStars) || 0));
+    if (count >= 5) {
+      return '5★ Максимум (98 000 звёзд)';
     }
     const next = count + 1;
     const cost = starCostFor(next);
@@ -1044,8 +1044,8 @@
       ? dateAdd(baseToday, daysWithoutEvents)
       : null;
 
-    const currentStars = Math.max(0, Math.min(6, Number(officer?.stars) || 0));
-    const requiredStars = 6;
+    const currentStars = Math.max(0, Math.min(5, Number(officer?.stars) || 0));
+    const requiredStars = 5;
     const isStarReady = currentStars >= requiredStars;
 
     return {
@@ -1897,8 +1897,8 @@
   }
 
   function calculateStarStockDelta(currentStars, newStars, stock, starCouponCost = 300, invested) {
-    const fromStar = Math.max(0, Math.min(6, Number(currentStars) || 0));
-    const toStar = Math.max(0, Math.min(6, Number(newStars) || 0));
+    const fromStar = Math.max(0, Math.min(5, Number(currentStars) || 0));
+    const toStar = Math.max(0, Math.min(5, Number(newStars) || 0));
     const deltaPoints = STAR_CUMULATIVE_COSTS[toStar] - STAR_CUMULATIVE_COSTS[fromStar];
     const hasInvested = invested !== undefined && invested !== null;
     const inv = hasInvested ? normalizeInvested(invested) : null;
