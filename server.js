@@ -1685,6 +1685,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/events' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const isNew = !body.id;
+      const previousEvent = body.id ? db.getEventById(Number(body.id)) : null;
+      const previousAssignments = previousEvent ? (previousEvent.assignments || []) : [];
+
       const saved = db.saveEvent(body);
 
       if (isNew && saved && saved.id) {
@@ -1706,6 +1709,74 @@ function createRequestHandler(staticDir, s3Manager = null) {
         } catch (notifErr) {
           console.warn('[Notification] Error preparing event_registration_opened:', notifErr.message);
         }
+      }
+
+      // Notifications on saveEvent: personal alerts for assigned places & staff summary
+      try {
+        const savedAssignments = (saved && saved.assignments) ? saved.assignments : [];
+        const assignedList = savedAssignments.filter(a => a.playerId && Number(a.place) > 0);
+
+        if (assignedList.length > 0) {
+          const eventTypes = db.getEventTypes();
+          const et = eventTypes.find(t => t.id === saved.typeId);
+          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom) : et.places) : [];
+          const baseUrl = getAppBaseUrl(req);
+          const players = db.getPlayers();
+
+          let newAssignmentsCount = 0;
+          for (const a of assignedList) {
+            const prevA = previousAssignments.find(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
+            if (prevA) continue; // Already assigned to this place earlier
+            newAssignmentsCount++;
+
+            const player = db.getPlayerById(a.playerId);
+            if (player && player.userId) {
+              const user = db.findUserById(player.userId);
+              if (user) {
+                const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
+                await dispatchNotification('event_place_assigned', {
+                  username: user.username,
+                  sectorName: player.name || a.playerName || 'Сектор',
+                  eventName: et?.name || 'Событие',
+                  eventDate: saved.dateFrom || '',
+                  place: String(a.place),
+                  coupons: String(coupons),
+                  link: `${baseUrl}/#calendar`
+                }, { userId: user.id }).catch(err => {
+                  console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
+                });
+              }
+            }
+          }
+
+          if (newAssignmentsCount > 0 || isNew) {
+            const topFormatted = assignedList
+              .sort((x, y) => Number(x.place) - Number(y.place))
+              .slice(0, 5)
+              .map((a, idx) => {
+                const p = players.find(pl => pl.id === a.playerId);
+                const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
+                const safeName = String(a.playerName || p?.name || 'Сектор')
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;');
+                return `${idx + 1}. #${a.place}: ${safeName}${vipStr}`;
+              })
+              .join('\n');
+
+            await dispatchNotification('staff_event_autopick_summary', {
+              eventName: et?.name || 'Событие',
+              assignedCount: String(assignedList.length),
+              availablePlaces: String(places.length),
+              topAssignmentsList: topFormatted || 'Назначений нет',
+              link: `${baseUrl}/#events`
+            }).catch(err => {
+              console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
+            });
+          }
+        }
+      } catch (assignNotifErr) {
+        console.warn('[Notification] Error in assignment notifications on saveEvent:', assignNotifErr.message);
       }
 
       return sendJson(res, 200, saved);
@@ -1921,64 +1992,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         recentWinners
       });
 
-      ev.assignments = result.assignments;
-      db.saveEvent(ev);
-
-      // Trigger 3: event_place_assigned & Trigger 4: staff_event_autopick_summary
-      try {
-        const baseUrl = getAppBaseUrl(req);
-        const assignedList = (result.assignments || []).filter(a => a.playerId && Number(a.place) > 0);
-
-        // 1. Personal notifications to each assigned sector owner
-        for (const a of assignedList) {
-          const player = db.getPlayerById(a.playerId);
-          if (player && player.userId) {
-            const user = db.findUserById(player.userId);
-            if (user) {
-              const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
-              await dispatchNotification('event_place_assigned', {
-                username: user.username,
-                sectorName: player.name || a.playerName || 'Сектор',
-                eventName: et?.name || 'Событие',
-                eventDate: ev.dateFrom || '',
-                place: String(a.place),
-                coupons: String(coupons),
-                link: `${baseUrl}/#calendar`
-              }, { userId: user.id }).catch(err => {
-                console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
-              });
-            }
-          }
-        }
-
-        // 2. Staff autopick summary
-        const topFormatted = assignedList
-          .sort((x, y) => Number(x.place) - Number(y.place))
-          .slice(0, 5)
-          .map((a, idx) => {
-            const p = players.find(pl => pl.id === a.playerId);
-            const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
-            const safeName = String(a.playerName || p?.name || 'Сектор')
-              .replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;');
-            return `${idx + 1}. #${a.place}: ${safeName}${vipStr}`;
-          })
-          .join('\n');
-
-        await dispatchNotification('staff_event_autopick_summary', {
-          eventName: et?.name || 'Событие',
-          assignedCount: String(assignedList.length),
-          availablePlaces: String(places.length),
-          topAssignmentsList: topFormatted || 'Назначений нет',
-          link: `${baseUrl}/#events`
-        }).catch(err => {
-          console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
-        });
-      } catch (autopickNotifErr) {
-        console.warn('[Notification] Error in autopick notifications:', autopickNotifErr.message);
-      }
-
+      // Dry-run preview: do not mutate db or send notifications until saveEvent is submitted
       return sendJson(res, 200, {
         success: true,
         assignments: result.assignments,

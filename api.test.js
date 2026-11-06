@@ -3792,14 +3792,35 @@ test('API Notification Triggers: event place assignment and autopick summary', a
 
     sentMessages.length = 0;
 
+    // 1. Dry-run autopick: must NOT send notifications and must NOT mutate db event
     const autopickRes = await fetch(`${baseUrl}/api/events/${ev2.id}/autopick`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminLogin.token}` }
     });
     assert.equal(autopickRes.status, 200);
+    const autopickData = await autopickRes.json();
+    assert.ok(autopickData.success);
+    assert.ok(Array.isArray(autopickData.assignments));
+    assert.equal(sentMessages.length, 0, 'Autopick preview must NOT send notifications');
+    const evBeforeSave = db.getEventById(ev2.id);
+    assert.equal(evBeforeSave.assignments.length, 0, 'Autopick preview must NOT mutate event assignments in db');
 
-    // Should send personal notification to assigned player + summary to staff chat
-    assert.ok(sentMessages.length >= 2);
+    // 2. Submit saveEvent with the autopick assignments
+    const saveRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: ev2.id,
+        typeId: ev2.typeId,
+        dateFrom: ev2.dateFrom,
+        dateTo: ev2.dateTo,
+        assignments: autopickData.assignments
+      })
+    });
+    assert.equal(saveRes.status, 200);
+
+    // Should now send personal notification to assigned player + summary to staff chat
+    assert.ok(sentMessages.length >= 2, 'saveEvent with assignments must dispatch notifications');
     const personalAutopick = sentMessages.find(m => m.chat_id === 777007);
     assert.ok(personalAutopick);
     assert.ok(personalAutopick.text.includes('Sector Victor'));

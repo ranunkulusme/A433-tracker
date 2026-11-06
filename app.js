@@ -10275,10 +10275,7 @@ async function autoPickWithRegistrationsServer() {
     const res = await apiFetch(`/api/events/${editEventId}/autopick`, { method: 'POST' });
     if (res && res.assignments) {
       eventAssignments = res.assignments;
-      const ev = getEvent(editEventId);
-      if (ev) ev.assignments = res.assignments;
-      save();
-      toast('⚡ Автоподбор с учетом заявок успешно выполнен!');
+      toast('⚡ Автоподбор с учетом заявок рассчитан (черновик)');
       renderEventAssignments();
       renderEventRegistrationsBlock();
     }
