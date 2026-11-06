@@ -3014,6 +3014,25 @@ test('suggestOfficerPuzzleCost calculates accurate costs with upward rounding an
 
   const step100 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: catalogWithTanks, roundUpStep: 100 });
   assert.equal(step100.suggestedCost, 1100, '1041.67 с шагом 100 -> 1100');
+
+  // 6. Осада: S8 = 720 в каталоге, добавляем S9
+  // Должен использовать мультипликатор 2.0716: 720 * 2.0716 = 1491.55 -> округление вверх до 50 = 1500
+  // И ни в коем случае НЕ должен смешивать Осаду S8 с Танком S7 (500) и получать 720/500 = 1.44 (+44%) -> 1050!
+  const catalogWithSiege8 = [
+    { id: 't7', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500 },
+    { id: 's8', name: 'Осада S8', type: 'Осада', generation: 8, couponPerPuzzle: 720 }
+  ];
+  const siege9 = suggestOfficerPuzzleCost({ generation: 9, type: 'Осада', catalog: catalogWithSiege8 });
+  assert.equal(siege9.suggestedCost, 1500, '720 * 2.0716 = 1491.55 -> округление вверх до 50 = 1500 (не 1050!)');
+  assert.equal(siege9.baseGeneration, 8);
+  assert.equal(siege9.baseCost, 720);
+  assert.ok(Math.abs(siege9.multiplier - 2.0716) < 0.001);
+  assert.ok(siege9.hintText.includes('1 500') || siege9.hintText.includes('1500'));
+  assert.ok(siege9.hintText.includes('+107%') || siege9.hintText.includes('+108%'));
+
+  // 7. Эталонная Осада S8 при пустом каталоге = 720
+  const fallbackSiege8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Осада', catalog: [] });
+  assert.equal(fallbackSiege8.suggestedCost, 720);
 });
 
 

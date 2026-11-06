@@ -2642,7 +2642,8 @@
 
   const REFERENCE_GENERATION_COSTS = {
     'Танк': { 2: 20, 3: 28, 4: 56, 5: 116, 6: 240, 7: 500 },
-    'Пехота': { 6: 289, 7: 600 }
+    'Пехота': { 6: 289, 7: 600 },
+    'Осада': { 8: 720 }
   };
 
   function normalizeTroopType(type) {
@@ -2678,67 +2679,79 @@
     const normType = normalizeTroopType(type);
     const catList = Array.isArray(catalog) ? catalog : [];
 
-    // Офицеры того же типа войск в каталоге с положительной стоимостью
+    // Офицеры строго того же типа войск в каталоге с положительной стоимостью
     const sameTypeOfficers = catList.filter(o => {
       const oType = normalizeTroopType(o.type);
       const cost = Number(o.couponPerPuzzle ?? o.coupon_per_puzzle ?? 0);
       return oType === normType && cost > 0;
     });
 
-    const refMap = REFERENCE_GENERATION_COSTS[normType] || REFERENCE_GENERATION_COSTS['Танк'];
+    const typeRefMap = REFERENCE_GENERATION_COSTS[normType];
+    const fallbackRefMap = typeRefMap || REFERENCE_GENERATION_COSTS['Танк'];
 
-    // 1. Если для запрашиваемого поколения есть точное значение в эталонной таблице
-    // и в каталоге нет более актуальной пользовательской записи для этого поколения:
+    // 1. Если для запрашиваемого поколения есть точное значение в эталонной таблице именно для этого рода войск:
     const exactCatalogMatch = sameTypeOfficers.find(o => Number(o.generation) === gen);
-    if (!exactCatalogMatch && refMap[gen] !== undefined) {
+    if (!exactCatalogMatch && typeRefMap && typeRefMap[gen] !== undefined) {
       return {
-        suggestedCost: refMap[gen],
+        suggestedCost: typeRefMap[gen],
         baseGeneration: gen,
-        baseCost: refMap[gen],
+        baseCost: typeRefMap[gen],
         baseType: normType,
         multiplier: 1.0,
-        hintText: `Эталонная стоимость S${gen} ${normType}: ${refMap[gen]} купонов.`
+        hintText: `Эталонная стоимость S${gen} ${normType}: ${typeRefMap[gen]} купонов.`
       };
     }
 
-    // 2. Ищем базу предыдущего поколения (gen - 1)
+    // 2. Ищем базу предыдущего поколения (gen - 1) строго для этого рода войск
     let baseGen = gen - 1;
     let baseCost = 0;
 
     const prevInCatalog = sameTypeOfficers.find(o => Number(o.generation) === baseGen);
     if (prevInCatalog) {
       baseCost = Number(prevInCatalog.couponPerPuzzle ?? prevInCatalog.coupon_per_puzzle);
-    } else if (refMap[baseGen] !== undefined) {
-      baseCost = refMap[baseGen];
+    } else if (typeRefMap && typeRefMap[baseGen] !== undefined) {
+      baseCost = typeRefMap[baseGen];
     } else {
-      // Ищем ближайшее меньшее поколение
+      // Ищем ближайшее меньшее поколение того же рода войск
       const sortedLower = sameTypeOfficers
         .filter(o => Number(o.generation) < gen)
         .sort((a, b) => Number(b.generation) - Number(a.generation));
       if (sortedLower.length > 0) {
         baseGen = Number(sortedLower[0].generation);
         baseCost = Number(sortedLower[0].couponPerPuzzle ?? sortedLower[0].coupon_per_puzzle);
-      } else {
-        const knownGens = Object.keys(refMap).map(Number).sort((a, b) => b - a);
+      } else if (typeRefMap) {
+        const knownGens = Object.keys(typeRefMap).map(Number).sort((a, b) => b - a);
         baseGen = knownGens[0] || 7;
-        baseCost = refMap[baseGen] || 500;
+        baseCost = typeRefMap[baseGen];
+      } else {
+        // Если род войск неизвестен в эталонах и каталоге, берем базу fallback
+        const knownGens = Object.keys(fallbackRefMap).map(Number).sort((a, b) => b - a);
+        baseGen = knownGens[0] || 7;
+        baseCost = fallbackRefMap[baseGen] || 500;
       }
     }
 
-    // 3. Вычисление коэффициента удорожания
-    let multiplier = 2.0761;
+    // 3. Вычисление коэффициента удорожания:
+    // Базовый игровой мультипликатор из реальных данных игры (2.0716)
+    let multiplier = 2.0716;
 
+    // Вычисляем динамический коэффициент ТОЛЬКО если есть два последовательных поколения ТОГО ЖЕ типа войск
     let prev2Cost = 0;
     const prev2Gen = baseGen - 1;
     const prev2InCatalog = sameTypeOfficers.find(o => Number(o.generation) === prev2Gen);
     if (prev2InCatalog) {
       prev2Cost = Number(prev2InCatalog.couponPerPuzzle ?? prev2InCatalog.coupon_per_puzzle);
-    } else if (refMap[prev2Gen] !== undefined) {
-      prev2Cost = refMap[prev2Gen];
+    } else if (typeRefMap && typeRefMap[prev2Gen] !== undefined) {
+      prev2Cost = typeRefMap[prev2Gen];
     }
 
+    // Рассчитываем коэффициент только между поколениями одного и того же рода войск,
+    // и проверяем, чтобы он находился в разумном коридоре удвоения игры (1.8 .. 2.3)
     if (prev2Cost > 0 && baseCost > prev2Cost) {
-      multiplier = baseCost / prev2Cost;
+      const dynMultiplier = baseCost / prev2Cost;
+      if (dynMultiplier >= 1.8 && dynMultiplier <= 2.3) {
+        multiplier = dynMultiplier;
+      }
     }
 
     // 4. Расчёт с округлением в большую сторону
