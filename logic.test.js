@@ -2962,4 +2962,59 @@ test('per-officer mode helpers: normalizeOfficerMode, getOfficerModeFromStore, s
   assert.equal(getOfficerModeFromStore(store, 'off-2'), 'normal');
 });
 
+test('suggestOfficerPuzzleCost calculates accurate costs with upward rounding and reference fallbacks', () => {
+  const { suggestOfficerPuzzleCost } = require('./logic.js');
+
+  assert.equal(typeof suggestOfficerPuzzleCost, 'function');
+
+  // 1. Танк S8 при наличии в каталоге S7 (500) и S6 (240)
+  const catalogWithTanks = [
+    { id: 't6', name: 'Танк S6', type: 'Танк', generation: 6, couponPerPuzzle: 240 },
+    { id: 't7', name: 'Генерал Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 500 }
+  ];
+  const tank8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: catalogWithTanks });
+  assert.equal(tank8.suggestedCost, 1050, '500 * (500/240) = 1041.67 -> округление вверх до 50 = 1050');
+  assert.equal(tank8.baseGeneration, 7);
+  assert.equal(tank8.baseCost, 500);
+  assert.ok(tank8.hintText.includes('1 050') || tank8.hintText.includes('1050'));
+
+  // 2. Пехота S8 при наличии в каталоге S7 (600) и S6 (289)
+  const catalogWithInfantry = [
+    { id: 'i6', name: 'Пехота S6', type: 'Пехота', generation: 6, couponPerPuzzle: 289 },
+    { id: 'i7', name: 'Пехота S7', type: 'Пехота', generation: 7, couponPerPuzzle: 600 }
+  ];
+  const inf8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Пехота', catalog: catalogWithInfantry });
+  assert.equal(inf8.suggestedCost, 1250, '600 * (600/289) = 1245.67 -> округление вверх до 50 = 1250');
+  assert.equal(inf8.baseGeneration, 7);
+  assert.equal(inf8.baseCost, 600);
+  assert.ok(inf8.hintText.includes('1 250') || inf8.hintText.includes('1250'));
+
+  // 3. Fallback к эталонной таблице при пустом каталоге
+  const fallbackTank8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: [] });
+  assert.equal(fallbackTank8.suggestedCost, 1050, 'Эталонный S7 для танка = 500 -> S8 = 1050');
+  assert.equal(fallbackTank8.baseGeneration, 7);
+  assert.equal(fallbackTank8.baseCost, 500);
+
+  const fallbackTank7 = suggestOfficerPuzzleCost({ generation: 7, type: 'Танк', catalog: [] });
+  assert.equal(fallbackTank7.suggestedCost, 500, 'Эталонный S7 для танка = 500');
+
+  const fallbackTank6 = suggestOfficerPuzzleCost({ generation: 6, type: 'Танк', catalog: [] });
+  assert.equal(fallbackTank6.suggestedCost, 240, 'Эталонный S6 для танка = 240');
+
+  const fallbackTank5 = suggestOfficerPuzzleCost({ generation: 5, type: 'Танк', catalog: [] });
+  assert.equal(fallbackTank5.suggestedCost, 116, 'Эталонный S5 для танка = 116');
+
+  // 4. Специальный офицер (upgradeType === special)
+  const specialRes = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', upgradeType: 'special', catalog: [] });
+  assert.equal(specialRes.suggestedCost, 0);
+
+  // 5. Округление с другим шагом (например, 10 или 100)
+  const step10 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: catalogWithTanks, roundUpStep: 10 });
+  assert.equal(step10.suggestedCost, 1050, '1041.67 с шагом 10 -> 1050');
+
+  const step100 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: catalogWithTanks, roundUpStep: 100 });
+  assert.equal(step100.suggestedCost, 1100, '1041.67 с шагом 100 -> 1100');
+});
+
+
 

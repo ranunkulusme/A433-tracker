@@ -367,7 +367,10 @@ const I18N_RESOURCES = {
         "th_star_cost": "Купонов за 110★",
         "th_before_training": "До подготовки",
         "th_training": "Подготовка",
-        "th_total_medals": "Всего медалей"
+        "th_total_medals": "Всего медалей",
+        "hint_auto_cost": "💡 Авторасчёт: {{cost}} купонов на основе S{{gen}} {{type}} ({{baseCost}}) с округлением вверх (+{{pct}}%). Можно изменить вручную.",
+        "hint_auto_cost_manual": "💡 Рекомендация для S{{gen}} {{type}}: {{cost}} купонов.",
+        "btn_reset_auto_cost": "Вернуть авторасчёт"
       },
       "event_types": {
         "title": "Типы ивентов",
@@ -796,7 +799,10 @@ const I18N_RESOURCES = {
         "th_star_cost": "Coupons for 110★",
         "th_before_training": "Pre-training",
         "th_training": "Training",
-        "th_total_medals": "Total Medals"
+        "th_total_medals": "Total Medals",
+        "hint_auto_cost": "💡 Auto-calculated: {{cost}} coupons based on S{{gen}} {{type}} ({{baseCost}}) with upward rounding (+{{pct}}%). Editable.",
+        "hint_auto_cost_manual": "💡 Recommended for S{{gen}} {{type}}: {{cost}} coupons.",
+        "btn_reset_auto_cost": "Reset to auto-cost"
       },
       "event_types": {
         "title": "Event Types",
@@ -1225,7 +1231,10 @@ const I18N_RESOURCES = {
         "th_star_cost": "Coupons für 110★",
         "th_before_training": "Vor Vorbereitung",
         "th_training": "Vorbereitung",
-        "th_total_medals": "Medaillen gesamt"
+        "th_total_medals": "Medaillen gesamt",
+        "hint_auto_cost": "💡 Automatisch berechnet: {{cost}} Coupons basierend auf S{{gen}} {{type}} ({{baseCost}}) aufgerundet (+{{pct}}%). Anpassbar.",
+        "hint_auto_cost_manual": "💡 Empfehlung für S{{gen}} {{type}}: {{cost}} Coupons.",
+        "btn_reset_auto_cost": "Auf Auto-Kosten zurücksetzen"
       },
       "event_types": {
         "title": "Event-Typen",
