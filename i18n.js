@@ -421,7 +421,13 @@ const I18N_RESOURCES = {
         "confirm_delete_title": "Удаление пользователя",
         "confirm_delete_desc": "Вы собираетесь удалить пользователя @{{username}}.",
         "delete_remove_sector": "Удалить сектор игрока вместе с аккаунтом",
-        "delete_remove_sector_hint": "Если не ставить галочку, сектор останется в гильдии как свободный (без владельца)."
+        "delete_remove_sector_hint": "Если не ставить галочку, сектор останется в гильдии как свободный (без владельца).",
+        "stat_total": "Всего",
+        "stat_online": "В сети",
+        "stat_blocked": "Заблокировано",
+        "tooltip_online": "В сети (онлайн)",
+        "tooltip_offline": "Не был в сети",
+        "tooltip_last_seen": "Был в сети: {{time}}"
       }
     }
   },
@@ -841,7 +847,13 @@ const I18N_RESOURCES = {
         "confirm_delete_title": "Delete User",
         "confirm_delete_desc": "You are about to delete user @{{username}}.",
         "delete_remove_sector": "Delete player sector along with account",
-        "delete_remove_sector_hint": "If unchecked, the sector will remain in the guild as unassigned (without an owner)."
+        "delete_remove_sector_hint": "If unchecked, the sector will remain in the guild as unassigned (without an owner).",
+        "stat_total": "Total",
+        "stat_online": "Online",
+        "stat_blocked": "Blocked",
+        "tooltip_online": "Online",
+        "tooltip_offline": "Never seen online",
+        "tooltip_last_seen": "Last seen: {{time}}"
       }
     }
   },
@@ -1261,7 +1273,13 @@ const I18N_RESOURCES = {
         "confirm_delete_title": "Benutzer löschen",
         "confirm_delete_desc": "Sie sind im Begriff, Benutzer @{{username}} zu löschen.",
         "delete_remove_sector": "Sektor des Spielers zusammen mit dem Konto löschen",
-        "delete_remove_sector_hint": "Wenn nicht ausgewählt, verbleibt der Sektor in der Gilde als frei (ohne Besitzer)."
+        "delete_remove_sector_hint": "Wenn nicht ausgewählt, verbleibt der Sektor in der Gilde als frei (ohne Besitzer).",
+        "stat_total": "Gesamt",
+        "stat_online": "Online",
+        "stat_blocked": "Gesperrt",
+        "tooltip_online": "Online",
+        "tooltip_offline": "Nie online gesehen",
+        "tooltip_last_seen": "Zuletzt online: {{time}}"
       }
     }
   }

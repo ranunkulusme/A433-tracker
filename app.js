@@ -4014,10 +4014,20 @@ async function renderUsers() {
     const container = document.getElementById('users-table-container');
     if (!container) return;
 
+    const titleEl = c.querySelector('.section-title');
+    if (titleEl) {
+      const baseTitle = typeof t === 'function' ? t('users.title') : 'Управление пользователями гильдии';
+      titleEl.textContent = `🔐 ${baseTitle} (${usersListCache.length})`;
+    }
+
     if (!users || users.length === 0) {
       container.innerHTML = `<div class="empty-state"><p>${typeof t === 'function' ? t('users.empty') : 'Пользователей не найдено'}</p></div>`;
       return;
     }
+
+    const totalCount = users.length;
+    const onlineCount = users.filter(u => u.isOnline).length;
+    const blockedCount = users.filter(u => u.is_blocked || u.isBlocked).length;
 
     const permBadgesMap = {
       view_sectors: { label: 'Секторы', icon: '📦' },
@@ -4029,6 +4039,19 @@ async function renderUsers() {
     };
 
     container.innerHTML = `
+      <div class="users-stats-bar">
+        <span class="badge" style="background:var(--card-bg, #1e293b);border:1px solid var(--border);color:var(--text);padding:6px 12px;font-size:13px;border-radius:6px">
+          👥 ${typeof t === 'function' ? t('users.stat_total') : 'Всего'}: <strong>${totalCount}</strong>
+        </span>
+        <span class="badge" style="background:rgba(46,160,67,0.12);border:1px solid rgba(46,160,67,0.3);color:#2ea043;padding:6px 12px;font-size:13px;border-radius:6px">
+          <span class="user-status-dot online" style="margin-right:4px"></span> ${typeof t === 'function' ? t('users.stat_online') : 'В сети'}: <strong>${onlineCount}</strong>
+        </span>
+        ${blockedCount > 0 ? `
+        <span class="badge" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#ef4444;padding:6px 12px;font-size:13px;border-radius:6px">
+          ⛔ ${typeof t === 'function' ? t('users.stat_blocked') : 'Заблокировано'}: <strong>${blockedCount}</strong>
+        </span>
+        ` : ''}
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -4105,7 +4128,11 @@ async function renderUsers() {
               return `
                 <tr class="${isBlocked ? 'row-blocked' : ''}">
                   <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
-                  <td style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</td>
+                  <td style="white-space:nowrap">
+                    <span class="user-status-dot ${u.isOnline ? 'online' : 'offline'}"
+                          title="${u.isOnline ? (typeof t === 'function' ? t('users.tooltip_online') : 'В сети (онлайн)') : (u.lastActiveAt ? (typeof t === 'function' ? t('users.tooltip_last_seen', { time: formatDateTime(u.lastActiveAt) }) : `Был в сети: ${formatDateTime(u.lastActiveAt)}`) : (typeof t === 'function' ? t('users.tooltip_offline') : 'Не был в сети'))}"></span>
+                    <span style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</span>
+                  </td>
                   <td>${u.playerName ? (u.playerId ? `<a href="#player-${u.playerId}" style="color:var(--accent);font-weight:600;text-decoration:none" title="Перейти к сектору" onclick="event.preventDefault();navigate('player_detail',{id:${u.playerId}})">${escapeHtml(u.playerName)}</a>` : escapeHtml(u.playerName)) : '<span style="color:var(--text3)">—</span>'}</td>
                   <td>
                     <select style="width:auto;padding:3px 8px;font-size:12px" onchange="handleChangeUserRank(${u.id}, this.value)">
@@ -5968,11 +5995,16 @@ function updateRegisterModalForSector(sectorId) {
     ? `Изменить заявку (${escapeHtml(targetSector.name)})`
     : `Регистрация на «${et?.name || 'Ивент'}» (${escapeHtml(targetSector.name)})`;
 
+  const eligibleOfficer = targetSector.officers.find(o => !(o.onlyPersonalPuzzles || o.only_personal_puzzles));
+  const hasExisting = existingReg && targetSector.officers.some(o => String(o.id) === String(existingReg.officerId));
+  const autoSelectedId = hasExisting ? existingReg.officerId : (eligibleOfficer ? eligibleOfficer.id : targetSector.officers[0]?.id);
+
   // populate officers
   offSelect.innerHTML = targetSector.officers.map(o => {
     const c = getCatalogOfficer(o.catalogId);
-    const sel = existingReg && String(existingReg.officerId) === String(o.id);
-    return `<option value="${o.id}" ${sel ? 'selected' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})</option>`;
+    const isOnlyPersonal = Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles);
+    const sel = String(autoSelectedId) === String(o.id);
+    return `<option value="${o.id}" ${sel ? 'selected' : ''} ${isOnlyPersonal ? 'disabled' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})${isOnlyPersonal ? ' [🔒 только личные пазлы — недоступен для ивентов]' : ''}</option>`;
   }).join('');
 
   // populate places
@@ -6014,11 +6046,24 @@ function onRegisterModalChange() {
   const warningBox = document.getElementById('reg-warning-box');
   if (!warningBox) return;
 
-  const officer = (player.officers || []).find(o => o.id === officerId) || player.officers?.[0];
+  const officer = (player.officers || []).find(o => String(o.id) === String(officerId)) || player.officers?.[0];
   if (!officer) {
     warningBox.style.display = 'none';
     return;
   }
+
+  const isOnlyPersonal = Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles);
+  const submitBtn = document.getElementById('reg-btn-submit');
+  if (isOnlyPersonal) {
+    warningBox.style.display = 'block';
+    warningBox.className = 'auth-alert warning';
+    warningBox.innerHTML = `
+      🔒 <strong>Офицер недоступен для ивентов:</strong> у офицера <em>${escapeHtml(officerLabel(officer))}</em> указано, что он качается только за счет личных пазлов. Он не участвует в ивентах и автоподборе.
+    `;
+    if (submitBtn) submitBtn.disabled = true;
+    return;
+  }
+  if (submitBtn) submitBtn.disabled = false;
 
   const cat = getCatalogOfficer(officer.catalogId);
   const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: 180, today: ev.dateFrom });
@@ -6069,6 +6114,17 @@ async function handleSubmitRegistration() {
 
   if (!officerId) {
     toast('Выберите офицера для прокачки', 'error');
+    return;
+  }
+
+  const sector = getUserSectors().find(s => Number(s.id) === Number(sectorId))
+    || getPlayer(sectorId)
+    || (myCabinetProfile && Number(myCabinetProfile.id) === Number(sectorId) ? myCabinetProfile : null)
+    || getPlayer(currentUser?.playerId)
+    || myCabinetProfile;
+  const officer = (sector?.officers || []).find(o => String(o.id) === String(officerId));
+  if (officer && (officer.onlyPersonalPuzzles || officer.only_personal_puzzles)) {
+    toast('Этот офицер качается только за счет личных пазлов и не может участвовать в ивентах', 'error');
     return;
   }
 

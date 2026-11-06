@@ -368,6 +368,78 @@ test('smartAutoPick prioritizes full-deficit candidate over candidate with 70-99
   assert.equal(pick[0].isEfficient, true);
 });
 
+test('smartAutoPick excludes officers with onlyPersonalPuzzles from event assignments', () => {
+  const catalog = [{ id: 'cat-std', name: 'Нейтон', generation: 8, couponPerPuzzle: 500 }];
+  const places = [{ place: 1, label: '1 место', coupons: 12500 }];
+  const players = [
+    {
+      id: 1,
+      name: 'Игрок 1',
+      sector: { killPoints: 100 },
+      stock: { coupons: 0, puzzles: 0 },
+      officers: [
+        { id: 'o1', catalogId: 'cat-std', level: 100, coupons: 0, onlyPersonalPuzzles: true }
+      ]
+    },
+    {
+      id: 2,
+      name: 'Игрок 2',
+      sector: { killPoints: 50 },
+      stock: { coupons: 0, puzzles: 0 },
+      officers: [
+        { id: 'o2', catalogId: 'cat-std', level: 100, coupons: 0, onlyPersonalPuzzles: false }
+      ]
+    }
+  ];
+
+  const pick = smartAutoPick({ places, players, officerCatalog: catalog, eventDate: '2026-10-24' });
+  // Игрок 1 должен быть пропущен, так как качается только за счёт личных пазлов! Назначен Игрок 2.
+  assert.equal(pick[0].playerId, 2);
+  assert.equal(pick[0].officerId, 'o2');
+});
+
+test('smartAutoPickWithRegistrations excludes candidates and registrations with onlyPersonalPuzzles', () => {
+  const event = {
+    places: [
+      { place: 1, label: '1 место', coupons: 12500 },
+      { place: 2, label: '2 место', coupons: 6500 }
+    ]
+  };
+  const catalog = [{ id: 'cat-std', name: 'Нейтон', generation: 8, couponPerPuzzle: 500 }];
+  const players = [
+    {
+      id: 1,
+      name: 'Игрок 1',
+      sector: { killPoints: 100 },
+      stock: { coupons: 0, puzzles: 0 },
+      officers: [{ id: 'o1', catalogId: 'cat-std', level: 100, onlyPersonalPuzzles: true }]
+    },
+    {
+      id: 2,
+      name: 'Игрок 2',
+      sector: { killPoints: 80 },
+      stock: { coupons: 0, puzzles: 0 },
+      officers: [{ id: 'o2', catalogId: 'cat-std', level: 100, onlyPersonalPuzzles: false }]
+    }
+  ];
+  const registrations = [
+    { playerId: 1, officerId: 'o1', desiredPlace: 1 },
+    { playerId: 2, officerId: 'o2', desiredPlace: 1 }
+  ];
+
+  const result = smartAutoPickWithRegistrations({
+    event,
+    players,
+    registrations,
+    officerCatalog: catalog
+  });
+
+  // Игрок 1 имеет onlyPersonalPuzzles, поэтому 1 место получает Игрок 2, а Игрок 1 не попадает в назначения
+  assert.equal(result.assignments[0].playerId, 2);
+  assert.equal(result.assignments[1].playerId, null);
+  assert.ok(!result.assignments.some(a => a.playerId === 1));
+});
+
 test('smartAutoPick handles duplicate place numbers without duplicate players', () => {
   const catalog = [{ id: 'cat-std', name: 'Нейтон', generation: 8, couponPerPuzzle: 500 }];
   const places = [
