@@ -5516,17 +5516,17 @@ function calCard(ev, status) {
         const placeLabel = myPlace === 0
           ? (typeof t === 'function' ? t('events.any_place') : 'Любое')
           : (placeInfo(et, myPlace, ev.dateFrom)?.label || (typeof t === 'function' ? t('events.place_num', { place: myPlace }) : `Место ${myPlace}`));
-        const sector = userSectors.find(s => Number(s.id) === Number(reg.playerId)) || getPlayer(reg.playerId) || { name: 'Сектор' };
+        const sector = userSectors.find(s => Number(s.id) === Number(reg.playerId)) || getPlayer(reg.playerId) || { name: reg.playerName || 'Сектор' };
+        const sectorName = sector.name || reg.playerName || 'Сектор';
         const regOff = (sector.officers || []).find(o => o.id === reg.officerId)
           || (state.players || []).flatMap(p => p.officers || []).find(o => o.id === reg.officerId)
           || (myCabinetProfile?.officers || []).find(o => o.id === reg.officerId);
         const regOfficerName = regOff ? officerLabel(regOff) : (reg.officerId || '—');
-        const showSectorName = userSectors.length > 1;
 
         return `
           <div class="cal-reg-item" onclick="event.stopPropagation()">
             <div style="min-width:0;overflow:hidden;text-overflow:ellipsis">
-              ${showSectorName ? `<strong>[${escapeHtml(sector.name)}]</strong> ` : ''}
+              <strong>[${escapeHtml(sectorName)}]</strong>
               <span>✓ ${escapeHtml(regOfficerName)}</span>
               <span class="badge badge-none" style="margin-left:4px;font-size:11px">${escapeHtml(placeLabel)}</span>
             </div>
@@ -5655,19 +5655,19 @@ function renderEventDetail(eventId) {
       const regItems = myRegs.map(reg => {
         const myPlace = Number(reg.desiredPlace) || 0;
         const placeLabel = myPlace === 0 ? 'Любое подходящее' : (placeInfo(et, myPlace, ev.dateFrom)?.label || `Место ${myPlace}`);
-        const sector = userSectors.find(s => Number(s.id) === Number(reg.playerId)) || getPlayer(reg.playerId) || { name: 'Сектор' };
+        const sector = userSectors.find(s => Number(s.id) === Number(reg.playerId)) || getPlayer(reg.playerId) || { name: reg.playerName || 'Сектор' };
+        const sectorName = sector.name || reg.playerName || 'Сектор';
         const regOff = (sector.officers || []).find(o => o.id === reg.officerId)
           || (state.players || []).flatMap(p => p.officers || []).find(o => o.id === reg.officerId)
           || (myCabinetProfile?.officers || []).find(o => o.id === reg.officerId);
         const regOfficerName = regOff ? officerLabel(regOff) : (reg.officerId || '—');
-        const showSectorName = userSectors.length > 1;
 
         return `
           <div class="cal-reg-badge" style="margin-top:10px;padding:12px 16px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-            <div>
-              ${showSectorName ? `<strong>[${escapeHtml(sector.name)}]</strong> ` : ''}
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span class="badge badge-info" style="font-size:12px">🏰 Сектор: <strong>${escapeHtml(sectorName)}</strong></span>
               <span>✓ Подана заявка: <strong>${escapeHtml(regOfficerName)}</strong></span>
-              <span class="badge badge-none" style="margin-left:6px">${escapeHtml(placeLabel)}</span>
+              <span class="badge badge-none" style="margin-left:4px">${escapeHtml(placeLabel)}</span>
             </div>
             <div style="display:flex;gap:6px">
               <button class="btn-ghost btn-sm" onclick="openRegisterModal(${ev.id},${reg.playerId})">✏️ Изменить</button>
@@ -5699,6 +5699,87 @@ function renderEventDetail(eventId) {
     }
   }
 
+  const canSeeAllRegistrations = canManage() || hasPermission('manage_events');
+  if (canSeeAllRegistrations && ev.registrations === undefined) {
+    apiFetch(`/api/events/${eventId}`).then(fresh => {
+      if (fresh && Array.isArray(fresh.registrations)) {
+        ev.registrations = fresh.registrations;
+        const localEv = getEvent(eventId);
+        if (localEv) localEv.registrations = fresh.registrations;
+        if (currentPage === 'event_detail' && String(pageParams) === String(eventId)) {
+          renderEventDetail(eventId);
+        }
+      }
+    }).catch(() => {});
+  }
+
+  let registrationsBlock = '';
+  const allRegistrations = ev.registrations || (ev.myRegistrations || []);
+  if (canSeeAllRegistrations || allRegistrations.length > 0) {
+    let regRows = '';
+    if (allRegistrations.length === 0) {
+      regRows = `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">Заявок на участие пока нет</td></tr>`;
+    } else {
+      regRows = allRegistrations.map(r => {
+        const player = getPlayer(r.playerId);
+        const sectorName = r.playerName || player?.name || `Сектор #${r.playerId}`;
+        const off = player?.officers?.find(o => o.id === r.officerId);
+        const cat = off ? getCatalogOfficer(off.catalogId) : null;
+        const desired = Number(r.desiredPlace) || 0;
+        const placeLabel = desired === 0 ? 'Любое подходящее' : (placeInfo(et, desired, ev.dateFrom)?.label || `Место ${desired}`);
+        const isAssignedToDesired = ev.assignments.some(a => Number(a.playerId) === Number(r.playerId) && (Number(a.place) === desired || desired === 0));
+        const isAssignedOther = !isAssignedToDesired && ev.assignments.some(a => Number(a.playerId) === Number(r.playerId));
+
+        let statusBadge = `<span class="badge badge-none" style="font-size:11px">Не назначен</span>`;
+        if (isAssignedToDesired) {
+          statusBadge = `<span class="badge badge-success" style="font-size:11px">Заявка учтена ✓</span>`;
+        } else if (isAssignedOther) {
+          statusBadge = `<span class="badge badge-warning" style="font-size:11px">Назначен иначе</span>`;
+        }
+
+        const def = off && cat ? calculateOfficerDeficit({ officer: off, catalogItem: cat, player, targetLevel: 180, today: ev.dateFrom }) : null;
+        const deficitCoupons = def ? `${fmtNum(def.deficitCoupons)} куп.` : '—';
+        const formattedDate = r.createdAt ? formatDateTime(r.createdAt) : '—';
+
+        return `
+          <tr>
+            <td><strong>${player ? playerLink(player) : escapeHtml(sectorName)}</strong></td>
+            <td style="color:var(--text2)">${off ? officerLink(off) : escapeHtml(r.officerId || '—')}</td>
+            <td style="font-family:var(--mono)">${off ? fmtNum(off.level) : '—'}</td>
+            <td><span class="badge badge-none">${escapeHtml(placeLabel)}</span></td>
+            <td style="font-family:var(--mono);color:var(--text2)">${deficitCoupons}</td>
+            <td>${statusBadge}</td>
+            <td style="font-size:12px;color:var(--text3)">${formattedDate}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    registrationsBlock = `
+      <div class="section-header" style="margin-top:28px">
+        <div class="section-title">📋 Поданные заявки участников (${allRegistrations.length})</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Сектор (База / Игрок)</th>
+              <th>Офицер</th>
+              <th>Уровень</th>
+              <th>Желаемое место</th>
+              <th>Дефицит</th>
+              <th>Статус</th>
+              <th>Дата подачи</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${regRows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   const c = document.getElementById('content');
   c.innerHTML = `
     <div style="margin-bottom:20px">
@@ -5718,6 +5799,7 @@ function renderEventDetail(eventId) {
       </div>
     </div>
     ${regBanner}
+    ${registrationsBlock}
 
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
@@ -5809,17 +5891,30 @@ function openRegisterModal(eventId, maybeSectorId = null) {
   // Sector group visibility & selector
   const sectorGroup = document.getElementById('reg-sector-group');
   const sectorSelect = document.getElementById('reg-sector-select');
-  if (sectorGroup && sectorSelect) {
+  const sectorStatic = document.getElementById('reg-sector-static');
+  if (sectorGroup) {
+    sectorGroup.style.display = 'block';
     if (userSectors.length > 1) {
-      sectorGroup.style.display = 'block';
-      sectorSelect.innerHTML = userSectors.map(s => {
-        const title = (typeof logic !== 'undefined' && logic.formatSectorTitle)
-          ? logic.formatSectorTitle(s)
-          : `${s.name} (VIP ${s.sector?.vipLevel || 0})`;
-        return `<option value="${s.id}" ${Number(s.id) === Number(selectedSectorId) ? 'selected' : ''}>${escapeHtml(title)}</option>`;
-      }).join('');
+      if (sectorSelect) {
+        sectorSelect.style.display = 'block';
+        sectorSelect.innerHTML = userSectors.map(s => {
+          const title = (typeof logic !== 'undefined' && logic.formatSectorTitle)
+            ? logic.formatSectorTitle(s)
+            : `${s.name} (VIP ${s.sector?.vipLevel || 0})`;
+          return `<option value="${s.id}" ${Number(s.id) === Number(selectedSectorId) ? 'selected' : ''}>${escapeHtml(title)}</option>`;
+        }).join('');
+      }
+      if (sectorStatic) sectorStatic.style.display = 'none';
     } else {
-      sectorGroup.style.display = 'none';
+      if (sectorSelect) sectorSelect.style.display = 'none';
+      if (sectorStatic) {
+        sectorStatic.style.display = 'block';
+        const singleSec = userSectors[0];
+        const secTitle = (typeof logic !== 'undefined' && logic.formatSectorTitle)
+          ? logic.formatSectorTitle(singleSec)
+          : `${singleSec.name} (VIP ${singleSec.sector?.vipLevel || 0})`;
+        sectorStatic.innerHTML = `🏰 База: <strong>${escapeHtml(secTitle)}</strong>`;
+      }
     }
   }
 
