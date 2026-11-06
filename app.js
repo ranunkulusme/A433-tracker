@@ -8808,9 +8808,11 @@ function confirmDeletePlayer(id) {
 
 // ─── OFFICER CATALOG MODAL ───────────────────────────────────
 let editCatalogOfficerId = null;
+let isFoCouponManuallyEdited = false;
 
 function openOfficerCatalogModal(id=null) {
   editCatalogOfficerId = id;
+  isFoCouponManuallyEdited = Boolean(id);
   const officer = id ? getCatalogOfficer(id) : null;
   const titleEl = document.getElementById('modal-officer-title');
   if (titleEl) titleEl.textContent = id ? 'Редактировать офицера каталога' : 'Добавить офицера в каталог';
@@ -8825,7 +8827,13 @@ function openOfficerCatalogModal(id=null) {
   const upTypeSelect = document.getElementById('fo-upgrade-type');
   if (upTypeSelect) upTypeSelect.value = upType;
   const coupInput = document.getElementById('fo-coupon-per-puzzle');
-  if (coupInput) coupInput.value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 720);
+  if (coupInput) {
+    if (officer) {
+      coupInput.value = officer?.couponPerPuzzle ?? (upType === 'special' ? 0 : 500);
+    } else {
+      coupInput.value = upType === 'special' ? 0 : 500;
+    }
+  }
   const starCoupInput = document.getElementById('fo-star-coupon-cost');
   if (starCoupInput) starCoupInput.value = officer?.starCouponCost ?? 360;
   const bInput = document.getElementById('fo-medals-before');
@@ -8833,7 +8841,86 @@ function openOfficerCatalogModal(id=null) {
   const tInput = document.getElementById('fo-medals-training');
   if (tInput) tInput.value = officer?.medalsTraining ?? 900;
   updateOfficerCatalogTotalMedals();
+  updateCatalogOfficerCostSuggestion();
   openModal('modal-officer');
+}
+
+function updateCatalogOfficerCostSuggestion() {
+  const upTypeSelect = document.getElementById('fo-upgrade-type');
+  const upType = upTypeSelect ? upTypeSelect.value : 'standard';
+  const hintEl = document.getElementById('fo-coupon-hint');
+  const coupInput = document.getElementById('fo-coupon-per-puzzle');
+
+  if (upType === 'special') {
+    if (hintEl) {
+      hintEl.style.display = 'block';
+      hintEl.className = 'coupon-auto-hint';
+      hintEl.textContent = '🔒 Специальный офицер: качается только за личные медали (0 купонов)';
+    }
+    if (coupInput && !editCatalogOfficerId) {
+      coupInput.value = 0;
+    }
+    return;
+  }
+
+  const gen = Math.max(1, parseInt(document.getElementById('fo-generation')?.value) || 8);
+  const type = document.getElementById('fo-type')?.value || 'Танк';
+
+  const suggestFn = (typeof logic !== 'undefined' && logic.suggestOfficerPuzzleCost)
+    ? logic.suggestOfficerPuzzleCost
+    : (typeof suggestOfficerPuzzleCost === 'function' ? suggestOfficerPuzzleCost : null);
+
+  if (!suggestFn) return;
+
+  const res = suggestFn({
+    generation: gen,
+    type: type,
+    upgradeType: upType,
+    catalog: state.officerCatalog || [],
+    roundUpStep: 50
+  });
+
+  if (!res || !hintEl) return;
+
+  const currentVal = parseInt(coupInput?.value) || 0;
+
+  // Если это добавление нового офицера и пользователь ещё не редактировал поле вручную
+  if (!editCatalogOfficerId && !isFoCouponManuallyEdited && coupInput) {
+    coupInput.value = res.suggestedCost;
+  }
+
+  // Обновляем текст подсказки
+  if (!isFoCouponManuallyEdited) {
+    hintEl.className = 'coupon-auto-hint';
+    hintEl.innerHTML = escapeHtml(res.hintText);
+    hintEl.style.display = 'block';
+  } else {
+    // Пользователь переопределил значение вручную
+    const isDifferent = currentVal !== res.suggestedCost;
+    if (isDifferent) {
+      hintEl.className = 'coupon-auto-hint manual-override';
+      hintEl.innerHTML = `💡 Рекомендация для S${gen} ${escapeHtml(type)}: <strong>${fmtNum(res.suggestedCost)}</strong> купонов. <button type="button" class="btn-reset-link" onclick="resetFoCouponToAuto()">Применить авторасчёт</button>`;
+      hintEl.style.display = 'block';
+    } else {
+      hintEl.className = 'coupon-auto-hint';
+      hintEl.innerHTML = escapeHtml(res.hintText);
+      hintEl.style.display = 'block';
+    }
+  }
+}
+
+function onFoTypeOrGenChange() {
+  updateCatalogOfficerCostSuggestion();
+}
+
+function onFoCouponManualInput() {
+  isFoCouponManuallyEdited = true;
+  updateCatalogOfficerCostSuggestion();
+}
+
+function resetFoCouponToAuto() {
+  isFoCouponManuallyEdited = false;
+  updateCatalogOfficerCostSuggestion();
 }
 
 function updateOfficerCatalogTotalMedals() {
@@ -8853,8 +8940,9 @@ function onFoUpgradeTypeChange(val) {
   if (val === 'special') {
     couponInput.value = 0;
   } else if (parseInt(couponInput.value) === 0) {
-    couponInput.value = 720;
+    isFoCouponManuallyEdited = false;
   }
+  updateCatalogOfficerCostSuggestion();
 }
 
 async function saveOfficerCatalog() {
@@ -11341,4 +11429,10 @@ if (typeof window !== 'undefined') {
   window.renderOfficerCardModeSelectorHtml = renderOfficerCardModeSelectorHtml;
   window.renderSectorOfficerModeSelectorHtml = renderSectorOfficerModeSelectorHtml;
   window.checkTelegramBindStatus = checkTelegramBindStatus;
+  window.openOfficerCatalogModal = openOfficerCatalogModal;
+  window.updateCatalogOfficerCostSuggestion = updateCatalogOfficerCostSuggestion;
+  window.onFoTypeOrGenChange = onFoTypeOrGenChange;
+  window.onFoCouponManualInput = onFoCouponManualInput;
+  window.resetFoCouponToAuto = resetFoCouponToAuto;
+  window.onFoUpgradeTypeChange = onFoUpgradeTypeChange;
 }
