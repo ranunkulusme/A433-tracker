@@ -101,14 +101,7 @@ function sanitizeSkills(skills) {
 
 function sanitizeInvested(invested) {
   if (!invested || typeof invested !== 'object') return { ...logic.INVESTED_ZERO };
-  return {
-    starCoupons: Math.max(0, Math.round(Number(invested.starCoupons) || 0)),
-    legendaryStars1: Math.max(0, Math.round(Number(invested.legendaryStars1) || 0)),
-    legendaryStars2: Math.max(0, Math.round(Number(invested.legendaryStars2) || 0)),
-    legendaryStars3: Math.max(0, Math.round(Number(invested.legendaryStars3) || 0)),
-    coupons: Math.max(0, Math.round(Number(invested.coupons) || 0)),
-    puzzles: Math.max(0, Math.round(Number(invested.puzzles) || 0)),
-  };
+  return logic.normalizeInvested(invested);
 }
 
 function sanitizeVipPoints(pts) {

@@ -1784,6 +1784,121 @@ test('calculateSkillStockDelta and calculateLevelStockDelta track invested and d
   const untrackedLvl = calculateLevelStockDelta(180, 0, stock, 600, 'standard', INVESTED_ZERO);
   assert.strictEqual(untrackedLvl.delta.coupons, 0);
   assert.strictEqual(untrackedLvl.delta.puzzles, 0);
+
+  // 7. Без параметра invested: понижение уровней НЕ должно генерировать миллионы купонов из воздуха!
+  const noInvestedRefund = calculateLevelStockDelta(100, 0, stock, 600, 'standard');
+  assert.strictEqual(noInvestedRefund.delta.coupons, 0, 'Без переданного invested купоны из воздуха не начисляются');
+  assert.strictEqual(noInvestedRefund.delta.puzzles, 0);
+});
+
+test('isolated rollback of skills does not refund or zero level resources in invested', () => {
+  const { calculateSkillStockDelta, calculateLevelStockDelta, INVESTED_ZERO } = require('./logic.js');
+
+  const stock = { coupons: 60000, puzzles: 500 };
+  let inv = { ...INVESTED_ZERO };
+
+  // 1. Прокачиваем уровень 0 -> 40 ур. (200 пазлов: 60 000 купонов (100 пазл.) + 100 пазлов со склада при курсе 600)
+  const lvlUp = calculateLevelStockDelta(0, 40, stock, 600, 'standard', inv);
+  assert.strictEqual(lvlUp.canAfford, true);
+  assert.strictEqual(lvlUp.delta.coupons, -60000);
+  assert.strictEqual(lvlUp.delta.puzzles, -100);
+  assert.strictEqual(lvlUp.newInvested.levelCoupons, 60000);
+  assert.strictEqual(lvlUp.newInvested.levelPuzzles, 100);
+  inv = lvlUp.newInvested;
+
+  // Склад после уровней: 0 купонов, 400 пазлов
+  const stockAfterLvl = { coupons: 0, puzzles: 400 };
+
+  // 2. Прокачиваем навыки 1-1-1-1 -> 5-1-1-1 (50 медалей: 0 купонов + 50 медалей со склада)
+  const skillUp = calculateSkillStockDelta([1, 1, 1, 1], [5, 1, 1, 1], stockAfterLvl, 600, 'standard', 690, inv);
+  assert.strictEqual(skillUp.canAfford, true);
+  assert.strictEqual(skillUp.delta.coupons, 0);
+  assert.strictEqual(skillUp.delta.puzzles, -50);
+  assert.strictEqual(skillUp.newInvested.skillCoupons, 0);
+  assert.strictEqual(skillUp.newInvested.skillPuzzles, 50);
+  assert.strictEqual(skillUp.newInvested.levelCoupons, 60000, 'Ресурсы уровня должны сохраниться в inv');
+  assert.strictEqual(skillUp.newInvested.levelPuzzles, 100, 'Ресурсы уровня должны сохраниться в inv');
+  inv = skillUp.newInvested;
+
+  // 3. Откатываем ТОЛЬКО навыки 5-1-1-1 -> 1-1-1-1:
+  // Должны вернуться ровно 50 медалей и 0 купонов! Ресурсы уровня должны остаться в inv!
+  const stockAfterSkills = { coupons: 0, puzzles: 350 };
+  const skillRefund = calculateSkillStockDelta([5, 1, 1, 1], [1, 1, 1, 1], stockAfterSkills, 600, 'standard', 690, inv);
+  assert.strictEqual(skillRefund.delta.coupons, 0, 'Откат навыков не должен возвращать купоны уровня!');
+  assert.strictEqual(skillRefund.delta.puzzles, 50, 'Откат навыков должен вернуть ровно 50 медалей навыков');
+  assert.strictEqual(skillRefund.newInvested.skillCoupons, 0);
+  assert.strictEqual(skillRefund.newInvested.skillPuzzles, 0);
+  assert.strictEqual(skillRefund.newInvested.levelCoupons, 60000, 'Ресурсы уровня НЕ должны обнуляться при откате навыков!');
+  assert.strictEqual(skillRefund.newInvested.levelPuzzles, 100, 'Ресурсы уровня НЕ должны обнуляться при откате навыков!');
+  inv = skillRefund.newInvested;
+
+  // 4. Откатываем уровень 40 -> 0:
+  // Теперь должны вернуться ровно 60 000 купонов и 100 пазлов уровня!
+  const lvlRefund = calculateLevelStockDelta(40, 0, { coupons: 0, puzzles: 400 }, 600, 'standard', inv);
+  assert.strictEqual(lvlRefund.delta.coupons, 60000);
+  assert.strictEqual(lvlRefund.delta.puzzles, 100);
+  assert.strictEqual(lvlRefund.newInvested.levelCoupons, 0);
+  assert.strictEqual(lvlRefund.newInvested.levelPuzzles, 0);
+});
+
+test('calculateInitialOfficerStockDeduction and full reset cycle preserves exact warehouse balance', () => {
+  const { calculateInitialOfficerStockDeduction, calculateOfficerStockReset } = require('./logic.js');
+
+  const initialStock = {
+    coupons: 50000,
+    puzzles: 1500,
+    starCoupons: 100000,
+    legendaryStars1: 10,
+    legendaryStars2: 10,
+    legendaryStars3: 100
+  };
+
+  const catalogOfficer = {
+    id: 'nathon',
+    name: 'Нейтон',
+    generation: 8,
+    couponPerPuzzle: 720,
+    upgradeType: 'standard',
+    starCouponCost: 360,
+    medalsBeforeTraining: 690
+  };
+
+  // Создаем офицера с уровнем 80, 5★, навыки 5-5-5-5
+  const deduction = calculateInitialOfficerStockDeduction({
+    officer: { level: 80, stars: 5, skills: [5, 5, 5, 5] },
+    stock: initialStock,
+    catalogOfficer,
+    isRetrospective: false
+  });
+
+  assert.strictEqual(deduction.canAfford, true);
+  assert.ok(deduction.invested.levelCoupons > 0 || deduction.invested.levelPuzzles > 0);
+  assert.ok(deduction.invested.skillCoupons > 0 || deduction.invested.skillPuzzles > 0);
+  assert.ok(deduction.invested.starCoupons > 0 || deduction.invested.legendaryStars3 > 0);
+
+  // Теперь сбрасываем офицера обратно в стоковое состояние
+  const resetRes = calculateOfficerStockReset({
+    officer: {
+      level: 80,
+      stars: 5,
+      skills: [5, 5, 5, 5],
+      invested: deduction.invested
+    },
+    stock: deduction.newStock,
+    catalogOfficer
+  });
+
+  // Проверяем: состояние склада после сброса ДОЛЖНО БЫТЬ 1 В 1 РАВНО ИСХОДНОМУ!
+  assert.strictEqual(resetRes.newStock.coupons, initialStock.coupons, 'Купоны должны вернуться ровно в исходном количестве');
+  assert.strictEqual(resetRes.newStock.puzzles, initialStock.puzzles, 'Медали должны вернуться ровно в исходном количестве');
+  assert.strictEqual(resetRes.newStock.starCoupons, initialStock.starCoupons, 'Купоны звёзд должны совпасть с исходными');
+  assert.strictEqual(resetRes.newStock.legendaryStars1, initialStock.legendaryStars1);
+  assert.strictEqual(resetRes.newStock.legendaryStars2, initialStock.legendaryStars2);
+  assert.strictEqual(resetRes.newStock.legendaryStars3, initialStock.legendaryStars3);
+  assert.strictEqual(resetRes.newInvested.coupons, 0);
+  assert.strictEqual(resetRes.newInvested.puzzles, 0);
+  assert.strictEqual(resetRes.newInvested.levelCoupons, 0);
+  assert.strictEqual(resetRes.newInvested.skillCoupons, 0);
 });
 
 test('calculateDurationDays and formatDayRange correctly handle same-week and weekend-crossing days', () => {

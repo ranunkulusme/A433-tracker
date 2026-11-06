@@ -3186,6 +3186,7 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
           </div>
         </div>
         <div style="display:flex;gap:4px">
+          <button type="button" class="action-btn" title="${typeof t === 'function' ? t('officers.btn_reset_stock') : '↩️ Сбросить в сток'}" onclick="openResetMyOfficerModal('${o.id}')">↩️</button>
           <button type="button" class="action-btn" title="Редактировать уровень и купоны" onclick="openEditMyOfficerModal('${o.id}')">✏️</button>
           <button type="button" class="action-btn danger" title="Удалить офицера" onclick="deleteMyOfficer('${o.id}', '${escapeHtml(officerLabel(o))}')">🗑️</button>
         </div>
@@ -3495,6 +3496,76 @@ function openEditMyOfficerModal(officerId) {
   openModal('modal-my-officer');
 }
 
+function openResetMyOfficerModal(officerId) {
+  const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(officerId));
+  if (!off) return;
+  const cat = getCatalogOfficer(off.catalogId);
+  const resetFn = (typeof logic !== 'undefined' && logic.calculateOfficerStockReset) ? logic.calculateOfficerStockReset : calculateOfficerStockReset;
+  const res = resetFn({ officer: off, stock: myCabinetProfile.stock, catalogOfficer: cat });
+
+  const contentEl = document.getElementById('modal-reset-officer-content');
+  if (!contentEl) return;
+  const d = res.delta;
+  const chips = [];
+  if (d.coupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🏷️ Купоны: <strong>+${fmtNum(d.coupons)}</strong></span>`);
+  if (d.puzzles > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🧩 Медали: <strong>+${fmtNum(d.puzzles)}</strong></span>`);
+  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
+  if (d.legendaryStars3 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды III: <strong>+${d.legendaryStars3}</strong></span>`);
+  if (d.legendaryStars2 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды II: <strong>+${d.legendaryStars2}</strong></span>`);
+  if (d.legendaryStars1 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды I: <strong>+${d.legendaryStars1}</strong></span>`);
+
+  const refundSummary = chips.length > 0
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${chips.join('')}</div>`
+    : `<div style="color:var(--text3);font-size:12px;margin-top:8px">Офицер вне трекера или в ретро-режиме: списаний со склада не было, возврат 0.</div>`;
+
+  contentEl.innerHTML = `
+    <p style="margin-bottom:12px">Вы действительно хотите сбросить офицера <strong>${escapeHtml(officerLabel(off))}</strong> в начальное состояние?</p>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:12px;font-size:12px">
+      <div>Текущее состояние: <strong>Ур. ${off.level}</strong>, <strong>${off.stars}★</strong>, навыки <strong>${(off.skills || [1,1,1,1]).join('-')}</strong></div>
+      <div style="margin-top:4px;color:var(--text2)">Новое состояние: <strong>Ур. 0</strong>, <strong>0★</strong>, навыки <strong>1-1-1-1</strong>, 0 купонов</div>
+    </div>
+    <div style="font-weight:600;font-size:12.5px">Ресурсы, которые вернутся на склад:</div>
+    ${refundSummary}
+  `;
+
+  const confirmBtn = document.getElementById('btn-confirm-reset-officer');
+  if (confirmBtn) {
+    confirmBtn.onclick = async () => {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Сброс...';
+      try {
+        await apiFetch(`/api/my-profile/officers/${officerId}`, {
+          method: 'PUT',
+          body: { ...res.resetOfficer, invested: res.newInvested }
+        });
+        await apiFetch('/api/my-profile', { method: 'PUT', body: { stock: res.newStock } });
+        myCabinetProfile.stock = res.newStock;
+        Object.assign(off, res.resetOfficer);
+        off.invested = res.newInvested;
+        if (state.players) {
+          for (const p of state.players) {
+            if (p.id === myCabinetProfile.id) {
+              p.stock = res.newStock;
+              const po = (p.officers || []).find(o => String(o.id) === String(officerId));
+              if (po) { Object.assign(po, res.resetOfficer); po.invested = res.newInvested; }
+            }
+          }
+        }
+        closeModal('modal-reset-officer');
+        toast(typeof t === 'function' ? t('officers.toast_reset_success') : 'Офицер сброшен в стоковое состояние, ресурсы возвращены на склад');
+        await renderMyCabinet();
+      } catch (err) {
+        toast('Ошибка сброса офицера: ' + (err.message || err), 'error');
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Сбросить в сток';
+      }
+    };
+  }
+
+  openModal('modal-reset-officer');
+}
+
 async function saveMyOfficerSubmit() {
   const level = Math.max(0, Math.min(180, parseInt(document.getElementById('my-officer-level').value) || 0));
   const coupons = Math.max(0, parseInt(document.getElementById('my-officer-coupons').value) || 0);
@@ -3507,29 +3578,75 @@ async function saveMyOfficerSubmit() {
   const isRetro = document.getElementById('my-officer-retro-on')?.checked ?? true;
 
   let newStock = null;
-  let levelStockDelta = null;
+  let newInvested = null;
 
   if (!isRetro && myCabinetProfile?.stock) {
     if (myOfficerEditId) {
       const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(myOfficerEditId));
-      if (oldOff && oldOff.level !== level) {
+      if (oldOff) {
         const cat = getCatalogOfficer(oldOff.catalogId);
         const rawCost = Number(cat?.couponPerPuzzle);
         const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
         const upgradeType = cat?.upgradeType || 'standard';
-        const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-        levelStockDelta = deltaFn(oldOff.level, level, myCabinetProfile.stock, costPerPuzzle, upgradeType);
+        const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
+        const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
 
-        if (!levelStockDelta.canAfford) {
-          toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
-          return;
+        let curStock = { ...myCabinetProfile.stock };
+        const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
+        let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
+        let hasChanges = false;
+
+        // 1. Level
+        if (oldOff.level !== level) {
+          const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
+          const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
+          if (!levelStockDelta.canAfford) {
+            toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
+            return;
+          }
+          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
+          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
+          if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
+          hasChanges = true;
         }
 
-        newStock = {
-          ...myCabinetProfile.stock,
-          coupons: Math.max(0, (myCabinetProfile.stock.coupons || 0) + levelStockDelta.delta.coupons),
-          puzzles: Math.max(0, (myCabinetProfile.stock.puzzles || 0) + levelStockDelta.delta.puzzles),
-        };
+        // 2. Stars
+        const oldStars = Number(oldOff.stars) || 0;
+        if (oldStars !== stars) {
+          const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
+          const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
+          if (!starRes.canAfford) {
+            toast(`❌ Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.`, 'error');
+            return;
+          }
+          curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
+          curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
+          curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
+          curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
+          if (starRes.newInvested) curInv = starRes.newInvested;
+          hasChanges = true;
+        }
+
+        // 3. Skills
+        const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
+        const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
+        if (hasSkillDiff) {
+          const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
+          const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
+          if (!skillRes.canAfford) {
+            toast(`❌ Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`, 'error');
+            return;
+          }
+          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
+          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
+          if (skillRes.newInvested) curInv = skillRes.newInvested;
+          hasChanges = true;
+        }
+
+        if (hasChanges) {
+          newStock = curStock;
+          newInvested = curInv;
+        }
       }
     }
   }
@@ -3538,7 +3655,15 @@ async function saveMyOfficerSubmit() {
     if (myOfficerEditId) {
       const updatedOffData = await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
         method: 'PUT',
-        body: { level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles }
+        body: {
+          level,
+          coupons,
+          stars,
+          skills,
+          personalPuzzles,
+          onlyPersonalPuzzles,
+          ...(newInvested ? { invested: newInvested } : {})
+        }
       });
       if (newStock) {
         await apiFetch('/api/my-profile', {
@@ -3564,6 +3689,7 @@ async function saveMyOfficerSubmit() {
           off.personalPuzzles = personalPuzzles;
           off.onlyPersonalPuzzles = onlyPersonalPuzzles;
         }
+        if (newInvested) off.invested = newInvested;
       }
       if (state.players) {
         for (const p of state.players) {
@@ -3579,6 +3705,7 @@ async function saveMyOfficerSubmit() {
                 po.personalPuzzles = personalPuzzles;
                 po.onlyPersonalPuzzles = onlyPersonalPuzzles;
               }
+              if (newInvested) po.invested = newInvested;
             }
           }
         }
@@ -6495,6 +6622,7 @@ function renderPlayerDetail(playerId) {
             const modeHtml = renderSectorOfficerModeSelectorHtml(p.id, o.id, canEditSector);
             const actionsHtml = canEditSector ? `
               <div style="display:flex;gap:4px">
+                <button class="action-btn" title="${typeof t === 'function' ? t('officers.btn_reset_stock') : '↩️ Сбросить в сток'}" onclick="openResetSectorOfficerModal(${p.id}, '${o.id}')">↩️</button>
                 <button class="action-btn" title="Редактировать" onclick="openEditSectorOfficerModal(${p.id}, '${o.id}')">✏️</button>
                 <button class="action-btn danger" title="Удалить" onclick="confirmDeleteSectorOfficer(${p.id}, '${o.id}')">🗑️</button>
               </div>
@@ -7253,6 +7381,77 @@ function openEditSectorOfficerModal(playerId, officerId) {
   openModal('modal-sector-officer');
 }
 
+function openResetSectorOfficerModal(playerId, officerId) {
+  const p = getPlayer(playerId);
+  const off = p?.officers?.find(o => String(o.id) === String(officerId));
+  if (!off || !p) {
+    toast('Офицер не найден', 'error');
+    return;
+  }
+  const cat = getCatalogOfficer(off.catalogId);
+  const resetFn = (typeof logic !== 'undefined' && logic.calculateOfficerStockReset) ? logic.calculateOfficerStockReset : calculateOfficerStockReset;
+  const res = resetFn({ officer: off, stock: p.stock, catalogOfficer: cat });
+
+  const contentEl = document.getElementById('modal-reset-officer-content');
+  if (!contentEl) return;
+  const d = res.delta;
+  const chips = [];
+  if (d.coupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🏷️ Купоны: <strong>+${fmtNum(d.coupons)}</strong></span>`);
+  if (d.puzzles > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🧩 Медали: <strong>+${fmtNum(d.puzzles)}</strong></span>`);
+  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
+  if (d.legendaryStars3 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды III: <strong>+${d.legendaryStars3}</strong></span>`);
+  if (d.legendaryStars2 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды II: <strong>+${d.legendaryStars2}</strong></span>`);
+  if (d.legendaryStars1 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды I: <strong>+${d.legendaryStars1}</strong></span>`);
+
+  const refundSummary = chips.length > 0
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${chips.join('')}</div>`
+    : `<div style="color:var(--text3);font-size:12px;margin-top:8px">Офицер вне трекера или в ретро-режиме: списаний со склада не было, возврат 0.</div>`;
+
+  contentEl.innerHTML = `
+    <p style="margin-bottom:12px">Вы действительно хотите сбросить офицера <strong>${escapeHtml(officerLabel(off))}</strong> игрока <strong>${escapeHtml(p.name)}</strong> в начальное состояние?</p>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:12px;font-size:12px">
+      <div>Текущее состояние: <strong>Ур. ${off.level}</strong>, <strong>${off.stars}★</strong>, навыки <strong>${(off.skills || [1,1,1,1]).join('-')}</strong></div>
+      <div style="margin-top:4px;color:var(--text2)">Новое состояние: <strong>Ур. 0</strong>, <strong>0★</strong>, навыки <strong>1-1-1-1</strong>, 0 купонов</div>
+    </div>
+    <div style="font-weight:600;font-size:12.5px">Ресурсы, которые вернутся на склад:</div>
+    ${refundSummary}
+  `;
+
+  const confirmBtn = document.getElementById('btn-confirm-reset-officer');
+  if (confirmBtn) {
+    confirmBtn.onclick = async () => {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Сброс...';
+      try {
+        await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+          method: 'PUT',
+          body: { ...res.resetOfficer, invested: res.newInvested }
+        });
+        await apiFetch(`/api/players/${playerId}`, { method: 'PUT', body: { stock: res.newStock } });
+        p.stock = res.newStock;
+        Object.assign(off, res.resetOfficer);
+        off.invested = res.newInvested;
+        if (myCabinetProfile && myCabinetProfile.id === p.id) {
+          myCabinetProfile.stock = res.newStock;
+          const myOff = (myCabinetProfile.officers || []).find(o => String(o.id) === String(officerId));
+          if (myOff) { Object.assign(myOff, res.resetOfficer); myOff.invested = res.newInvested; }
+        }
+        if (typeof save === 'function') save();
+        closeModal('modal-reset-officer');
+        toast(typeof t === 'function' ? t('officers.toast_reset_success') : 'Офицер сброшен в стоковое состояние, ресурсы возвращены на склад');
+        renderPlayerDetail(playerId);
+      } catch (err) {
+        toast('Ошибка сброса офицера: ' + (err.message || err), 'error');
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Сбросить в сток';
+      }
+    };
+  }
+
+  openModal('modal-reset-officer');
+}
+
 function renderSoStarsPicker(stars) {
   const container = document.getElementById('so-stars-picker');
   if (!container) return;
@@ -7323,25 +7522,83 @@ async function submitEditSectorOfficer() {
   const p = getPlayer(editSectorOfficerPlayerId);
   const oldOff = p?.officers?.find(o => String(o.id) === String(editSectorOfficerId));
   let newStock = null;
-  if (!isRetro && p?.stock && oldOff && oldOff.level !== level) {
+  let newInvested = null;
+
+  if (!isRetro && p?.stock && oldOff) {
     const cat = getCatalogOfficer(oldOff.catalogId);
     const rawCost = Number(cat?.couponPerPuzzle);
     const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
     const upgradeType = cat?.upgradeType || 'standard';
-    const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-    const levelStockDelta = deltaFn(oldOff.level, level, p.stock, costPerPuzzle, upgradeType);
-    if (!levelStockDelta.canAfford) {
-      toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.)`, 'error');
-      return;
+    const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
+    const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
+
+    let curStock = { ...p.stock };
+    const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
+    let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
+    let hasChanges = false;
+
+    // 1. Level
+    if (oldOff.level !== level) {
+      const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
+      const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
+      if (!levelStockDelta.canAfford) {
+        toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.)`, 'error');
+        return;
+      }
+      curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
+      curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
+      if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
+      hasChanges = true;
     }
-    newStock = {
-      ...p.stock,
-      coupons: Math.max(0, (p.stock.coupons || 0) + (levelStockDelta.delta.coupons || 0)),
-      puzzles: Math.max(0, (p.stock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0))
-    };
+
+    // 2. Stars
+    const oldStars = Number(oldOff.stars) || 0;
+    if (oldStars !== stars) {
+      const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
+      const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
+      if (!starRes.canAfford) {
+        toast(`❌ Недостаточно ресурсов на складе для изменения звёзд`, 'error');
+        return;
+      }
+      curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
+      curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
+      curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
+      curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
+      if (starRes.newInvested) curInv = starRes.newInvested;
+      hasChanges = true;
+    }
+
+    // 3. Skills
+    const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
+    const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
+    if (hasSkillDiff) {
+      const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
+      const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
+      if (!skillRes.canAfford) {
+        toast(`❌ Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей)`, 'error');
+        return;
+      }
+      curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
+      curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
+      if (skillRes.newInvested) curInv = skillRes.newInvested;
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      newStock = curStock;
+      newInvested = curInv;
+    }
   }
 
-  const payload = { level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles };
+  const payload = {
+    level,
+    coupons,
+    stars,
+    skills,
+    personalPuzzles,
+    onlyPersonalPuzzles,
+    ...(newInvested ? { invested: newInvested } : {})
+  };
   try {
     const res = await apiFetch(`/api/players/${editSectorOfficerPlayerId}/officers/${editSectorOfficerId}`, {
       method: 'PUT',
@@ -11000,6 +11257,9 @@ if (typeof window !== 'undefined') {
   window.setAsoSkill = setAsoSkill;
   window.submitAddSectorOfficer = submitAddSectorOfficer;
   window.openEditSectorOfficerModal = openEditSectorOfficerModal;
+  window.openResetSectorOfficerModal = openResetSectorOfficerModal;
+  window.openResetMyOfficerModal = openResetMyOfficerModal;
+  window.openEditMyOfficerModal = openEditMyOfficerModal;
   window.renderSoStarsPicker = renderSoStarsPicker;
   window.renderSoSkillsPicker = renderSoSkillsPicker;
   window.setSoSkill = setSoSkill;
