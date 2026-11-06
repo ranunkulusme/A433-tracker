@@ -619,7 +619,7 @@
       </div>
       <div class="form-group">
         <label>Тип войск</label>
-        <select id="fo-type">
+        <select id="fo-type" onchange="onFoTypeOrGenChange()">
           <option>Танк</option>
           <option>Пехота</option>
           <option>ПТ-Сау</option>
@@ -631,11 +631,12 @@
     <div class="form-row form-row-3">
       <div class="form-group">
         <label>Сезон / Поколение</label>
-        <input type="number" id="fo-generation" min="1" value="8">
+        <input type="number" id="fo-generation" min="1" value="8" oninput="onFoTypeOrGenChange()">
       </div>
       <div class="form-group">
         <label>Купонов на 1 медаль</label>
-        <input type="number" id="fo-coupon-per-puzzle" min="0" value="720">
+        <input type="number" id="fo-coupon-per-puzzle" min="0" value="720" oninput="onFoCouponManualInput()">
+        <div id="fo-coupon-hint" class="coupon-auto-hint" style="display:none"></div>
       </div>
       <div class="form-group">
         <label>Купонов за 110 звёзд</label>
