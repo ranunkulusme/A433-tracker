@@ -4476,6 +4476,81 @@ test('API rejects event registration for officer with onlyPersonalPuzzles and GE
   }
 });
 
+test('Dynamic API endpoints return strict anti-caching headers (Cache-Control: no-store, no-cache, Pragma: no-cache, Expires: 0)', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    assert.equal(loginRes.status, 200);
+    const { token } = await loginRes.json();
+
+    // 1. Check GET /api/users
+    const usersRes = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(usersRes.status, 200);
+    const ccUsers = usersRes.headers.get('cache-control');
+    assert.ok(ccUsers, 'cache-control header must be present');
+    assert.ok(ccUsers.includes('no-store'), 'cache-control must contain no-store');
+    assert.ok(ccUsers.includes('no-cache'), 'cache-control must contain no-cache');
+    assert.ok(ccUsers.includes('must-revalidate'), 'cache-control must contain must-revalidate');
+    assert.equal(usersRes.headers.get('pragma'), 'no-cache');
+    assert.equal(usersRes.headers.get('expires'), '0');
+
+    // 2. Check GET /api/events
+    const eventsRes = await fetch(`${baseUrl}/api/events`);
+    assert.equal(eventsRes.status, 200);
+    const ccEvents = eventsRes.headers.get('cache-control');
+    assert.ok(ccEvents && ccEvents.includes('no-store'));
+
+    // 3. Check PATCH /api/users/:id and immediate GET /api/users reflection
+    // First, register a regular user
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'perm_tester', password: 'testpassword123' })
+    });
+    assert.equal(regRes.status, 200);
+    const regData = await regRes.json();
+    const targetUserId = regData.userId;
+
+    // Approve the user
+    await fetch(`${baseUrl}/api/users/${targetUserId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+
+    // Update permissions via PATCH
+    const patchRes = await fetch(`${baseUrl}/api/users/${targetUserId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissions: ['view_sectors', 'view_stocks', 'manage_events'] })
+    });
+    assert.equal(patchRes.status, 200);
+    const ccPatch = patchRes.headers.get('cache-control');
+    assert.ok(ccPatch && ccPatch.includes('no-store'));
+
+    // Fetch /api/users immediately -> must have the new permissions
+    const refreshedUsersRes = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(refreshedUsersRes.status, 200);
+    const allUsers = await refreshedUsersRes.json();
+    const updatedUser = allUsers.find(u => u.id === targetUserId);
+    assert.ok(updatedUser, 'User must exist');
+    assert.deepEqual(updatedUser.permissions, ['view_sectors', 'view_stocks', 'manage_events']);
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 

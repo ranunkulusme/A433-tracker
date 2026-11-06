@@ -387,6 +387,9 @@ async function apiFetch(url, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  headers['Pragma'] = 'no-cache';
+  headers['Cache-Control'] = 'no-cache';
+
   let bodyObj = options.body;
   if (typeof bodyObj === 'string') {
     try {
@@ -404,9 +407,15 @@ async function apiFetch(url, options = {}) {
     return handleOfflineApiRequest(url, method, bodyObj);
   }
 
+  const fetchOptions = {
+    ...options,
+    cache: 'no-store',
+    headers
+  };
+
   let res;
   try {
-    res = await fetch(url, { ...options, headers });
+    res = await fetch(url, fetchOptions);
   } catch (netErr) {
     // Network failure (server unreachable or connection dropped)
     return handleOfflineApiRequest(url, method, bodyObj);
@@ -4423,12 +4432,17 @@ async function handleChangeUserRank(userId, newRank) {
       body: { rank: newRank }
     });
     toast(`Ранг пользователя #${userId} изменен на ${newRank.toUpperCase()}`);
+    const uInCache = usersListCache.find(u => Number(u.id) === Number(userId));
+    if (uInCache) {
+      uInCache.rank = newRank;
+    }
     if (currentUser && currentUser.id === userId) {
       currentUser.rank = newRank;
       state.currentRole = newRank;
       renderTopbarProfile();
       renderSidebarNav();
     }
+    await renderUsers();
   } catch (err) {
     toast(`Ошибка изменения ранга: ${err.message}`, 'error');
     renderUsers();
@@ -11247,9 +11261,43 @@ async function initApp() {
   });
 
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+
     const registerSW = () => {
       navigator.serviceWorker.register('/sw.js')
-        .then(() => {})
+        .then(reg => {
+          if (!reg) return;
+
+          // Периодическая проверка раз в час
+          setInterval(() => {
+            if (navigator.onLine) {
+              reg.update().catch(() => {});
+            }
+          }, 60 * 60 * 1000);
+
+          if (reg.waiting) {
+            newWorkerWaiting = reg.waiting;
+            showPwaUpdatePrompt();
+            return;
+          }
+
+          reg.addEventListener('updatefound', () => {
+            const installingWorker = reg.installing;
+            if (!installingWorker) return;
+            installingWorker.addEventListener('statechange', () => {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                newWorkerWaiting = installingWorker;
+                showPwaUpdatePrompt();
+              }
+            });
+          });
+        })
         .catch(err => {
           console.warn('ServiceWorker registration failed:', err);
         });
@@ -11260,6 +11308,99 @@ async function initApp() {
       window.addEventListener('load', registerSW);
     }
   }
+
+  setupBackgroundSync();
+}
+
+let isGlobalSyncing = false;
+
+async function handleGlobalSync() {
+  if (isGlobalSyncing) return;
+  const syncBtn = document.getElementById('btn-global-sync');
+  if (syncBtn) syncBtn.classList.add('spinning');
+  isGlobalSyncing = true;
+
+  try {
+    await loadDataFromServer();
+    refreshCurrentPage();
+    toast(typeof t === 'function' ? t('toasts.sync_success') : 'Данные успешно синхронизированы', 'success');
+  } catch (err) {
+    console.warn('Sync error:', err);
+    toast('Ошибка синхронизации: ' + (err.message || 'сеть недоступна'), 'error');
+  } finally {
+    isGlobalSyncing = false;
+    if (syncBtn) syncBtn.classList.remove('spinning');
+  }
+}
+
+function refreshCurrentPage() {
+  if (currentPage === 'users') {
+    renderUsers();
+  } else if (currentPage === 'my_cabinet') {
+    renderMyCabinet();
+  } else if (currentPage === 'pending_registrations') {
+    renderPendingRegistrations();
+  } else if (currentPage === 'notifications') {
+    renderNotificationsPage();
+  } else {
+    navigate(currentPage, pageParams);
+  }
+}
+
+let lastBackgroundSyncTime = Date.now();
+
+function setupBackgroundSync() {
+  if (typeof document === 'undefined') return;
+
+  const triggerSilentSync = () => {
+    const now = Date.now();
+    const diffMs = now - lastBackgroundSyncTime;
+    // 3 minutes threshold as selected in requirement #3
+    if (diffMs > 3 * 60 * 1000 && (!navigator || navigator.onLine !== false)) {
+      lastBackgroundSyncTime = now;
+      loadDataFromServer().then(() => {
+        refreshCurrentPage();
+      }).catch(() => {});
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      triggerSilentSync();
+    }
+  });
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', () => {
+      triggerSilentSync();
+    });
+  }
+}
+
+let newWorkerWaiting = null;
+
+function showPwaUpdatePrompt() {
+  const banner = document.getElementById('pwa-update-banner');
+  if (banner) {
+    banner.style.display = 'flex';
+  }
+}
+
+function dismissAppUpdate() {
+  const banner = document.getElementById('pwa-update-banner');
+  if (banner) {
+    banner.style.display = 'none';
+  }
+}
+
+function applyAppUpdate() {
+  dismissAppUpdate();
+  if (newWorkerWaiting) {
+    newWorkerWaiting.postMessage({ type: 'SKIP_WAITING' });
+  } else if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+  }
+  window.location.reload();
 }
 
 if (typeof window !== 'undefined') {
@@ -11435,4 +11576,11 @@ if (typeof window !== 'undefined') {
   window.onFoCouponManualInput = onFoCouponManualInput;
   window.resetFoCouponToAuto = resetFoCouponToAuto;
   window.onFoUpgradeTypeChange = onFoUpgradeTypeChange;
+
+  window.handleGlobalSync = handleGlobalSync;
+  window.refreshCurrentPage = refreshCurrentPage;
+  window.setupBackgroundSync = setupBackgroundSync;
+  window.showPwaUpdatePrompt = showPwaUpdatePrompt;
+  window.dismissAppUpdate = dismissAppUpdate;
+  window.applyAppUpdate = applyAppUpdate;
 }

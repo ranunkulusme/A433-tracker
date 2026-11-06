@@ -3458,6 +3458,135 @@ tr.row-blocked:hover {
   filter: brightness(1.2);
 }
 
+/* ─── PWA LIVE SYNC BUTTON ─────────────────────────────────── */
+.btn-global-sync {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg-surface, #1e293b);
+  border: 1px solid var(--border, #334155);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text, #f1f5f9);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 15px;
+}
+
+.btn-global-sync:hover {
+  background: var(--bg-hover, #334155);
+  border-color: var(--accent, #3b82f6);
+  transform: translateY(-1px);
+}
+
+.btn-global-sync:active {
+  transform: translateY(0);
+}
+
+.btn-global-sync .sync-icon {
+  display: inline-block;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.btn-global-sync.spinning .sync-icon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ─── PWA UPDATE PROMPT BANNER ─────────────────────────────── */
+.pwa-update-banner {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(59, 130, 246, 0.25);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 90vw;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.pwa-update-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.pwa-update-icon {
+  font-size: 18px;
+  animation: bounceSubtle 2s infinite ease-in-out;
+}
+
+@keyframes bounceSubtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.pwa-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pwa-update-actions .btn-primary {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: #2563eb;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+.pwa-update-actions .btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.pwa-close-btn {
+  background: none;
+  border: none;
+  color: var(--text3, #94a3b8);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.pwa-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 
 
 

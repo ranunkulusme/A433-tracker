@@ -104,6 +104,9 @@
           </div>
         </div>
         <button id="network-status-badge" class="network-badge online" onclick="handleNetworkBadgeClick()" title="Статус подключения" type="button">🟢 <span class="badge-text" data-i18n="common.online">Онлайн</span></button>
+        <button id="btn-global-sync" class="btn-global-sync" onclick="handleGlobalSync()" title="Синхронизировать данные" data-i18n-attr="title:common.sync" type="button">
+          <span class="sync-icon">🔄</span>
+        </button>
         <button id="pwa-install-btn" class="btn-pwa-install" onclick="handleInstallPwaClick()" title="Установить приложение на устройство" data-i18n-attr="title:common.install_pwa_title" type="button" style="display:none">📲 <span class="pwa-btn-text" data-i18n="common.install_pwa">Установить</span></button>
         <div class="topbar-profile" id="topbar-profile"></div>
       </div>
@@ -1548,6 +1551,17 @@
   </div>
   <div class="modal-footer">
     <button type="button" class="btn-ghost" onclick="closeStaffPinModal()" data-i18n="common.close">Закрыть</button>
+  </div>
+</div>
+
+<div id="pwa-update-banner" class="pwa-update-banner" style="display:none">
+  <div class="pwa-update-content">
+    <span class="pwa-update-icon">🚀</span>
+    <span class="pwa-update-text" data-i18n="pwa.update_available">Доступно обновление приложения</span>
+  </div>
+  <div class="pwa-update-actions">
+    <button type="button" class="btn btn-primary btn-sm" onclick="applyAppUpdate()" data-i18n="pwa.btn_refresh">Обновить</button>
+    <button type="button" class="btn btn-ghost btn-sm pwa-close-btn" onclick="dismissAppUpdate()" aria-label="Закрыть">✕</button>
   </div>
 </div>
 
