@@ -4,7 +4,7 @@
  * сквозной пропуск API-запросов напрямую в сеть.
  */
 
-const CACHE_NAME = 'kow-cache-v3.31.0';
+const CACHE_NAME = 'kow-cache-v3.38.0';
 
 const STATIC_ASSETS = [
   '/',
@@ -42,6 +42,13 @@ self.addEventListener('activate', event => {
       ))
       .then(() => self.clients.claim())
   );
+});
+
+// Слушатель сообщений от клиента (принудительное обновление по кнопке)
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Fetch: Stale-While-Revalidate для статических ресурсов, bypass для API и не-GET

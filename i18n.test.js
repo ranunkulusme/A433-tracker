@@ -415,6 +415,28 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('pwa and sync dictionaries provide update and sync translations across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('pwa.update_available'), 'Доступно обновление приложения');
+    assert.equal(t('pwa.btn_refresh'), 'Обновить');
+    assert.equal(t('toasts.sync_success'), 'Данные успешно синхронизированы');
+    assert.equal(t('common.sync'), 'Синхронизировать');
+
+    await setAppLanguage('en');
+    assert.equal(t('pwa.update_available'), 'An application update is available');
+    assert.equal(t('pwa.btn_refresh'), 'Update');
+    assert.equal(t('toasts.sync_success'), 'Data successfully synchronized');
+    assert.equal(t('common.sync'), 'Synchronize');
+
+    await setAppLanguage('de');
+    assert.equal(t('pwa.update_available'), 'Ein Anwendungsupdate ist verfügbar');
+    assert.equal(t('pwa.btn_refresh'), 'Aktualisieren');
+    assert.equal(t('toasts.sync_success'), 'Daten erfolgreich synchronisiert');
+    assert.equal(t('common.sync'), 'Synchronisieren');
+
+    await setAppLanguage('ru');
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);

@@ -43,6 +43,7 @@ const I18N_RESOURCES = {
         "requests_other": "заявок",
         "user": "Пользователь",
         "refresh": "Обновить",
+        "sync": "Синхронизировать",
         "change_password": "Сменить пароль",
         "active_now": "Идут сейчас",
         "upcoming": "Предстоящие",
@@ -132,10 +133,15 @@ const I18N_RESOURCES = {
       "toasts": {
         "saved_success": "Изменения успешно сохранены",
         "saved_successfully": "Изменения успешно сохранены",
+        "sync_success": "Данные успешно синхронизированы",
         "error_occurred": "Произошла ошибка: {{error}}",
         "access_denied": "Доступ ограничен правами ранга",
         "import_success": "Импортировано {{count}} записей",
         "export_success": "Данные успешно экспортированы"
+      },
+      "pwa": {
+        "update_available": "Доступно обновление приложения",
+        "btn_refresh": "Обновить"
       },
       "audit": {
         "freshness_fresh": "Свежие данные",
@@ -475,6 +481,7 @@ const I18N_RESOURCES = {
         "requests_other": "requests",
         "user": "User",
         "refresh": "Refresh",
+        "sync": "Synchronize",
         "change_password": "Change Password",
         "active_now": "Active Now",
         "upcoming": "Upcoming",
@@ -564,10 +571,15 @@ const I18N_RESOURCES = {
       "toasts": {
         "saved_success": "Changes saved successfully",
         "saved_successfully": "Changes saved successfully",
+        "sync_success": "Data successfully synchronized",
         "error_occurred": "An error occurred: {{error}}",
         "access_denied": "Access denied by rank permissions",
         "import_success": "Imported {{count}} records",
         "export_success": "Data exported successfully"
+      },
+      "pwa": {
+        "update_available": "An application update is available",
+        "btn_refresh": "Update"
       },
       "audit": {
         "freshness_fresh": "Fresh data",
@@ -907,6 +919,7 @@ const I18N_RESOURCES = {
         "requests_other": "Anträge",
         "user": "Benutzer",
         "refresh": "Aktualisieren",
+        "sync": "Synchronisieren",
         "change_password": "Passwort ändern",
         "active_now": "Läuft gerade",
         "upcoming": "Bevorstehend",
@@ -996,10 +1009,15 @@ const I18N_RESOURCES = {
       "toasts": {
         "saved_success": "Änderungen erfolgreich gespeichert",
         "saved_successfully": "Änderungen erfolgreich gespeichert",
+        "sync_success": "Daten erfolgreich synchronisiert",
         "error_occurred": "Ein Fehler ist aufgetreten: {{error}}",
         "access_denied": "Zugriff durch Rangberechtigungen verweigert",
         "import_success": "{{count}} Datensätze importiert",
         "export_success": "Daten erfolgreich exportiert"
+      },
+      "pwa": {
+        "update_available": "Ein Anwendungsupdate ist verfügbar",
+        "btn_refresh": "Aktualisieren"
       },
       "audit": {
         "freshness_fresh": "Aktuelle Daten",
