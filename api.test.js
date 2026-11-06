@@ -4275,6 +4275,111 @@ test('API User Management: resolves character name for sector owners in GET /api
   }
 });
 
+test('Event registrations visibility for R3 member in GET /api/events and GET /api/events/:id', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Admin login
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // 2. Create an event
+    const eventRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeId: 1,
+        dateFrom: '2026-11-10',
+        dateTo: '2026-11-12',
+        note: 'Test Event Visibility',
+        assignments: []
+      })
+    });
+    const createdEvent = await eventRes.json();
+    assert.ok(createdEvent.id);
+
+    // 3. Register R3 user and create sector
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'member_r3', password: 'password123' })
+    });
+    const regData = await regRes.json();
+    db.approveUser(regData.userId, 'r3');
+
+    const sectorRes = await fetch(`${baseUrl}/api/players`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Сектор Рядового',
+        rank: 'r3',
+        userId: regData.userId
+      })
+    });
+    const sector = await sectorRes.json();
+
+    // 4. Login as R3 member
+    const memberLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'member_r3', password: 'password123' })
+    });
+    const { token: memberToken } = await memberLoginRes.json();
+
+    // 5. Member registers for event
+    const submitRegRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${memberToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sectorId: sector.id,
+        desiredPlace: 2
+      })
+    });
+    assert.equal(submitRegRes.status, 200);
+
+    // 6. Member fetches GET /api/events - myRegistrations must contain playerName
+    const eventsRes = await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: `Bearer ${memberToken}` }
+    });
+    assert.equal(eventsRes.status, 200);
+    const eventsList = await eventsRes.json();
+    const targetEv = eventsList.find(e => e.id === createdEvent.id);
+    assert.ok(targetEv, 'Event must exist in list');
+    assert.ok(Array.isArray(targetEv.myRegistrations), 'myRegistrations array must be present for member');
+    assert.equal(targetEv.myRegistrations.length, 1);
+    assert.equal(targetEv.myRegistrations[0].playerName, 'Сектор Рядового');
+
+    // 7. Member fetches GET /api/events/:id - myRegistrations must contain playerName
+    const eventDetailRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}`, {
+      headers: { Authorization: `Bearer ${memberToken}` }
+    });
+    assert.equal(eventDetailRes.status, 200);
+    const detailData = await eventDetailRes.json();
+    assert.ok(Array.isArray(detailData.myRegistrations), 'myRegistrations array must be present in event detail');
+    assert.equal(detailData.myRegistrations.length, 1);
+    assert.equal(detailData.myRegistrations[0].playerName, 'Сектор Рядового');
+
+    // 8. Admin fetches GET /api/events/:id - registrations must contain all registrations with playerName
+    const adminDetailRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(adminDetailRes.status, 200);
+    const adminDetailData = await adminDetailRes.json();
+    assert.ok(Array.isArray(adminDetailData.registrations), 'registrations must be present for admin');
+    assert.equal(adminDetailData.registrations.length, 1);
+    assert.equal(adminDetailData.registrations[0].playerName, 'Сектор Рядового');
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 
