@@ -29,6 +29,10 @@
     legendaryStars1: 0,
     legendaryStars2: 0,
     legendaryStars3: 0,
+    levelCoupons: 0,
+    levelPuzzles: 0,
+    skillCoupons: 0,
+    skillPuzzles: 0,
     coupons: 0,
     puzzles: 0,
   });
@@ -37,13 +41,40 @@
     if (!inv || typeof inv !== 'object') {
       return { ...INVESTED_ZERO };
     }
+    const starCoupons = Math.max(0, Math.round(Number(inv.starCoupons) || 0));
+    const legendaryStars1 = Math.max(0, Math.round(Number(inv.legendaryStars1) || 0));
+    const legendaryStars2 = Math.max(0, Math.round(Number(inv.legendaryStars2) || 0));
+    const legendaryStars3 = Math.max(0, Math.round(Number(inv.legendaryStars3) || 0));
+
+    let levelCoupons = Math.max(0, Math.round(Number(inv.levelCoupons) || 0));
+    let levelPuzzles = Math.max(0, Math.round(Number(inv.levelPuzzles) || 0));
+    let skillCoupons = Math.max(0, Math.round(Number(inv.skillCoupons) || 0));
+    let skillPuzzles = Math.max(0, Math.round(Number(inv.skillPuzzles) || 0));
+
+    const legacyCoupons = Math.max(0, Math.round(Number(inv.coupons) || 0));
+    const legacyPuzzles = Math.max(0, Math.round(Number(inv.puzzles) || 0));
+
+    if (levelCoupons === 0 && skillCoupons === 0 && legacyCoupons > 0) {
+      levelCoupons = legacyCoupons;
+    }
+    if (levelPuzzles === 0 && skillPuzzles === 0 && legacyPuzzles > 0) {
+      skillPuzzles = legacyPuzzles;
+    }
+
+    const totalCoupons = levelCoupons + skillCoupons;
+    const totalPuzzles = levelPuzzles + skillPuzzles;
+
     return {
-      starCoupons: Math.max(0, Math.round(Number(inv.starCoupons) || 0)),
-      legendaryStars1: Math.max(0, Math.round(Number(inv.legendaryStars1) || 0)),
-      legendaryStars2: Math.max(0, Math.round(Number(inv.legendaryStars2) || 0)),
-      legendaryStars3: Math.max(0, Math.round(Number(inv.legendaryStars3) || 0)),
-      coupons: Math.max(0, Math.round(Number(inv.coupons) || 0)),
-      puzzles: Math.max(0, Math.round(Number(inv.puzzles) || 0)),
+      starCoupons,
+      legendaryStars1,
+      legendaryStars2,
+      legendaryStars3,
+      levelCoupons,
+      levelPuzzles,
+      skillCoupons,
+      skillPuzzles,
+      coupons: totalCoupons,
+      puzzles: totalPuzzles,
     };
   }
 
@@ -2118,7 +2149,12 @@
             ...(hasInvested ? { newInvested: { ...inv } } : {})
           };
         }
-        const newInvested = inv ? { ...inv, puzzles: inv.puzzles + deltaMedals } : undefined;
+        const newSkillPuzzles = inv ? inv.skillPuzzles + deltaMedals : 0;
+        const newInvested = inv ? {
+          ...inv,
+          skillPuzzles: newSkillPuzzles,
+          puzzles: inv.levelPuzzles + newSkillPuzzles,
+        } : undefined;
         return {
           canAfford: true,
           medals: deltaMedals,
@@ -2144,10 +2180,14 @@
         };
       }
 
+      const newSkillCoupons = inv ? inv.skillCoupons + couponsToDeduct : 0;
+      const newSkillPuzzles = inv ? inv.skillPuzzles + remMedals : 0;
       const newInvested = inv ? {
         ...inv,
-        coupons: inv.coupons + couponsToDeduct,
-        puzzles: inv.puzzles + remMedals
+        skillCoupons: newSkillCoupons,
+        skillPuzzles: newSkillPuzzles,
+        coupons: inv.levelCoupons + newSkillCoupons,
+        puzzles: inv.levelPuzzles + newSkillPuzzles,
       } : undefined;
 
       return {
@@ -2159,15 +2199,17 @@
     } else {
       const refundMedals = Math.abs(deltaMedals);
 
+      // БЕЗ переданного invested (или офицер вне трекера): НЕ начислять купоны из воздуха!
       if (!hasInvested) {
-        if (isSpecial) {
-          return { canAfford: true, medals: deltaMedals, delta: { coupons: 0, puzzles: refundMedals } };
-        }
-        return { canAfford: true, medals: deltaMedals, delta: { coupons: refundMedals * rate, puzzles: 0 } };
+        return {
+          canAfford: true,
+          medals: deltaMedals,
+          delta: { coupons: 0, puzzles: 0 }
+        };
       }
 
       // Для офицера вне трекера:
-      if (inv.coupons === 0 && inv.puzzles === 0) {
+      if (inv.skillCoupons === 0 && inv.skillPuzzles === 0) {
         return {
           canAfford: true,
           medals: deltaMedals,
@@ -2176,33 +2218,46 @@
         };
       }
 
-      // Полный сброс навыков до базы (newMedals === 0): возвращаем все вложенные купоны и медали
+      // Полный сброс навыков до базы (newMedals === 0): возвращаем ВСЕ и ТОЛЬКО вложенные в навыки купоны и медали!
       if (newMedals === 0) {
+        const refundCoupons = inv.skillCoupons;
+        const refundPuzzles = inv.skillPuzzles;
+        const newInvested = {
+          ...inv,
+          skillCoupons: 0,
+          skillPuzzles: 0,
+          coupons: inv.levelCoupons,
+          puzzles: inv.levelPuzzles,
+        };
         return {
           canAfford: true,
           medals: deltaMedals,
-          delta: { coupons: inv.coupons, puzzles: inv.puzzles },
-          newInvested: { ...inv, coupons: 0, puzzles: 0 }
+          delta: { coupons: refundCoupons, puzzles: refundPuzzles },
+          newInvested
         };
       }
 
-      // Частичный сброс: сначала медали (puzzles), затем купоны
+      // Частичный сброс: сначала медали навыков (skillPuzzles), затем купоны навыков (skillCoupons)
       let remRefund = refundMedals;
       const curInv = { ...inv };
       let refundPuzzles = 0;
       let refundCoupons = 0;
 
-      if (curInv.puzzles > 0 && remRefund > 0) {
-        refundPuzzles = Math.min(curInv.puzzles, remRefund);
+      if (curInv.skillPuzzles > 0 && remRefund > 0) {
+        refundPuzzles = Math.min(curInv.skillPuzzles, remRefund);
         remRefund -= refundPuzzles;
-        curInv.puzzles -= refundPuzzles;
+        curInv.skillPuzzles -= refundPuzzles;
       }
-      if (curInv.coupons > 0 && remRefund > 0) {
+      if (curInv.skillCoupons > 0 && remRefund > 0) {
         const couponsNeeded = remRefund * rate;
-        refundCoupons = Math.min(curInv.coupons, couponsNeeded);
-        curInv.coupons -= refundCoupons;
-        remRefund = 0;
+        refundCoupons = Math.min(curInv.skillCoupons, couponsNeeded);
+        curInv.skillCoupons -= refundCoupons;
+        const medalsCovered = rate > 0 ? Math.floor(refundCoupons / rate) : 0;
+        remRefund = Math.max(0, remRefund - medalsCovered);
       }
+
+      curInv.coupons = curInv.levelCoupons + curInv.skillCoupons;
+      curInv.puzzles = curInv.levelPuzzles + curInv.skillPuzzles;
 
       return {
         canAfford: true,
@@ -2244,7 +2299,12 @@
             ...(hasInvested ? { newInvested: { ...inv } } : {})
           };
         }
-        const newInvested = inv ? { ...inv, puzzles: inv.puzzles + deltaPuzzles } : undefined;
+        const newLevelPuzzles = inv ? inv.levelPuzzles + deltaPuzzles : 0;
+        const newInvested = inv ? {
+          ...inv,
+          levelPuzzles: newLevelPuzzles,
+          puzzles: newLevelPuzzles + inv.skillPuzzles,
+        } : undefined;
         return {
           canAfford: true,
           puzzles: deltaPuzzles,
@@ -2269,10 +2329,14 @@
         };
       }
 
+      const newLevelCoupons = inv ? inv.levelCoupons + couponsDeduct : 0;
+      const newLevelPuzzles = inv ? inv.levelPuzzles + remPuzzles : 0;
       const newInvested = inv ? {
         ...inv,
-        coupons: inv.coupons + couponsDeduct,
-        puzzles: inv.puzzles + remPuzzles
+        levelCoupons: newLevelCoupons,
+        levelPuzzles: newLevelPuzzles,
+        coupons: newLevelCoupons + inv.skillCoupons,
+        puzzles: newLevelPuzzles + inv.skillPuzzles,
       } : undefined;
 
       return {
@@ -2284,14 +2348,16 @@
     } else {
       const refundPuz = Math.abs(deltaPuzzles);
 
+      // БЕЗ переданного invested (или офицер вне трекера): НЕ начислять купоны из воздуха!
       if (!hasInvested) {
-        if (isSpecial) {
-          return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: 0, puzzles: refundPuz } };
-        }
-        return { canAfford: true, puzzles: deltaPuzzles, delta: { coupons: refundPuz * rate, puzzles: 0 } };
+        return {
+          canAfford: true,
+          puzzles: deltaPuzzles,
+          delta: { coupons: 0, puzzles: 0 }
+        };
       }
 
-      if (inv.coupons === 0 && inv.puzzles === 0) {
+      if (inv.levelCoupons === 0 && inv.levelPuzzles === 0) {
         return {
           canAfford: true,
           puzzles: deltaPuzzles,
@@ -2300,31 +2366,46 @@
         };
       }
 
+      // Полный откат уровня до 0: возвращаем ровно то, что было вложено в уровень!
       if (newLvl === 0) {
+        const refundCoupons = inv.levelCoupons;
+        const refundPuzzles = inv.levelPuzzles;
+        const newInvested = {
+          ...inv,
+          levelCoupons: 0,
+          levelPuzzles: 0,
+          coupons: inv.skillCoupons,
+          puzzles: inv.skillPuzzles,
+        };
         return {
           canAfford: true,
           puzzles: deltaPuzzles,
-          delta: { coupons: inv.coupons, puzzles: inv.puzzles },
-          newInvested: { ...inv, coupons: 0, puzzles: 0 }
+          delta: { coupons: refundCoupons, puzzles: refundPuzzles },
+          newInvested
         };
       }
 
+      // Частичный откат: LIFO (сначала медали уровня, затем купоны уровня)
       let remRefund = refundPuz;
       const curInv = { ...inv };
       let refundPuzzles = 0;
       let refundCoupons = 0;
 
-      if (curInv.puzzles > 0 && remRefund > 0) {
-        refundPuzzles = Math.min(curInv.puzzles, remRefund);
+      if (curInv.levelPuzzles > 0 && remRefund > 0) {
+        refundPuzzles = Math.min(curInv.levelPuzzles, remRefund);
         remRefund -= refundPuzzles;
-        curInv.puzzles -= refundPuzzles;
+        curInv.levelPuzzles -= refundPuzzles;
       }
-      if (curInv.coupons > 0 && remRefund > 0) {
+      if (curInv.levelCoupons > 0 && remRefund > 0) {
         const couponsNeeded = remRefund * rate;
-        refundCoupons = Math.min(curInv.coupons, couponsNeeded);
-        curInv.coupons -= refundCoupons;
-        remRefund = 0;
+        refundCoupons = Math.min(curInv.levelCoupons, couponsNeeded);
+        curInv.levelCoupons -= refundCoupons;
+        const puzzlesCovered = rate > 0 ? Math.floor(refundCoupons / rate) : 0;
+        remRefund = Math.max(0, remRefund - puzzlesCovered);
       }
+
+      curInv.coupons = curInv.levelCoupons + curInv.skillCoupons;
+      curInv.puzzles = curInv.levelPuzzles + curInv.skillPuzzles;
 
       return {
         canAfford: true,
@@ -2424,8 +2505,10 @@
       totalDelta.puzzles += (levelRes.delta.puzzles || 0);
 
       if (levelRes.newInvested) {
-        accumulatedInvested.coupons = levelRes.newInvested.coupons;
-        accumulatedInvested.puzzles = levelRes.newInvested.puzzles;
+        accumulatedInvested.levelCoupons = levelRes.newInvested.levelCoupons;
+        accumulatedInvested.levelPuzzles = levelRes.newInvested.levelPuzzles;
+        accumulatedInvested.coupons = accumulatedInvested.levelCoupons + accumulatedInvested.skillCoupons;
+        accumulatedInvested.puzzles = accumulatedInvested.levelPuzzles + accumulatedInvested.skillPuzzles;
       }
     }
 
@@ -2479,8 +2562,10 @@
       totalDelta.puzzles += (skillRes.delta.puzzles || 0);
 
       if (skillRes.newInvested) {
-        accumulatedInvested.coupons = skillRes.newInvested.coupons;
-        accumulatedInvested.puzzles = skillRes.newInvested.puzzles;
+        accumulatedInvested.skillCoupons = skillRes.newInvested.skillCoupons;
+        accumulatedInvested.skillPuzzles = skillRes.newInvested.skillPuzzles;
+        accumulatedInvested.coupons = accumulatedInvested.levelCoupons + accumulatedInvested.skillCoupons;
+        accumulatedInvested.puzzles = accumulatedInvested.levelPuzzles + accumulatedInvested.skillPuzzles;
       }
     }
 
@@ -2491,6 +2576,48 @@
       delta: totalDelta,
       newStock: currentStock,
       invested: accumulatedInvested
+    };
+  }
+
+  function calculateOfficerStockReset({
+    officer = {},
+    stock = {},
+    catalogOfficer = {}
+  } = {}) {
+    const normStock = normalizeStock(stock);
+    const inv = normalizeInvested(officer?.invested || officer?.invested_json);
+
+    const delta = {
+      coupons: inv.coupons,
+      puzzles: inv.puzzles,
+      starCoupons: inv.starCoupons,
+      legendaryStars1: inv.legendaryStars1,
+      legendaryStars2: inv.legendaryStars2,
+      legendaryStars3: inv.legendaryStars3
+    };
+
+    const newStock = {
+      ...normStock,
+      coupons: normStock.coupons + delta.coupons,
+      puzzles: normStock.puzzles + delta.puzzles,
+      starCoupons: normStock.starCoupons + delta.starCoupons,
+      legendaryStars1: normStock.legendaryStars1 + delta.legendaryStars1,
+      legendaryStars2: normStock.legendaryStars2 + delta.legendaryStars2,
+      legendaryStars3: normStock.legendaryStars3 + delta.legendaryStars3
+    };
+
+    return {
+      canAfford: true,
+      delta,
+      newStock,
+      newInvested: { ...INVESTED_ZERO },
+      resetOfficer: {
+        level: 0,
+        stars: 0,
+        skills: [1, 1, 1, 1],
+        coupons: 0,
+        personalPuzzles: 0
+      }
     };
   }
 
@@ -2958,6 +3085,7 @@
     NOTIFICATION_TEMPLATE_SAMPLE_DATA,
     renderTemplate,
     calculateInitialOfficerStockDeduction,
+    calculateOfficerStockReset,
     normalizeOfficerMode,
     getOfficerModeFromStore,
     setOfficerModeInStore,

@@ -205,7 +205,10 @@ const I18N_RESOURCES = {
         "toast_retro_updated": "Параметры обновлены (Ретро: без списания)",
         "toast_retro_stars_updated": "Звёзды обновлены (Ретро: без списания со склада)",
         "toast_retro_skills_updated": "Навык обновлен (Ретро: без списания со склада)",
-        "stars_label": "Звёзды (0-5★)"
+        "stars_label": "Звёзды (0-5★)",
+        "btn_reset_stock": "↩️ Сбросить в сток",
+        "toast_reset_success": "Офицер сброшен в стоковое состояние, ресурсы возвращены на склад",
+        "reset_modal_title": "Сбросить офицера в стоковое состояние"
       },
       "mieru": {
         "card_title": "Туннель Mieru (обход блокировок Telegram)",
@@ -631,7 +634,10 @@ const I18N_RESOURCES = {
         "toast_retro_updated": "Updated (Retro: no stock deduction)",
         "toast_retro_stars_updated": "Stars updated (Retro: no stock deduction)",
         "toast_retro_skills_updated": "Skill updated (Retro: no stock deduction)",
-        "stars_label": "Stars (0-5★)"
+        "stars_label": "Stars (0-5★)",
+        "btn_reset_stock": "↩️ Reset to stock",
+        "toast_reset_success": "Officer reset to stock state, resources refunded to warehouse",
+        "reset_modal_title": "Reset Officer to Stock State"
       },
       "mieru": {
         "card_title": "Mieru Tunnel (Telegram Anti-Censorship)",
@@ -1057,7 +1063,10 @@ const I18N_RESOURCES = {
         "toast_retro_updated": "Aktualisiert (Retro: ohne Lagerabzug)",
         "toast_retro_stars_updated": "Sterne aktualisiert (Retro: ohne Lagerabzug)",
         "toast_retro_skills_updated": "Fähigkeit aktualisiert (Retro: ohne Lagerabzug)",
-        "stars_label": "Sterne (0-5★)"
+        "stars_label": "Sterne (0-5★)",
+        "btn_reset_stock": "↩️ Auf Standard zurücksetzen",
+        "toast_reset_success": "Offizier auf Standardzustand zurückgesetzt, Ressourcen erstattet",
+        "reset_modal_title": "Offizier auf Standardzustand zurücksetzen"
       },
       "mieru": {
         "card_title": "Mieru-Tunnel (Telegram-Zensurumgehung)",
