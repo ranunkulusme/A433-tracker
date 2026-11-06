@@ -206,6 +206,7 @@ function loginUser(username, password) {
     return { error: 'PENDING_APPROVAL' };
   }
   const token = createSession(user.id);
+  touchUserActive(user.id, true);
   let playerName = '';
   if (user.player_id) {
     const player = getPlayerById(user.player_id);
@@ -310,6 +311,7 @@ function getPendingUsers() {
            u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
            u.telegram_username as telegramUsername, u.telegram_username,
            u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
+           u.last_active_at as lastActiveAt, u.last_active_at,
            u.created_at as createdAt, u.created_at,
            COALESCE(p_direct.name, p_owner.name) as playerName
     FROM users u
@@ -320,13 +322,44 @@ function getPendingUsers() {
     WHERE u.is_approved = 0
     ORDER BY u.id ASC
   `).all();
-  return rows.map(r => ({
-    ...r,
-    is_blocked: r.is_blocked || 0,
-    isBlocked: Boolean(r.is_blocked),
-    permissions: parsePermissions(r.permissions),
-    telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0
-  }));
+  return rows.map(r => {
+    const lastActiveAt = r.last_active_at || null;
+    const isOnline = Boolean(
+      lastActiveAt && (Date.now() - new Date(lastActiveAt).getTime() <= 5 * 60 * 1000)
+    );
+    return {
+      ...r,
+      is_blocked: r.is_blocked || 0,
+      isBlocked: Boolean(r.is_blocked),
+      permissions: parsePermissions(r.permissions),
+      telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0,
+      lastActiveAt,
+      isOnline
+    };
+  });
+}
+
+function touchUserActive(userId, force = false) {
+  if (!userId) return;
+  const numId = Number(userId);
+  if (!numId) return;
+  const now = new Date().toISOString();
+  try {
+    if (force) {
+      getDb().prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now, numId);
+    } else {
+      getDb().prepare(`
+        UPDATE users 
+        SET last_active_at = ? 
+        WHERE id = ? 
+          AND (last_active_at IS NULL OR (strftime('%s', 'now') - strftime('%s', last_active_at) >= 60))
+      `).run(now, numId);
+    }
+  } catch (e) {
+    try {
+      getDb().prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now, numId);
+    } catch (err) {}
+  }
 }
 
 function getUsers() {
@@ -339,6 +372,7 @@ function getUsers() {
            u.telegram_chat_id as telegramChatId, u.telegram_chat_id,
            u.telegram_username as telegramUsername, u.telegram_username,
            u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
+           u.last_active_at as lastActiveAt, u.last_active_at,
            u.created_at as createdAt, u.created_at,
            COALESCE(p_direct.name, p_owner.name) as playerName
     FROM users u
@@ -348,13 +382,21 @@ function getUsers() {
     )
     ORDER BY u.id ASC
   `).all();
-  return rows.map(r => ({
-    ...r,
-    is_blocked: r.is_blocked || 0,
-    isBlocked: Boolean(r.is_blocked),
-    permissions: parsePermissions(r.permissions),
-    telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0
-  }));
+  return rows.map(r => {
+    const lastActiveAt = r.last_active_at || null;
+    const isOnline = Boolean(
+      lastActiveAt && (Date.now() - new Date(lastActiveAt).getTime() <= 5 * 60 * 1000)
+    );
+    return {
+      ...r,
+      is_blocked: r.is_blocked || 0,
+      isBlocked: Boolean(r.is_blocked),
+      permissions: parsePermissions(r.permissions),
+      telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0,
+      lastActiveAt,
+      isOnline
+    };
+  });
 }
 
 function updateUser(userId, updates = {}) {
@@ -1763,6 +1805,9 @@ function migrateSchema(db) {
     if (!userCols.includes('telegram_bind_expires_at')) {
       db.exec("ALTER TABLE users ADD COLUMN telegram_bind_expires_at TEXT NULL;");
     }
+    if (!userCols.includes('last_active_at')) {
+      db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT NULL;");
+    }
   }
 
   const playerCols = getColumns('players');
@@ -1978,6 +2023,7 @@ function initDb(filePath) {
       telegram_notifications_enabled INTEGER NOT NULL DEFAULT 1,
       telegram_bind_token TEXT NULL,
       telegram_bind_expires_at TEXT NULL,
+      last_active_at TEXT NULL,
       created_at TEXT NOT NULL
     );
 
@@ -2415,4 +2461,5 @@ module.exports = {
   verifyAndBindStaffChat,
   getMieruSettings,
   saveMieruSettings,
+  touchUserActive,
 };

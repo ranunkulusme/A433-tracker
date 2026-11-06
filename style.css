@@ -2415,6 +2415,35 @@ tr.row-blocked:hover {
   font-size: 12px;
 }
 
+/* User Online / Offline Indicator */
+.user-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.user-status-dot.online {
+  background-color: #2ea043;
+  box-shadow: 0 0 6px rgba(46, 160, 67, 0.85);
+}
+
+.user-status-dot.offline {
+  background-color: var(--text3);
+  opacity: 0.45;
+}
+
+.users-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
 .badge-perm-count {
   font-weight: 700;
   font-size: 10.5px;

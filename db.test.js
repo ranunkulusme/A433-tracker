@@ -2102,6 +2102,28 @@ test('getUsers resolves character name when sector is linked via players.user_id
   assert.equal(oldOwnerUser.playerId, null);
 });
 
+test('touchUserActive records last_active_at and getUsers reports isOnline', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({ username: 'online_user', password: 'password123', playerName: 'Sector Online' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Before touch: lastActiveAt is null or empty, isOnline is false
+  let users = dbModule.getUsers();
+  let user = users.find(u => u.id === reg.userId);
+  assert.ok(user);
+  assert.equal(user.isOnline, false);
+
+  // Touch active user
+  dbModule.touchUserActive(reg.userId);
+
+  users = dbModule.getUsers();
+  user = users.find(u => u.id === reg.userId);
+  assert.ok(user.lastActiveAt);
+  assert.equal(user.isOnline, true);
+});
+
 
 
 

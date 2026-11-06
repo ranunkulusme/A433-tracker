@@ -4380,6 +4380,102 @@ test('Event registrations visibility for R3 member in GET /api/events and GET /a
   }
 });
 
+test('API rejects event registration for officer with onlyPersonalPuzzles and GET /api/users returns isOnline', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Admin login
+    const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const { token: adminToken } = await adminLoginRes.json();
+
+    // 2. Create an event
+    const eventRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeId: 1,
+        dateFrom: '2026-11-10',
+        dateTo: '2026-11-12',
+        assignments: []
+      })
+    });
+    const event = await eventRes.json();
+
+    // 3. Register user and create player with an officer having onlyPersonalPuzzles: true
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'puzzle_user', password: 'password123' })
+    });
+    const { userId } = await regRes.json();
+    db.approveUser(userId, 'r3');
+
+    const sectorRes = await fetch(`${baseUrl}/api/players`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'База Пазлы',
+        rank: 'r3',
+        userId
+      })
+    });
+    const sector = await sectorRes.json();
+
+    // Add officer with onlyPersonalPuzzles
+    const addOffRes = await fetch(`${baseUrl}/api/players/${sector.id}/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogId: 'alex',
+        level: 100,
+        onlyPersonalPuzzles: true
+      })
+    });
+    const newOfficer = await addOffRes.json();
+
+    // 4. User logs in
+    const userLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'puzzle_user', password: 'password123' })
+    });
+    const { token: userToken } = await userLoginRes.json();
+
+    // 5. Try registering the officer with onlyPersonalPuzzles -> must be rejected with 400
+    const submitRegRes = await fetch(`${baseUrl}/api/events/${event.id}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sectorId: sector.id,
+        officerId: newOfficer.id,
+        desiredPlace: 1
+      })
+    });
+    assert.equal(submitRegRes.status, 400);
+    const regError = await submitRegRes.json();
+    assert.equal(regError.error, 'OFFICER_ONLY_PERSONAL_PUZZLES');
+
+    // 6. Admin checks GET /api/users: user should have isOnline: true
+    const usersRes = await fetch(`${baseUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(usersRes.status, 200);
+    const users = await usersRes.json();
+    const puzzleUser = users.find(u => u.username === 'puzzle_user');
+    assert.ok(puzzleUser);
+    assert.equal(puzzleUser.isOnline, true);
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 

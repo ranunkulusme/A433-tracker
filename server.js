@@ -86,6 +86,9 @@ function authenticate(req) {
   const user = db.verifySession(token);
   req.user = user || null;
   req.token = token;
+  if (req.user && req.user.id) {
+    db.touchUserActive(req.user.id);
+  }
   return req.user;
 }
 
@@ -1853,6 +1856,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       const { officerId, desiredPlace } = body;
+      if (officerId) {
+        const off = (player.officers || []).find(o => String(o.id) === String(officerId));
+        if (off && Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles)) {
+          return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
+        }
+      }
+
       const reg = db.registerForEvent({
         eventId,
         playerId: targetSectorId,

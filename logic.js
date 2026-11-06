@@ -1397,6 +1397,9 @@
         const costPerPuzzle = Number(cat.couponPerPuzzle);
         if (costPerPuzzle === 0) return;
 
+        const isOnlyPersonal = Boolean(officer?.onlyPersonalPuzzles || officer?.only_personal_puzzles);
+        if (isOnlyPersonal) return;
+
         const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: MAX_LEVEL, today });
         if (def.deficitCoupons <= 0) return;
 
@@ -1504,10 +1507,12 @@
 
     let candidateList = [];
     if (Array.isArray(candidates)) {
-      candidateList = candidates.map(c => ({
-        ...c,
-        isCooldown: candidateIsCooldown(c),
-      }));
+      candidateList = candidates
+        .filter(c => !Boolean(c?.onlyPersonalPuzzles || c?.only_personal_puzzles))
+        .map(c => ({
+          ...c,
+          isCooldown: candidateIsCooldown(c),
+        }));
     } else if (Array.isArray(players)) {
       const catalogMap = new Map((officerCatalog || DEFAULT_OFFICERS).map(o => [o.id, o]));
       const today = eventDate || new Date().toISOString().slice(0, 10);
@@ -1517,6 +1522,9 @@
           if (!cat) return;
           const costPerPuzzle = Number(cat.couponPerPuzzle);
           if (costPerPuzzle === 0) return;
+
+          const isOnlyPersonal = Boolean(officer?.onlyPersonalPuzzles || officer?.only_personal_puzzles);
+          if (isOnlyPersonal) return;
 
           const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: MAX_LEVEL, today });
           if (def.deficitCoupons <= 0) return;
