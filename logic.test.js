@@ -3165,6 +3165,60 @@ test('stale stock alert scheduler: shouldRunStaleStockAlert and calculateNextSta
   assert.strictEqual(nextDisabled, null);
 });
 
+test('timezone utilities: getUserTimezoneInfo, formatTimezoneOffsetLabel, convertTimeBetweenTimezones', () => {
+  const {
+    getUserTimezoneInfo,
+    formatTimezoneOffsetLabel,
+    convertTimeBetweenTimezones
+  } = require('./logic.js');
+
+  // 1. formatTimezoneOffsetLabel
+  assert.strictEqual(formatTimezoneOffsetLabel(3, 'Europe/Moscow'), 'UTC+3 (Europe/Moscow)');
+  assert.strictEqual(formatTimezoneOffsetLabel(5, 'Asia/Yekaterinburg'), 'UTC+5 (Asia/Yekaterinburg)');
+  assert.strictEqual(formatTimezoneOffsetLabel(-4, 'America/New_York'), 'UTC-4 (America/New_York)');
+  assert.strictEqual(formatTimezoneOffsetLabel(0, 'UTC'), 'UTC+0 (UTC)');
+  assert.strictEqual(formatTimezoneOffsetLabel(3.5, 'Asia/Tehran'), 'UTC+3:30 (Asia/Tehran)');
+
+  // 2. getUserTimezoneInfo
+  const tzInfo = getUserTimezoneInfo();
+  assert.ok(tzInfo);
+  assert.strictEqual(typeof tzInfo.offsetHours, 'number');
+  assert.strictEqual(typeof tzInfo.timeZone, 'string');
+  assert.strictEqual(typeof tzInfo.formattedLabel, 'string');
+
+  // 3. convertTimeBetweenTimezones
+  // 3a. Same timezone
+  const sameTz = convertTimeBetweenTimezones('10:00', 3, 3);
+  assert.strictEqual(sameTz.time, '10:00');
+  assert.strictEqual(sameTz.dayShift, 0);
+
+  // 3b. UTC+3 (10:00) to UTC+5 (Yekaterinburg) -> 12:00
+  const mskToYekt = convertTimeBetweenTimezones('10:00', 3, 5);
+  assert.strictEqual(mskToYekt.time, '12:00');
+  assert.strictEqual(mskToYekt.dayShift, 0);
+
+  // 3c. UTC+5 (12:00) to UTC+3 (MSK) -> 10:00
+  const yektToMsk = convertTimeBetweenTimezones('12:00', 5, 3);
+  assert.strictEqual(yektToMsk.time, '10:00');
+  assert.strictEqual(yektToMsk.dayShift, 0);
+
+  // 3d. UTC+3 (10:00) to UTC+1 (Berlin) -> 08:00
+  const mskToBerlin = convertTimeBetweenTimezones('10:00', 3, 1);
+  assert.strictEqual(mskToBerlin.time, '08:00');
+  assert.strictEqual(mskToBerlin.dayShift, 0);
+
+  // 3e. Forward day wrap: UTC+3 (23:30) to UTC+6 -> 02:30 next day
+  const forwardWrap = convertTimeBetweenTimezones('23:30', 3, 6);
+  assert.strictEqual(forwardWrap.time, '02:30');
+  assert.strictEqual(forwardWrap.dayShift, 1);
+
+  // 3f. Backward day wrap: UTC+3 (01:15) to UTC+0 -> 22:15 previous day
+  const backwardWrap = convertTimeBetweenTimezones('01:15', 3, 0);
+  assert.strictEqual(backwardWrap.time, '22:15');
+  assert.strictEqual(backwardWrap.dayShift, -1);
+});
+
+
 
 
 

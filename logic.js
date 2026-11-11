@@ -3290,6 +3290,69 @@
     return null;
   }
 
+  function formatTimezoneOffsetLabel(offsetHours, timeZoneName = null) {
+    const num = Number(offsetHours || 0);
+    const sign = num >= 0 ? '+' : '-';
+    const abs = Math.abs(num);
+    const whole = Math.floor(abs);
+    const fraction = Math.round((abs - whole) * 60);
+    const offsetStr = fraction > 0 ? `${whole}:${String(fraction).padStart(2, '0')}` : `${whole}`;
+    const base = `UTC${sign}${offsetStr}`;
+    return timeZoneName ? `${base} (${timeZoneName})` : base;
+  }
+
+  function getUserTimezoneInfo() {
+    let timeZone = 'UTC';
+    try {
+      if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+        timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      }
+    } catch (_) {}
+
+    let offsetHours = 3;
+    try {
+      offsetHours = - (new Date().getTimezoneOffset() / 60);
+    } catch (_) {}
+
+    return {
+      timeZone,
+      offsetHours,
+      formattedLabel: formatTimezoneOffsetLabel(offsetHours, timeZone)
+    };
+  }
+
+  function convertTimeBetweenTimezones(timeStr, fromOffsetHours = 3, toOffsetHours = 3) {
+    const { hour, minute } = parseTimeString(timeStr);
+    const fromOffset = Number(fromOffsetHours || 0);
+    const toOffset = Number(toOffsetHours || 0);
+
+    const origMinutes = hour * 60 + minute;
+    const diffMinutes = Math.round((toOffset - fromOffset) * 60);
+    const totalMinutes = origMinutes + diffMinutes;
+
+    let dayShift = 0;
+    let wrappedMinutes = totalMinutes;
+
+    if (wrappedMinutes >= 1440) {
+      dayShift = Math.floor(wrappedMinutes / 1440);
+      wrappedMinutes = ((wrappedMinutes % 1440) + 1440) % 1440;
+    } else if (wrappedMinutes < 0) {
+      dayShift = Math.floor(wrappedMinutes / 1440);
+      wrappedMinutes = ((wrappedMinutes % 1440) + 1440) % 1440;
+    }
+
+    const targetHour = Math.floor(wrappedMinutes / 60);
+    const targetMinute = wrappedMinutes % 60;
+
+    const time = `${String(targetHour).padStart(2, '0')}:${String(targetMinute).padStart(2, '0')}`;
+    return {
+      time,
+      dayShift,
+      targetHour,
+      targetMinute
+    };
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -3371,6 +3434,9 @@
     getZonedDateParts,
     shouldRunStaleStockAlert,
     calculateNextStaleRun,
+    formatTimezoneOffsetLabel,
+    getUserTimezoneInfo,
+    convertTimeBetweenTimezones,
     calculateInitialOfficerStockDeduction,
     calculateOfficerStockReset,
     normalizeOfficerMode,

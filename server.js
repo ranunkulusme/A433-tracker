@@ -2562,7 +2562,15 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять расписание уведомлений');
       }
 
-      const updated = db.updateStaleAlertSchedule(body || {});
+      const payload = { ...(body || {}) };
+      if (payload.time && payload.clientTimezoneOffset !== undefined) {
+        const clientOffset = Number(payload.clientTimezoneOffset);
+        if (!isNaN(clientOffset) && clientOffset !== 3) {
+          payload.time = logic.convertTimeBetweenTimezones(payload.time, clientOffset, 3).time;
+        }
+      }
+
+      const updated = db.updateStaleAlertSchedule(payload);
       const nextRun = logic.calculateNextStaleRun({
         frequency: updated.frequency,
         time: updated.time,

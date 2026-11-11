@@ -4007,6 +4007,22 @@ test('API Telegram Stale Alert Schedule CRUD & Smart Silence / Cooldown Triggers
     assert.strictEqual(putData.schedule.frequency, 'semiweekly');
     assert.strictEqual(putData.schedule.time, '14:00');
 
+    // 3b. PUT /api/telegram/schedule with clientTimezoneOffset (e.g. UTC+5 Yekaterinburg sets 15:00 local -> should become 13:00 MSK)
+    const putTzRes = await fetch(`${baseUrl}/api/telegram/schedule`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminLogin.token}`
+      },
+      body: JSON.stringify({
+        time: '15:00',
+        clientTimezoneOffset: 5
+      })
+    });
+    assert.strictEqual(putTzRes.status, 200);
+    const putTzData = await putTzRes.json();
+    assert.strictEqual(putTzData.schedule.time, '13:00', '15:00 at UTC+5 must be converted to 13:00 MSK (UTC+3)');
+
     // 4. Test Smart Silence: when staleCount === 0 and isScheduled === true -> no message in staff chat
     for (const player of db.getPlayers()) {
       db.updatePlayer(player.id, { stockUpdatedAt: new Date().toISOString() });

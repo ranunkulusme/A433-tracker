@@ -4653,6 +4653,18 @@ async function renderNotificationsPage() {
     const botUserVal = (settingsRes && settingsRes.botUsername) ? settingsRes.botUsername : '';
     const staffChatVal = (settingsRes && settingsRes.staffChatId) ? settingsRes.staffChatId : '';
 
+    const userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo
+      ? logic.getUserTimezoneInfo()
+      : { timeZone: 'UTC', offsetHours: 3, offsetLabel: 'UTC+3', isMsk: true };
+    const mskScheduleTime = (scheduleRes && scheduleRes.schedule && scheduleRes.schedule.time) || '10:00';
+    const localScheduleTime = (typeof logic !== 'undefined' && logic.convertTimeBetweenTimezones)
+      ? logic.convertTimeBetweenTimezones(mskScheduleTime, 3, userTz.offsetHours).time
+      : mskScheduleTime;
+    const tzBadgeText = typeof t === 'function'
+      ? t('telegram.your_timezone', { tz: `${userTz.offsetLabel}, ${userTz.timeZone}` })
+      : `ваше время: ${userTz.offsetLabel}, ${userTz.timeZone}`;
+    const initialTimeHint = formatScheduleTimeHint(localScheduleTime, userTz);
+
     pageContent.innerHTML = `
       ${isR5 ? `
         <!-- Bot Settings (R5) -->
@@ -4714,8 +4726,12 @@ async function renderNotificationsPage() {
                 </select>
               </div>
               <div class="form-group">
-                <label for="tg-schedule-time">${typeof t === 'function' ? t('telegram.schedule_time_label') : 'Время отправки (МСК / UTC+3)'}</label>
-                <input type="time" id="tg-schedule-time" value="${escapeHtml((scheduleRes && scheduleRes.schedule && scheduleRes.schedule.time) || '10:00')}" class="form-control">
+                <label for="tg-schedule-time">
+                  <span>${typeof t === 'function' ? t('telegram.schedule_time_label') : 'Время отправки'}</span>
+                  <small id="tg-schedule-tz-badge" style="color:var(--accent);font-weight:600;margin-left:4px">(${escapeHtml(tzBadgeText)})</small>
+                </label>
+                <input type="time" id="tg-schedule-time" value="${escapeHtml(localScheduleTime)}" class="form-control" oninput="onScheduleTimeInput(this.value)">
+                <small id="tg-schedule-time-hint" style="display:block;color:var(--text2);margin-top:4px">${escapeHtml(initialTimeHint)}</small>
               </div>
               <div class="form-group">
                 <label for="tg-schedule-cooldown">${typeof t === 'function' ? t('telegram.personal_cooldown_label') : 'Личные напоминания бойцам (в ЛС)'}</label>
@@ -5297,17 +5313,59 @@ async function saveTelegramSettings() {
 }
 
 // ─── TELEGRAM SCHEDULE & STALE REMINDERS ──────────────────────
+function formatScheduleTimeHint(localTime, userTz) {
+  if (!userTz) {
+    userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo
+      ? logic.getUserTimezoneInfo()
+      : { offsetHours: 3, isMsk: true };
+  }
+  if (!localTime) return '';
+  const converted = typeof logic !== 'undefined' && logic.convertTimeBetweenTimezones
+    ? logic.convertTimeBetweenTimezones(localTime, userTz.offsetHours, 3)
+    : { time: localTime, dayShift: 0 };
+  const shiftText = converted.dayShift > 0 ? ' (+1d)' : (converted.dayShift < 0 ? ' (-1d)' : '');
+  const mskTimeWithShift = `${converted.time}${shiftText}`;
+  if (typeof t === 'function') {
+    return `ℹ️ ${t('telegram.corresponds_to_msk', { time: mskTimeWithShift })}`;
+  }
+  return `ℹ️ соответствует ${mskTimeWithShift} по МСК`;
+}
+
+function onScheduleTimeInput(val) {
+  const hintEl = document.getElementById('tg-schedule-time-hint');
+  if (!hintEl) return;
+  const userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo ? logic.getUserTimezoneInfo() : null;
+  hintEl.textContent = formatScheduleTimeHint(val, userTz);
+}
+
 function formatScheduleStatusText(scheduleRes) {
   if (!scheduleRes || !scheduleRes.schedule) return;
   const s = scheduleRes.schedule;
   const lastRunEl = document.getElementById('tg-schedule-last-run-text');
   const nextRunEl = document.getElementById('tg-schedule-next-run-text');
 
+  const userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo
+    ? logic.getUserTimezoneInfo()
+    : { offsetHours: 3, isMsk: true };
+
+  const mskLabel = typeof t === 'function' ? t('telegram.status_msk_time') : 'по МСК';
+  const yourLabel = typeof t === 'function' ? t('telegram.status_your_time') : 'ваше время';
+
   if (lastRunEl) {
     if (s.lastRunAt) {
       const d = new Date(s.lastRunAt);
-      const zoned = typeof logic !== 'undefined' && logic.getZonedDateParts ? logic.getZonedDateParts(d, s.timezoneOffset || 3) : null;
-      const dateText = zoned ? `${zoned.dateString} ${zoned.timeString} МСК` : d.toLocaleString();
+      const mskZoned = typeof logic !== 'undefined' && logic.getZonedDateParts ? logic.getZonedDateParts(d, s.timezoneOffset || 3) : null;
+
+      let dateText = '';
+      if (!userTz.isMsk) {
+        const localZoned = typeof logic !== 'undefined' && logic.getZonedDateParts ? logic.getZonedDateParts(d, userTz.offsetHours) : null;
+        const localText = localZoned ? `${localZoned.dateString} ${localZoned.timeString}` : d.toLocaleString();
+        const mskText = mskZoned ? `${mskZoned.dateString} ${mskZoned.timeString}` : '';
+        dateText = `${localText} (${yourLabel}) / ${mskText} (${mskLabel})`;
+      } else {
+        dateText = mskZoned ? `${mskZoned.dateString} ${mskZoned.timeString} ${mskLabel}` : d.toLocaleString();
+      }
+
       let statusDetail = '';
       if (s.lastRunStatus) {
         if (s.lastRunStatus.silent) {
@@ -5327,7 +5385,14 @@ function formatScheduleStatusText(scheduleRes) {
       nextRunEl.textContent = typeof t === 'function' ? t('telegram.freq_disabled') : 'Отключено (только вручную)';
     } else if (scheduleRes.nextRun) {
       const nr = scheduleRes.nextRun;
-      nextRunEl.textContent = `${nr.dayName || ''}, ${nr.nextRunZonedText} МСК`;
+      if (!userTz.isMsk && nr.nextRunIso) {
+        const nextDate = new Date(nr.nextRunIso);
+        const localZoned = typeof logic !== 'undefined' && logic.getZonedDateParts ? logic.getZonedDateParts(nextDate, userTz.offsetHours) : null;
+        const localText = localZoned ? `${localZoned.dayName || ''}, ${localZoned.dateString} ${localZoned.timeString}` : '';
+        nextRunEl.textContent = `${localText} (${yourLabel}) / ${nr.dayName || ''}, ${nr.nextRunZonedText} (${mskLabel})`;
+      } else {
+        nextRunEl.textContent = `${nr.dayName || ''}, ${nr.nextRunZonedText} ${mskLabel}`;
+      }
     } else {
       nextRunEl.textContent = '—';
     }
@@ -5340,9 +5405,14 @@ async function saveTelegramSchedule() {
   const cooldownEl = document.getElementById('tg-schedule-cooldown');
   const silenceEl = document.getElementById('tg-schedule-smart-silence');
 
+  const userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo
+    ? logic.getUserTimezoneInfo()
+    : { offsetHours: 3 };
+
   const payload = {
     frequency: freqEl ? freqEl.value : 'weekly',
     time: timeEl && timeEl.value ? timeEl.value.trim() : '10:00',
+    clientTimezoneOffset: userTz.offsetHours,
     personalCooldownDays: cooldownEl ? parseInt(cooldownEl.value, 10) : 7,
     smartSilence: silenceEl ? silenceEl.checked : true
   };
@@ -5354,6 +5424,13 @@ async function saveTelegramSchedule() {
     });
     if (res && res.success) {
       telegramScheduleCache = res;
+      if (timeEl && res.schedule && res.schedule.time) {
+        const localTime = typeof logic !== 'undefined' && logic.convertTimeBetweenTimezones
+          ? logic.convertTimeBetweenTimezones(res.schedule.time, 3, userTz.offsetHours).time
+          : res.schedule.time;
+        timeEl.value = localTime;
+        onScheduleTimeInput(localTime);
+      }
       formatScheduleStatusText(res);
       showToast(typeof t === 'function' ? t('telegram.schedule_saved') : 'Расписание уведомлений успешно сохранено', 'success');
     }
@@ -11722,6 +11799,8 @@ if (typeof window !== 'undefined') {
   window.copyStaffPinCommand = copyStaffPinCommand;
   window.saveTelegramSettings = saveTelegramSettings;
   window.saveTelegramSchedule = saveTelegramSchedule;
+  window.onScheduleTimeInput = onScheduleTimeInput;
+  window.formatScheduleTimeHint = formatScheduleTimeHint;
   window.triggerManualStaleCheck = triggerManualStaleCheck;
   window.formatScheduleStatusText = formatScheduleStatusText;
 

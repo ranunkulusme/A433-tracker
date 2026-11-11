@@ -177,8 +177,9 @@
                 </select>
               </div>
               <div class="form-group">
-                <label for="tg-schedule-time" data-i18n="telegram.schedule_time_label">Время отправки (МСК / UTC+3)</label>
-                <input type="time" id="tg-schedule-time" value="10:00" class="form-control">
+                <label for="tg-schedule-time"><span data-i18n="telegram.schedule_time_label">Время отправки</span> <small id="tg-schedule-tz-badge" style="color:var(--accent);font-weight:600"></small></label>
+                <input type="time" id="tg-schedule-time" value="10:00" class="form-control" oninput="onScheduleTimeInput(this.value)">
+                <small id="tg-schedule-time-hint" style="display:block;color:var(--text2);margin-top:4px"></small>
               </div>
               <div class="form-group">
                 <label for="tg-schedule-cooldown" data-i18n="telegram.personal_cooldown_label">Личные напоминания бойцам (в ЛС)</label>
