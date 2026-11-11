@@ -4617,7 +4617,7 @@ async function renderNotificationsPage() {
   `;
 
   try {
-    const [settingsRes, templatesRes, mieruRes] = await Promise.all([
+    const [settingsRes, templatesRes, mieruRes, scheduleRes] = await Promise.all([
       apiFetch('/api/telegram/settings').catch(err => {
         console.warn('Failed to load telegram settings:', err);
         return null;
@@ -4629,12 +4629,17 @@ async function renderNotificationsPage() {
       apiFetch('/api/mieru/settings').catch(err => {
         console.warn('Failed to load mieru settings:', err);
         return null;
+      }),
+      apiFetch('/api/telegram/schedule').catch(err => {
+        console.warn('Failed to load telegram schedule:', err);
+        return null;
       })
     ]);
 
     telegramSettingsCache = settingsRes;
     notificationTemplatesCache = Array.isArray(templatesRes) ? templatesRes : [];
     mieruSettingsCache = mieruRes;
+    telegramScheduleCache = scheduleRes;
 
     const pageContent = document.getElementById('notifications-page-content');
     const pageLoading = document.getElementById('notifications-page-loading');
@@ -4684,6 +4689,71 @@ async function renderNotificationsPage() {
               </button>
               <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-staff-pin" onclick="generateStaffPinCode()">
                 ${typeof t === 'function' ? t('telegram.btn_generate_staff_pin') : '🔑 Сгенерировать код привязки штаба'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Warehouse Stock Reminder Schedule Block (R5) -->
+        <div class="settings-card schedule-settings-card" id="schedule-settings-block" style="margin-top:20px">
+          <div class="settings-card-title">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">⏰</span>
+              <h3>${typeof t === 'function' ? t('telegram.schedule_title') : 'Расписание сводки по складам'}</h3>
+            </div>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-row form-row-3">
+              <div class="form-group">
+                <label for="tg-schedule-freq">${typeof t === 'function' ? t('telegram.schedule_freq_label') : 'Периодичность отправки в штаб'}</label>
+                <select id="tg-schedule-freq" class="form-control">
+                  <option value="weekly" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.frequency === 'weekly') ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.freq_weekly') : 'Еженедельно (Пн)'}</option>
+                  <option value="semiweekly" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.frequency === 'semiweekly') ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.freq_semiweekly') : '2 раза в неделю (Пн, Чт)'}</option>
+                  <option value="daily" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.frequency === 'daily') ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.freq_daily') : 'Ежедневно'}</option>
+                  <option value="disabled" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.frequency === 'disabled') ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.freq_disabled') : 'Отключено (только вручную)'}</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="tg-schedule-time">${typeof t === 'function' ? t('telegram.schedule_time_label') : 'Время отправки (МСК / UTC+3)'}</label>
+                <input type="time" id="tg-schedule-time" value="${escapeHtml((scheduleRes && scheduleRes.schedule && scheduleRes.schedule.time) || '10:00')}" class="form-control">
+              </div>
+              <div class="form-group">
+                <label for="tg-schedule-cooldown">${typeof t === 'function' ? t('telegram.personal_cooldown_label') : 'Личные напоминания бойцам (в ЛС)'}</label>
+                <select id="tg-schedule-cooldown" class="form-control">
+                  <option value="7" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.personalCooldownDays === 7) ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.cooldown_7d') : 'Не чаще 1 раза в 7 дней'}</option>
+                  <option value="14" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.personalCooldownDays === 14) ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.cooldown_14d') : 'Не чаще 1 раза в 14 дней'}</option>
+                  <option value="0" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.personalCooldownDays === 0) ? 'selected' : ''}>${typeof t === 'function' ? t('telegram.cooldown_none') : 'Отключено (не слать в ЛС)'}</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Smart silence toggle -->
+            <div style="margin-top:12px">
+              <label class="switch-toggle" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="tg-schedule-smart-silence" ${(scheduleRes && scheduleRes.schedule && scheduleRes.schedule.smartSilence) ? 'checked' : ''}>
+                <span style="font-weight:600">${typeof t === 'function' ? t('telegram.smart_silence_label') : 'Умная тишина: не слать в штаб при 0 устаревших складах'}</span>
+              </label>
+            </div>
+
+            <!-- Status Banner -->
+            <div class="schedule-status-banner" id="tg-schedule-status-banner" style="margin-top:14px;padding:10px 14px;background:var(--bg3);border-radius:6px;font-size:13px;border-left:4px solid var(--accent)">
+              <div>
+                <strong>${typeof t === 'function' ? t('telegram.status_last_run') : 'Последняя проверка:'}</strong>
+                <span id="tg-schedule-last-run-text" style="color:var(--text2);margin-left:6px">—</span>
+              </div>
+              <div style="margin-top:4px">
+                <strong>${typeof t === 'function' ? t('telegram.status_next_run') : 'Следующая плановая проверка:'}</strong>
+                <span id="tg-schedule-next-run-text" style="color:var(--text2);margin-left:6px">—</span>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="form-actions" style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-schedule" onclick="saveTelegramSchedule()">
+                ${typeof t === 'function' ? t('telegram.btn_save_schedule') : '💾 Сохранить расписание'}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-manual-stale-check" onclick="triggerManualStaleCheck()">
+                ${typeof t === 'function' ? t('telegram.btn_manual_check') : '⚡ Проверить и отправить сейчас'}
               </button>
             </div>
           </div>
@@ -4928,6 +4998,9 @@ async function renderNotificationsPage() {
       : (notificationTemplatesCache.find(tpl => tpl.channel === 'staff')?.key || notificationTemplatesCache[0]?.key || 'staff_new_user_pending');
     onSelectNotificationTemplate(initialKey);
 
+    if (isR5 && scheduleRes) {
+      formatScheduleStatusText(scheduleRes);
+    }
   } catch (err) {
     c.innerHTML = `<div class="empty-state"><p>Ошибка загрузки страницы уведомлений: ${escapeHtml(err.message)}</p></div>`;
   }
@@ -5220,6 +5293,106 @@ async function saveTelegramSettings() {
     }
   } catch (err) {
     showToast(err.message || 'Ошибка сохранения настроек бота', 'error');
+  }
+}
+
+// ─── TELEGRAM SCHEDULE & STALE REMINDERS ──────────────────────
+function formatScheduleStatusText(scheduleRes) {
+  if (!scheduleRes || !scheduleRes.schedule) return;
+  const s = scheduleRes.schedule;
+  const lastRunEl = document.getElementById('tg-schedule-last-run-text');
+  const nextRunEl = document.getElementById('tg-schedule-next-run-text');
+
+  if (lastRunEl) {
+    if (s.lastRunAt) {
+      const d = new Date(s.lastRunAt);
+      const zoned = typeof logic !== 'undefined' && logic.getZonedDateParts ? logic.getZonedDateParts(d, s.timezoneOffset || 3) : null;
+      const dateText = zoned ? `${zoned.dateString} ${zoned.timeString} МСК` : d.toLocaleString();
+      let statusDetail = '';
+      if (s.lastRunStatus) {
+        if (s.lastRunStatus.silent) {
+          statusDetail = ` (${typeof t === 'function' ? t('telegram.status_silence_active') : 'тишина: 0 устаревших складов'})`;
+        } else {
+          statusDetail = ` (${typeof t === 'function' ? t('telegram.status_sent_summary', { count: s.lastRunStatus.personalRemindersSent || 0 }) : 'отправлено в штаб'})`;
+        }
+      }
+      lastRunEl.textContent = `${dateText}${statusDetail}`;
+    } else {
+      lastRunEl.textContent = typeof t === 'function' ? t('telegram.status_never') : 'ещё не запускалась';
+    }
+  }
+
+  if (nextRunEl) {
+    if (s.frequency === 'disabled') {
+      nextRunEl.textContent = typeof t === 'function' ? t('telegram.freq_disabled') : 'Отключено (только вручную)';
+    } else if (scheduleRes.nextRun) {
+      const nr = scheduleRes.nextRun;
+      nextRunEl.textContent = `${nr.dayName || ''}, ${nr.nextRunZonedText} МСК`;
+    } else {
+      nextRunEl.textContent = '—';
+    }
+  }
+}
+
+async function saveTelegramSchedule() {
+  const freqEl = document.getElementById('tg-schedule-freq');
+  const timeEl = document.getElementById('tg-schedule-time');
+  const cooldownEl = document.getElementById('tg-schedule-cooldown');
+  const silenceEl = document.getElementById('tg-schedule-smart-silence');
+
+  const payload = {
+    frequency: freqEl ? freqEl.value : 'weekly',
+    time: timeEl && timeEl.value ? timeEl.value.trim() : '10:00',
+    personalCooldownDays: cooldownEl ? parseInt(cooldownEl.value, 10) : 7,
+    smartSilence: silenceEl ? silenceEl.checked : true
+  };
+
+  try {
+    const res = await apiFetch('/api/telegram/schedule', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+    if (res && res.success) {
+      telegramScheduleCache = res;
+      formatScheduleStatusText(res);
+      showToast(typeof t === 'function' ? t('telegram.schedule_saved') : 'Расписание уведомлений успешно сохранено', 'success');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения расписания', 'error');
+  }
+}
+
+async function triggerManualStaleCheck() {
+  const confirmMsg = typeof t === 'function'
+    ? t('telegram.manual_check_confirm')
+    : 'Запустить внеочередную проверку актуальности складов и отправить сводку в штаб?';
+  if (!confirm(confirmMsg)) return;
+
+  const btn = document.getElementById('btn-manual-stale-check');
+  const originalText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Проверка...';
+  }
+
+  try {
+    const res = await apiFetch('/api/telegram/check-reminders', {
+      method: 'POST',
+      body: JSON.stringify({ force: true })
+    });
+    if (res && res.success) {
+      const alertStatus = res.staffAlertSent ? 'Сводка отправлена в штаб' : 'Тишина (нет устаревших складов)';
+      showToast(`✅ Проверка завершена: ${alertStatus}. ЛС отправлено: ${res.personalRemindersSent || 0}`, 'success');
+      const sched = await apiFetch('/api/telegram/schedule').catch(() => null);
+      if (sched) formatScheduleStatusText(sched);
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка проверки складов', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   }
 }
 
@@ -11548,6 +11721,9 @@ if (typeof window !== 'undefined') {
   window.closeStaffPinModal = closeStaffPinModal;
   window.copyStaffPinCommand = copyStaffPinCommand;
   window.saveTelegramSettings = saveTelegramSettings;
+  window.saveTelegramSchedule = saveTelegramSchedule;
+  window.triggerManualStaleCheck = triggerManualStaleCheck;
+  window.formatScheduleStatusText = formatScheduleStatusText;
 
   window.switchMieruTab = switchMieruTab;
   window.syncMieruFormToJson = syncMieruFormToJson;

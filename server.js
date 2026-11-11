@@ -348,8 +348,15 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
   }
 }
 
-async function checkStaleStockReminders(req = null) {
+async function checkStaleStockReminders(req = null, options = {}) {
   try {
+    const isScheduled = Boolean(options.isScheduled);
+    const force = Boolean(options.force || !isScheduled);
+    const forcePersonal = Boolean(options.forcePersonal);
+
+    const schedule = db.getStaleAlertSchedule();
+    const cooldownDays = schedule.personalCooldownDays !== undefined ? schedule.personalCooldownDays : 7;
+
     const players = db.getPlayers();
     const totalSectors = players.length;
     let freshCount = 0;
@@ -375,21 +382,35 @@ async function checkStaleStockReminders(req = null) {
     }
 
     // 1. Personal reminders to owners of stale sectors
-    for (const { player, freshness } of staleSectors) {
-      if (player.userId) {
-        const user = db.findUserById(player.userId);
-        if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
-          const res = await dispatchNotification('stock_reminder_personal', {
-            username: user.username,
-            sectorName: player.name || 'Сектор',
-            daysOverdue: String(freshness.days ?? '14+'),
-            link: `${baseUrl}/#cabinet`
-          }, { userId: user.id }).catch(err => {
-            console.warn(`[Reminders] Error sending reminder to user ${user.id}:`, err.message);
-            return { sent: false };
-          });
-          if (res && res.sent) {
-            personalRemindersSent++;
+    if (cooldownDays > 0 || forcePersonal) {
+      for (const { player, freshness } of staleSectors) {
+        if (player.userId) {
+          // Check personal cooldown
+          if (!forcePersonal && player.lastStockReminderSentAt) {
+            const lastSentTime = new Date(player.lastStockReminderSentAt).getTime();
+            if (!isNaN(lastSentTime)) {
+              const daysSince = (now.getTime() - lastSentTime) / (24 * 60 * 60 * 1000);
+              if (daysSince < cooldownDays) {
+                continue; // Suppressed by cooldown
+              }
+            }
+          }
+
+          const user = db.findUserById(player.userId);
+          if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
+            const res = await dispatchNotification('stock_reminder_personal', {
+              username: user.username,
+              sectorName: player.name || 'Сектор',
+              daysOverdue: String(freshness.days ?? '14+'),
+              link: `${baseUrl}/#cabinet`
+            }, { userId: user.id }).catch(err => {
+              console.warn(`[Reminders] Error sending reminder to user ${user.id}:`, err.message);
+              return { sent: false };
+            });
+            if (res && res.sent) {
+              personalRemindersSent++;
+              db.updatePlayerStockReminderTime(player.id, now.toISOString());
+            }
           }
         }
       }
@@ -397,28 +418,39 @@ async function checkStaleStockReminders(req = null) {
 
     // 2. Staff alert summary
     let staffAlertSent = false;
-    const staffRes = await dispatchNotification('staff_stale_stocks_alert', {
-      totalSectors: String(totalSectors),
-      freshCount: String(freshCount),
-      warningCount: String(warningCount),
-      staleCount: String(staleCount),
-      link: `${baseUrl}/#matrix`
-    }).catch(err => {
-      console.warn('[Reminders] Error sending staff_stale_stocks_alert:', err.message);
-      return { sent: false };
-    });
-    if (staffRes && staffRes.sent) {
-      staffAlertSent = true;
+    const shouldSkipStaffDueToSilence = isScheduled && schedule.smartSilence && staleCount === 0 && !force;
+
+    if (!shouldSkipStaffDueToSilence) {
+      const staffRes = await dispatchNotification('staff_stale_stocks_alert', {
+        totalSectors: String(totalSectors),
+        freshCount: String(freshCount),
+        warningCount: String(warningCount),
+        staleCount: String(staleCount),
+        link: `${baseUrl}/#matrix`
+      }).catch(err => {
+        console.warn('[Reminders] Error sending staff_stale_stocks_alert:', err.message);
+        return { sent: false };
+      });
+      if (staffRes && staffRes.sent) {
+        staffAlertSent = true;
+      }
+    } else {
+      console.log('[Reminders] Smart silence active: 0 stale sectors, staff alert skipped');
     }
 
-    return {
+    const result = {
       totalSectors,
       freshCount,
       warningCount,
       staleCount,
       personalRemindersSent,
-      staffAlertSent
+      staffAlertSent,
+      silent: shouldSkipStaffDueToSilence
     };
+
+    db.recordStaleAlertRun({ lastRunAt: now.toISOString(), status: result });
+
+    return result;
   } catch (err) {
     console.warn('[Reminders] Error in checkStaleStockReminders:', err.message);
     return {
@@ -428,8 +460,32 @@ async function checkStaleStockReminders(req = null) {
       staleCount: 0,
       personalRemindersSent: 0,
       staffAlertSent: false,
+      silent: false,
       error: err.message
     };
+  }
+}
+
+async function checkScheduledStaleStockReminders() {
+  try {
+    const schedule = db.getStaleAlertSchedule();
+    if (!schedule || schedule.frequency === 'disabled') return;
+
+    const now = new Date();
+    const shouldRun = logic.shouldRunStaleStockAlert({
+      frequency: schedule.frequency,
+      time: schedule.time,
+      lastRunAt: schedule.lastRunAt,
+      now,
+      timezoneOffset: schedule.timezoneOffset || 3
+    });
+
+    if (shouldRun) {
+      console.log(`[Reminders] Triggering scheduled stale stock check (${schedule.frequency} at ${schedule.time})`);
+      await checkStaleStockReminders(null, { isScheduled: true });
+    }
+  } catch (err) {
+    console.error('[Reminders] Error in checkScheduledStaleStockReminders:', err);
   }
 }
 
@@ -2475,6 +2531,52 @@ function createRequestHandler(staticDir, s3Manager = null) {
       });
     }
 
+    if (pathname === '/api/telegram/schedule' && req.method === 'GET') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const schedule = db.getStaleAlertSchedule();
+      const nextRun = logic.calculateNextStaleRun({
+        frequency: schedule.frequency,
+        time: schedule.time,
+        now: new Date(),
+        timezoneOffset: schedule.timezoneOffset || 3
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        schedule,
+        nextRun
+      });
+    }
+
+    if (pathname === '/api/telegram/schedule' && req.method === 'PUT') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять расписание уведомлений');
+      }
+
+      const updated = db.updateStaleAlertSchedule(body || {});
+      const nextRun = logic.calculateNextStaleRun({
+        frequency: updated.frequency,
+        time: updated.time,
+        now: new Date(),
+        timezoneOffset: updated.timezoneOffset || 3
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        schedule: updated,
+        nextRun
+      });
+    }
+
     if (pathname === '/api/telegram/check-reminders' && req.method === 'POST') {
       if (!authenticate(req)) {
         return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
@@ -2483,7 +2585,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
 
-      const result = await checkStaleStockReminders(req);
+      const force = (body && body.force !== undefined) ? Boolean(body.force) : true;
+      const forcePersonal = Boolean(body && body.forcePersonal);
+      const result = await checkStaleStockReminders(req, { isScheduled: false, force, forcePersonal });
       return sendJson(res, 200, { success: true, ...result });
     }
 
@@ -2648,12 +2752,12 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   }, 24 * 60 * 60 * 1000);
   if (retentionInterval.unref) retentionInterval.unref();
 
-  // Schedule daily stale stock check (24h)
+  // Schedule minute ticker for configurable stale stock reminders
   const staleReminderInterval = setInterval(() => {
-    checkStaleStockReminders().catch(err => {
-      console.error('[Reminders] Error in scheduled checkStaleStockReminders:', err);
+    checkScheduledStaleStockReminders().catch(err => {
+      console.error('[Reminders] Error in scheduled stale reminder ticker:', err);
     });
-  }, 24 * 60 * 60 * 1000);
+  }, 60 * 1000);
   if (staleReminderInterval.unref) staleReminderInterval.unref();
 
   // Auto-start Mieru tunnel client if enabled

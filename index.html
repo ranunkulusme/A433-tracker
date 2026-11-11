@@ -159,6 +159,65 @@
           </div>
         </div>
 
+        <!-- Warehouse Stock Reminder Schedule Block (R5) -->
+        <div class="settings-card schedule-settings-card" id="schedule-settings-block" style="margin-top:20px">
+          <div class="settings-card-title">
+            <span style="font-size:18px">⏰</span>
+            <h3 data-i18n="telegram.schedule_title">Расписание сводки по складам</h3>
+          </div>
+          <div class="settings-card-body">
+            <div class="form-row form-row-3">
+              <div class="form-group">
+                <label for="tg-schedule-freq" data-i18n="telegram.schedule_freq_label">Периодичность отправки в штаб</label>
+                <select id="tg-schedule-freq" class="form-control">
+                  <option value="weekly" data-i18n="telegram.freq_weekly">Еженедельно (Пн)</option>
+                  <option value="semiweekly" data-i18n="telegram.freq_semiweekly">2 раза в неделю (Пн, Чт)</option>
+                  <option value="daily" data-i18n="telegram.freq_daily">Ежедневно</option>
+                  <option value="disabled" data-i18n="telegram.freq_disabled">Отключено (только вручную)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="tg-schedule-time" data-i18n="telegram.schedule_time_label">Время отправки (МСК / UTC+3)</label>
+                <input type="time" id="tg-schedule-time" value="10:00" class="form-control">
+              </div>
+              <div class="form-group">
+                <label for="tg-schedule-cooldown" data-i18n="telegram.personal_cooldown_label">Личные напоминания бойцам (в ЛС)</label>
+                <select id="tg-schedule-cooldown" class="form-control">
+                  <option value="7" data-i18n="telegram.cooldown_7d">Не чаще 1 раза в 7 дней</option>
+                  <option value="14" data-i18n="telegram.cooldown_14d">Не чаще 1 раза в 14 дней</option>
+                  <option value="0" data-i18n="telegram.cooldown_none">Отключено (не слать в ЛС)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Smart silence toggle -->
+            <div style="margin-top:12px">
+              <label class="switch-toggle" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="tg-schedule-smart-silence" checked>
+                <span data-i18n="telegram.smart_silence_label" style="font-weight:600">Умная тишина: не слать в штаб при 0 устаревших складах</span>
+              </label>
+            </div>
+
+            <!-- Status Banner -->
+            <div class="schedule-status-banner" id="tg-schedule-status-banner" style="margin-top:14px;padding:10px 14px;background:var(--bg3);border-radius:6px;font-size:13px;border-left:4px solid var(--accent)">
+              <div>
+                <strong data-i18n="telegram.status_last_run">Последняя проверка:</strong>
+                <span id="tg-schedule-last-run-text" style="color:var(--text2);margin-left:6px">—</span>
+              </div>
+              <div style="margin-top:4px">
+                <strong data-i18n="telegram.status_next_run">Следующая плановая проверка:</strong>
+                <span id="tg-schedule-next-run-text" style="color:var(--text2);margin-left:6px">—</span>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="form-actions" style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-schedule" onclick="saveTelegramSchedule()" data-i18n="telegram.btn_save_schedule">💾 Сохранить расписание</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-manual-stale-check" onclick="triggerManualStaleCheck()" data-i18n="telegram.btn_manual_check">⚡ Проверить и отправить сейчас</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Mieru Tunnel Settings Block (R5) -->
         <div class="settings-card mieru-settings-card" id="card-mieru-settings">
           <div class="settings-card-title mieru-card-header">

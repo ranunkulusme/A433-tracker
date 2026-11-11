@@ -3141,6 +3141,155 @@
     });
   }
 
+  const DEFAULT_STALE_ALERT_SCHEDULE = Object.freeze({
+    frequency: 'weekly', // 'weekly' | 'semiweekly' | 'daily' | 'disabled'
+    time: '10:00', // HH:MM
+    smartSilence: true, // true: don't alert staff if staleCount === 0
+    personalCooldownDays: 7, // 0 = disabled, 7, 14
+    timezoneOffset: 3 // MSK = UTC+3
+  });
+
+  const DAY_NAMES_RU = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+
+  function getZonedDateParts(dateInput, timezoneOffset = 3) {
+    const d = dateInput instanceof Date ? dateInput : (dateInput ? new Date(dateInput) : new Date());
+    if (isNaN(d.getTime())) return null;
+    const offsetMs = Number(timezoneOffset || 0) * 60 * 60 * 1000;
+    const zoned = new Date(d.getTime() + offsetMs);
+
+    const year = zoned.getUTCFullYear();
+    const month = zoned.getUTCMonth() + 1;
+    const day = zoned.getUTCDate();
+    const dayOfWeek = zoned.getUTCDay(); // 0 = Sun, 1 = Mon ...
+    const hour = zoned.getUTCHours();
+    const minute = zoned.getUTCMinutes();
+    const second = zoned.getUTCSeconds();
+
+    const mm = String(month).padStart(2, '0');
+    const dd = String(day).padStart(2, '0');
+    const hh = String(hour).padStart(2, '0');
+    const min = String(minute).padStart(2, '0');
+
+    return {
+      year,
+      month,
+      day,
+      dayOfWeek,
+      hour,
+      minute,
+      second,
+      dateString: `${year}-${mm}-${dd}`,
+      timeString: `${hh}:${min}`,
+      dayName: DAY_NAMES_RU[dayOfWeek] || ''
+    };
+  }
+
+  function parseTimeString(timeStr) {
+    if (typeof timeStr !== 'string') return { hour: 10, minute: 0 };
+    const parts = timeStr.trim().split(':');
+    const hour = Math.max(0, Math.min(23, parseInt(parts[0], 10) || 0));
+    const minute = Math.max(0, Math.min(59, parseInt(parts[1], 10) || 0));
+    return { hour, minute };
+  }
+
+  function shouldRunStaleStockAlert({
+    frequency = 'weekly',
+    time = '10:00',
+    lastRunAt = null,
+    now = null,
+    timezoneOffset = 3
+  } = {}) {
+    if (frequency === 'disabled') return false;
+
+    const currentZoned = getZonedDateParts(now || new Date(), timezoneOffset);
+    if (!currentZoned) return false;
+
+    // Day of week match
+    // 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
+    if (frequency === 'weekly') {
+      if (currentZoned.dayOfWeek !== 1) return false; // Mon only
+    } else if (frequency === 'semiweekly') {
+      if (currentZoned.dayOfWeek !== 1 && currentZoned.dayOfWeek !== 4) return false; // Mon & Thu only
+    } else if (frequency === 'daily') {
+      // Any day
+    } else {
+      return false;
+    }
+
+    // Time of day match
+    const target = parseTimeString(time);
+    const currentMins = currentZoned.hour * 60 + currentZoned.minute;
+    const targetMins = target.hour * 60 + target.minute;
+    if (currentMins < targetMins) {
+      return false; // Not yet time
+    }
+
+    // Check if already ran on the same calendar day in this timezone
+    if (lastRunAt) {
+      const lastZoned = getZonedDateParts(lastRunAt, timezoneOffset);
+      if (lastZoned && lastZoned.dateString === currentZoned.dateString) {
+        return false; // Already ran today
+      }
+    }
+
+    return true;
+  }
+
+  function calculateNextStaleRun({
+    frequency = 'weekly',
+    time = '10:00',
+    now = null,
+    timezoneOffset = 3
+  } = {}) {
+    if (frequency === 'disabled') return null;
+
+    const currentBase = now instanceof Date ? now : (now ? new Date(now) : new Date());
+    if (isNaN(currentBase.getTime())) return null;
+
+    const target = parseTimeString(time);
+    const offsetMs = Number(timezoneOffset || 0) * 60 * 60 * 1000;
+
+    // Check up to 14 days ahead
+    for (let dayOffset = 0; dayOffset <= 14; dayOffset++) {
+      // Shift current base date by dayOffset in local timezone
+      const checkZoned = new Date(currentBase.getTime() + offsetMs + (dayOffset * 24 * 60 * 60 * 1000));
+      const dayOfWeek = checkZoned.getUTCDay();
+
+      let dayMatches = false;
+      if (frequency === 'daily') {
+        dayMatches = true;
+      } else if (frequency === 'weekly') {
+        dayMatches = (dayOfWeek === 1);
+      } else if (frequency === 'semiweekly') {
+        dayMatches = (dayOfWeek === 1 || dayOfWeek === 4);
+      }
+
+      if (!dayMatches) continue;
+
+      // Construct target UTC timestamp for that zoned day
+      const targetUtcYear = checkZoned.getUTCFullYear();
+      const targetUtcMonth = checkZoned.getUTCMonth();
+      const targetUtcDate = checkZoned.getUTCDate();
+
+      // target UTC millis = Date.UTC(year, month, date, targetHour, targetMin) - offsetMs
+      const targetUtcMillis = Date.UTC(targetUtcYear, targetUtcMonth, targetUtcDate, target.hour, target.minute, 0, 0) - offsetMs;
+
+      // Must be strictly in the future compared to currentBase (with 1 second tolerance)
+      if (targetUtcMillis > currentBase.getTime() + 1000) {
+        const nextDate = new Date(targetUtcMillis);
+        const nextZoned = getZonedDateParts(nextDate, timezoneOffset);
+        return {
+          nextRunIso: nextDate.toISOString(),
+          nextRunZonedText: `${nextZoned.dateString} ${nextZoned.timeString}`,
+          dayOfWeek: nextZoned.dayOfWeek,
+          dayName: nextZoned.dayName
+        };
+      }
+    }
+
+    return null;
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -3218,6 +3367,10 @@
     DEFAULT_NOTIFICATION_TEMPLATES,
     NOTIFICATION_TEMPLATE_SAMPLE_DATA,
     renderTemplate,
+    DEFAULT_STALE_ALERT_SCHEDULE,
+    getZonedDateParts,
+    shouldRunStaleStockAlert,
+    calculateNextStaleRun,
     calculateInitialOfficerStockDeduction,
     calculateOfficerStockReset,
     normalizeOfficerMode,
