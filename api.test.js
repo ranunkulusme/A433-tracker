@@ -3792,14 +3792,35 @@ test('API Notification Triggers: event place assignment and autopick summary', a
 
     sentMessages.length = 0;
 
+    // 1. Dry-run autopick: must NOT send notifications and must NOT mutate db event
     const autopickRes = await fetch(`${baseUrl}/api/events/${ev2.id}/autopick`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminLogin.token}` }
     });
     assert.equal(autopickRes.status, 200);
+    const autopickData = await autopickRes.json();
+    assert.ok(autopickData.success);
+    assert.ok(Array.isArray(autopickData.assignments));
+    assert.equal(sentMessages.length, 0, 'Autopick preview must NOT send notifications');
+    const evBeforeSave = db.getEventById(ev2.id);
+    assert.equal(evBeforeSave.assignments.length, 0, 'Autopick preview must NOT mutate event assignments in db');
 
-    // Should send personal notification to assigned player + summary to staff chat
-    assert.ok(sentMessages.length >= 2);
+    // 2. Submit saveEvent with the autopick assignments
+    const saveRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: ev2.id,
+        typeId: ev2.typeId,
+        dateFrom: ev2.dateFrom,
+        dateTo: ev2.dateTo,
+        assignments: autopickData.assignments
+      })
+    });
+    assert.equal(saveRes.status, 200);
+
+    // Should now send personal notification to assigned player + summary to staff chat
+    assert.ok(sentMessages.length >= 2, 'saveEvent with assignments must dispatch notifications');
     const personalAutopick = sentMessages.find(m => m.chat_id === 777007);
     assert.ok(personalAutopick);
     assert.ok(personalAutopick.text.includes('Sector Victor'));
@@ -3897,6 +3918,151 @@ test('API Notification Triggers: stale stock reminders and staff summary', async
     assert.ok(staffAlert);
     assert.ok(staffAlert.text.includes('актуальность складов'));
     assert.ok(staffAlert.text.includes('Устарели (>14 дн.)'));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('API Telegram Stale Alert Schedule CRUD & Smart Silence / Cooldown Triggers', async () => {
+  const { startServer, checkStaleStockReminders } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 205 } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    db.setAppSetting('telegram_bot_token', 'mock_token_schedule');
+    db.setAppSetting('telegram_staff_chat_id', '-100999888');
+
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const r3Reg = db.registerUser({ username: 'member_r3', password: 'password', playerName: 'Sector R3' });
+    db.approveUser(r3Reg.userId, 'r3');
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'member_r3', password: 'password' })
+    })).json();
+
+    // 1. GET /api/telegram/schedule defaults
+    const getRes = await fetch(`${baseUrl}/api/telegram/schedule`, {
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.strictEqual(getRes.status, 200);
+    const getData = await getRes.json();
+    assert.strictEqual(getData.success, true);
+    assert.strictEqual(getData.schedule.frequency, 'weekly');
+    assert.strictEqual(getData.schedule.time, '10:00');
+    assert.strictEqual(getData.schedule.smartSilence, true);
+    assert.strictEqual(getData.schedule.personalCooldownDays, 7);
+    assert.ok(getData.nextRun !== undefined);
+
+    // 2. PUT /api/telegram/schedule RBAC: R3 gets 403
+    const putR3Res = await fetch(`${baseUrl}/api/telegram/schedule`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${r3Login.token}`
+      },
+      body: JSON.stringify({ frequency: 'semiweekly' })
+    });
+    assert.strictEqual(putR3Res.status, 403);
+
+    // 3. PUT /api/telegram/schedule as R5: updates successfully
+    const putAdminRes = await fetch(`${baseUrl}/api/telegram/schedule`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminLogin.token}`
+      },
+      body: JSON.stringify({
+        frequency: 'semiweekly',
+        time: '14:00',
+        smartSilence: true,
+        personalCooldownDays: 7
+      })
+    });
+    assert.strictEqual(putAdminRes.status, 200);
+    const putData = await putAdminRes.json();
+    assert.strictEqual(putData.success, true);
+    assert.strictEqual(putData.schedule.frequency, 'semiweekly');
+    assert.strictEqual(putData.schedule.time, '14:00');
+
+    // 3b. PUT /api/telegram/schedule with clientTimezoneOffset (e.g. UTC+5 Yekaterinburg sets 15:00 local -> should become 13:00 MSK)
+    const putTzRes = await fetch(`${baseUrl}/api/telegram/schedule`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminLogin.token}`
+      },
+      body: JSON.stringify({
+        time: '15:00',
+        clientTimezoneOffset: 5
+      })
+    });
+    assert.strictEqual(putTzRes.status, 200);
+    const putTzData = await putTzRes.json();
+    assert.strictEqual(putTzData.schedule.time, '13:00', '15:00 at UTC+5 must be converted to 13:00 MSK (UTC+3)');
+
+    // 4. Test Smart Silence: when staleCount === 0 and isScheduled === true -> no message in staff chat
+    for (const player of db.getPlayers()) {
+      db.updatePlayer(player.id, { stockUpdatedAt: new Date().toISOString() });
+    }
+    sentMessages.length = 0;
+
+    const scheduledSilenceResult = await checkStaleStockReminders(null, { isScheduled: true });
+    assert.strictEqual(scheduledSilenceResult.staleCount, 0);
+    assert.strictEqual(scheduledSilenceResult.staffAlertSent, false, 'Scheduled run with smart silence must skip staff alert');
+    assert.strictEqual(sentMessages.length, 0, 'No Telegram messages should be sent');
+
+    // But manual check sends status even if staleCount === 0
+    const manualCheckRes = await fetch(`${baseUrl}/api/telegram/check-reminders`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.strictEqual(manualCheckRes.status, 200);
+    const manualData = await manualCheckRes.json();
+    assert.strictEqual(manualData.staffAlertSent, true, 'Manual check must send summary to staff chat');
+    assert.ok(sentMessages.some(m => m.chat_id === -100999888));
+
+    // 5. Test Personal Cooldown: player gets reminder, but second run within 7 days skips them
+    db.bindUserTelegram(r3Reg.userId, 777666, 'tg_r3_user');
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+    db.updatePlayer(r3Reg.playerId, { stockUpdatedAt: fifteenDaysAgo, last_stock_reminder_sent_at: null });
+
+    sentMessages.length = 0;
+    const run1 = await checkStaleStockReminders(null, { isScheduled: true });
+    assert.ok(run1.staleCount >= 1);
+    assert.strictEqual(run1.personalRemindersSent, 1, 'First reminder must be sent');
+    assert.ok(sentMessages.some(m => m.chat_id === 777666));
+
+    // Immediately run again: cooldown (7 days) should suppress personal reminder
+    sentMessages.length = 0;
+    const run2 = await checkStaleStockReminders(null, { isScheduled: true });
+    assert.strictEqual(run2.personalRemindersSent, 0, 'Personal reminder must be suppressed by 7-day cooldown');
+    // Staff alert is sent because staleCount >= 1, but NO personal reminder to 777666
+    assert.strictEqual(run2.staffAlertSent, true);
+    assert.ok(sentMessages.some(m => m.chat_id === -100999888));
+    assert.ok(!sentMessages.some(m => m.chat_id === 777666), 'User must not receive repeated reminder');
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();

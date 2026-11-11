@@ -522,6 +522,7 @@ function getPlayers() {
     },
     stockUpdatedAt: p.stock_updated_at || null,
     stockUpdateSource: p.stock_update_source || null,
+    lastStockReminderSentAt: p.last_stock_reminder_sent_at || null,
     officers: officersByPlayer.get(p.id) || []
   }));
 }
@@ -564,6 +565,7 @@ function getPlayerById(id) {
     },
     stockUpdatedAt: p.stock_updated_at || null,
     stockUpdateSource: p.stock_update_source || null,
+    lastStockReminderSentAt: p.last_stock_reminder_sent_at || null,
     officers: officerRows.map(o => ({
       id: o.id,
       catalogId: o.catalog_id,
@@ -644,6 +646,7 @@ function getPlayersByUserId(userId) {
     },
     stockUpdatedAt: p.stock_updated_at || null,
     stockUpdateSource: p.stock_update_source || null,
+    lastStockReminderSentAt: p.last_stock_reminder_sent_at || null,
     officers: officersByPlayer.get(p.id) || []
   }));
 }
@@ -1836,6 +1839,9 @@ function migrateSchema(db) {
     if (!playerCols.includes('stock_update_source')) {
       db.exec("ALTER TABLE players ADD COLUMN stock_update_source TEXT NULL;");
     }
+    if (!playerCols.includes('last_stock_reminder_sent_at')) {
+      db.exec("ALTER TABLE players ADD COLUMN last_stock_reminder_sent_at TEXT NULL;");
+    }
     if (!playerCols.includes('hq_level')) {
       db.exec("ALTER TABLE players ADD COLUMN hq_level INTEGER NULL DEFAULT NULL;");
     }
@@ -2049,6 +2055,7 @@ function initDb(filePath) {
       stock_chests INTEGER DEFAULT 0,
       stock_updated_at TEXT NULL,
       stock_update_source TEXT NULL,
+      last_stock_reminder_sent_at TEXT NULL,
       updated_at TEXT NOT NULL
     );
 
@@ -2247,6 +2254,73 @@ function saveMieruSettings(settings = {}) {
     setAppSetting('mieru_config_json', String(settings.configJson).trim());
   }
   return getMieruSettings();
+}
+
+// ─── STALE ALERT SCHEDULE ────────────────────────────────────
+function getStaleAlertSchedule() {
+  const frequency = getAppSetting('tg_stale_frequency') || 'weekly';
+  const time = getAppSetting('tg_stale_time') || '10:00';
+  const smartSilenceRaw = getAppSetting('tg_stale_smart_silence');
+  const smartSilence = smartSilenceRaw === null ? true : (smartSilenceRaw === 'true' || smartSilenceRaw === '1');
+  const cooldownDaysRaw = getAppSetting('tg_stale_personal_cooldown');
+  const personalCooldownDays = cooldownDaysRaw !== null ? (parseInt(cooldownDaysRaw, 10) || 0) : 7;
+  const lastRunAt = getAppSetting('tg_stale_last_run_at') || null;
+  const lastRunStatusRaw = getAppSetting('tg_stale_last_run_status');
+  let lastRunStatus = null;
+  if (lastRunStatusRaw) {
+    try {
+      lastRunStatus = JSON.parse(lastRunStatusRaw);
+    } catch (_) {}
+  }
+
+  return {
+    frequency,
+    time,
+    smartSilence,
+    personalCooldownDays,
+    lastRunAt,
+    lastRunStatus,
+    timezoneOffset: 3
+  };
+}
+
+function updateStaleAlertSchedule(updates = {}) {
+  if (updates.frequency !== undefined) {
+    const validFreqs = ['weekly', 'semiweekly', 'daily', 'disabled'];
+    if (validFreqs.includes(updates.frequency)) {
+      setAppSetting('tg_stale_frequency', updates.frequency);
+    }
+  }
+  if (updates.time !== undefined) {
+    const timeMatch = String(updates.time).trim().match(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/);
+    if (timeMatch) {
+      setAppSetting('tg_stale_time', updates.time.trim());
+    }
+  }
+  if (updates.smartSilence !== undefined) {
+    setAppSetting('tg_stale_smart_silence', updates.smartSilence ? '1' : '0');
+  }
+  if (updates.personalCooldownDays !== undefined) {
+    const days = Math.max(0, parseInt(updates.personalCooldownDays, 10) || 0);
+    setAppSetting('tg_stale_personal_cooldown', String(days));
+  }
+  return getStaleAlertSchedule();
+}
+
+function recordStaleAlertRun({ lastRunAt = null, status = null } = {}) {
+  const runTime = lastRunAt ? (typeof lastRunAt === 'string' ? lastRunAt : new Date(lastRunAt).toISOString()) : new Date().toISOString();
+  setAppSetting('tg_stale_last_run_at', runTime);
+  if (status !== null) {
+    setAppSetting('tg_stale_last_run_status', JSON.stringify(status));
+  }
+  return getStaleAlertSchedule();
+}
+
+function updatePlayerStockReminderTime(playerId, isoString = null) {
+  if (!playerId) return false;
+  const time = isoString || new Date().toISOString();
+  getDb().prepare('UPDATE players SET last_stock_reminder_sent_at = ? WHERE id = ?').run(time, playerId);
+  return true;
 }
 
 // ─── NOTIFICATION TEMPLATES ──────────────────────────────────
@@ -2462,4 +2536,8 @@ module.exports = {
   getMieruSettings,
   saveMieruSettings,
   touchUserActive,
+  getStaleAlertSchedule,
+  updateStaleAlertSchedule,
+  recordStaleAlertRun,
+  updatePlayerStockReminderTime,
 };

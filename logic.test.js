@@ -3035,5 +3035,190 @@ test('suggestOfficerPuzzleCost calculates accurate costs with upward rounding an
   assert.equal(fallbackSiege8.suggestedCost, 720);
 });
 
+test('stale stock alert scheduler: shouldRunStaleStockAlert and calculateNextStaleRun', () => {
+  const {
+    DEFAULT_STALE_ALERT_SCHEDULE,
+    getZonedDateParts,
+    shouldRunStaleStockAlert,
+    calculateNextStaleRun
+  } = require('./logic.js');
+
+  // 1. Defaults check
+  assert.strictEqual(DEFAULT_STALE_ALERT_SCHEDULE.frequency, 'weekly');
+  assert.strictEqual(DEFAULT_STALE_ALERT_SCHEDULE.time, '10:00');
+  assert.strictEqual(DEFAULT_STALE_ALERT_SCHEDULE.smartSilence, true);
+  assert.strictEqual(DEFAULT_STALE_ALERT_SCHEDULE.personalCooldownDays, 7);
+  assert.strictEqual(DEFAULT_STALE_ALERT_SCHEDULE.timezoneOffset, 3);
+
+  // 2. getZonedDateParts check: 2026-11-16 07:00 UTC = 2026-11-16 10:00 MSK (Monday)
+  const mondayUtc = new Date('2026-11-16T07:00:00.000Z');
+  const mondayZoned = getZonedDateParts(mondayUtc, 3);
+  assert.strictEqual(mondayZoned.dateString, '2026-11-16');
+  assert.strictEqual(mondayZoned.dayOfWeek, 1, 'Day 1 is Monday');
+  assert.strictEqual(mondayZoned.hour, 10);
+  assert.strictEqual(mondayZoned.minute, 0);
+
+  // 3. frequency: 'disabled' -> always false
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'disabled',
+    time: '10:00',
+    now: mondayUtc,
+    timezoneOffset: 3
+  }), false);
+
+  // 4. frequency: 'weekly' (runs Monday 10:00 MSK)
+  // 4a. Exactly Monday 10:00 MSK, no previous run -> true
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'weekly',
+    time: '10:00',
+    lastRunAt: null,
+    now: mondayUtc,
+    timezoneOffset: 3
+  }), true);
+
+  // 4b. Monday 09:59 MSK (too early) -> false
+  const mondayEarly = new Date('2026-11-16T06:59:00.000Z');
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'weekly',
+    time: '10:00',
+    now: mondayEarly,
+    timezoneOffset: 3
+  }), false);
+
+  // 4c. Monday 14:30 MSK (catch-up on same day if not run yet) -> true
+  const mondayLate = new Date('2026-11-16T11:30:00.000Z');
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'weekly',
+    time: '10:00',
+    lastRunAt: null,
+    now: mondayLate,
+    timezoneOffset: 3
+  }), true);
+
+  // 4d. Monday 14:30 MSK, but already ran on Monday at 10:00 MSK -> false (idempotence)
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'weekly',
+    time: '10:00',
+    lastRunAt: '2026-11-16T07:01:00.000Z',
+    now: mondayLate,
+    timezoneOffset: 3
+  }), false);
+
+  // 4e. Tuesday 10:00 MSK with weekly schedule -> false (not Monday)
+  const tuesdayUtc = new Date('2026-11-17T07:00:00.000Z');
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'weekly',
+    time: '10:00',
+    now: tuesdayUtc,
+    timezoneOffset: 3
+  }), false);
+
+  // 5. frequency: 'semiweekly' (runs Monday and Thursday)
+  // Thursday 10:00 MSK (2026-11-19) -> true
+  const thursdayUtc = new Date('2026-11-19T07:00:00.000Z');
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'semiweekly',
+    time: '10:00',
+    lastRunAt: '2026-11-16T07:00:00.000Z', // ran on Monday
+    now: thursdayUtc,
+    timezoneOffset: 3
+  }), true);
+
+  // Friday with semiweekly -> false
+  const fridayUtc = new Date('2026-11-20T07:00:00.000Z');
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'semiweekly',
+    time: '10:00',
+    now: fridayUtc,
+    timezoneOffset: 3
+  }), false);
+
+  // 6. frequency: 'daily'
+  // Runs every day after 10:00 if not run today
+  assert.strictEqual(shouldRunStaleStockAlert({
+    frequency: 'daily',
+    time: '10:00',
+    lastRunAt: '2026-11-16T07:00:00.000Z',
+    now: tuesdayUtc,
+    timezoneOffset: 3
+  }), true);
+
+  // 7. calculateNextStaleRun
+  // On Tuesday 2026-11-17 10:00 MSK with weekly (Mon 10:00): next run is next Monday 2026-11-23 10:00 MSK (07:00 UTC)
+  const nextWeekly = calculateNextStaleRun({
+    frequency: 'weekly',
+    time: '10:00',
+    now: tuesdayUtc,
+    timezoneOffset: 3
+  });
+  assert.ok(nextWeekly);
+  assert.strictEqual(nextWeekly.nextRunIso, '2026-11-23T07:00:00.000Z');
+  assert.strictEqual(nextWeekly.dayName, 'Понедельник');
+
+  // With frequency: 'disabled', next run is null
+  const nextDisabled = calculateNextStaleRun({
+    frequency: 'disabled',
+    time: '10:00',
+    now: tuesdayUtc,
+    timezoneOffset: 3
+  });
+  assert.strictEqual(nextDisabled, null);
+});
+
+test('timezone utilities: getUserTimezoneInfo, formatTimezoneOffsetLabel, convertTimeBetweenTimezones', () => {
+  const {
+    getUserTimezoneInfo,
+    formatTimezoneOffsetLabel,
+    convertTimeBetweenTimezones
+  } = require('./logic.js');
+
+  // 1. formatTimezoneOffsetLabel
+  assert.strictEqual(formatTimezoneOffsetLabel(3, 'Europe/Moscow'), 'UTC+3 (Europe/Moscow)');
+  assert.strictEqual(formatTimezoneOffsetLabel(5, 'Asia/Yekaterinburg'), 'UTC+5 (Asia/Yekaterinburg)');
+  assert.strictEqual(formatTimezoneOffsetLabel(-4, 'America/New_York'), 'UTC-4 (America/New_York)');
+  assert.strictEqual(formatTimezoneOffsetLabel(0, 'UTC'), 'UTC+0 (UTC)');
+  assert.strictEqual(formatTimezoneOffsetLabel(3.5, 'Asia/Tehran'), 'UTC+3:30 (Asia/Tehran)');
+
+  // 2. getUserTimezoneInfo
+  const tzInfo = getUserTimezoneInfo();
+  assert.ok(tzInfo);
+  assert.strictEqual(typeof tzInfo.offsetHours, 'number');
+  assert.strictEqual(typeof tzInfo.timeZone, 'string');
+  assert.strictEqual(typeof tzInfo.formattedLabel, 'string');
+
+  // 3. convertTimeBetweenTimezones
+  // 3a. Same timezone
+  const sameTz = convertTimeBetweenTimezones('10:00', 3, 3);
+  assert.strictEqual(sameTz.time, '10:00');
+  assert.strictEqual(sameTz.dayShift, 0);
+
+  // 3b. UTC+3 (10:00) to UTC+5 (Yekaterinburg) -> 12:00
+  const mskToYekt = convertTimeBetweenTimezones('10:00', 3, 5);
+  assert.strictEqual(mskToYekt.time, '12:00');
+  assert.strictEqual(mskToYekt.dayShift, 0);
+
+  // 3c. UTC+5 (12:00) to UTC+3 (MSK) -> 10:00
+  const yektToMsk = convertTimeBetweenTimezones('12:00', 5, 3);
+  assert.strictEqual(yektToMsk.time, '10:00');
+  assert.strictEqual(yektToMsk.dayShift, 0);
+
+  // 3d. UTC+3 (10:00) to UTC+1 (Berlin) -> 08:00
+  const mskToBerlin = convertTimeBetweenTimezones('10:00', 3, 1);
+  assert.strictEqual(mskToBerlin.time, '08:00');
+  assert.strictEqual(mskToBerlin.dayShift, 0);
+
+  // 3e. Forward day wrap: UTC+3 (23:30) to UTC+6 -> 02:30 next day
+  const forwardWrap = convertTimeBetweenTimezones('23:30', 3, 6);
+  assert.strictEqual(forwardWrap.time, '02:30');
+  assert.strictEqual(forwardWrap.dayShift, 1);
+
+  // 3f. Backward day wrap: UTC+3 (01:15) to UTC+0 -> 22:15 previous day
+  const backwardWrap = convertTimeBetweenTimezones('01:15', 3, 0);
+  assert.strictEqual(backwardWrap.time, '22:15');
+  assert.strictEqual(backwardWrap.dayShift, -1);
+});
+
+
+
 
 

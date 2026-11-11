@@ -2124,6 +2124,61 @@ test('touchUserActive records last_active_at and getUsers reports isOnline', () 
   assert.equal(user.isOnline, true);
 });
 
+test('stale stock alert schedule and player reminder timestamp persistence in db', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  // 1. Initial schedule defaults
+  const initial = dbModule.getStaleAlertSchedule();
+  assert.strictEqual(initial.frequency, 'weekly');
+  assert.strictEqual(initial.time, '10:00');
+  assert.strictEqual(initial.smartSilence, true);
+  assert.strictEqual(initial.personalCooldownDays, 7);
+  assert.strictEqual(initial.lastRunAt, null);
+  assert.strictEqual(initial.lastRunStatus, null);
+
+  // 2. Update schedule
+  const updated = dbModule.updateStaleAlertSchedule({
+    frequency: 'semiweekly',
+    time: '14:30',
+    smartSilence: false,
+    personalCooldownDays: 14
+  });
+  assert.strictEqual(updated.frequency, 'semiweekly');
+  assert.strictEqual(updated.time, '14:30');
+  assert.strictEqual(updated.smartSilence, false);
+  assert.strictEqual(updated.personalCooldownDays, 14);
+
+  // Re-read from db
+  const reRead = dbModule.getStaleAlertSchedule();
+  assert.strictEqual(reRead.frequency, 'semiweekly');
+  assert.strictEqual(reRead.time, '14:30');
+  assert.strictEqual(reRead.smartSilence, false);
+  assert.strictEqual(reRead.personalCooldownDays, 14);
+
+  // 3. Record alert run with status
+  const runTime = '2026-11-16T11:30:00.000Z';
+  const status = { totalSectors: 20, staleCount: 2, staffAlertSent: true, personalRemindersSent: 1 };
+  const afterRun = dbModule.recordStaleAlertRun({ lastRunAt: runTime, status });
+  assert.strictEqual(afterRun.lastRunAt, runTime);
+  assert.deepStrictEqual(afterRun.lastRunStatus, status);
+
+  // 4. Player stock reminder timestamp
+  const player = dbModule.getPlayers()[0];
+  assert.ok(player);
+  assert.strictEqual(player.lastStockReminderSentAt, null);
+
+  const reminderIso = '2026-11-16T11:30:05.000Z';
+  dbModule.updatePlayerStockReminderTime(player.id, reminderIso);
+
+  const pAfter = dbModule.getPlayerById(player.id);
+  assert.strictEqual(pAfter.lastStockReminderSentAt, reminderIso);
+  const playersList = dbModule.getPlayers();
+  const pInList = playersList.find(p => p.id === player.id);
+  assert.strictEqual(pInList.lastStockReminderSentAt, reminderIso);
+});
+
+
 
 
 
