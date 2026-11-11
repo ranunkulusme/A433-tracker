@@ -1,7 +1,7 @@
 {
   "name": "kow-tracker",
-  "version": "3.38.0",
-  "description": "Kingdom of Winners Officer Tracker and Event Planner",
+  "version": "3.39.0",
+  "description": "Kiss of War Officer Tracker and Event Planner",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
