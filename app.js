@@ -9435,7 +9435,7 @@ function updateCatalogOfficerCostSuggestion() {
       hintEl.className = 'coupon-auto-hint';
       hintEl.textContent = '🔒 Специальный офицер: качается только за личные медали (0 купонов)';
     }
-    if (coupInput && !editCatalogOfficerId) {
+    if (coupInput && !isFoCouponManuallyEdited) {
       coupInput.value = 0;
     }
     return;
@@ -9460,12 +9460,12 @@ function updateCatalogOfficerCostSuggestion() {
 
   if (!res || !hintEl) return;
 
-  const currentVal = parseInt(coupInput?.value) || 0;
-
-  // Если это добавление нового офицера и пользователь ещё не редактировал поле вручную
-  if (!editCatalogOfficerId && !isFoCouponManuallyEdited && coupInput) {
+  // Если пользователь не редактировал поле вручную или нажал «Применить авторасчёт»
+  if (!isFoCouponManuallyEdited && coupInput) {
     coupInput.value = res.suggestedCost;
   }
+
+  const currentVal = parseInt(coupInput?.value) || 0;
 
   // Обновляем текст подсказки
   if (!isFoCouponManuallyEdited) {
@@ -9498,6 +9498,30 @@ function onFoCouponManualInput() {
 
 function resetFoCouponToAuto() {
   isFoCouponManuallyEdited = false;
+  const coupInput = document.getElementById('fo-coupon-per-puzzle');
+  const gen = Math.max(1, parseInt(document.getElementById('fo-generation')?.value) || 8);
+  const type = document.getElementById('fo-type')?.value || 'Танк';
+  const upType = document.getElementById('fo-upgrade-type')?.value || 'standard';
+  const suggestFn = (typeof logic !== 'undefined' && logic.suggestOfficerPuzzleCost)
+    ? logic.suggestOfficerPuzzleCost
+    : (typeof suggestOfficerPuzzleCost === 'function' ? suggestOfficerPuzzleCost : null);
+
+  if (suggestFn && coupInput) {
+    const res = suggestFn({
+      generation: gen,
+      type: type,
+      upgradeType: upType,
+      catalog: state.officerCatalog || [],
+      roundUpStep: 50
+    });
+    if (res && res.suggestedCost !== undefined) {
+      coupInput.value = res.suggestedCost;
+      if (typeof toast === 'function') {
+        const fmt = typeof fmtNum === 'function' ? fmtNum : (n => n);
+        toast(`Применён авторасчёт: ${fmt(res.suggestedCost)} купонов`, 'success');
+      }
+    }
+  }
   updateCatalogOfficerCostSuggestion();
 }
 

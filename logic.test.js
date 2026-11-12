@@ -3037,6 +3037,21 @@ test('suggestOfficerPuzzleCost calculates accurate costs with upward rounding an
   // 7. Эталонная Осада S8 при пустом каталоге = 720
   const fallbackSiege8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Осада', catalog: [] });
   assert.equal(fallbackSiege8.suggestedCost, 720);
+
+  // 8. Сценарий пользователя: Офицер Танк S8 со старой ценой 1020 в каталоге
+  // При вычислении рекомендации выдаёт 1050, что отличается от 1020
+  const tankOldCost = 1020;
+  const autoTank8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: catalogWithTanks });
+  assert.equal(autoTank8.suggestedCost, 1050);
+  assert.notEqual(tankOldCost, autoTank8.suggestedCost, 'Старое значение 1020 отличается от рекомендованного 1050');
+  // При сбросе к авторасчету значение должно стать 1050
+  let currentCost = tankOldCost;
+  let isManuallyEdited = true;
+  // Пользователь нажимает "Применить авторасчёт"
+  isManuallyEdited = false;
+  currentCost = autoTank8.suggestedCost;
+  assert.equal(currentCost, 1050);
+  assert.equal(isManuallyEdited, false);
 });
 
 test('stale stock alert scheduler: shouldRunStaleStockAlert and calculateNextStaleRun', () => {
