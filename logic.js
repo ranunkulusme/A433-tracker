@@ -2857,6 +2857,54 @@
     return officers.filter(o => isOfficerEligibleForSimulator(o, catalog));
   }
 
+  function collectUniqueOfficers(catalog = [], players = []) {
+    const map = new Map();
+    const catalogById = new Map();
+
+    (catalog || []).forEach(c => {
+      if (c && c.id) catalogById.set(c.id, c);
+      if (c && c.name && !map.has(c.name.toLowerCase().trim())) {
+        map.set(c.name.toLowerCase().trim(), {
+          name: c.name.trim(),
+          type: c.type || '',
+          generation: c.generation !== undefined && c.generation !== null ? c.generation : ''
+        });
+      }
+    });
+
+    (players || []).forEach(p => {
+      (p?.officers || []).forEach(o => {
+        const cat = o.catalogId ? catalogById.get(o.catalogId) : null;
+        const name = (o.name || cat?.name || '').trim();
+        if (name && !map.has(name.toLowerCase())) {
+          const type = cat?.type || o.type || '';
+          const generation = cat?.generation !== undefined && cat?.generation !== null
+            ? cat.generation
+            : (o.generation !== undefined && o.generation !== null ? o.generation : '');
+          map.set(name.toLowerCase(), {
+            name,
+            type,
+            generation
+          });
+        }
+      });
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  }
+
+  function filterOfficersByQuery(officers = [], query = '') {
+    if (!Array.isArray(officers)) return [];
+    const q = (query || '').toLowerCase().trim();
+    if (!q) return [...officers];
+    return officers.filter(o => {
+      if (!o || !o.name) return false;
+      const nameMatch = o.name.toLowerCase().includes(q);
+      const typeMatch = o.type ? o.type.toLowerCase().includes(q) : false;
+      return nameMatch || typeMatch;
+    });
+  }
+
   const USER_PERMISSIONS = Object.freeze({
     VIEW_SECTORS: 'view_sectors',     // Просмотр всех секторов и командиров альянса
     VIEW_STOCKS: 'view_stocks',       // Просмотр точных остатков складов других игроков
@@ -3474,5 +3522,7 @@
     setOfficerModeInStore,
     REFERENCE_GENERATION_COSTS,
     suggestOfficerPuzzleCost,
+    collectUniqueOfficers,
+    filterOfficersByQuery,
   };
 });

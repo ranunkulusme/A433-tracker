@@ -59,6 +59,8 @@ const {
   DEFAULT_NOTIFICATION_TEMPLATES,
   NOTIFICATION_TEMPLATE_SAMPLE_DATA,
   renderTemplate,
+  collectUniqueOfficers,
+  filterOfficersByQuery,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -3219,6 +3221,67 @@ test('timezone utilities: getUserTimezoneInfo, formatTimezoneOffsetLabel, conver
   assert.strictEqual(backwardWrap.time, '22:15');
   assert.strictEqual(backwardWrap.dayShift, -1);
 });
+
+test('matrix officer combobox filter: collectUniqueOfficers and filterOfficersByQuery', () => {
+  const catalog = [
+    { id: 'c1', name: 'Белла', type: 'Танки', generation: 1 },
+    { id: 'c2', name: 'Александра', type: 'Артиллерия', generation: 2 },
+    { id: 'c3', name: 'Виктория', type: 'Пехота', generation: 3 },
+  ];
+
+  const players = [
+    {
+      id: 1,
+      name: 'Player1',
+      officers: [
+        { id: 'o1', catalogId: 'c1', name: 'Белла' },
+        { id: 'o2', catalogId: 'custom_1', name: 'Злата', type: 'Танки', generation: 4 },
+      ]
+    },
+    {
+      id: 2,
+      name: 'Player2',
+      officers: [
+        { id: 'o3', catalogId: 'c2' }, // should resolve name 'Александра' via catalogId
+        { id: 'o4', catalogId: 'c3', name: 'Виктория' } // duplicate name with catalog, deduplicated
+      ]
+    }
+  ];
+
+  // 1. collectUniqueOfficers extracts, enriches, deduplicates and sorts in Russian alphabetical order
+  const uniqueOfficers = collectUniqueOfficers(catalog, players);
+  assert.strictEqual(uniqueOfficers.length, 4);
+  assert.deepStrictEqual(uniqueOfficers.map(o => o.name), [
+    'Александра',
+    'Белла',
+    'Виктория',
+    'Злата'
+  ]);
+  assert.strictEqual(uniqueOfficers.find(o => o.name === 'Александра').type, 'Артиллерия');
+  assert.strictEqual(uniqueOfficers.find(o => o.name === 'Злата').generation, 4);
+
+  // 2. filterOfficersByQuery with empty or whitespace returns full list
+  assert.strictEqual(filterOfficersByQuery(uniqueOfficers, '').length, 4);
+  assert.strictEqual(filterOfficersByQuery(uniqueOfficers, '   ').length, 4);
+
+  // 3. filterOfficersByQuery matches case-insensitively by officer name
+  const filteredByName = filterOfficersByQuery(uniqueOfficers, 'бел');
+  assert.strictEqual(filteredByName.length, 1);
+  assert.strictEqual(filteredByName[0].name, 'Белла');
+
+  // 4. filterOfficersByQuery matches by troop type
+  const filteredByType = filterOfficersByQuery(uniqueOfficers, 'танк');
+  assert.strictEqual(filteredByType.length, 2);
+  assert.deepStrictEqual(filteredByType.map(o => o.name), ['Белла', 'Злата']);
+
+  // 5. filterOfficersByQuery returns empty array on no matches
+  assert.strictEqual(filterOfficersByQuery(uniqueOfficers, 'Несуществующий').length, 0);
+
+  // 6. Graceful handling of null / undefined inputs
+  assert.deepStrictEqual(collectUniqueOfficers(null, null), []);
+  assert.deepStrictEqual(filterOfficersByQuery(null, 'test'), []);
+});
+
 
 
 

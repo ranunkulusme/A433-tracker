@@ -3607,6 +3607,69 @@ tr.row-blocked:hover {
   }
 }
 
+/* ── MATRIX OFFICER COMBOBOX FILTER ── */
+.matrix-officer-filter-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.matrix-officer-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1050;
+  width: 280px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+}
+
+.matrix-officer-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--text1);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  user-select: none;
+}
+
+.matrix-officer-dropdown-item:hover,
+.matrix-officer-dropdown-item.is-highlighted {
+  background: var(--bg3);
+}
+
+.matrix-officer-dropdown-item.is-selected {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--blue, #3b82f6);
+  font-weight: 600;
+}
+
+.matrix-officer-dropdown-item .officer-name-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-officer-dropdown-item .officer-meta-col {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text3);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
 
 
 

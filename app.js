@@ -8216,9 +8216,19 @@ function setCalcSimMode(mode) {
   }
 }
 
+let highlightedMatrixOfficerIdx = -1;
+
 function setMatrixSearch(query) {
   matrixSearch = (query || '').toLowerCase().trim();
-  renderCalculator();
+  const input = document.getElementById('matrix-officer-search-input');
+  if (input && input.value !== (query || '')) {
+    input.value = query || '';
+  }
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) {
+    clearBtn.style.display = (query || '').trim() ? 'block' : 'none';
+  }
+  updateMatrixTable();
 }
 
 function setMatrixSort(col) {
@@ -8228,7 +8238,7 @@ function setMatrixSort(col) {
     matrixSortCol = col;
     matrixSortDir = 'asc';
   }
-  renderCalculator();
+  updateMatrixTable();
 }
 
 function setCalcPlayer(id) {
@@ -8264,12 +8274,12 @@ function resetCalcPlanned() {
 
 function setMatrixFilterType(type) {
   matrixFilterType = type;
-  renderCalculator();
+  updateMatrixTable();
 }
 
 function setMatrixFilterGen(gen) {
   matrixFilterGen = gen;
-  renderCalculator();
+  updateMatrixTable();
 }
 
 function renderCalculator() {
@@ -8731,11 +8741,205 @@ function renderPersonalSimulator() {
   `;
 }
 
-function renderGuildMatrix() {
-  const rows = [];
-  const types = ['all', ...OFFICER_TYPES];
-  const gens = ['all', ...Array.from(new Set(state.officerCatalog.map(c => String(c.generation)).filter(Boolean))).sort((a,b)=>Number(a)-Number(b))];
+function getMatrixOfficerList() {
+  if (typeof collectUniqueOfficers === 'function') {
+    return collectUniqueOfficers(state.officerCatalog, state.players);
+  }
+  const map = new Map();
+  (state.officerCatalog || []).forEach(c => {
+    if (c.name && !map.has(c.name.toLowerCase())) {
+      map.set(c.name.toLowerCase(), {
+        name: c.name,
+        type: c.type || '',
+        generation: c.generation || ''
+      });
+    }
+  });
+  (state.players || []).forEach(p => {
+    (p.officers || []).forEach(o => {
+      const cat = getCatalogOfficer(o.catalogId);
+      const name = o.name || cat?.name;
+      if (name && !map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), {
+          name,
+          type: cat?.type || '',
+          generation: cat?.generation || ''
+        });
+      }
+    });
+  });
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
 
+function renderMatrixOfficerDropdownItems(query = '') {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (!dropdown) return;
+
+  const q = (query || '').toLowerCase().trim();
+  const allOfficers = getMatrixOfficerList();
+  const filtered = typeof filterOfficersByQuery === 'function'
+    ? filterOfficersByQuery(allOfficers, q)
+    : (q ? allOfficers.filter(o => o.name.toLowerCase().includes(q) || (o.type && o.type.toLowerCase().includes(q))) : allOfficers);
+
+  let html = `
+    <div class="matrix-officer-dropdown-item ${!q && !matrixSearch ? 'is-selected' : ''}"
+         onclick="selectMatrixOfficer('')">
+      <span class="officer-name-col">
+        <span>🌐</span>
+        <strong>${typeof t === 'function' ? t('calc.all_officers') : '— Все офицеры —'}</strong>
+      </span>
+      <span class="officer-meta-col">${typeof t === 'function' ? t('calc.reset_filter') : 'Сброс'}</span>
+    </div>
+  `;
+
+  if (filtered.length === 0) {
+    html += `
+      <div style="padding:10px 12px;color:var(--text3);font-size:12px;text-align:center">
+        ${typeof t === 'function' ? t('calc.officer_not_found') : 'Офицер не найден'}
+      </div>
+    `;
+  } else {
+    html += filtered.map((o, idx) => {
+      const isSelected = matrixSearch && matrixSearch === o.name.toLowerCase();
+      const isHighlighted = idx === highlightedMatrixOfficerIdx;
+      const genStr = o.generation ? `Gen ${o.generation}` : '';
+      const typeBadge = o.type ? troopBadge(o.type) : '';
+      return `
+        <div class="matrix-officer-dropdown-item ${isSelected ? 'is-selected' : ''} ${isHighlighted ? 'is-highlighted' : ''}"
+             data-officer-name="${escapeHtml(o.name)}"
+             onclick="selectMatrixOfficer('${escapeHtml(o.name)}')">
+          <span class="officer-name-col">
+            <span>🎖️</span>
+            <strong>${escapeHtml(o.name)}</strong>
+          </span>
+          <span class="officer-meta-col">
+            ${typeBadge}
+            ${genStr ? `<span style="font-family:var(--mono);color:var(--text3)">${genStr}</span>` : ''}
+          </span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  dropdown.innerHTML = html;
+}
+
+function openMatrixOfficerDropdown() {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (!dropdown) return;
+  highlightedMatrixOfficerIdx = -1;
+  const input = document.getElementById('matrix-officer-search-input');
+  renderMatrixOfficerDropdownItems(input ? input.value : matrixSearch);
+  dropdown.style.display = 'block';
+}
+
+function closeMatrixOfficerDropdown() {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (dropdown) dropdown.style.display = 'none';
+  highlightedMatrixOfficerIdx = -1;
+}
+
+function onMatrixOfficerInput(value) {
+  matrixSearch = (value || '').toLowerCase().trim();
+
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) {
+    clearBtn.style.display = value.trim() ? 'block' : 'none';
+  }
+
+  highlightedMatrixOfficerIdx = -1;
+  renderMatrixOfficerDropdownItems(value);
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (dropdown) dropdown.style.display = 'block';
+
+  updateMatrixTable();
+}
+
+function selectMatrixOfficer(officerName) {
+  const input = document.getElementById('matrix-officer-search-input');
+  if (input) {
+    input.value = officerName;
+    input.focus();
+  }
+  matrixSearch = (officerName || '').toLowerCase().trim();
+
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) {
+    clearBtn.style.display = officerName ? 'block' : 'none';
+  }
+
+  closeMatrixOfficerDropdown();
+  updateMatrixTable();
+}
+
+function clearMatrixOfficerFilter() {
+  const input = document.getElementById('matrix-officer-search-input');
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
+  matrixSearch = '';
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) clearBtn.style.display = 'none';
+
+  renderMatrixOfficerDropdownItems('');
+  closeMatrixOfficerDropdown();
+  updateMatrixTable();
+}
+
+function onMatrixOfficerKeydown(event) {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (!dropdown || dropdown.style.display === 'none') {
+    if (event.key === 'ArrowDown') {
+      openMatrixOfficerDropdown();
+      event.preventDefault();
+    }
+    return;
+  }
+
+  const items = dropdown.querySelectorAll('.matrix-officer-dropdown-item[data-officer-name]');
+  if (items.length === 0) {
+    if (event.key === 'Escape') closeMatrixOfficerDropdown();
+    return;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    highlightedMatrixOfficerIdx = (highlightedMatrixOfficerIdx + 1) % items.length;
+    items.forEach((item, idx) => {
+      item.classList.toggle('is-highlighted', idx === highlightedMatrixOfficerIdx);
+      if (idx === highlightedMatrixOfficerIdx) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    highlightedMatrixOfficerIdx = (highlightedMatrixOfficerIdx - 1 + items.length) % items.length;
+    items.forEach((item, idx) => {
+      item.classList.toggle('is-highlighted', idx === highlightedMatrixOfficerIdx);
+      if (idx === highlightedMatrixOfficerIdx) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (highlightedMatrixOfficerIdx >= 0 && items[highlightedMatrixOfficerIdx]) {
+      const name = items[highlightedMatrixOfficerIdx].getAttribute('data-officer-name');
+      selectMatrixOfficer(name);
+    } else if (items.length === 1) {
+      const name = items[0].getAttribute('data-officer-name');
+      selectMatrixOfficer(name);
+    } else {
+      closeMatrixOfficerDropdown();
+    }
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeMatrixOfficerDropdown();
+  }
+}
+
+function buildMatrixRows() {
+  const rows = [];
   state.players.forEach(p => {
     p.officers.forEach(o => {
       const cat = getCatalogOfficer(o.catalogId);
@@ -8789,6 +8993,10 @@ function renderGuildMatrix() {
     return matrixSortDir === 'asc' ? diff : -diff;
   });
 
+  return rows;
+}
+
+function renderMatrixTableHtml(rows) {
   function sortHeader(col, label) {
     const active = matrixSortCol === col;
     const arrow = active ? (matrixSortDir === 'asc' ? ' ↑' : ' ↓') : '';
@@ -8796,10 +9004,95 @@ function renderGuildMatrix() {
   }
 
   return `
+    <table>
+      <thead>
+        <tr>
+          ${sortHeader('player', 'Игрок')}
+          ${sortHeader('officer', 'Офицер')}
+          ${sortHeader('type', 'Род войск')}
+          ${sortHeader('generation', 'Поколение')}
+          ${sortHeader('level', 'Уровень')}
+          <th>Звёзды</th>
+          ${sortHeader('deficit', 'Дефицит до 180')}
+          <th>Склад</th>
+          ${sortHeader('days', 'Без ивентов')}
+          <th>Рекомендация</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td><strong>${playerLink(r.player)}</strong></td>
+            <td><strong>${officerLink(r.officer)}</strong></td>
+            <td>${troopBadge(r.catalog.type)}</td>
+            <td style="font-family:var(--mono)">${r.catalog.generation}</td>
+            <td style="font-family:var(--mono)">Ур. ${fmtNum(r.officer.level)}</td>
+            <td>${renderStars(r.officer.stars)}</td>
+            <td style="font-family:var(--mono)">
+              ${fmtNum(r.def.deficitPuzzles)} пазл.
+              <div style="font-size:11px;color:var(--text3)">${r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы'}</div>
+            </td>
+            <td style="font-family:var(--mono);font-size:12px">
+              ${canSeeStock(r.player.id) ? `${fmtNum(r.player.stock.coupons)} куп. / ${fmtNum(r.player.stock.puzzles)} пазл.` : 'Скрыто'}
+            </td>
+            <td style="font-size:12px">
+              ${r.def.dateWithoutEvents || '—'}
+              <div style="font-size:11px;color:var(--text3)">${r.def.daysWithoutEvents !== null ? `${fmtNum(r.def.daysWithoutEvents)} дн.` : '—'}</div>
+            </td>
+            <td>${r.recBadge}</td>
+            <td>
+              <button class="action-btn" onclick="setCalcPlayer(${r.player.id});setCalcOfficer('${r.officer.id}');setCalcTab('personal')" title="Открыть симулятор">🎯</button>
+            </td>
+          </tr>
+        `).join('') || '<tr><td colspan="11" class="empty-state">Нет офицеров по выбранным фильтрам</td></tr>'}
+      </tbody>
+    </table>
+  `;
+}
+
+function updateMatrixTable() {
+  const tableWrap = document.getElementById('matrix-table-wrap');
+  if (!tableWrap) {
+    renderCalculator();
+    return;
+  }
+  const rows = buildMatrixRows();
+  const countEl = document.getElementById('matrix-rows-count');
+  if (countEl) countEl.textContent = rows.length;
+  tableWrap.innerHTML = renderMatrixTableHtml(rows);
+}
+
+function renderGuildMatrix() {
+  const types = ['all', ...OFFICER_TYPES];
+  const gens = ['all', ...Array.from(new Set(state.officerCatalog.map(c => String(c.generation)).filter(Boolean))).sort((a,b)=>Number(a)-Number(b))];
+  const rows = buildMatrixRows();
+  const searchPlaceholder = typeof t === 'function' ? t('calc.search_officer_placeholder') : '🔍 Поиск офицера...';
+
+  return `
     <div class="section-header">
-      <div class="section-title">Сводная матрица готовности офицеров (${rows.length})</div>
+      <div class="section-title">Сводная матрица готовности офицеров (<span id="matrix-rows-count">${rows.length}</span>)</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="text" placeholder="🔍 Поиск по игроку или офицеру..." value="${matrixSearch}" oninput="setMatrixSearch(this.value)" style="width:230px;padding:5px 9px;font-size:12px">
+        <div class="matrix-officer-filter-wrap">
+          <div style="position:relative;display:flex;align-items:center">
+            <input type="text"
+                   id="matrix-officer-search-input"
+                   placeholder="${escapeHtml(searchPlaceholder)}"
+                   value="${escapeHtml(matrixSearch)}"
+                   autocomplete="off"
+                   onfocus="openMatrixOfficerDropdown()"
+                   oninput="onMatrixOfficerInput(this.value)"
+                   onkeydown="onMatrixOfficerKeydown(event)"
+                   style="width:230px;padding:5px 26px 5px 9px;font-size:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text1)">
+            <button type="button"
+                    id="matrix-officer-clear-btn"
+                    onclick="clearMatrixOfficerFilter()"
+                    title="Сбросить фильтр"
+                    style="position:absolute;right:6px;background:none;border:none;color:var(--text3);cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;display:${matrixSearch ? 'block' : 'none'}">✕</button>
+          </div>
+          <div id="matrix-officer-dropdown" class="matrix-officer-dropdown-menu" style="display:none"></div>
+        </div>
+
         <label style="font-size:12px;color:var(--text3)">Род войск:</label>
         <select style="width:130px;padding:4px 8px;font-size:12px" onchange="setMatrixFilterType(this.value)">
           ${types.map(t => `<option value="${t}" ${t===matrixFilterType?'selected':''}>${t==='all'?'Все войска':t}</option>`).join('')}
@@ -8811,51 +9104,8 @@ function renderGuildMatrix() {
       </div>
     </div>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            ${sortHeader('player', 'Игрок')}
-            ${sortHeader('officer', 'Офицер')}
-            ${sortHeader('type', 'Род войск')}
-            ${sortHeader('generation', 'Поколение')}
-            ${sortHeader('level', 'Уровень')}
-            <th>Звёзды</th>
-            ${sortHeader('deficit', 'Дефицит до 180')}
-            <th>Склад</th>
-            ${sortHeader('days', 'Без ивентов')}
-            <th>Рекомендация</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td><strong>${playerLink(r.player)}</strong></td>
-              <td><strong>${officerLink(r.officer)}</strong></td>
-              <td>${troopBadge(r.catalog.type)}</td>
-              <td style="font-family:var(--mono)">${r.catalog.generation}</td>
-              <td style="font-family:var(--mono)">Ур. ${fmtNum(r.officer.level)}</td>
-              <td>${renderStars(r.officer.stars)}</td>
-              <td style="font-family:var(--mono)">
-                ${fmtNum(r.def.deficitPuzzles)} пазл.
-                <div style="font-size:11px;color:var(--text3)">${r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы'}</div>
-              </td>
-              <td style="font-family:var(--mono);font-size:12px">
-                ${canSeeStock(r.player.id) ? `${fmtNum(r.player.stock.coupons)} куп. / ${fmtNum(r.player.stock.puzzles)} пазл.` : 'Скрыто'}
-              </td>
-              <td style="font-size:12px">
-                ${r.def.dateWithoutEvents || '—'}
-                <div style="font-size:11px;color:var(--text3)">${r.def.daysWithoutEvents !== null ? `${fmtNum(r.def.daysWithoutEvents)} дн.` : '—'}</div>
-              </td>
-              <td>${r.recBadge}</td>
-              <td>
-                <button class="action-btn" onclick="setCalcPlayer(${r.player.id});setCalcOfficer('${r.officer.id}');setCalcTab('personal')" title="Открыть симулятор">🎯</button>
-              </td>
-            </tr>
-          `).join('') || '<tr><td colspan="11" class="empty-state">Нет офицеров по выбранным фильтрам</td></tr>'}
-        </tbody>
-      </table>
+    <div class="table-wrap" id="matrix-table-wrap">
+      ${renderMatrixTableHtml(rows)}
     </div>
   `;
 }
@@ -11905,6 +12155,14 @@ if (typeof window !== 'undefined') {
         if (menu) menu.style.display = 'none';
       }
     }
+
+    const matrixFilterWrap = document.querySelector('.matrix-officer-filter-wrap');
+    const matrixDropdown = document.getElementById('matrix-officer-dropdown');
+    if (matrixDropdown && matrixDropdown.style.display !== 'none') {
+      if (!matrixFilterWrap || !matrixFilterWrap.contains(e.target)) {
+        closeMatrixOfficerDropdown();
+      }
+    }
   });
 
   window.addEventListener('beforeinstallprompt', (e) => {
@@ -12090,4 +12348,11 @@ if (typeof window !== 'undefined') {
   window.sendEventSummaryStaff = sendEventSummaryStaff;
   window.dismissAppUpdate = dismissAppUpdate;
   window.applyAppUpdate = applyAppUpdate;
+
+  window.openMatrixOfficerDropdown = openMatrixOfficerDropdown;
+  window.closeMatrixOfficerDropdown = closeMatrixOfficerDropdown;
+  window.onMatrixOfficerInput = onMatrixOfficerInput;
+  window.selectMatrixOfficer = selectMatrixOfficer;
+  window.clearMatrixOfficerFilter = clearMatrixOfficerFilter;
+  window.onMatrixOfficerKeydown = onMatrixOfficerKeydown;
 }
