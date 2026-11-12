@@ -6071,12 +6071,16 @@ function renderEventDetail(eventId) {
         } else {
           state.events.push(freshEv);
         }
-        renderEventDetail(eventId);
-      } else {
+        if (currentPage === 'event_detail' && String(pageParams?.id) === String(eventId)) {
+          renderEventDetail(eventId);
+        }
+      } else if (currentPage === 'event_detail') {
         navigate('calendar');
       }
     }).catch(() => {
-      navigate('calendar');
+      if (currentPage === 'event_detail') {
+        navigate('calendar');
+      }
     });
     return;
   }
@@ -8305,6 +8309,17 @@ function setCalcTab(tab) {
   } else {
     calcActiveTab = tab;
   }
+  if (pageParams) pageParams.tab = calcActiveTab;
+  if (typeof window !== 'undefined' && window.location) {
+    const targetHash = calcActiveTab === 'matrix' ? '#matrix' : '#calculator';
+    if (window.location.hash !== targetHash) {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', targetHash);
+      } else {
+        window.location.hash = targetHash;
+      }
+    }
+  }
   renderCalculator();
 }
 
@@ -8382,6 +8397,9 @@ function setMatrixFilterGen(gen) {
 }
 
 function renderCalculator() {
+  if (pageParams && pageParams.tab) {
+    calcActiveTab = pageParams.tab;
+  }
   if (!calcPlayerId && state.players.length) {
     calcPlayerId = state.players[0].id;
   }
@@ -11184,7 +11202,10 @@ function openEventResultModal(eventId, place) {
     : Number(place);
 
   let opts = places.map(pi => `<option value="${pi.place}" ${Number(pi.place) === selectedPlace ? 'selected' : ''}>${escapeHtml(pi.label || 'Место ' + pi.place)} (${fmtNum(pi.coupons)} куп.)</option>`).join('');
-  opts += `<option value="4" ${selectedPlace === 4 ? 'selected' : ''}>4-10 место (утешительные купоны)</option><option value="0" ${selectedPlace === 0 ? 'selected' : ''}>Не попал в топ (0 купонов)</option>`;
+  if (!places.some(pi => Number(pi.place) === 4)) {
+    opts += `<option value="4" ${selectedPlace === 4 ? 'selected' : ''}>4-10 место (утешительные купоны)</option>`;
+  }
+  opts += `<option value="0" ${selectedPlace === 0 ? 'selected' : ''}>Не попал в топ (0 купонов)</option>`;
 
   const isAlreadyConfirmed = Boolean(a && a.resultStatus === 'confirmed');
   const btnLabel = isAlreadyConfirmed ? 'Сохранить изменения' : 'Сохранить и зачислить';
