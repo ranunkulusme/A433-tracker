@@ -340,7 +340,10 @@ const I18N_RESOURCES = {
         "forecast_goal": "Прогноз достижения цели:",
         "unreachable": "Не достижимо",
         "in_days": "через {{days}} дн.",
-        "available_in_stock": "Доступно на складе для Ген. {{gen}}:"
+        "available_in_stock": "Доступно на складе для Ген. {{gen}}:",
+        "btn_confirm_stock": "Данные актуальны",
+        "btn_confirm_stock_title": "Подтвердить, что запасы на складе верны без изменений",
+        "stock_confirmed_toast": "Данные склада успешно подтверждены"
       },
       "events": {
         "title": "Ивенты",
@@ -363,7 +366,22 @@ const I18N_RESOURCES = {
         "cancel_registration": "Отменить",
         "any_place": "Любое",
         "place_num": "Место {{place}}",
-        "event_detail": "Детали ивента"
+        "event_detail": "Детали ивента",
+        "stock_warning_banner": "Данные склада давно не обновлялись",
+        "stock_warning_desc": "Рекомендуется подтвердить актуальность или обновить запасы перед регистрацией",
+        "btn_confirm_stock_inline": "Актуально",
+        "stock_confirmed_inline": "Склад подтвержден",
+        "rsvp_confirmed": "Подтвердил",
+        "rsvp_declined": "Отказ",
+        "rsvp_pending": "Ожидает",
+        "btn_rsvp_confirm": "Подтвердить",
+        "btn_rsvp_decline": "Не смогу",
+        "btn_request_results_tg": "Запросить итоги в TG",
+        "btn_send_staff_summary": "Отчёт в штаб",
+        "result_submitted_toast": "Результат зафиксирован",
+        "coupons_accrued_toast": "Купоны успешно зачислены на склад: +{{count}}",
+        "results_prompt_sent_toast": "Запросы итогов отправлены участникам в Telegram",
+        "staff_summary_sent_toast": "Сводка события отправлена в чат штаба"
       },
       "sectors": {
         "title": "Секторы альянса",
@@ -803,7 +821,10 @@ const I18N_RESOURCES = {
         "forecast_goal": "Goal forecast:",
         "unreachable": "Unreachable",
         "in_days": "in {{days}} days",
-        "available_in_stock": "Available in stock for Gen. {{gen}}:"
+        "available_in_stock": "Available in stock for Gen. {{gen}}:",
+        "btn_confirm_stock": "Data is current",
+        "btn_confirm_stock_title": "Confirm that warehouse stocks are accurate without changes",
+        "stock_confirmed_toast": "Stock data successfully confirmed"
       },
       "events": {
         "title": "Events",
@@ -826,7 +847,22 @@ const I18N_RESOURCES = {
         "cancel_registration": "Cancel",
         "any_place": "Any",
         "place_num": "Place {{place}}",
-        "event_detail": "Event Details"
+        "event_detail": "Event Details",
+        "stock_warning_banner": "Warehouse stock data is outdated",
+        "stock_warning_desc": "It is recommended to confirm accuracy or update stocks before registering",
+        "btn_confirm_stock_inline": "Current",
+        "stock_confirmed_inline": "Stock confirmed",
+        "rsvp_confirmed": "Confirmed",
+        "rsvp_declined": "Declined",
+        "rsvp_pending": "Pending",
+        "btn_rsvp_confirm": "Confirm",
+        "btn_rsvp_decline": "Cannot attend",
+        "btn_request_results_tg": "Request results via TG",
+        "btn_send_staff_summary": "Report to staff",
+        "result_submitted_toast": "Result recorded",
+        "coupons_accrued_toast": "Coupons credited to warehouse: +{{count}}",
+        "results_prompt_sent_toast": "Result prompts sent to participants in Telegram",
+        "staff_summary_sent_toast": "Event summary sent to staff chat"
       },
       "sectors": {
         "title": "Alliance Sectors",
@@ -1266,7 +1302,10 @@ const I18N_RESOURCES = {
         "forecast_goal": "Ziel-Prognose:",
         "unreachable": "Nicht erreichbar",
         "in_days": "in {{days}} Tagen",
-        "available_in_stock": "Auf Lager verfügbar für Gen. {{gen}}:"
+        "available_in_stock": "Auf Lager verfügbar für Gen. {{gen}}:",
+        "btn_confirm_stock": "Daten sind aktuell",
+        "btn_confirm_stock_title": "Bestätigen, dass Lagerbestände unverändert korrekt sind",
+        "stock_confirmed_toast": "Lagerdaten erfolgreich bestätigt"
       },
       "events": {
         "title": "Events",
@@ -1289,7 +1328,22 @@ const I18N_RESOURCES = {
         "cancel_registration": "Abbrechen",
         "any_place": "Beliebig",
         "place_num": "Platz {{place}}",
-        "event_detail": "Event-Details"
+        "event_detail": "Event-Details",
+        "stock_warning_banner": "Lagerbestandsdaten sind veraltet",
+        "stock_warning_desc": "Es wird empfohlen, die Bestände vor der Anmeldung zu bestätigen oder zu aktualisieren",
+        "btn_confirm_stock_inline": "Aktuell",
+        "stock_confirmed_inline": "Lager bestätigt",
+        "rsvp_confirmed": "Bestätigt",
+        "rsvp_declined": "Abgelehnt",
+        "rsvp_pending": "Ausstehend",
+        "btn_rsvp_confirm": "Bestätigen",
+        "btn_rsvp_decline": "Kann nicht",
+        "btn_request_results_tg": "Ergebnisse via TG anfordern",
+        "btn_send_staff_summary": "Bericht an Stab",
+        "result_submitted_toast": "Ergebnis erfasst",
+        "coupons_accrued_toast": "Gutscheine dem Lager gutgeschrieben: +{{count}}",
+        "results_prompt_sent_toast": "Ergebnisabfragen an Teilnehmer in Telegram gesendet",
+        "staff_summary_sent_toast": "Ereigniszusammenfassung an den Stabschat gesendet"
       },
       "sectors": {
         "title": "Allianz-Sektoren",

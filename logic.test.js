@@ -2788,7 +2788,7 @@ test('getStockFreshness computes status, days elapsed and label', () => {
   assert.equal(stale.label, '22 дн. назад');
 });
 
-test('DEFAULT_NOTIFICATION_TEMPLATES contains all 7 baseline templates with valid metadata', () => {
+test('DEFAULT_NOTIFICATION_TEMPLATES contains all 9 baseline templates with valid metadata', () => {
   assert.ok(DEFAULT_NOTIFICATION_TEMPLATES, 'DEFAULT_NOTIFICATION_TEMPLATES must exist');
   const expectedKeys = [
     'event_place_assigned',
@@ -2797,7 +2797,9 @@ test('DEFAULT_NOTIFICATION_TEMPLATES contains all 7 baseline templates with vali
     'staff_new_user_pending',
     'staff_event_deadline_24h',
     'staff_event_autopick_summary',
-    'staff_stale_stocks_alert'
+    'staff_stale_stocks_alert',
+    'event_result_prompt',
+    'staff_event_completed_summary'
   ];
 
   for (const key of expectedKeys) {
