@@ -426,7 +426,7 @@ async function checkStaleStockReminders(req = null, options = {}) {
         freshCount: String(freshCount),
         warningCount: String(warningCount),
         staleCount: String(staleCount),
-        link: `${baseUrl}/#matrix`
+        link: `${baseUrl}/#sectors`
       }).catch(err => {
         console.warn('[Reminders] Error sending staff_stale_stocks_alert:', err.message);
         return { sent: false };
@@ -1111,11 +1111,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
               }
             }
 
+            const baseUrl = getAppBaseUrl(req);
             await dispatchNotification('staff_new_user_pending', {
               username,
               sectorName,
               power,
-              vip
+              vip,
+              link: `${baseUrl}/#pending`
             }, {
               replyMarkup: {
                 inline_keyboard: [
@@ -2000,7 +2002,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
             eventName: et?.name || 'Событие',
             eventDate: saved.dateFrom || '',
             totalPlaces: String(totalPlaces),
-            link: `${baseUrl}/#cabinet`
+            link: `${baseUrl}/#event/${saved.id}`
           }, { broadcast: true }).catch(err => {
             console.warn('[Notification] Error broadcasting event_registration_opened:', err.message);
           });
@@ -2047,7 +2049,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
                   eventDate: saved.dateFrom || '',
                   place: String(a.place),
                   coupons: String(coupons),
-                  link: `${baseUrl}/#calendar`
+                  link: `${baseUrl}/#event/${saved.id}`
                 }, { userId: user.id, replyMarkup: rsvpMarkup }).catch(err => {
                   console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
                 });
@@ -2075,7 +2077,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
               assignedCount: String(assignedList.length),
               availablePlaces: String(places.length),
               topAssignmentsList: topFormatted || 'Назначений нет',
-              link: `${baseUrl}/#events`
+              link: `${baseUrl}/#event/${saved.id}`
             }).catch(err => {
               console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
             });
@@ -2364,7 +2366,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
                       eventDate: saved.dateFrom || prevEvent?.dateFrom || '',
                       place: String(a.place),
                       coupons: String(coupons),
-                      link: `${baseUrl}/#calendar`
+                      link: `${baseUrl}/#event/${saved.id}`
                     }, { userId: user.id, replyMarkup: rsvpMarkup }).catch(() => {});
                   }
                 }
@@ -2462,10 +2464,17 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const placeInfo = actualPlace > 0 ? places.find(p => Number(p.place) === actualPlace) : null;
       const prizeCoupons = placeInfo ? (Number(placeInfo.coupons) || 0) : 0;
 
-      if (!assignment.accrued && player && prizeCoupons > 0) {
+      const previousCoupons = (assignment.accrued && assignment.actualCoupons !== undefined)
+        ? (Number(assignment.actualCoupons) || 0)
+        : 0;
+      const couponDiff = assignment.accrued
+        ? (prizeCoupons - previousCoupons)
+        : prizeCoupons;
+
+      if (player && couponDiff !== 0) {
         const curStock = player.stock || {};
         const oldCoupons = Number(curStock.coupons) || 0;
-        const newStock = { ...curStock, coupons: oldCoupons + prizeCoupons };
+        const newStock = { ...curStock, coupons: Math.max(0, oldCoupons + couponDiff) };
         db.updatePlayer(player.id, { stock: newStock });
         db.recordStockHistory({
           playerId: player.id,
@@ -2473,7 +2482,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
           source: 'event_reward',
           snapshotBefore: curStock,
           snapshotAfter: newStock,
-          diffSummary: `Награда за событие ${et?.name || 'ивент'}: +${prizeCoupons} купонов (место #${actualPlace})`,
+          diffSummary: assignment.accrued
+            ? `Корректировка награды за ${et?.name || 'ивент'}: ${couponDiff > 0 ? '+' : ''}${couponDiff} куп. (место #${actualPlace})`
+            : `Награда за событие ${et?.name || 'ивент'}: +${prizeCoupons} купонов (место #${actualPlace})`,
           screenshotPath: null,
           createdAt: new Date().toISOString()
         });
@@ -2524,7 +2535,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
                 eventName: et?.name || 'Событие',
                 sectorName: player.name || 'Сектор',
                 assignedPlace: String(a.place),
-                link: `${baseUrl}/#events`
+                link: `${baseUrl}/#event/${ev.id}`
               }, { userId: user.id, replyMarkup: buttons }).catch(() => {});
               sentCount++;
             }
@@ -2555,7 +2566,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         confirmedCount: String(confirmedCount),
         unconfirmedCount: String(unconfirmedCount),
         totalCoupons: String(totalCoupons),
-        link: `${baseUrl}/#events`
+        link: `${baseUrl}/#event/${ev.id}`
       });
 
       return sendJson(res, 200, { success: true, totalAssigned, confirmedCount, unconfirmedCount, totalCoupons });

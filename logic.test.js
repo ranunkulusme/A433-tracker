@@ -61,6 +61,8 @@ const {
   renderTemplate,
   collectUniqueOfficers,
   filterOfficersByQuery,
+  getHashForRoute,
+  parseRouteFromHash,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -3296,6 +3298,44 @@ test('matrix officer combobox filter: collectUniqueOfficers and filterOfficersBy
   assert.deepStrictEqual(collectUniqueOfficers(null, null), []);
   assert.deepStrictEqual(filterOfficersByQuery(null, 'test'), []);
 });
+
+test('deep linking hash routing: getHashForRoute and parseRouteFromHash', () => {
+  // 1. getHashForRoute
+  assert.strictEqual(getHashForRoute('event_detail', { id: 42 }), '#event/42');
+  assert.strictEqual(getHashForRoute('event_detail', { id: 'ev-1' }), '#event/ev-1');
+  assert.strictEqual(getHashForRoute('player_detail', { id: 7 }), '#player/7');
+  assert.strictEqual(getHashForRoute('officer_detail', { id: 'c1' }), '#officer/c1');
+  assert.strictEqual(getHashForRoute('my_cabinet'), '#cabinet');
+  assert.strictEqual(getHashForRoute('calendar'), '#calendar');
+  assert.strictEqual(getHashForRoute('players'), '#sectors');
+  assert.strictEqual(getHashForRoute('calculator', { tab: 'matrix' }), '#matrix');
+  assert.strictEqual(getHashForRoute('pending_registrations'), '#pending');
+  assert.strictEqual(getHashForRoute('notifications'), '#notifications');
+
+  // 2. parseRouteFromHash: event links
+  assert.deepStrictEqual(parseRouteFromHash('#event/42'), { page: 'event_detail', params: { id: '42' } });
+  assert.deepStrictEqual(parseRouteFromHash('/#event/42'), { page: 'event_detail', params: { id: '42' } });
+  assert.deepStrictEqual(parseRouteFromHash('#/event/42'), { page: 'event_detail', params: { id: '42' } });
+  assert.deepStrictEqual(parseRouteFromHash('#events/105'), { page: 'event_detail', params: { id: '105' } });
+  assert.deepStrictEqual(parseRouteFromHash('#events'), { page: 'calendar', params: {} });
+
+  // 3. parseRouteFromHash: player/sector links
+  assert.deepStrictEqual(parseRouteFromHash('#player/3'), { page: 'player_detail', params: { id: '3' } });
+  assert.deepStrictEqual(parseRouteFromHash('#sector/3'), { page: 'player_detail', params: { id: '3' } });
+  assert.deepStrictEqual(parseRouteFromHash('#sectors'), { page: 'players', params: {} });
+
+  // 4. parseRouteFromHash: other sections
+  assert.deepStrictEqual(parseRouteFromHash('#cabinet'), { page: 'my_cabinet', params: {} });
+  assert.deepStrictEqual(parseRouteFromHash('#matrix'), { page: 'calculator', params: { tab: 'matrix' } });
+  assert.deepStrictEqual(parseRouteFromHash('#pending'), { page: 'pending_registrations', params: {} });
+  assert.deepStrictEqual(parseRouteFromHash('#notifications'), { page: 'notifications', params: {} });
+
+  // 5. Invalid / empty hashes
+  assert.strictEqual(parseRouteFromHash(''), null);
+  assert.strictEqual(parseRouteFromHash('#'), null);
+  assert.strictEqual(parseRouteFromHash(null), null);
+});
+
 
 
 

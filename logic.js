@@ -2905,6 +2905,89 @@
     });
   }
 
+  function getHashForRoute(page, params = {}) {
+    const p = params || {};
+    switch (page) {
+      case 'event_detail':
+        return p.id !== undefined && p.id !== null ? `#event/${p.id}` : '#calendar';
+      case 'player_detail':
+        return p.id !== undefined && p.id !== null ? `#player/${p.id}` : '#sectors';
+      case 'officer_detail':
+        return p.id !== undefined && p.id !== null ? `#officer/${p.id}` : '#officers';
+      case 'my_cabinet':
+        return '#cabinet';
+      case 'calendar':
+        return '#calendar';
+      case 'players':
+        return '#sectors';
+      case 'officers':
+        return '#officers';
+      case 'event_types':
+        return '#event_types';
+      case 'calculator':
+        return p.tab === 'matrix' ? '#matrix' : '#calculator';
+      case 'pending_registrations':
+        return '#pending';
+      case 'users':
+        return '#users';
+      case 'notifications':
+        return '#notifications';
+      default:
+        return `#${page}`;
+    }
+  }
+
+  function parseRouteFromHash(hashStr) {
+    if (!hashStr || typeof hashStr !== 'string') return null;
+    const clean = hashStr.replace(/^[#/!]+/, '').trim();
+    if (!clean) return null;
+
+    const [pathPart] = clean.split('?');
+    const segments = pathPart.split('/').filter(Boolean);
+    if (!segments.length) return null;
+
+    const route = segments[0].toLowerCase();
+    const id = segments[1] || null;
+
+    if (route === 'event' || route === 'events') {
+      if (id) return { page: 'event_detail', params: { id } };
+      return { page: 'calendar', params: {} };
+    }
+    if (route === 'player' || route === 'players' || route === 'sector' || route === 'sectors') {
+      if (id) return { page: 'player_detail', params: { id } };
+      return { page: 'players', params: {} };
+    }
+    if (route === 'officer' || route === 'officers') {
+      if (id) return { page: 'officer_detail', params: { id } };
+      return { page: 'officers', params: {} };
+    }
+    if (route === 'cabinet' || route === 'my_cabinet') {
+      return { page: 'my_cabinet', params: {} };
+    }
+    if (route === 'calendar') {
+      return { page: 'calendar', params: {} };
+    }
+    if (route === 'calculator') {
+      return { page: 'calculator', params: {} };
+    }
+    if (route === 'matrix') {
+      return { page: 'calculator', params: { tab: 'matrix' } };
+    }
+    if (route === 'pending' || route === 'pending_registrations') {
+      return { page: 'pending_registrations', params: {} };
+    }
+    if (route === 'users') {
+      return { page: 'users', params: {} };
+    }
+    if (route === 'notifications') {
+      return { page: 'notifications', params: {} };
+    }
+    if (route === 'event_types') {
+      return { page: 'event_types', params: {} };
+    }
+    return null;
+  }
+
   const USER_PERMISSIONS = Object.freeze({
     VIEW_SECTORS: 'view_sectors',     // Просмотр всех секторов и командиров альянса
     VIEW_STOCKS: 'view_stocks',       // Просмотр точных остатков складов других игроков
@@ -3064,7 +3147,7 @@
       channel: 'personal',
       parseMode: 'HTML',
       placeholders: Object.freeze(['eventName', 'eventDate', 'sectorName', 'place', 'coupons', 'link']),
-      template: `🎯 <b>Вам назначено призовое место!</b>\n\nСобытие: <b>{eventName}</b>\nДата старта: <b>{eventDate}</b>\nСектор: <b>{sectorName}</b>\nНазначенное место: <b>#{place}</b>\nНаграда: <b>+{coupons}</b> призовых купонов 🎟️\n\n<i>Не забудьте подготовить ресурсы и активировать необходимые бусты перед стартом!</i>\n🔗 <a href="{link}">Открыть расписание в KoW Tracker</a>`
+      template: `🎯 <b>Вам назначено призовое место!</b>\n\nСобытие: <b>{eventName}</b>\nДата старта: <b>{eventDate}</b>\nСектор: <b>{sectorName}</b>\nНазначенное место: <b>#{place}</b>\nНаграда: <b>+{coupons}</b> призовых купонов 🎟️\n\n<i>Не забудьте подготовить ресурсы и активировать необходимые бусты перед стартом!</i>\n🔗 <a href="{link}">Открыть событие в KoW Tracker</a>`
     }),
     event_registration_opened: Object.freeze({
       key: 'event_registration_opened',
@@ -3072,7 +3155,7 @@
       channel: 'personal',
       parseMode: 'HTML',
       placeholders: Object.freeze(['eventName', 'eventDate', 'totalPlaces', 'link']),
-      template: `📢 <b>Открыта подача заявок на событие!</b>\n\nСобытие: <b>{eventName}</b>\nДата проведения: <b>{eventDate}</b>\nДоступно мест по регламенту: <b>{totalPlaces}</b>\n\nПодайте заявку на желаемое место через Личный кабинет:\n🔗 <a href="{link}">Подать заявку на участие</a>`
+      template: `📢 <b>Открыта подача заявок на событие!</b>\n\nСобытие: <b>{eventName}</b>\nДата проведения: <b>{eventDate}</b>\nДоступно мест по регламенту: <b>{totalPlaces}</b>\n\nПодайте заявку на желаемое место через KoW Tracker:\n🔗 <a href="{link}">Подать заявку на участие</a>`
     }),
     stock_reminder_personal: Object.freeze({
       key: 'stock_reminder_personal',
@@ -3087,8 +3170,8 @@
       title: 'Заявка нового бойца на регистрацию',
       channel: 'staff',
       parseMode: 'HTML',
-      placeholders: Object.freeze(['username', 'sectorName', 'power', 'vip']),
-      template: `🔔 <b>Новый боец ожидает одобрения!</b>\n\nПользователь: <b>@{username}</b>\nИгровой сектор: <b>{sectorName}</b>\nСила: <b>{power}</b> | VIP: <b>{vip}</b>\n\n<i>Проверьте бойца в списках альянса и подтвердите доступ:</i>`
+      placeholders: Object.freeze(['username', 'sectorName', 'power', 'vip', 'link']),
+      template: `🔔 <b>Новый боец ожидает одобрения!</b>\n\nПользователь: <b>@{username}</b>\nИгровой сектор: <b>{sectorName}</b>\nСила: <b>{power}</b> | VIP: <b>{vip}</b>\n\n<i>Проверьте бойца в списках альянса и подтвердите доступ:</i>\n🔗 <a href="{link}">Открыть заявки на регистрацию</a>`
     }),
     staff_event_deadline_24h: Object.freeze({
       key: 'staff_event_deadline_24h',
@@ -3139,13 +3222,13 @@
       sectorName: 'Sector 7 (Рейнджер)',
       place: '1',
       coupons: '50',
-      link: 'https://kow.example.com/#calendar'
+      link: 'https://kow.example.com/#event/1'
     }),
     event_registration_opened: Object.freeze({
       eventName: 'Мощь времени (Power of Time)',
       eventDate: '2026-11-15 00:00 UTC',
       totalPlaces: '10',
-      link: 'https://kow.example.com/#cabinet'
+      link: 'https://kow.example.com/#event/1'
     }),
     stock_reminder_personal: Object.freeze({
       username: 'Commander',
@@ -3157,34 +3240,35 @@
       username: 'recruit_soldier',
       sectorName: 'Sector 99',
       power: '45.2M',
-      vip: '12'
+      vip: '12',
+      link: 'https://kow.example.com/#pending'
     }),
     staff_event_deadline_24h: Object.freeze({
       eventName: 'Могучие войска (Mighty Forces)',
       eventDate: '2026-11-05 18:00 UTC',
       registrationsCount: '14',
       availablePlaces: '5',
-      link: 'https://kow.example.com/#events'
+      link: 'https://kow.example.com/#event/1'
     }),
     staff_event_autopick_summary: Object.freeze({
       eventName: 'Битва за трон',
       assignedCount: '5',
       availablePlaces: '5',
       topAssignmentsList: '1. #1: Sector 3 (VIP 15)\n2. #2: Sector 7 (VIP 14)\n3. #3: Sector 1 (VIP 13)',
-      link: 'https://kow.example.com/#events'
+      link: 'https://kow.example.com/#event/1'
     }),
     staff_stale_stocks_alert: Object.freeze({
       totalSectors: '42',
       freshCount: '28',
       warningCount: '8',
       staleCount: '6',
-      link: 'https://kow.example.com/#matrix'
+      link: 'https://kow.example.com/#sectors'
     }),
     event_result_prompt: Object.freeze({
       eventName: 'Битва за трон (King of War)',
       sectorName: 'Sector 7 (Рейнджер)',
       assignedPlace: '1',
-      link: 'https://kow.example.com/#events'
+      link: 'https://kow.example.com/#event/1'
     }),
     staff_event_completed_summary: Object.freeze({
       eventName: 'Битва за трон',
@@ -3192,7 +3276,7 @@
       confirmedCount: '9',
       unconfirmedCount: '1',
       totalCoupons: '320',
-      link: 'https://kow.example.com/#events'
+      link: 'https://kow.example.com/#event/1'
     })
   });
 
@@ -3524,5 +3608,7 @@
     suggestOfficerPuzzleCost,
     collectUniqueOfficers,
     filterOfficersByQuery,
+    getHashForRoute,
+    parseRouteFromHash,
   };
 });

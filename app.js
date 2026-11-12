@@ -790,10 +790,10 @@ function showUndoToast(msg, undoFn, type = 'success') {
   }, 6500);
 }
 
-function getPlayer(id) { return state.players.find(p => p.id === id); }
-function getEventType(id) { return state.eventTypes.find(t => t.id === id); }
-function getEvent(id) { return state.events.find(e => e.id === id); }
-function getCatalogOfficer(id) { return state.officerCatalog.find(o => o.id === id); }
+function getPlayer(id) { return state.players.find(p => String(p.id) === String(id)); }
+function getEventType(id) { return state.eventTypes.find(t => String(t.id) === String(id)); }
+function getEvent(id) { return state.events.find(e => String(e.id) === String(id)); }
+function getCatalogOfficer(id) { return state.officerCatalog.find(o => String(o.id) === String(id)); }
 function officerLabel(officer) {
   const catalog = getCatalogOfficer(officer?.catalogId);
   return catalog?.name || officer?.name || '—';
@@ -1174,11 +1174,7 @@ async function handleLoginSubmit(e) {
     renderSidebarNav();
     await loadDataFromServer();
     flushOutboxQueue();
-    if (currentUser.rank === 'r3') {
-      navigate('my_cabinet');
-    } else {
-      navigate('calendar');
-    }
+    navigateInitialOrHash();
   } catch (err) {
     showAuthAlert('Ошибка соединения с сервером', 'error');
   } finally {
@@ -5779,7 +5775,7 @@ async function testMieruConnection() {
 let currentPage = 'calendar';
 let pageParams = {};
 
-function navigate(page, params={}) {
+function navigate(page, params={}, updateHash = true) {
   const role = currentUser?.rank || state.currentRole || 'r3';
 
   // Role permissions check
@@ -5805,6 +5801,22 @@ function navigate(page, params={}) {
 
   currentPage = page;
   pageParams = params;
+
+  if (updateHash && typeof window !== 'undefined' && window.location) {
+    const getRouteHash = typeof getHashForRoute === 'function'
+      ? getHashForRoute
+      : (typeof window !== 'undefined' && window.logic?.getHashForRoute ? window.logic.getHashForRoute : null);
+    if (getRouteHash) {
+      const targetHash = getRouteHash(page, params);
+      if (targetHash && window.location.hash !== targetHash) {
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', targetHash);
+        } else {
+          window.location.hash = targetHash;
+        }
+      }
+    }
+  }
 
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
   const titles = {
@@ -5856,6 +5868,43 @@ function navigate(page, params={}) {
 
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('overlay')?.classList.remove('open');
+}
+
+function handleHashRoute() {
+  if (typeof window === 'undefined' || !window.location.hash) return;
+  const parseFn = typeof parseRouteFromHash === 'function'
+    ? parseRouteFromHash
+    : (typeof window !== 'undefined' && window.logic?.parseRouteFromHash ? window.logic.parseRouteFromHash : null);
+  if (!parseFn) return;
+  const parsed = parseFn(window.location.hash);
+  if (!parsed || !parsed.page) return;
+  if (currentPage === parsed.page && JSON.stringify(pageParams || {}) === JSON.stringify(parsed.params || {})) {
+    return;
+  }
+  navigate(parsed.page, parsed.params || {}, false);
+}
+
+function navigateInitialOrHash() {
+  const parseFn = typeof parseRouteFromHash === 'function'
+    ? parseRouteFromHash
+    : (typeof window !== 'undefined' && window.logic?.parseRouteFromHash ? window.logic.parseRouteFromHash : null);
+  const route = (parseFn && typeof window !== 'undefined' && window.location.hash)
+    ? parseFn(window.location.hash)
+    : null;
+
+  if (route && route.page) {
+    navigate(route.page, route.params || {}, false);
+    return;
+  }
+  if (currentUser?.rank === 'r3') {
+    navigate('my_cabinet');
+  } else {
+    navigate('calendar');
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', handleHashRoute);
 }
 
 document.querySelectorAll('.nav-item').forEach(el=>{
@@ -6012,12 +6061,30 @@ function calCard(ev, status) {
 
 // ─── PAGE: EVENT DETAIL ──────────────────────────────────────
 function renderEventDetail(eventId) {
-  const ev = getEvent(eventId);
-  if (!ev) { navigate('calendar'); return; }
+  let ev = getEvent(eventId);
+  if (!ev) {
+    apiFetch(`/api/events/${eventId}`).then(freshEv => {
+      if (freshEv && freshEv.id) {
+        const existingIdx = state.events.findIndex(e => String(e.id) === String(eventId));
+        if (existingIdx !== -1) {
+          state.events[existingIdx] = freshEv;
+        } else {
+          state.events.push(freshEv);
+        }
+        renderEventDetail(eventId);
+      } else {
+        navigate('calendar');
+      }
+    }).catch(() => {
+      navigate('calendar');
+    });
+    return;
+  }
   const et = getEventType(ev.typeId);
   const color = et?.color || '#888';
   const status = isEventActive(ev)?'active':isEventUpcoming(ev)?'upcoming':'past';
   const statusLabels = { active:'● Идёт сейчас', upcoming:'◎ Предстоящий', past:'◌ Завершён' };
+  const isPast = isEventPast(ev);
 
   const assignMap = {};
   ev.assignments.forEach(a => assignMap[a.place] = a);
@@ -6037,8 +6104,10 @@ function renderEventDetail(eventId) {
     const pi = placeInfo(et, pl, ev.dateFrom);
     const p = a ? getPlayer(a.playerId) : null;
     const officer = a && p ? p.officers.find(o=>o.id===a.officerId) : null;
-    const coupons = a?.actualCoupons ?? pi?.coupons ?? 0;
-    const isConfirmed = a?.actualCoupons !== undefined;
+    const isResultConfirmed = Boolean(a && a.resultStatus === 'confirmed');
+    const coupons = (a && a.actualCoupons !== undefined && a.actualCoupons !== null)
+      ? a.actualCoupons
+      : (pi?.coupons ?? 0);
     const r3Submit = state.currentRole === 'r3' && state.currentPlayerId && canR3SubmitResult({ event: ev, place: pl, nowIso: new Date().toISOString(), players: state.players });
 
     let regMatchBadge = '';
@@ -6049,44 +6118,71 @@ function renderEventDetail(eventId) {
       }
     }
 
-    let rsvpBadge = '';
-    let rsvpActions = '';
-    let resultAction = '';
+    let statusBadge = '';
+    let actionButtons = '';
 
     if (a && p) {
-      const rsvpStatus = a.rsvpStatus || 'pending';
-      if (rsvpStatus === 'confirmed') {
-        rsvpBadge = ` <span class="badge badge-success" style="font-size:11px" title="Участие подтверждено">🟢 ${typeof t === 'function' ? t('events.rsvp_confirmed') : 'Подтвердил'}</span>`;
-      } else if (rsvpStatus === 'declined') {
-        rsvpBadge = ` <span class="badge badge-danger" style="font-size:11px" title="Отказ от участия">🔴 ${typeof t === 'function' ? t('events.rsvp_declined') : 'Отказ'}</span>`;
-      } else {
-        rsvpBadge = ` <span class="badge badge-none" style="font-size:11px" title="Ожидает подтверждения">⏳ ${typeof t === 'function' ? t('events.rsvp_pending') : 'Ожидает'}</span>`;
-      }
-
       const isMySector = currentUser && (Number(currentUser.playerId) === Number(p.id) || getUserSectors().some(s => Number(s.id) === Number(p.id)));
       const canManageEv = canManage() || hasPermission('manage_events');
 
-      if (!isEventPast(ev) && (isMySector || canManageEv)) {
-        rsvpActions = `
-          <span style="display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle">
-            ${rsvpStatus !== 'confirmed' ? `<button class="btn btn-xs btn-outline" style="color:var(--green);border-color:var(--green);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'confirmed')" title="${typeof t === 'function' ? t('events.btn_rsvp_confirm') : 'Подтвердить'}">✓</button>` : ''}
-            ${rsvpStatus !== 'declined' ? `<button class="btn btn-xs btn-outline" style="color:var(--red);border-color:var(--red);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'declined')" title="${typeof t === 'function' ? t('events.btn_rsvp_decline') : 'Не смогу'}">✕</button>` : ''}
-          </span>
-        `;
-      }
+      if (isPast) {
+        // По завершённому событию отображаем фактический результат
+        if (isResultConfirmed) {
+          const actPlace = (a.actualPlace !== undefined && a.actualPlace !== null) ? Number(a.actualPlace) : pl;
+          let medal = '🏅';
+          let placeText = `${actPlace} место (факт)`;
+          if (actPlace === 1) { medal = '🥇'; placeText = '1 место (факт)'; }
+          else if (actPlace === 2) { medal = '🥈'; placeText = '2 место (факт)'; }
+          else if (actPlace === 3) { medal = '🥉'; placeText = '3 место (факт)'; }
+          else if (actPlace === 4) { medal = '🏅'; placeText = '4–10 место (факт)'; }
+          else if (actPlace === 0) { medal = '❌'; placeText = 'Не участвовал'; }
 
-      if (isEventPast(ev) && (isMySector || canManageEv) && !a.accrued && a.resultStatus !== 'confirmed') {
-        resultAction = ` <button class="btn btn-xs btn-primary" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})">🏆 Итог</button>`;
+          const planDiff = (actPlace !== pl)
+            ? ` <span style="font-size:10px;opacity:0.85;font-weight:normal">(план: #${pl})</span>`
+            : '';
+
+          statusBadge = ` <span class="badge badge-success" style="font-size:11px" title="Фактический результат подтверждён">${medal} ${placeText}${planDiff}</span>`;
+
+          if (isMySector || canManageEv) {
+            actionButtons = ` <button class="btn btn-xs btn-outline" style="padding:1px 6px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})" title="Изменить занятое место">✏️</button>`;
+          }
+        } else {
+          statusBadge = ` <span class="badge badge-warning" style="font-size:11px" title="Ожидается подтверждение фактического результата в игре">⏳ Ожидает итога</span>`;
+          if (isMySector || canManageEv) {
+            actionButtons = ` <button class="btn btn-xs btn-primary" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})">🏆 Внести итог</button>`;
+          }
+        }
+      } else {
+        // До завершения события отображаем статус предварительного подтверждения участия (RSVP)
+        const rsvpStatus = a.rsvpStatus || 'pending';
+        if (rsvpStatus === 'confirmed') {
+          statusBadge = ` <span class="badge badge-success" style="font-size:11px" title="Участие подтверждено">🟢 ${typeof t === 'function' ? t('events.rsvp_confirmed') : 'Подтвердил'}</span>`;
+        } else if (rsvpStatus === 'declined') {
+          statusBadge = ` <span class="badge badge-danger" style="font-size:11px" title="Отказ от участия">🔴 ${typeof t === 'function' ? t('events.rsvp_declined') : 'Отказ'}</span>`;
+        } else {
+          statusBadge = ` <span class="badge badge-none" style="font-size:11px" title="Ожидает подтверждения">⏳ ${typeof t === 'function' ? t('events.rsvp_pending') : 'Ожидает'}</span>`;
+        }
+
+        if (isMySector || canManageEv) {
+          actionButtons = `
+            <span style="display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle">
+              ${rsvpStatus !== 'confirmed' ? `<button class="btn btn-xs btn-outline" style="color:var(--green);border-color:var(--green);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'confirmed')" title="${typeof t === 'function' ? t('events.btn_rsvp_confirm') : 'Подтвердить'}">✓</button>` : ''}
+              ${rsvpStatus !== 'declined' ? `<button class="btn btn-xs btn-outline" style="color:var(--red);border-color:var(--red);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'declined')" title="${typeof t === 'function' ? t('events.btn_rsvp_decline') : 'Не смогу'}">✕</button>` : ''}
+            </span>
+          `;
+        }
       }
     }
 
+    const showGreenCheck = isPast && isResultConfirmed;
+
     rows.push(`<tr>
       <td><strong style="font-size:15px">${pi?.label || `Место ${pl}`}</strong></td>
-      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${rsvpBadge}${rsvpActions}${resultAction}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
+      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${statusBadge}${actionButtons}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
       <td style="color:var(--text2)">${officer ? officerLink(officer) : '—'}</td>
       <td style="color:var(--text2)">Ур. ${officer?.level ?? '—'}</td>
-      <td style="font-family:var(--mono);color:${isConfirmed?'var(--green)':'var(--text2)'};font-weight:600">
-        ${fmtNum(coupons)}${isConfirmed?' ✓':''}
+      <td style="font-family:var(--mono);color:${showGreenCheck?'var(--green)':'var(--text2)'};font-weight:600">
+        ${fmtNum(coupons)}${showGreenCheck ? ' ✓' : (isPast ? ' <span style="font-size:10px;color:var(--text3);font-weight:normal">(план)</span>' : '')}
       </td>
     </tr>`);
   }
@@ -6248,6 +6344,9 @@ function renderEventDetail(eventId) {
       <div class="edh-right">
         <span class="cal-status ${status}">${statusLabels[status]}</span>
         <div class="edh-stat">${fmtNum(ev.assignments.length)} назначений</div>
+        ${isPast ? `
+          <div class="edh-stat">Итоги подтвердили: <strong>${ev.assignments.filter(x => x.resultStatus === 'confirmed').length}</strong> из ${ev.assignments.length}</div>
+        ` : ''}
         <div class="edh-stat">Итого купонов: <strong>${fmtNum(totalCoupons)}</strong></div>
       </div>
     </div>
@@ -11080,8 +11179,15 @@ function openEventResultModal(eventId, place) {
   const p = a ? getPlayer(a.playerId) : null;
   const places = resolveEventPlaces(et, ev.dateFrom);
 
-  let opts = places.map(pi => `<option value="${pi.place}" ${Number(pi.place) === Number(place) ? 'selected' : ''}>${escapeHtml(pi.label || 'Место ' + pi.place)} (${fmtNum(pi.coupons)} куп.)</option>`).join('');
-  opts += `<option value="4">4-10 место (утешительные купоны)</option><option value="0">Не попал в топ (0 купонов)</option>`;
+  const selectedPlace = (a && a.actualPlace !== undefined && a.actualPlace !== null)
+    ? Number(a.actualPlace)
+    : Number(place);
+
+  let opts = places.map(pi => `<option value="${pi.place}" ${Number(pi.place) === selectedPlace ? 'selected' : ''}>${escapeHtml(pi.label || 'Место ' + pi.place)} (${fmtNum(pi.coupons)} куп.)</option>`).join('');
+  opts += `<option value="4" ${selectedPlace === 4 ? 'selected' : ''}>4-10 место (утешительные купоны)</option><option value="0" ${selectedPlace === 0 ? 'selected' : ''}>Не попал в топ (0 купонов)</option>`;
+
+  const isAlreadyConfirmed = Boolean(a && a.resultStatus === 'confirmed');
+  const btnLabel = isAlreadyConfirmed ? 'Сохранить изменения' : 'Сохранить и зачислить';
 
   const modalHtml = `
     <div class="modal is-active" id="modal-event-result-submit" style="display:flex">
@@ -11094,6 +11200,7 @@ function openEventResultModal(eventId, place) {
         <div class="modal-body">
           <div class="auth-demo-hint" style="margin-bottom:12px">
             Боец: <strong>${escapeHtml(p?.name || a?.playerName || 'Сектор')}</strong> · Назначенное место: <strong>#${place}</strong>
+            ${isAlreadyConfirmed ? ` · Текущий факт: <strong>${selectedPlace === 0 ? 'Не участвовал' : (selectedPlace === 4 ? '4-10 место' : '#' + selectedPlace)}</strong>` : ''}
           </div>
           <div class="form-group">
             <label>Фактическое занятое место в игре:</label>
@@ -11107,7 +11214,7 @@ function openEventResultModal(eventId, place) {
         </div>
         <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
           <button class="btn-ghost" onclick="closeEventResultModal()">Отмена</button>
-          <button class="btn-primary" onclick="submitEventResultFromModal(${eventId}, ${place})">Сохранить и зачислить</button>
+          <button class="btn-primary" onclick="submitEventResultFromModal(${eventId}, ${place})">${btnLabel}</button>
         </div>
       </div>
     </div>
@@ -12015,11 +12122,7 @@ async function initApp() {
 
   checkAuth().then(isAuth => {
     if (isAuth) {
-      if (currentUser?.rank === 'r3') {
-        navigate('my_cabinet');
-      } else {
-        navigate('calendar');
-      }
+      navigateInitialOrHash();
       if (typeof navigator === 'undefined' || navigator.onLine) {
         flushOutboxQueue();
       }
