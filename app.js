@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.40.0';
+const APP_VERSION = 'v3.41.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -790,10 +790,10 @@ function showUndoToast(msg, undoFn, type = 'success') {
   }, 6500);
 }
 
-function getPlayer(id) { return state.players.find(p => p.id === id); }
-function getEventType(id) { return state.eventTypes.find(t => t.id === id); }
-function getEvent(id) { return state.events.find(e => e.id === id); }
-function getCatalogOfficer(id) { return state.officerCatalog.find(o => o.id === id); }
+function getPlayer(id) { return state.players.find(p => String(p.id) === String(id)); }
+function getEventType(id) { return state.eventTypes.find(t => String(t.id) === String(id)); }
+function getEvent(id) { return state.events.find(e => String(e.id) === String(id)); }
+function getCatalogOfficer(id) { return state.officerCatalog.find(o => String(o.id) === String(id)); }
 function officerLabel(officer) {
   const catalog = getCatalogOfficer(officer?.catalogId);
   return catalog?.name || officer?.name || '—';
@@ -1174,11 +1174,7 @@ async function handleLoginSubmit(e) {
     renderSidebarNav();
     await loadDataFromServer();
     flushOutboxQueue();
-    if (currentUser.rank === 'r3') {
-      navigate('my_cabinet');
-    } else {
-      navigate('calendar');
-    }
+    navigateInitialOrHash();
   } catch (err) {
     showAuthAlert('Ошибка соединения с сервером', 'error');
   } finally {
@@ -5779,7 +5775,7 @@ async function testMieruConnection() {
 let currentPage = 'calendar';
 let pageParams = {};
 
-function navigate(page, params={}) {
+function navigate(page, params={}, updateHash = true) {
   const role = currentUser?.rank || state.currentRole || 'r3';
 
   // Role permissions check
@@ -5805,6 +5801,22 @@ function navigate(page, params={}) {
 
   currentPage = page;
   pageParams = params;
+
+  if (updateHash && typeof window !== 'undefined' && window.location) {
+    const getRouteHash = typeof getHashForRoute === 'function'
+      ? getHashForRoute
+      : (typeof window !== 'undefined' && window.logic?.getHashForRoute ? window.logic.getHashForRoute : null);
+    if (getRouteHash) {
+      const targetHash = getRouteHash(page, params);
+      if (targetHash && window.location.hash !== targetHash) {
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', targetHash);
+        } else {
+          window.location.hash = targetHash;
+        }
+      }
+    }
+  }
 
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
   const titles = {
@@ -5856,6 +5868,43 @@ function navigate(page, params={}) {
 
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('overlay')?.classList.remove('open');
+}
+
+function handleHashRoute() {
+  if (typeof window === 'undefined' || !window.location.hash) return;
+  const parseFn = typeof parseRouteFromHash === 'function'
+    ? parseRouteFromHash
+    : (typeof window !== 'undefined' && window.logic?.parseRouteFromHash ? window.logic.parseRouteFromHash : null);
+  if (!parseFn) return;
+  const parsed = parseFn(window.location.hash);
+  if (!parsed || !parsed.page) return;
+  if (currentPage === parsed.page && JSON.stringify(pageParams || {}) === JSON.stringify(parsed.params || {})) {
+    return;
+  }
+  navigate(parsed.page, parsed.params || {}, false);
+}
+
+function navigateInitialOrHash() {
+  const parseFn = typeof parseRouteFromHash === 'function'
+    ? parseRouteFromHash
+    : (typeof window !== 'undefined' && window.logic?.parseRouteFromHash ? window.logic.parseRouteFromHash : null);
+  const route = (parseFn && typeof window !== 'undefined' && window.location.hash)
+    ? parseFn(window.location.hash)
+    : null;
+
+  if (route && route.page) {
+    navigate(route.page, route.params || {}, false);
+    return;
+  }
+  if (currentUser?.rank === 'r3') {
+    navigate('my_cabinet');
+  } else {
+    navigate('calendar');
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', handleHashRoute);
 }
 
 document.querySelectorAll('.nav-item').forEach(el=>{
@@ -6012,12 +6061,34 @@ function calCard(ev, status) {
 
 // ─── PAGE: EVENT DETAIL ──────────────────────────────────────
 function renderEventDetail(eventId) {
-  const ev = getEvent(eventId);
-  if (!ev) { navigate('calendar'); return; }
+  let ev = getEvent(eventId);
+  if (!ev) {
+    apiFetch(`/api/events/${eventId}`).then(freshEv => {
+      if (freshEv && freshEv.id) {
+        const existingIdx = state.events.findIndex(e => String(e.id) === String(eventId));
+        if (existingIdx !== -1) {
+          state.events[existingIdx] = freshEv;
+        } else {
+          state.events.push(freshEv);
+        }
+        if (currentPage === 'event_detail' && String(pageParams?.id) === String(eventId)) {
+          renderEventDetail(eventId);
+        }
+      } else if (currentPage === 'event_detail') {
+        navigate('calendar');
+      }
+    }).catch(() => {
+      if (currentPage === 'event_detail') {
+        navigate('calendar');
+      }
+    });
+    return;
+  }
   const et = getEventType(ev.typeId);
   const color = et?.color || '#888';
   const status = isEventActive(ev)?'active':isEventUpcoming(ev)?'upcoming':'past';
   const statusLabels = { active:'● Идёт сейчас', upcoming:'◎ Предстоящий', past:'◌ Завершён' };
+  const isPast = isEventPast(ev);
 
   const assignMap = {};
   ev.assignments.forEach(a => assignMap[a.place] = a);
@@ -6037,8 +6108,10 @@ function renderEventDetail(eventId) {
     const pi = placeInfo(et, pl, ev.dateFrom);
     const p = a ? getPlayer(a.playerId) : null;
     const officer = a && p ? p.officers.find(o=>o.id===a.officerId) : null;
-    const coupons = a?.actualCoupons ?? pi?.coupons ?? 0;
-    const isConfirmed = a?.actualCoupons !== undefined;
+    const isResultConfirmed = Boolean(a && a.resultStatus === 'confirmed');
+    const coupons = (a && a.actualCoupons !== undefined && a.actualCoupons !== null)
+      ? a.actualCoupons
+      : (pi?.coupons ?? 0);
     const r3Submit = state.currentRole === 'r3' && state.currentPlayerId && canR3SubmitResult({ event: ev, place: pl, nowIso: new Date().toISOString(), players: state.players });
 
     let regMatchBadge = '';
@@ -6049,44 +6122,71 @@ function renderEventDetail(eventId) {
       }
     }
 
-    let rsvpBadge = '';
-    let rsvpActions = '';
-    let resultAction = '';
+    let statusBadge = '';
+    let actionButtons = '';
 
     if (a && p) {
-      const rsvpStatus = a.rsvpStatus || 'pending';
-      if (rsvpStatus === 'confirmed') {
-        rsvpBadge = ` <span class="badge badge-success" style="font-size:11px" title="Участие подтверждено">🟢 ${typeof t === 'function' ? t('events.rsvp_confirmed') : 'Подтвердил'}</span>`;
-      } else if (rsvpStatus === 'declined') {
-        rsvpBadge = ` <span class="badge badge-danger" style="font-size:11px" title="Отказ от участия">🔴 ${typeof t === 'function' ? t('events.rsvp_declined') : 'Отказ'}</span>`;
-      } else {
-        rsvpBadge = ` <span class="badge badge-none" style="font-size:11px" title="Ожидает подтверждения">⏳ ${typeof t === 'function' ? t('events.rsvp_pending') : 'Ожидает'}</span>`;
-      }
-
       const isMySector = currentUser && (Number(currentUser.playerId) === Number(p.id) || getUserSectors().some(s => Number(s.id) === Number(p.id)));
       const canManageEv = canManage() || hasPermission('manage_events');
 
-      if (!isEventPast(ev) && (isMySector || canManageEv)) {
-        rsvpActions = `
-          <span style="display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle">
-            ${rsvpStatus !== 'confirmed' ? `<button class="btn btn-xs btn-outline" style="color:var(--green);border-color:var(--green);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'confirmed')" title="${typeof t === 'function' ? t('events.btn_rsvp_confirm') : 'Подтвердить'}">✓</button>` : ''}
-            ${rsvpStatus !== 'declined' ? `<button class="btn btn-xs btn-outline" style="color:var(--red);border-color:var(--red);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'declined')" title="${typeof t === 'function' ? t('events.btn_rsvp_decline') : 'Не смогу'}">✕</button>` : ''}
-          </span>
-        `;
-      }
+      if (isPast) {
+        // По завершённому событию отображаем фактический результат
+        if (isResultConfirmed) {
+          const actPlace = (a.actualPlace !== undefined && a.actualPlace !== null) ? Number(a.actualPlace) : pl;
+          let medal = '🏅';
+          let placeText = `${actPlace} место (факт)`;
+          if (actPlace === 1) { medal = '🥇'; placeText = '1 место (факт)'; }
+          else if (actPlace === 2) { medal = '🥈'; placeText = '2 место (факт)'; }
+          else if (actPlace === 3) { medal = '🥉'; placeText = '3 место (факт)'; }
+          else if (actPlace === 4) { medal = '🏅'; placeText = '4–10 место (факт)'; }
+          else if (actPlace === 0) { medal = '❌'; placeText = 'Не участвовал'; }
 
-      if (isEventPast(ev) && (isMySector || canManageEv) && !a.accrued && a.resultStatus !== 'confirmed') {
-        resultAction = ` <button class="btn btn-xs btn-primary" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})">🏆 Итог</button>`;
+          const planDiff = (actPlace !== pl)
+            ? ` <span style="font-size:10px;opacity:0.85;font-weight:normal">(план: #${pl})</span>`
+            : '';
+
+          statusBadge = ` <span class="badge badge-success" style="font-size:11px" title="Фактический результат подтверждён">${medal} ${placeText}${planDiff}</span>`;
+
+          if (isMySector || canManageEv) {
+            actionButtons = ` <button class="btn btn-xs btn-outline" style="padding:1px 6px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})" title="Изменить занятое место">✏️</button>`;
+          }
+        } else {
+          statusBadge = ` <span class="badge badge-warning" style="font-size:11px" title="Ожидается подтверждение фактического результата в игре">⏳ Ожидает итога</span>`;
+          if (isMySector || canManageEv) {
+            actionButtons = ` <button class="btn btn-xs btn-primary" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})">🏆 Внести итог</button>`;
+          }
+        }
+      } else {
+        // До завершения события отображаем статус предварительного подтверждения участия (RSVP)
+        const rsvpStatus = a.rsvpStatus || 'pending';
+        if (rsvpStatus === 'confirmed') {
+          statusBadge = ` <span class="badge badge-success" style="font-size:11px" title="Участие подтверждено">🟢 ${typeof t === 'function' ? t('events.rsvp_confirmed') : 'Подтвердил'}</span>`;
+        } else if (rsvpStatus === 'declined') {
+          statusBadge = ` <span class="badge badge-danger" style="font-size:11px" title="Отказ от участия">🔴 ${typeof t === 'function' ? t('events.rsvp_declined') : 'Отказ'}</span>`;
+        } else {
+          statusBadge = ` <span class="badge badge-none" style="font-size:11px" title="Ожидает подтверждения">⏳ ${typeof t === 'function' ? t('events.rsvp_pending') : 'Ожидает'}</span>`;
+        }
+
+        if (isMySector || canManageEv) {
+          actionButtons = `
+            <span style="display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle">
+              ${rsvpStatus !== 'confirmed' ? `<button class="btn btn-xs btn-outline" style="color:var(--green);border-color:var(--green);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'confirmed')" title="${typeof t === 'function' ? t('events.btn_rsvp_confirm') : 'Подтвердить'}">✓</button>` : ''}
+              ${rsvpStatus !== 'declined' ? `<button class="btn btn-xs btn-outline" style="color:var(--red);border-color:var(--red);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'declined')" title="${typeof t === 'function' ? t('events.btn_rsvp_decline') : 'Не смогу'}">✕</button>` : ''}
+            </span>
+          `;
+        }
       }
     }
 
+    const showGreenCheck = isPast && isResultConfirmed;
+
     rows.push(`<tr>
       <td><strong style="font-size:15px">${pi?.label || `Место ${pl}`}</strong></td>
-      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${rsvpBadge}${rsvpActions}${resultAction}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
+      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${statusBadge}${actionButtons}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
       <td style="color:var(--text2)">${officer ? officerLink(officer) : '—'}</td>
       <td style="color:var(--text2)">Ур. ${officer?.level ?? '—'}</td>
-      <td style="font-family:var(--mono);color:${isConfirmed?'var(--green)':'var(--text2)'};font-weight:600">
-        ${fmtNum(coupons)}${isConfirmed?' ✓':''}
+      <td style="font-family:var(--mono);color:${showGreenCheck?'var(--green)':'var(--text2)'};font-weight:600">
+        ${fmtNum(coupons)}${showGreenCheck ? ' ✓' : (isPast ? ' <span style="font-size:10px;color:var(--text3);font-weight:normal">(план)</span>' : '')}
       </td>
     </tr>`);
   }
@@ -6248,6 +6348,9 @@ function renderEventDetail(eventId) {
       <div class="edh-right">
         <span class="cal-status ${status}">${statusLabels[status]}</span>
         <div class="edh-stat">${fmtNum(ev.assignments.length)} назначений</div>
+        ${isPast ? `
+          <div class="edh-stat">Итоги подтвердили: <strong>${ev.assignments.filter(x => x.resultStatus === 'confirmed').length}</strong> из ${ev.assignments.length}</div>
+        ` : ''}
         <div class="edh-stat">Итого купонов: <strong>${fmtNum(totalCoupons)}</strong></div>
       </div>
     </div>
@@ -8206,6 +8309,17 @@ function setCalcTab(tab) {
   } else {
     calcActiveTab = tab;
   }
+  if (pageParams) pageParams.tab = calcActiveTab;
+  if (typeof window !== 'undefined' && window.location) {
+    const targetHash = calcActiveTab === 'matrix' ? '#matrix' : '#calculator';
+    if (window.location.hash !== targetHash) {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', targetHash);
+      } else {
+        window.location.hash = targetHash;
+      }
+    }
+  }
   renderCalculator();
 }
 
@@ -8216,9 +8330,19 @@ function setCalcSimMode(mode) {
   }
 }
 
+let highlightedMatrixOfficerIdx = -1;
+
 function setMatrixSearch(query) {
   matrixSearch = (query || '').toLowerCase().trim();
-  renderCalculator();
+  const input = document.getElementById('matrix-officer-search-input');
+  if (input && input.value !== (query || '')) {
+    input.value = query || '';
+  }
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) {
+    clearBtn.style.display = (query || '').trim() ? 'block' : 'none';
+  }
+  updateMatrixTable();
 }
 
 function setMatrixSort(col) {
@@ -8228,7 +8352,7 @@ function setMatrixSort(col) {
     matrixSortCol = col;
     matrixSortDir = 'asc';
   }
-  renderCalculator();
+  updateMatrixTable();
 }
 
 function setCalcPlayer(id) {
@@ -8264,15 +8388,18 @@ function resetCalcPlanned() {
 
 function setMatrixFilterType(type) {
   matrixFilterType = type;
-  renderCalculator();
+  updateMatrixTable();
 }
 
 function setMatrixFilterGen(gen) {
   matrixFilterGen = gen;
-  renderCalculator();
+  updateMatrixTable();
 }
 
 function renderCalculator() {
+  if (pageParams && pageParams.tab) {
+    calcActiveTab = pageParams.tab;
+  }
   if (!calcPlayerId && state.players.length) {
     calcPlayerId = state.players[0].id;
   }
@@ -8731,11 +8858,205 @@ function renderPersonalSimulator() {
   `;
 }
 
-function renderGuildMatrix() {
-  const rows = [];
-  const types = ['all', ...OFFICER_TYPES];
-  const gens = ['all', ...Array.from(new Set(state.officerCatalog.map(c => String(c.generation)).filter(Boolean))).sort((a,b)=>Number(a)-Number(b))];
+function getMatrixOfficerList() {
+  if (typeof collectUniqueOfficers === 'function') {
+    return collectUniqueOfficers(state.officerCatalog, state.players);
+  }
+  const map = new Map();
+  (state.officerCatalog || []).forEach(c => {
+    if (c.name && !map.has(c.name.toLowerCase())) {
+      map.set(c.name.toLowerCase(), {
+        name: c.name,
+        type: c.type || '',
+        generation: c.generation || ''
+      });
+    }
+  });
+  (state.players || []).forEach(p => {
+    (p.officers || []).forEach(o => {
+      const cat = getCatalogOfficer(o.catalogId);
+      const name = o.name || cat?.name;
+      if (name && !map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), {
+          name,
+          type: cat?.type || '',
+          generation: cat?.generation || ''
+        });
+      }
+    });
+  });
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
 
+function renderMatrixOfficerDropdownItems(query = '') {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (!dropdown) return;
+
+  const q = (query || '').toLowerCase().trim();
+  const allOfficers = getMatrixOfficerList();
+  const filtered = typeof filterOfficersByQuery === 'function'
+    ? filterOfficersByQuery(allOfficers, q)
+    : (q ? allOfficers.filter(o => o.name.toLowerCase().includes(q) || (o.type && o.type.toLowerCase().includes(q))) : allOfficers);
+
+  let html = `
+    <div class="matrix-officer-dropdown-item ${!q && !matrixSearch ? 'is-selected' : ''}"
+         onclick="selectMatrixOfficer('')">
+      <span class="officer-name-col">
+        <span>🌐</span>
+        <strong>${typeof t === 'function' ? t('calc.all_officers') : '— Все офицеры —'}</strong>
+      </span>
+      <span class="officer-meta-col">${typeof t === 'function' ? t('calc.reset_filter') : 'Сброс'}</span>
+    </div>
+  `;
+
+  if (filtered.length === 0) {
+    html += `
+      <div style="padding:10px 12px;color:var(--text3);font-size:12px;text-align:center">
+        ${typeof t === 'function' ? t('calc.officer_not_found') : 'Офицер не найден'}
+      </div>
+    `;
+  } else {
+    html += filtered.map((o, idx) => {
+      const isSelected = matrixSearch && matrixSearch === o.name.toLowerCase();
+      const isHighlighted = idx === highlightedMatrixOfficerIdx;
+      const genStr = o.generation ? `Gen ${o.generation}` : '';
+      const typeBadge = o.type ? troopBadge(o.type) : '';
+      return `
+        <div class="matrix-officer-dropdown-item ${isSelected ? 'is-selected' : ''} ${isHighlighted ? 'is-highlighted' : ''}"
+             data-officer-name="${escapeHtml(o.name)}"
+             onclick="selectMatrixOfficer('${escapeHtml(o.name)}')">
+          <span class="officer-name-col">
+            <span>🎖️</span>
+            <strong>${escapeHtml(o.name)}</strong>
+          </span>
+          <span class="officer-meta-col">
+            ${typeBadge}
+            ${genStr ? `<span style="font-family:var(--mono);color:var(--text3)">${genStr}</span>` : ''}
+          </span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  dropdown.innerHTML = html;
+}
+
+function openMatrixOfficerDropdown() {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (!dropdown) return;
+  highlightedMatrixOfficerIdx = -1;
+  const input = document.getElementById('matrix-officer-search-input');
+  renderMatrixOfficerDropdownItems(input ? input.value : matrixSearch);
+  dropdown.style.display = 'block';
+}
+
+function closeMatrixOfficerDropdown() {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (dropdown) dropdown.style.display = 'none';
+  highlightedMatrixOfficerIdx = -1;
+}
+
+function onMatrixOfficerInput(value) {
+  matrixSearch = (value || '').toLowerCase().trim();
+
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) {
+    clearBtn.style.display = value.trim() ? 'block' : 'none';
+  }
+
+  highlightedMatrixOfficerIdx = -1;
+  renderMatrixOfficerDropdownItems(value);
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (dropdown) dropdown.style.display = 'block';
+
+  updateMatrixTable();
+}
+
+function selectMatrixOfficer(officerName) {
+  const input = document.getElementById('matrix-officer-search-input');
+  if (input) {
+    input.value = officerName;
+    input.focus();
+  }
+  matrixSearch = (officerName || '').toLowerCase().trim();
+
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) {
+    clearBtn.style.display = officerName ? 'block' : 'none';
+  }
+
+  closeMatrixOfficerDropdown();
+  updateMatrixTable();
+}
+
+function clearMatrixOfficerFilter() {
+  const input = document.getElementById('matrix-officer-search-input');
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
+  matrixSearch = '';
+  const clearBtn = document.getElementById('matrix-officer-clear-btn');
+  if (clearBtn) clearBtn.style.display = 'none';
+
+  renderMatrixOfficerDropdownItems('');
+  closeMatrixOfficerDropdown();
+  updateMatrixTable();
+}
+
+function onMatrixOfficerKeydown(event) {
+  const dropdown = document.getElementById('matrix-officer-dropdown');
+  if (!dropdown || dropdown.style.display === 'none') {
+    if (event.key === 'ArrowDown') {
+      openMatrixOfficerDropdown();
+      event.preventDefault();
+    }
+    return;
+  }
+
+  const items = dropdown.querySelectorAll('.matrix-officer-dropdown-item[data-officer-name]');
+  if (items.length === 0) {
+    if (event.key === 'Escape') closeMatrixOfficerDropdown();
+    return;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    highlightedMatrixOfficerIdx = (highlightedMatrixOfficerIdx + 1) % items.length;
+    items.forEach((item, idx) => {
+      item.classList.toggle('is-highlighted', idx === highlightedMatrixOfficerIdx);
+      if (idx === highlightedMatrixOfficerIdx) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    highlightedMatrixOfficerIdx = (highlightedMatrixOfficerIdx - 1 + items.length) % items.length;
+    items.forEach((item, idx) => {
+      item.classList.toggle('is-highlighted', idx === highlightedMatrixOfficerIdx);
+      if (idx === highlightedMatrixOfficerIdx) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (highlightedMatrixOfficerIdx >= 0 && items[highlightedMatrixOfficerIdx]) {
+      const name = items[highlightedMatrixOfficerIdx].getAttribute('data-officer-name');
+      selectMatrixOfficer(name);
+    } else if (items.length === 1) {
+      const name = items[0].getAttribute('data-officer-name');
+      selectMatrixOfficer(name);
+    } else {
+      closeMatrixOfficerDropdown();
+    }
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeMatrixOfficerDropdown();
+  }
+}
+
+function buildMatrixRows() {
+  const rows = [];
   state.players.forEach(p => {
     p.officers.forEach(o => {
       const cat = getCatalogOfficer(o.catalogId);
@@ -8789,6 +9110,10 @@ function renderGuildMatrix() {
     return matrixSortDir === 'asc' ? diff : -diff;
   });
 
+  return rows;
+}
+
+function renderMatrixTableHtml(rows) {
   function sortHeader(col, label) {
     const active = matrixSortCol === col;
     const arrow = active ? (matrixSortDir === 'asc' ? ' ↑' : ' ↓') : '';
@@ -8796,10 +9121,95 @@ function renderGuildMatrix() {
   }
 
   return `
+    <table>
+      <thead>
+        <tr>
+          ${sortHeader('player', 'Игрок')}
+          ${sortHeader('officer', 'Офицер')}
+          ${sortHeader('type', 'Род войск')}
+          ${sortHeader('generation', 'Поколение')}
+          ${sortHeader('level', 'Уровень')}
+          <th>Звёзды</th>
+          ${sortHeader('deficit', 'Дефицит до 180')}
+          <th>Склад</th>
+          ${sortHeader('days', 'Без ивентов')}
+          <th>Рекомендация</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td><strong>${playerLink(r.player)}</strong></td>
+            <td><strong>${officerLink(r.officer)}</strong></td>
+            <td>${troopBadge(r.catalog.type)}</td>
+            <td style="font-family:var(--mono)">${r.catalog.generation}</td>
+            <td style="font-family:var(--mono)">Ур. ${fmtNum(r.officer.level)}</td>
+            <td>${renderStars(r.officer.stars)}</td>
+            <td style="font-family:var(--mono)">
+              ${fmtNum(r.def.deficitPuzzles)} пазл.
+              <div style="font-size:11px;color:var(--text3)">${r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы'}</div>
+            </td>
+            <td style="font-family:var(--mono);font-size:12px">
+              ${canSeeStock(r.player.id) ? `${fmtNum(r.player.stock.coupons)} куп. / ${fmtNum(r.player.stock.puzzles)} пазл.` : 'Скрыто'}
+            </td>
+            <td style="font-size:12px">
+              ${r.def.dateWithoutEvents || '—'}
+              <div style="font-size:11px;color:var(--text3)">${r.def.daysWithoutEvents !== null ? `${fmtNum(r.def.daysWithoutEvents)} дн.` : '—'}</div>
+            </td>
+            <td>${r.recBadge}</td>
+            <td>
+              <button class="action-btn" onclick="setCalcPlayer(${r.player.id});setCalcOfficer('${r.officer.id}');setCalcTab('personal')" title="Открыть симулятор">🎯</button>
+            </td>
+          </tr>
+        `).join('') || '<tr><td colspan="11" class="empty-state">Нет офицеров по выбранным фильтрам</td></tr>'}
+      </tbody>
+    </table>
+  `;
+}
+
+function updateMatrixTable() {
+  const tableWrap = document.getElementById('matrix-table-wrap');
+  if (!tableWrap) {
+    renderCalculator();
+    return;
+  }
+  const rows = buildMatrixRows();
+  const countEl = document.getElementById('matrix-rows-count');
+  if (countEl) countEl.textContent = rows.length;
+  tableWrap.innerHTML = renderMatrixTableHtml(rows);
+}
+
+function renderGuildMatrix() {
+  const types = ['all', ...OFFICER_TYPES];
+  const gens = ['all', ...Array.from(new Set(state.officerCatalog.map(c => String(c.generation)).filter(Boolean))).sort((a,b)=>Number(a)-Number(b))];
+  const rows = buildMatrixRows();
+  const searchPlaceholder = typeof t === 'function' ? t('calc.search_officer_placeholder') : '🔍 Поиск офицера...';
+
+  return `
     <div class="section-header">
-      <div class="section-title">Сводная матрица готовности офицеров (${rows.length})</div>
+      <div class="section-title">Сводная матрица готовности офицеров (<span id="matrix-rows-count">${rows.length}</span>)</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="text" placeholder="🔍 Поиск по игроку или офицеру..." value="${matrixSearch}" oninput="setMatrixSearch(this.value)" style="width:230px;padding:5px 9px;font-size:12px">
+        <div class="matrix-officer-filter-wrap">
+          <div style="position:relative;display:flex;align-items:center">
+            <input type="text"
+                   id="matrix-officer-search-input"
+                   placeholder="${escapeHtml(searchPlaceholder)}"
+                   value="${escapeHtml(matrixSearch)}"
+                   autocomplete="off"
+                   onfocus="openMatrixOfficerDropdown()"
+                   oninput="onMatrixOfficerInput(this.value)"
+                   onkeydown="onMatrixOfficerKeydown(event)"
+                   style="width:230px;padding:5px 26px 5px 9px;font-size:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text1)">
+            <button type="button"
+                    id="matrix-officer-clear-btn"
+                    onclick="clearMatrixOfficerFilter()"
+                    title="Сбросить фильтр"
+                    style="position:absolute;right:6px;background:none;border:none;color:var(--text3);cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;display:${matrixSearch ? 'block' : 'none'}">✕</button>
+          </div>
+          <div id="matrix-officer-dropdown" class="matrix-officer-dropdown-menu" style="display:none"></div>
+        </div>
+
         <label style="font-size:12px;color:var(--text3)">Род войск:</label>
         <select style="width:130px;padding:4px 8px;font-size:12px" onchange="setMatrixFilterType(this.value)">
           ${types.map(t => `<option value="${t}" ${t===matrixFilterType?'selected':''}>${t==='all'?'Все войска':t}</option>`).join('')}
@@ -8811,51 +9221,8 @@ function renderGuildMatrix() {
       </div>
     </div>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            ${sortHeader('player', 'Игрок')}
-            ${sortHeader('officer', 'Офицер')}
-            ${sortHeader('type', 'Род войск')}
-            ${sortHeader('generation', 'Поколение')}
-            ${sortHeader('level', 'Уровень')}
-            <th>Звёзды</th>
-            ${sortHeader('deficit', 'Дефицит до 180')}
-            <th>Склад</th>
-            ${sortHeader('days', 'Без ивентов')}
-            <th>Рекомендация</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td><strong>${playerLink(r.player)}</strong></td>
-              <td><strong>${officerLink(r.officer)}</strong></td>
-              <td>${troopBadge(r.catalog.type)}</td>
-              <td style="font-family:var(--mono)">${r.catalog.generation}</td>
-              <td style="font-family:var(--mono)">Ур. ${fmtNum(r.officer.level)}</td>
-              <td>${renderStars(r.officer.stars)}</td>
-              <td style="font-family:var(--mono)">
-                ${fmtNum(r.def.deficitPuzzles)} пазл.
-                <div style="font-size:11px;color:var(--text3)">${r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы'}</div>
-              </td>
-              <td style="font-family:var(--mono);font-size:12px">
-                ${canSeeStock(r.player.id) ? `${fmtNum(r.player.stock.coupons)} куп. / ${fmtNum(r.player.stock.puzzles)} пазл.` : 'Скрыто'}
-              </td>
-              <td style="font-size:12px">
-                ${r.def.dateWithoutEvents || '—'}
-                <div style="font-size:11px;color:var(--text3)">${r.def.daysWithoutEvents !== null ? `${fmtNum(r.def.daysWithoutEvents)} дн.` : '—'}</div>
-              </td>
-              <td>${r.recBadge}</td>
-              <td>
-                <button class="action-btn" onclick="setCalcPlayer(${r.player.id});setCalcOfficer('${r.officer.id}');setCalcTab('personal')" title="Открыть симулятор">🎯</button>
-              </td>
-            </tr>
-          `).join('') || '<tr><td colspan="11" class="empty-state">Нет офицеров по выбранным фильтрам</td></tr>'}
-        </tbody>
-      </table>
+    <div class="table-wrap" id="matrix-table-wrap">
+      ${renderMatrixTableHtml(rows)}
     </div>
   `;
 }
@@ -9185,7 +9552,7 @@ function updateCatalogOfficerCostSuggestion() {
       hintEl.className = 'coupon-auto-hint';
       hintEl.textContent = '🔒 Специальный офицер: качается только за личные медали (0 купонов)';
     }
-    if (coupInput && !editCatalogOfficerId) {
+    if (coupInput && !isFoCouponManuallyEdited) {
       coupInput.value = 0;
     }
     return;
@@ -9210,12 +9577,12 @@ function updateCatalogOfficerCostSuggestion() {
 
   if (!res || !hintEl) return;
 
-  const currentVal = parseInt(coupInput?.value) || 0;
-
-  // Если это добавление нового офицера и пользователь ещё не редактировал поле вручную
-  if (!editCatalogOfficerId && !isFoCouponManuallyEdited && coupInput) {
+  // Если пользователь не редактировал поле вручную или нажал «Применить авторасчёт»
+  if (!isFoCouponManuallyEdited && coupInput) {
     coupInput.value = res.suggestedCost;
   }
+
+  const currentVal = parseInt(coupInput?.value) || 0;
 
   // Обновляем текст подсказки
   if (!isFoCouponManuallyEdited) {
@@ -9248,6 +9615,30 @@ function onFoCouponManualInput() {
 
 function resetFoCouponToAuto() {
   isFoCouponManuallyEdited = false;
+  const coupInput = document.getElementById('fo-coupon-per-puzzle');
+  const gen = Math.max(1, parseInt(document.getElementById('fo-generation')?.value) || 8);
+  const type = document.getElementById('fo-type')?.value || 'Танк';
+  const upType = document.getElementById('fo-upgrade-type')?.value || 'standard';
+  const suggestFn = (typeof logic !== 'undefined' && logic.suggestOfficerPuzzleCost)
+    ? logic.suggestOfficerPuzzleCost
+    : (typeof suggestOfficerPuzzleCost === 'function' ? suggestOfficerPuzzleCost : null);
+
+  if (suggestFn && coupInput) {
+    const res = suggestFn({
+      generation: gen,
+      type: type,
+      upgradeType: upType,
+      catalog: state.officerCatalog || [],
+      roundUpStep: 50
+    });
+    if (res && res.suggestedCost !== undefined) {
+      coupInput.value = res.suggestedCost;
+      if (typeof toast === 'function') {
+        const fmt = typeof fmtNum === 'function' ? fmtNum : (n => n);
+        toast(`Применён авторасчёт: ${fmt(res.suggestedCost)} купонов`, 'success');
+      }
+    }
+  }
   updateCatalogOfficerCostSuggestion();
 }
 
@@ -10806,8 +11197,18 @@ function openEventResultModal(eventId, place) {
   const p = a ? getPlayer(a.playerId) : null;
   const places = resolveEventPlaces(et, ev.dateFrom);
 
-  let opts = places.map(pi => `<option value="${pi.place}" ${Number(pi.place) === Number(place) ? 'selected' : ''}>${escapeHtml(pi.label || 'Место ' + pi.place)} (${fmtNum(pi.coupons)} куп.)</option>`).join('');
-  opts += `<option value="4">4-10 место (утешительные купоны)</option><option value="0">Не попал в топ (0 купонов)</option>`;
+  const selectedPlace = (a && a.actualPlace !== undefined && a.actualPlace !== null)
+    ? Number(a.actualPlace)
+    : Number(place);
+
+  let opts = places.map(pi => `<option value="${pi.place}" ${Number(pi.place) === selectedPlace ? 'selected' : ''}>${escapeHtml(pi.label || 'Место ' + pi.place)} (${fmtNum(pi.coupons)} куп.)</option>`).join('');
+  if (!places.some(pi => Number(pi.place) === 4)) {
+    opts += `<option value="4" ${selectedPlace === 4 ? 'selected' : ''}>4-10 место (утешительные купоны)</option>`;
+  }
+  opts += `<option value="0" ${selectedPlace === 0 ? 'selected' : ''}>Не попал в топ (0 купонов)</option>`;
+
+  const isAlreadyConfirmed = Boolean(a && a.resultStatus === 'confirmed');
+  const btnLabel = isAlreadyConfirmed ? 'Сохранить изменения' : 'Сохранить и зачислить';
 
   const modalHtml = `
     <div class="modal is-active" id="modal-event-result-submit" style="display:flex">
@@ -10820,6 +11221,7 @@ function openEventResultModal(eventId, place) {
         <div class="modal-body">
           <div class="auth-demo-hint" style="margin-bottom:12px">
             Боец: <strong>${escapeHtml(p?.name || a?.playerName || 'Сектор')}</strong> · Назначенное место: <strong>#${place}</strong>
+            ${isAlreadyConfirmed ? ` · Текущий факт: <strong>${selectedPlace === 0 ? 'Не участвовал' : (selectedPlace === 4 ? '4-10 место' : '#' + selectedPlace)}</strong>` : ''}
           </div>
           <div class="form-group">
             <label>Фактическое занятое место в игре:</label>
@@ -10833,7 +11235,7 @@ function openEventResultModal(eventId, place) {
         </div>
         <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
           <button class="btn-ghost" onclick="closeEventResultModal()">Отмена</button>
-          <button class="btn-primary" onclick="submitEventResultFromModal(${eventId}, ${place})">Сохранить и зачислить</button>
+          <button class="btn-primary" onclick="submitEventResultFromModal(${eventId}, ${place})">${btnLabel}</button>
         </div>
       </div>
     </div>
@@ -11741,11 +12143,7 @@ async function initApp() {
 
   checkAuth().then(isAuth => {
     if (isAuth) {
-      if (currentUser?.rank === 'r3') {
-        navigate('my_cabinet');
-      } else {
-        navigate('calendar');
-      }
+      navigateInitialOrHash();
       if (typeof navigator === 'undefined' || navigator.onLine) {
         flushOutboxQueue();
       }
@@ -11903,6 +12301,14 @@ if (typeof window !== 'undefined') {
       if (!switcher.contains(e.target)) {
         switcher.classList.remove('open');
         if (menu) menu.style.display = 'none';
+      }
+    }
+
+    const matrixFilterWrap = document.querySelector('.matrix-officer-filter-wrap');
+    const matrixDropdown = document.getElementById('matrix-officer-dropdown');
+    if (matrixDropdown && matrixDropdown.style.display !== 'none') {
+      if (!matrixFilterWrap || !matrixFilterWrap.contains(e.target)) {
+        closeMatrixOfficerDropdown();
       }
     }
   });
@@ -12090,4 +12496,11 @@ if (typeof window !== 'undefined') {
   window.sendEventSummaryStaff = sendEventSummaryStaff;
   window.dismissAppUpdate = dismissAppUpdate;
   window.applyAppUpdate = applyAppUpdate;
+
+  window.openMatrixOfficerDropdown = openMatrixOfficerDropdown;
+  window.closeMatrixOfficerDropdown = closeMatrixOfficerDropdown;
+  window.onMatrixOfficerInput = onMatrixOfficerInput;
+  window.selectMatrixOfficer = selectMatrixOfficer;
+  window.clearMatrixOfficerFilter = clearMatrixOfficerFilter;
+  window.onMatrixOfficerKeydown = onMatrixOfficerKeydown;
 }

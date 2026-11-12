@@ -430,7 +430,11 @@ const I18N_RESOURCES = {
         "tab_personal": "🎯 Персональный симулятор",
         "tab_matrix": "📊 Сводная матрица гильдии",
         "player_label": "Игрок",
-        "no_officers_player": "У игрока нет офицеров для симулятора купонов"
+        "no_officers_player": "У игрока нет офицеров для симулятора купонов",
+        "search_officer_placeholder": "🔍 Поиск офицера...",
+        "all_officers": "— Все офицеры —",
+        "officer_not_found": "Офицер не найден",
+        "reset_filter": "Сброс"
       },
       "pending": {
         "title": "Заявки на регистрацию участников",
@@ -911,7 +915,11 @@ const I18N_RESOURCES = {
         "tab_personal": "🎯 Personal Simulator",
         "tab_matrix": "📊 Alliance Summary Matrix",
         "player_label": "Player",
-        "no_officers_player": "Player has no officers for coupon simulator"
+        "no_officers_player": "Player has no officers for coupon simulator",
+        "search_officer_placeholder": "🔍 Search officer...",
+        "all_officers": "— All officers —",
+        "officer_not_found": "Officer not found",
+        "reset_filter": "Reset"
       },
       "pending": {
         "title": "Member Registration Requests",
@@ -1392,7 +1400,11 @@ const I18N_RESOURCES = {
         "tab_personal": "🎯 Persönlicher Simulator",
         "tab_matrix": "📊 Allianz-Übersichtsmatrix",
         "player_label": "Spieler",
-        "no_officers_player": "Spieler hat keine Offiziere für den Coupon-Simulator"
+        "no_officers_player": "Spieler hat keine Offiziere für den Coupon-Simulator",
+        "search_officer_placeholder": "🔍 Offizier suchen...",
+        "all_officers": "— Alle Offiziere —",
+        "officer_not_found": "Offizier nicht gefunden",
+        "reset_filter": "Zurücksetzen"
       },
       "pending": {
         "title": "Mitglieder-Registrierungsanträge",

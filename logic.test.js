@@ -59,6 +59,10 @@ const {
   DEFAULT_NOTIFICATION_TEMPLATES,
   NOTIFICATION_TEMPLATE_SAMPLE_DATA,
   renderTemplate,
+  collectUniqueOfficers,
+  filterOfficersByQuery,
+  getHashForRoute,
+  parseRouteFromHash,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -3035,6 +3039,21 @@ test('suggestOfficerPuzzleCost calculates accurate costs with upward rounding an
   // 7. Эталонная Осада S8 при пустом каталоге = 720
   const fallbackSiege8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Осада', catalog: [] });
   assert.equal(fallbackSiege8.suggestedCost, 720);
+
+  // 8. Сценарий пользователя: Офицер Танк S8 со старой ценой 1020 в каталоге
+  // При вычислении рекомендации выдаёт 1050, что отличается от 1020
+  const tankOldCost = 1020;
+  const autoTank8 = suggestOfficerPuzzleCost({ generation: 8, type: 'Танк', catalog: catalogWithTanks });
+  assert.equal(autoTank8.suggestedCost, 1050);
+  assert.notEqual(tankOldCost, autoTank8.suggestedCost, 'Старое значение 1020 отличается от рекомендованного 1050');
+  // При сбросе к авторасчету значение должно стать 1050
+  let currentCost = tankOldCost;
+  let isManuallyEdited = true;
+  // Пользователь нажимает "Применить авторасчёт"
+  isManuallyEdited = false;
+  currentCost = autoTank8.suggestedCost;
+  assert.equal(currentCost, 1050);
+  assert.equal(isManuallyEdited, false);
 });
 
 test('stale stock alert scheduler: shouldRunStaleStockAlert and calculateNextStaleRun', () => {
@@ -3219,6 +3238,105 @@ test('timezone utilities: getUserTimezoneInfo, formatTimezoneOffsetLabel, conver
   assert.strictEqual(backwardWrap.time, '22:15');
   assert.strictEqual(backwardWrap.dayShift, -1);
 });
+
+test('matrix officer combobox filter: collectUniqueOfficers and filterOfficersByQuery', () => {
+  const catalog = [
+    { id: 'c1', name: 'Белла', type: 'Танки', generation: 1 },
+    { id: 'c2', name: 'Александра', type: 'Артиллерия', generation: 2 },
+    { id: 'c3', name: 'Виктория', type: 'Пехота', generation: 3 },
+  ];
+
+  const players = [
+    {
+      id: 1,
+      name: 'Player1',
+      officers: [
+        { id: 'o1', catalogId: 'c1', name: 'Белла' },
+        { id: 'o2', catalogId: 'custom_1', name: 'Злата', type: 'Танки', generation: 4 },
+      ]
+    },
+    {
+      id: 2,
+      name: 'Player2',
+      officers: [
+        { id: 'o3', catalogId: 'c2' }, // should resolve name 'Александра' via catalogId
+        { id: 'o4', catalogId: 'c3', name: 'Виктория' } // duplicate name with catalog, deduplicated
+      ]
+    }
+  ];
+
+  // 1. collectUniqueOfficers extracts, enriches, deduplicates and sorts in Russian alphabetical order
+  const uniqueOfficers = collectUniqueOfficers(catalog, players);
+  assert.strictEqual(uniqueOfficers.length, 4);
+  assert.deepStrictEqual(uniqueOfficers.map(o => o.name), [
+    'Александра',
+    'Белла',
+    'Виктория',
+    'Злата'
+  ]);
+  assert.strictEqual(uniqueOfficers.find(o => o.name === 'Александра').type, 'Артиллерия');
+  assert.strictEqual(uniqueOfficers.find(o => o.name === 'Злата').generation, 4);
+
+  // 2. filterOfficersByQuery with empty or whitespace returns full list
+  assert.strictEqual(filterOfficersByQuery(uniqueOfficers, '').length, 4);
+  assert.strictEqual(filterOfficersByQuery(uniqueOfficers, '   ').length, 4);
+
+  // 3. filterOfficersByQuery matches case-insensitively by officer name
+  const filteredByName = filterOfficersByQuery(uniqueOfficers, 'бел');
+  assert.strictEqual(filteredByName.length, 1);
+  assert.strictEqual(filteredByName[0].name, 'Белла');
+
+  // 4. filterOfficersByQuery matches by troop type
+  const filteredByType = filterOfficersByQuery(uniqueOfficers, 'танк');
+  assert.strictEqual(filteredByType.length, 2);
+  assert.deepStrictEqual(filteredByType.map(o => o.name), ['Белла', 'Злата']);
+
+  // 5. filterOfficersByQuery returns empty array on no matches
+  assert.strictEqual(filterOfficersByQuery(uniqueOfficers, 'Несуществующий').length, 0);
+
+  // 6. Graceful handling of null / undefined inputs
+  assert.deepStrictEqual(collectUniqueOfficers(null, null), []);
+  assert.deepStrictEqual(filterOfficersByQuery(null, 'test'), []);
+});
+
+test('deep linking hash routing: getHashForRoute and parseRouteFromHash', () => {
+  // 1. getHashForRoute
+  assert.strictEqual(getHashForRoute('event_detail', { id: 42 }), '#event/42');
+  assert.strictEqual(getHashForRoute('event_detail', { id: 'ev-1' }), '#event/ev-1');
+  assert.strictEqual(getHashForRoute('player_detail', { id: 7 }), '#player/7');
+  assert.strictEqual(getHashForRoute('officer_detail', { id: 'c1' }), '#officer/c1');
+  assert.strictEqual(getHashForRoute('my_cabinet'), '#cabinet');
+  assert.strictEqual(getHashForRoute('calendar'), '#calendar');
+  assert.strictEqual(getHashForRoute('players'), '#sectors');
+  assert.strictEqual(getHashForRoute('calculator', { tab: 'matrix' }), '#matrix');
+  assert.strictEqual(getHashForRoute('pending_registrations'), '#pending');
+  assert.strictEqual(getHashForRoute('notifications'), '#notifications');
+
+  // 2. parseRouteFromHash: event links
+  assert.deepStrictEqual(parseRouteFromHash('#event/42'), { page: 'event_detail', params: { id: '42' } });
+  assert.deepStrictEqual(parseRouteFromHash('/#event/42'), { page: 'event_detail', params: { id: '42' } });
+  assert.deepStrictEqual(parseRouteFromHash('#/event/42'), { page: 'event_detail', params: { id: '42' } });
+  assert.deepStrictEqual(parseRouteFromHash('#events/105'), { page: 'event_detail', params: { id: '105' } });
+  assert.deepStrictEqual(parseRouteFromHash('#events'), { page: 'calendar', params: {} });
+
+  // 3. parseRouteFromHash: player/sector links
+  assert.deepStrictEqual(parseRouteFromHash('#player/3'), { page: 'player_detail', params: { id: '3' } });
+  assert.deepStrictEqual(parseRouteFromHash('#sector/3'), { page: 'player_detail', params: { id: '3' } });
+  assert.deepStrictEqual(parseRouteFromHash('#sectors'), { page: 'players', params: {} });
+
+  // 4. parseRouteFromHash: other sections
+  assert.deepStrictEqual(parseRouteFromHash('#cabinet'), { page: 'my_cabinet', params: {} });
+  assert.deepStrictEqual(parseRouteFromHash('#matrix'), { page: 'calculator', params: { tab: 'matrix' } });
+  assert.deepStrictEqual(parseRouteFromHash('#pending'), { page: 'pending_registrations', params: {} });
+  assert.deepStrictEqual(parseRouteFromHash('#notifications'), { page: 'notifications', params: {} });
+
+  // 5. Invalid / empty hashes
+  assert.strictEqual(parseRouteFromHash(''), null);
+  assert.strictEqual(parseRouteFromHash('#'), null);
+  assert.strictEqual(parseRouteFromHash(null), null);
+});
+
+
 
 
 

@@ -2019,6 +2019,11 @@ function migrateSchema(db) {
         INSERT OR IGNORE INTO notification_templates (key, title, channel, parse_mode, template, default_template, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
+      const updateDefaultT = db.prepare(`
+        UPDATE notification_templates
+        SET default_template = ?
+        WHERE key = ?
+      `);
       const now = new Date().toISOString();
       for (const [key, item] of Object.entries(DEFAULT_NOTIFICATION_TEMPLATES)) {
         insertT.run(
@@ -2030,6 +2035,22 @@ function migrateSchema(db) {
           item.template,
           now
         );
+        updateDefaultT.run(item.template, item.key || key);
+
+        // Softly refresh unedited templates that still point to old general hashes
+        const current = db.prepare('SELECT template FROM notification_templates WHERE key = ?').get(item.key || key);
+        if (current && current.template) {
+          if (
+            (key === 'staff_event_completed_summary' && current.template.includes('/#events')) ||
+            (key === 'event_result_prompt' && current.template.includes('/#events')) ||
+            (key === 'event_place_assigned' && current.template.includes('/#calendar')) ||
+            (key === 'event_registration_opened' && current.template.includes('/#cabinet')) ||
+            (key === 'staff_event_autopick_summary' && current.template.includes('/#events')) ||
+            (key === 'staff_new_user_pending' && !current.template.includes('{link}'))
+          ) {
+            db.prepare('UPDATE notification_templates SET template = ? WHERE key = ?').run(item.template, item.key || key);
+          }
+        }
       }
     }
   } catch (e) {}

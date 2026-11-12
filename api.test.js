@@ -4875,6 +4875,28 @@ test('API Event RSVP, Post-Event Results submission, and stock rewards accrual',
     assert.equal(summaryRes.status, 200);
     const summaryData = await summaryRes.json();
     assert.equal(summaryData.confirmedCount, 1);
+
+    // Verify staff summary link points directly to #event/:id
+    const staffSummaryMsg = sentMessages.find(m => m.payload.chat_id === -100999999 && m.payload.text?.includes('Итоги события'));
+    assert.ok(staffSummaryMsg, 'Staff summary message should be dispatched');
+    assert.ok(staffSummaryMsg.payload.text?.includes(`#event/${createdEvent.id}`), 'Staff summary must link directly to #event/:id');
+
+    // 5. Test Result Correction: POST /api/events/:id/submit-result with updated place
+    const beforeCorrectionCoupons = db.getPlayerById(soldierUser.player_id).stock.coupons;
+    const correctionRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/submit-result`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${soldierAuth.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place: 1, actualPlace: 2 })
+    });
+    assert.equal(correctionRes.status, 200);
+    const correctionData = await correctionRes.json();
+    assert.equal(correctionData.event.assignments[0].actualPlace, 2);
+
+    const afterCorrectionCoupons = db.getPlayerById(soldierUser.player_id).stock.coupons;
+    const et = db.getEventTypes().find(t => t.id === createdEvent.typeId);
+    const place1Coupons = et.places.find(p => p.place === 1)?.coupons || 0;
+    const place2Coupons = et.places.find(p => p.place === 2)?.coupons || 0;
+    assert.equal(afterCorrectionCoupons, beforeCorrectionCoupons + (place2Coupons - place1Coupons));
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();
