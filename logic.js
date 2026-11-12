@@ -3065,6 +3065,22 @@
       parseMode: 'HTML',
       placeholders: Object.freeze(['totalSectors', 'freshCount', 'warningCount', 'staleCount', 'link']),
       template: `📊 <b>Отчет службы кадров: актуальность складов альянса</b>\n\nВсего активных секторов: <b>{totalSectors}</b>\n🟢 Актуальные (до 7 дн.): <b>{freshCount}</b>\n🟡 Требуют внимания (7–14 дн.): <b>{warningCount}</b>\n🔴 Устарели (>14 дн.): <b>{staleCount}</b>\n\nБойцам с устаревшими данными автоматически отправлены персональные напоминания в Telegram.\n🔗 <a href="{link}">Открыть мониторинг актуальности складов</a>`
+    }),
+    event_result_prompt: Object.freeze({
+      key: 'event_result_prompt',
+      title: 'Запрос результатов события',
+      channel: 'personal',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'sectorName', 'assignedPlace', 'link']),
+      template: `🏁 <b>Событие завершилось: {eventName}!</b>\n\nСектор: <b>{sectorName}</b>\nВам было назначено место: <b>#{assignedPlace}</b>\n\nПожалуйста, подтвердите фактически занятое место кнопками ниже (или в трекере) для автоматического зачисления наград на склад:\n🔗 <a href="{link}">Открыть детали события</a>`
+    }),
+    staff_event_completed_summary: Object.freeze({
+      key: 'staff_event_completed_summary',
+      title: 'Итоги события в штаб',
+      channel: 'staff',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'totalAssigned', 'confirmedCount', 'unconfirmedCount', 'totalCoupons', 'link']),
+      template: `🏆 <b>Итоги события: {eventName}</b>\n\nВсего участников: <b>{totalAssigned}</b>\n✅ Подтвердили результат: <b>{confirmedCount}</b>\n⏳ Ожидают подтверждения: <b>{unconfirmedCount}</b>\n🎟️ Всего добыто купонов альянсом: <b>+{totalCoupons}</b>\n\n🔗 <a href="{link}">Просмотреть итоговую сетку в трекере</a>`
     })
   });
 
@@ -3115,6 +3131,20 @@
       warningCount: '8',
       staleCount: '6',
       link: 'https://kow.example.com/#matrix'
+    }),
+    event_result_prompt: Object.freeze({
+      eventName: 'Битва за трон (King of War)',
+      sectorName: 'Sector 7 (Рейнджер)',
+      assignedPlace: '1',
+      link: 'https://kow.example.com/#events'
+    }),
+    staff_event_completed_summary: Object.freeze({
+      eventName: 'Битва за трон',
+      totalAssigned: '10',
+      confirmedCount: '9',
+      unconfirmedCount: '1',
+      totalCoupons: '320',
+      link: 'https://kow.example.com/#events'
     })
   });
 

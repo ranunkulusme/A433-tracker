@@ -1437,6 +1437,23 @@ function recordStockHistory(arg1, arg2, arg3) {
   `).run(playerId, d, stock.coupons || 0, stock.puzzles || 0, stock.chests || 0);
 }
 
+function confirmPlayerStock(playerId, userId = null) {
+  const player = getPlayerById(playerId);
+  if (!player) return null;
+  const nowIso = new Date().toISOString();
+  recordStockHistory({
+    playerId: player.id,
+    userId: userId ? Number(userId) : null,
+    source: 'manual_confirm',
+    snapshotBefore: player.stock || {},
+    snapshotAfter: player.stock || {},
+    diffSummary: 'Подтверждена актуальность склада без изменений',
+    screenshotPath: null,
+    createdAt: nowIso
+  });
+  return getPlayerById(playerId);
+}
+
 async function cleanupExpiredScreenshots(dbInstance, screenshotsBaseDir) {
   const db = dbInstance || getDb();
   const baseDir = screenshotsBaseDir || path.join(__dirname, 'data', 'screenshots');
@@ -1941,7 +1958,7 @@ function migrateSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit')),
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
       snapshot_before TEXT NOT NULL,
       snapshot_after TEXT NOT NULL,
       diff_summary TEXT NOT NULL,
@@ -1950,7 +1967,35 @@ function migrateSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_stock_history_player ON stock_history_records(player_id);
     CREATE INDEX IF NOT EXISTS idx_stock_history_created ON stock_history_records(created_at);
+  `);
 
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_history_records'").get();
+    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('manual_confirm')) {
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE stock_history_records_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+          user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+          source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+          snapshot_before TEXT NOT NULL,
+          snapshot_after TEXT NOT NULL,
+          diff_summary TEXT NOT NULL,
+          screenshot_path TEXT NULL,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO stock_history_records_new SELECT * FROM stock_history_records;
+        DROP TABLE stock_history_records;
+        ALTER TABLE stock_history_records_new RENAME TO stock_history_records;
+        CREATE INDEX IF NOT EXISTS idx_stock_history_player ON stock_history_records(player_id);
+        CREATE INDEX IF NOT EXISTS idx_stock_history_created ON stock_history_records(created_at);
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+  } catch (e) {}
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -1969,10 +2014,9 @@ function migrateSchema(db) {
   `);
 
   try {
-    const tCount = db.prepare('SELECT count(*) as count FROM notification_templates').get().count;
-    if (tCount === 0 && DEFAULT_NOTIFICATION_TEMPLATES) {
+    if (DEFAULT_NOTIFICATION_TEMPLATES) {
       const insertT = db.prepare(`
-        INSERT INTO notification_templates (key, title, channel, parse_mode, template, default_template, updated_at)
+        INSERT OR IGNORE INTO notification_templates (key, title, channel, parse_mode, template, default_template, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
       const now = new Date().toISOString();
@@ -2138,7 +2182,7 @@ function initDb(filePath) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit')),
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
       snapshot_before TEXT NOT NULL,
       snapshot_after TEXT NOT NULL,
       diff_summary TEXT NOT NULL,
@@ -2515,6 +2559,7 @@ module.exports = {
   getStockHistory,
   getStockHistoryByPlayerId,
   recordStockHistory,
+  confirmPlayerStock,
   cleanupExpiredScreenshots,
   exportKowJson,
   importKowJson,

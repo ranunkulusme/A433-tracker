@@ -1606,6 +1606,31 @@ test('updatePlayer automatically records stock_history_records when stock change
   assert.equal(updatedPlayer.stockUpdatedAt, history[0].createdAt);
 });
 
+test('confirmPlayerStock updates stock_updated_at and creates manual_confirm history record', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const player = dbModule.getPlayers()[0];
+  const admin = dbModule.findUserByUsername('admin');
+
+  // Set stockUpdatedAt to 20 days ago
+  const oldDate = new Date(Date.now() - 20 * 86400000).toISOString();
+  dbModule.updatePlayer(player.id, { stockUpdatedAt: oldDate });
+  assert.equal(dbModule.getPlayerById(player.id).stockUpdatedAt, oldDate);
+
+  const confirmed = dbModule.confirmPlayerStock(player.id, admin.id);
+  assert.ok(confirmed);
+  assert.notEqual(confirmed.stockUpdatedAt, oldDate);
+  assert.equal(confirmed.stockUpdateSource, 'manual_confirm');
+
+  const history = dbModule.getStockHistory(player.id);
+  assert.ok(history.length >= 1);
+  const latest = history[0];
+  assert.equal(latest.source, 'manual_confirm');
+  assert.equal(latest.authorUsername, 'admin');
+  assert.ok(latest.diffSummary.includes('Подтверждена актуальность'));
+});
+
 test('cleanupExpiredScreenshots deletes screenshot files older than 30 days and clears screenshot_path', async () => {
   const dbModule = require('./db.js');
   const db = dbModule.initDb(':memory:');
@@ -1668,9 +1693,9 @@ test('app_settings and notification_templates initialized and seeded on initDb',
   dbModule.setAppSetting('telegram_bot_token', '999999:UPDATED');
   assert.equal(dbModule.getAppSetting('telegram_bot_token'), '999999:UPDATED');
 
-  // notification_templates seeded with 7 baseline items
+  // notification_templates seeded with 9 baseline items
   const templates = dbModule.getNotificationTemplates();
-  assert.equal(templates.length, 7);
+  assert.equal(templates.length, 9);
 
   const t1 = dbModule.getNotificationTemplate('event_place_assigned');
   assert.ok(t1);

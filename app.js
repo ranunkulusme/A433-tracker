@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.39.0';
+const APP_VERSION = 'v3.40.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -1864,6 +1864,9 @@ async function renderMyCabinet() {
             ${renderStockFreshnessBadge(profile.stockUpdatedAt || profile.stock_updated_at)}
           </div>
           <div style="display:flex;align-items:center;gap:6px">
+            <button type="button" class="btn btn-outline btn-xs btn-confirm-stock" onclick="confirmMyStock()" title="${escapeHtml(typeof t === 'function' ? t('cabinet.btn_confirm_stock_title') : 'Подтвердить, что запасы на складе верны без изменений')}">
+              ✅ ${typeof t === 'function' ? t('cabinet.btn_confirm_stock') : 'Данные актуальны'}
+            </button>
             <button type="button" class="btn-ghost btn-xs btn-history-trigger" onclick="openStockHistoryModal(${profile.id})" title="${escapeHtml(typeof t === 'function' ? t('audit.btn_history') : 'История склада')}">
               📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}
             </button>
@@ -6046,9 +6049,40 @@ function renderEventDetail(eventId) {
       }
     }
 
+    let rsvpBadge = '';
+    let rsvpActions = '';
+    let resultAction = '';
+
+    if (a && p) {
+      const rsvpStatus = a.rsvpStatus || 'pending';
+      if (rsvpStatus === 'confirmed') {
+        rsvpBadge = ` <span class="badge badge-success" style="font-size:11px" title="Участие подтверждено">🟢 ${typeof t === 'function' ? t('events.rsvp_confirmed') : 'Подтвердил'}</span>`;
+      } else if (rsvpStatus === 'declined') {
+        rsvpBadge = ` <span class="badge badge-danger" style="font-size:11px" title="Отказ от участия">🔴 ${typeof t === 'function' ? t('events.rsvp_declined') : 'Отказ'}</span>`;
+      } else {
+        rsvpBadge = ` <span class="badge badge-none" style="font-size:11px" title="Ожидает подтверждения">⏳ ${typeof t === 'function' ? t('events.rsvp_pending') : 'Ожидает'}</span>`;
+      }
+
+      const isMySector = currentUser && (Number(currentUser.playerId) === Number(p.id) || getUserSectors().some(s => Number(s.id) === Number(p.id)));
+      const canManageEv = canManage() || hasPermission('manage_events');
+
+      if (!isEventPast(ev) && (isMySector || canManageEv)) {
+        rsvpActions = `
+          <span style="display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle">
+            ${rsvpStatus !== 'confirmed' ? `<button class="btn btn-xs btn-outline" style="color:var(--green);border-color:var(--green);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'confirmed')" title="${typeof t === 'function' ? t('events.btn_rsvp_confirm') : 'Подтвердить'}">✓</button>` : ''}
+            ${rsvpStatus !== 'declined' ? `<button class="btn btn-xs btn-outline" style="color:var(--red);border-color:var(--red);padding:1px 6px;font-size:11px" onclick="handleEventRsvp(${ev.id},${pl},'declined')" title="${typeof t === 'function' ? t('events.btn_rsvp_decline') : 'Не смогу'}">✕</button>` : ''}
+          </span>
+        `;
+      }
+
+      if (isEventPast(ev) && (isMySector || canManageEv) && !a.accrued && a.resultStatus !== 'confirmed') {
+        resultAction = ` <button class="btn btn-xs btn-primary" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="openEventResultModal(${ev.id},${pl})">🏆 Итог</button>`;
+      }
+    }
+
     rows.push(`<tr>
       <td><strong style="font-size:15px">${pi?.label || `Место ${pl}`}</strong></td>
-      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
+      <td><strong>${p ? playerLink(p) : '<span style="color:var(--text3)">Не назначен</span>'}</strong>${regMatchBadge}${rsvpBadge}${rsvpActions}${resultAction}${r3Submit ? ` <button class="action-btn" onclick="submitR3Result(${ev.id},${pl})">Это моё место</button>` : ''}</td>
       <td style="color:var(--text2)">${officer ? officerLink(officer) : '—'}</td>
       <td style="color:var(--text2)">Ур. ${officer?.level ?? '—'}</td>
       <td style="font-family:var(--mono);color:${isConfirmed?'var(--green)':'var(--text2)'};font-weight:600">
@@ -6141,6 +6175,7 @@ function renderEventDetail(eventId) {
       regRows = allRegistrations.map(r => {
         const player = getPlayer(r.playerId);
         const sectorName = r.playerName || player?.name || `Сектор #${r.playerId}`;
+        const freshnessBadge = renderStockFreshnessBadge(player?.stockUpdatedAt || player?.stock_updated_at);
         const off = player?.officers?.find(o => o.id === r.officerId);
         const cat = off ? getCatalogOfficer(off.catalogId) : null;
         const desired = Number(r.desiredPlace) || 0;
@@ -6161,7 +6196,7 @@ function renderEventDetail(eventId) {
 
         return `
           <tr>
-            <td><strong>${player ? playerLink(player) : escapeHtml(sectorName)}</strong></td>
+            <td><strong>${player ? playerLink(player) : escapeHtml(sectorName)}</strong> ${freshnessBadge}</td>
             <td style="color:var(--text2)">${off ? officerLink(off) : escapeHtml(r.officerId || '—')}</td>
             <td style="font-family:var(--mono)">${off ? fmtNum(off.level) : '—'}</td>
             <td><span class="badge badge-none">${escapeHtml(placeLabel)}</span></td>
@@ -6221,7 +6256,11 @@ function renderEventDetail(eventId) {
 
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) ? `
+          <button class="btn btn-secondary btn-sm" onclick="requestEventResultsTg(${ev.id})" title="Разослать участникам запрос фактического места в Telegram">🏁 ${typeof t === 'function' ? t('events.btn_request_results_tg') : 'Запросить итоги в TG'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="sendEventSummaryStaff(${ev.id})" title="Отправить сводку по итогам события в штабной чат Telegram">📊 ${typeof t === 'function' ? t('events.btn_send_staff_summary') : 'Отчёт в штаб'}</button>
+        ` : ''}
         ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) && !ev.accrued ? `<button class="btn-primary btn-sm" onclick="accrueEventRewards(${ev.id})">Начислить награды</button>` : ''}
         ${ev.accrued ? `<span class="badge badge-none">Начислено</span>` : ''}
         ${(canManage() || hasPermission('manage_events')) ? `<button class="btn-primary btn-sm" onclick="openEventModal(${ev.id})">✏️ Редактировать ивент</button>` : ''}
@@ -6358,6 +6397,31 @@ function updateRegisterModalForSector(sectorId) {
   const targetSector = userSectors.find(s => Number(s.id) === Number(sectorId))
     || getPlayer(sectorId)
     || (myCabinetProfile && Number(myCabinetProfile.id) === Number(sectorId) ? myCabinetProfile : null);
+
+  const stockWarnBox = document.getElementById('reg-stock-warning');
+  if (stockWarnBox && targetSector) {
+    const getFreshness = (typeof logic !== 'undefined' && logic.getStockFreshness)
+      ? logic.getStockFreshness
+      : (typeof getStockFreshness === 'function' ? getStockFreshness : null);
+    const freshness = getFreshness ? getFreshness(targetSector.stockUpdatedAt || targetSector.stock_updated_at) : { status: 'unknown', label: 'нет данных' };
+    if (freshness.status === 'warning' || freshness.status === 'stale' || freshness.status === 'unknown') {
+      stockWarnBox.style.display = 'block';
+      stockWarnBox.innerHTML = `
+        <div class="auth-alert warning" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;margin:0">
+          <div>
+            ⚠️ <strong>${typeof t === 'function' ? t('events.stock_warning_banner') : 'Данные склада давно не обновлялись'}</strong> (${escapeHtml(freshness.label)}).<br>
+            <span style="font-size:12px;color:var(--text2)">${typeof t === 'function' ? t('events.stock_warning_desc') : 'Рекомендуется подтвердить актуальность или обновить запасы перед регистрацией'}</span>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline" onclick="confirmSectorStockInline(${targetSector.id})" style="white-space:nowrap">
+            ✅ ${typeof t === 'function' ? t('events.btn_confirm_stock_inline') : 'Актуально'}
+          </button>
+        </div>
+      `;
+    } else {
+      stockWarnBox.style.display = 'none';
+      stockWarnBox.innerHTML = '';
+    }
+  }
 
   const offSelect = document.getElementById('reg-officer-select');
   const placeSelect = document.getElementById('reg-place-select');
@@ -10637,6 +10701,187 @@ function accrueEventRewards(id) {
   renderEventDetail(id);
 }
 
+// ─── EVENT RSVP & COMPLETION HANDLERS ────────────────────────
+async function confirmMyStock() {
+  try {
+    const res = await apiFetch('/api/my-profile/confirm-stock', { method: 'POST' });
+    if (res && res.player) {
+      if (myCabinetProfile) {
+        myCabinetProfile.stockUpdatedAt = res.player.stockUpdatedAt || res.player.stock_updated_at;
+        myCabinetProfile.stockUpdateSource = res.player.stockUpdateSource || res.player.stock_update_source;
+      }
+      const mySectors = getUserSectors();
+      const sec = mySectors.find(s => Number(s.id) === Number(res.player.id));
+      if (sec) {
+        sec.stockUpdatedAt = res.player.stockUpdatedAt;
+        sec.stockUpdateSource = res.player.stockUpdateSource;
+      }
+      toast(typeof t === 'function' ? t('cabinet.stock_confirmed_toast') : 'Данные склада успешно подтверждены', 'success');
+      renderMyCabinet();
+    }
+  } catch (err) {
+    toast(err.message || 'Ошибка подтверждения склада', 'error');
+  }
+}
+
+async function confirmSectorStockInline(sectorId) {
+  try {
+    const res = await apiFetch('/api/my-profile/confirm-stock', { method: 'POST' });
+    if (res && res.player) {
+      if (myCabinetProfile) {
+        myCabinetProfile.stockUpdatedAt = res.player.stockUpdatedAt;
+        myCabinetProfile.stockUpdateSource = res.player.stockUpdateSource;
+      }
+      const mySectors = getUserSectors();
+      const sec = mySectors.find(s => Number(s.id) === Number(res.player.id));
+      if (sec) {
+        sec.stockUpdatedAt = res.player.stockUpdatedAt;
+        sec.stockUpdateSource = res.player.stockUpdateSource;
+      }
+      const stockWarnBox = document.getElementById('reg-stock-warning');
+      if (stockWarnBox) {
+        stockWarnBox.innerHTML = `
+          <div class="auth-alert success" style="padding:8px 12px;margin:0">
+            ✓ ${typeof t === 'function' ? t('events.stock_confirmed_inline') : 'Склад подтвержден'}
+          </div>
+        `;
+      }
+      toast(typeof t === 'function' ? t('cabinet.stock_confirmed_toast') : 'Данные склада успешно подтверждены', 'success');
+    }
+  } catch (err) {
+    toast(err.message || 'Ошибка подтверждения склада', 'error');
+  }
+}
+
+async function handleEventRsvp(eventId, place, status) {
+  try {
+    const res = await apiFetch(`/api/events/${eventId}/rsvp`, {
+      method: 'POST',
+      body: { place, status }
+    });
+    if (res && res.event) {
+      const idx = state.events.findIndex(e => Number(e.id) === Number(eventId));
+      if (idx !== -1) {
+        state.events[idx] = res.event;
+      }
+      const label = status === 'confirmed'
+        ? (typeof t === 'function' ? t('events.rsvp_confirmed') : 'Подтвердил')
+        : (typeof t === 'function' ? t('events.rsvp_declined') : 'Отказ');
+      toast(`Статус участия обновлен: ${label}`, 'success');
+      renderEventDetail(eventId);
+    }
+  } catch (err) {
+    toast(err.message || 'Ошибка обновления статуса участия', 'error');
+  }
+}
+
+async function handleEventSubmitResult(eventId, place, actualPlace) {
+  try {
+    const res = await apiFetch(`/api/events/${eventId}/submit-result`, {
+      method: 'POST',
+      body: { place, actualPlace: Number(actualPlace) }
+    });
+    if (res && res.event) {
+      const idx = state.events.findIndex(e => Number(e.id) === Number(eventId));
+      if (idx !== -1) {
+        state.events[idx] = res.event;
+      }
+      closeEventResultModal();
+      const accruedMsg = res.accruedCoupons > 0
+        ? ` (${typeof t === 'function' ? t('events.coupons_accrued_toast', { count: res.accruedCoupons }) : '+' + res.accruedCoupons + ' купонов на склад'})`
+        : '';
+      toast(`${typeof t === 'function' ? t('events.result_submitted_toast') : 'Результат зафиксирован'}${accruedMsg}`, 'success');
+      renderEventDetail(eventId);
+    }
+  } catch (err) {
+    toast(err.message || 'Ошибка фиксации результата', 'error');
+  }
+}
+
+function openEventResultModal(eventId, place) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+  const a = ev.assignments.find(x => Number(x.place) === Number(place));
+  const p = a ? getPlayer(a.playerId) : null;
+  const places = resolveEventPlaces(et, ev.dateFrom);
+
+  let opts = places.map(pi => `<option value="${pi.place}" ${Number(pi.place) === Number(place) ? 'selected' : ''}>${escapeHtml(pi.label || 'Место ' + pi.place)} (${fmtNum(pi.coupons)} куп.)</option>`).join('');
+  opts += `<option value="4">4-10 место (утешительные купоны)</option><option value="0">Не попал в топ (0 купонов)</option>`;
+
+  const modalHtml = `
+    <div class="modal is-active" id="modal-event-result-submit" style="display:flex">
+      <div class="modal-overlay" onclick="closeEventResultModal()"></div>
+      <div class="modal-card" style="max-width:480px">
+        <div class="modal-header">
+          <h3>🏆 Итоги события: ${escapeHtml(et?.name || 'Событие')}</h3>
+          <button class="modal-close" onclick="closeEventResultModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-demo-hint" style="margin-bottom:12px">
+            Боец: <strong>${escapeHtml(p?.name || a?.playerName || 'Сектор')}</strong> · Назначенное место: <strong>#${place}</strong>
+          </div>
+          <div class="form-group">
+            <label>Фактическое занятое место в игре:</label>
+            <select id="event-result-actual-place" class="form-control">
+              ${opts}
+            </select>
+          </div>
+          <p style="font-size:12px;color:var(--text3);margin-top:8px">
+            💡 При подтверждении призовые купоны будут автоматически зачислены на склад бойца с записью в аудит-лог.
+          </p>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn-ghost" onclick="closeEventResultModal()">Отмена</button>
+          <button class="btn-primary" onclick="submitEventResultFromModal(${eventId}, ${place})">Сохранить и зачислить</button>
+        </div>
+      </div>
+    </div>
+  `;
+  let container = document.getElementById('event-result-modal-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'event-result-modal-container';
+    document.body.appendChild(container);
+  }
+  container.innerHTML = modalHtml;
+}
+
+function closeEventResultModal() {
+  const container = document.getElementById('event-result-modal-container');
+  if (container) container.innerHTML = '';
+}
+
+function submitEventResultFromModal(eventId, place) {
+  const sel = document.getElementById('event-result-actual-place');
+  const actualPlace = sel ? Number(sel.value) : place;
+  handleEventSubmitResult(eventId, place, actualPlace);
+}
+
+async function requestEventResultsTg(eventId) {
+  if (!confirm('Отправить участникам события в Telegram запрос итогов с инлайн-кнопками выбора места?')) return;
+  try {
+    const res = await apiFetch(`/api/events/${eventId}/finish`, { method: 'POST' });
+    if (res && res.success) {
+      toast(typeof t === 'function' ? t('events.results_prompt_sent_toast') : 'Запросы итогов отправлены участникам в Telegram', 'success');
+    }
+  } catch (err) {
+    toast(err.message || 'Ошибка отправки запросов в Telegram', 'error');
+  }
+}
+
+async function sendEventSummaryStaff(eventId) {
+  if (!confirm('Отправить сводный отчет по завершенному событию в командирский чат штаба?')) return;
+  try {
+    const res = await apiFetch(`/api/events/${eventId}/summary`, { method: 'POST' });
+    if (res && res.success) {
+      toast(typeof t === 'function' ? t('events.staff_summary_sent_toast') : 'Сводка события отправлена в чат штаба', 'success');
+    }
+  } catch (err) {
+    toast(err.message || 'Ошибка отправки сводки в штаб', 'error');
+  }
+}
+
 // ─── EXPORT / IMPORT ─────────────────────────────────────────
 function exportExcel() {
   if (currentUser?.rank !== 'r5') { toast(t('toasts.access_denied', 'Экспорт доступен только для главы альянса (Р5)'), 'error'); return; }
@@ -11833,6 +12078,16 @@ if (typeof window !== 'undefined') {
   window.refreshCurrentPage = refreshCurrentPage;
   window.setupBackgroundSync = setupBackgroundSync;
   window.showPwaUpdatePrompt = showPwaUpdatePrompt;
+
+  window.confirmMyStock = confirmMyStock;
+  window.confirmSectorStockInline = confirmSectorStockInline;
+  window.handleEventRsvp = handleEventRsvp;
+  window.handleEventSubmitResult = handleEventSubmitResult;
+  window.openEventResultModal = openEventResultModal;
+  window.closeEventResultModal = closeEventResultModal;
+  window.submitEventResultFromModal = submitEventResultFromModal;
+  window.requestEventResultsTg = requestEventResultsTg;
+  window.sendEventSummaryStaff = sendEventSummaryStaff;
   window.dismissAppUpdate = dismissAppUpdate;
   window.applyAppUpdate = applyAppUpdate;
 }

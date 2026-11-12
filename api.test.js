@@ -522,6 +522,21 @@ test('API Player Cabinet /api/my-profile: read, update sector/stock, and officer
       headers: { Authorization: `Bearer ${soldierLogin.token}` }
     })).json();
     assert.equal(checkProfAfter.officers.length, 0);
+
+    // 7. POST /api/my-profile/confirm-stock
+    const confirmRes = await fetch(`${baseUrl}/api/my-profile/confirm-stock`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${soldierLogin.token}` }
+    });
+    assert.equal(confirmRes.status, 200);
+    const confirmData = await confirmRes.json();
+    assert.equal(confirmData.success, true);
+    assert.equal(confirmData.stockUpdateSource, 'manual_confirm');
+    assert.ok(confirmData.stockUpdatedAt);
+
+    // Unauthorized check
+    const noAuthConfirm = await fetch(`${baseUrl}/api/my-profile/confirm-stock`, { method: 'POST' });
+    assert.equal(noAuthConfirm.status, 401);
   } finally {
     await server.close();
   }
@@ -3486,13 +3501,13 @@ test('API Notification Templates CRUD, reset, and test send', async () => {
       body: JSON.stringify({ username: 'admin', password: 'admin123' })
     })).json();
 
-    // 1. GET /api/notification-templates (7 default templates)
+    // 1. GET /api/notification-templates (9 default templates)
     const listRes = await fetch(`${baseUrl}/api/notification-templates`, {
       headers: { Authorization: `Bearer ${adminLogin.token}` }
     });
     assert.equal(listRes.status, 200);
     const templates = await listRes.json();
-    assert.equal(templates.length, 7);
+    assert.equal(templates.length, 9);
 
     // 2. PUT /api/notification-templates/:key
     const putRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned`, {
@@ -4713,6 +4728,155 @@ test('Dynamic API endpoints return strict anti-caching headers (Cache-Control: n
     assert.ok(updatedUser, 'User must exist');
     assert.deepEqual(updatedUser.permissions, ['view_sectors', 'view_stocks', 'manage_events']);
   } finally {
+    await server.close();
+  }
+});
+
+test('API Event RSVP, Post-Event Results submission, and stock rewards accrual', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options = {}) => {
+    const payload = JSON.parse(options.body || '{}');
+    sentMessages.push({ url, payload });
+    if (url.includes('/sendMessage')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 1001, chat: { id: payload.chat_id }, text: payload.text } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const db = require('./db.js');
+    db.setAppSetting('telegram_bot_token', 'test_token');
+    db.setAppSetting('telegram_staff_chat_id', '-100999999');
+
+    // Create soldier user
+    const soldierLogin = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'rsvp_hero',
+        password: 'pass',
+        playerName: 'RSVP Hero Sector'
+      })
+    })).json();
+
+    const soldierUser = db.findUserByUsername('rsvp_hero');
+    db.approveUser(soldierUser.id, 'r3');
+    db.bindUserTelegram(soldierUser.id, 777111, 'rsvp_hero_tg');
+
+    const soldierAuth = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'rsvp_hero', password: 'pass' })
+    })).json();
+    assert.ok(soldierAuth.token, 'Soldier auth token should be present');
+
+    // Create an event
+    const eventType = db.getEventTypes()[0];
+    const eventRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeId: eventType.id,
+        dateFrom: '2026-12-01',
+        dateTo: '2026-12-07',
+        assignments: [
+          { place: 1, playerId: soldierUser.player_id, officerId: 'o1' }
+        ]
+      })
+    });
+    assert.equal(eventRes.status, 200);
+    const createdEvent = await eventRes.json();
+    assert.ok(createdEvent.id);
+
+    // Verify event_place_assigned notification was sent with inline keyboard
+    const placeAssignedMsg = sentMessages.find(m => m.url.includes('/sendMessage') && m.payload.chat_id === 777111 && m.payload.reply_markup?.inline_keyboard);
+    assert.ok(placeAssignedMsg, 'Telegram notification with inline keyboard should be sent to user');
+
+    // 1. Test Web RSVP: POST /api/events/:id/rsvp
+    const rsvpRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/rsvp`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${soldierAuth.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place: 1, status: 'confirmed' })
+    });
+    assert.equal(rsvpRes.status, 200);
+    const rsvpData = await rsvpRes.json();
+    assert.equal(rsvpData.event.assignments[0].rsvpStatus, 'confirmed');
+
+    // 2. Test Telegram Callback RSVP: decline
+    const webhookRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query: {
+          id: 'cq_rsvp_1',
+          from: { id: 777111, username: 'rsvp_hero_tg' },
+          message: { message_id: 1001, chat: { id: 777111 }, text: 'Назначено место #1' },
+          data: `rsvp_event:decline:${createdEvent.id}:1`
+        }
+      })
+    });
+    assert.equal(webhookRes.status, 200);
+    const updatedEv = db.getEventById(createdEvent.id);
+    assert.equal(updatedEv.assignments[0].rsvpStatus, 'declined');
+
+    // Verify staff chat alert was sent about decline
+    const staffDeclineAlert = sentMessages.find(m => m.payload.chat_id === -100999999 && m.payload.text?.includes('Отказ от участия'));
+    assert.ok(staffDeclineAlert, 'Staff chat should be alerted about decline');
+
+    // 3. Test Results Submission via Web: POST /api/events/:id/submit-result
+    const initialPlayer = db.getPlayerById(soldierUser.player_id);
+    const initialCoupons = Number(initialPlayer.stock.coupons) || 0;
+
+    const resultRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/submit-result`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${soldierAuth.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place: 1, actualPlace: 1 })
+    });
+    assert.equal(resultRes.status, 200);
+    const resultData = await resultRes.json();
+    assert.equal(resultData.event.assignments[0].resultStatus, 'confirmed');
+    assert.equal(resultData.event.assignments[0].accrued, true);
+    assert.ok(resultData.accruedCoupons > 0, 'Prize coupons should be greater than 0');
+
+    // Verify player stock was updated
+    const afterPlayer = db.getPlayerById(soldierUser.player_id);
+    assert.equal(afterPlayer.stock.coupons, initialCoupons + resultData.accruedCoupons);
+
+    // Verify stock_history_records has source 'event_reward'
+    const history = db.getStockHistory(soldierUser.player_id);
+    assert.ok(history.some(h => h.source === 'event_reward' && h.diffSummary.includes('Награда за событие')));
+
+    // 4. Test Finish Event Prompt & Summary endpoints
+    const finishRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/finish`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(finishRes.status, 200);
+
+    const summaryRes = await fetch(`${baseUrl}/api/events/${createdEvent.id}/summary`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}` }
+    });
+    assert.equal(summaryRes.status, 200);
+    const summaryData = await summaryRes.json();
+    assert.equal(summaryData.confirmedCount, 1);
+  } finally {
+    telegram.setTelegramFetch(null);
     await server.close();
   }
 });
