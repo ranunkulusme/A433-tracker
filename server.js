@@ -502,9 +502,18 @@ async function checkScheduledEventMorningReminders(req = null, options = {}) {
     const baseUrl = getAppBaseUrl(req);
     let sentCount = 0;
 
+    const nowTime = now.getTime();
     for (const ev of events) {
       const assignments = ev.assignments || [];
       if (!assignments.length) continue;
+
+      // Ранний отсев архивных и далеких будущих событий (окно старта ±36 часов от текущего момента)
+      if (!options.force && ev.dateFrom) {
+        const evTime = new Date(ev.dateFrom).getTime();
+        if (!isNaN(evTime) && Math.abs(evTime - nowTime) > 36 * 3600 * 1000) {
+          continue;
+        }
+      }
 
       const et = eventTypes.find(t => t.id === ev.typeId);
       const effectivePlaces = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
@@ -797,11 +806,12 @@ async function handleTelegramUpdate(update) {
                 fs.mkdirSync(screenshotsDir, { recursive: true });
               }
 
-              const ext = path.extname(fileInfo.result.file_path) || '.jpg';
+              const rawExt = (path.extname(fileInfo.result.file_path) || '').toLowerCase();
+              const ext = ['.jpg', '.jpeg', '.png', '.webp'].includes(rawExt) ? rawExt : '.jpg';
               const hash = crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0, 8);
               const filename = `${player.id}_${Date.now()}_${hash}${ext}`;
               const fullPath = path.join(screenshotsDir, filename);
-              fs.writeFileSync(fullPath, fileBuf);
+              await fs.promises.writeFile(fullPath, fileBuf);
               screenshotPath = `${yyyyMm}/${filename}`;
             }
           }

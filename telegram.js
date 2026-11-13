@@ -340,13 +340,29 @@ async function callTelegramApi(token, method, payload = null, options = {}) {
     let response;
 
     if (proxyUrl && !options.fetchFn) {
+      let reqBody = null;
+      const reqHeaders = { 'Accept': 'application/json' };
+      if (payload !== null) {
+        if (typeof FormData !== 'undefined' && payload instanceof FormData) {
+          if (typeof Response !== 'undefined') {
+            const formResp = new Response(payload);
+            reqBody = Buffer.from(await formResp.arrayBuffer());
+            const ct = formResp.headers.get('content-type');
+            if (ct) reqHeaders['Content-Type'] = ct;
+          } else {
+            reqBody = payload;
+          }
+        } else {
+          reqHeaders['Content-Type'] = 'application/json';
+          reqBody = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        }
+      }
+
       response = await requestViaProxy({
         url,
         method: payload !== null ? 'POST' : 'GET',
-        headers: {
-          'Accept': 'application/json'
-        },
-        body: payload !== null ? JSON.stringify(payload) : null,
+        headers: reqHeaders,
+        body: reqBody,
         proxyUrl,
         timeoutMs: options.timeoutMs || 10000,
         skipTls: Boolean(options.skipTls)
