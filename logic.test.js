@@ -3552,6 +3552,8 @@ test('telegram fighter suite formatters and keyboards', () => {
     formatTelegramDeficitMessage,
     formatTelegramEventsListMessage,
     getTelegramEventsKeyboard,
+    formatTelegramEventDetailMessage,
+    formatEventDetailRegistrationKeyboard,
     getTelegramMainMenuKeyboard,
   } = require('./logic.js');
 
@@ -3624,17 +3626,43 @@ test('telegram fighter suite formatters and keyboards', () => {
   assert(pastEventsText.includes('Событие завершено'));
 
   // 4. getTelegramEventsKeyboard
-  const upcomingKb = getTelegramEventsKeyboard({ mode: 'upcoming' });
+  const upcomingKb = getTelegramEventsKeyboard({
+    events: [{ id: 6, title: 'Мощные Силы' }, { id: 7, title: 'Король Войны' }],
+    mode: 'upcoming'
+  });
   assert(Array.isArray(upcomingKb.inline_keyboard));
+  assert(upcomingKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_ev_view:6'));
   assert(upcomingKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events_past'));
 
   const pastKb = getTelegramEventsKeyboard({ mode: 'past' });
   assert(Array.isArray(pastKb.inline_keyboard));
   assert(pastKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events_upcoming'));
 
+  // 4b. formatTelegramEventDetailMessage and formatEventDetailRegistrationKeyboard
+  const detailMsg = formatTelegramEventDetailMessage({
+    event: { id: 6, title: 'Мощные Силы', dateFrom: '2026-11-14T00:00:00Z', dateTo: '2026-11-16T00:00:00Z' },
+    eventType: { name: 'Мощные Силы', places: [{ place: 1, coupons: 18000 }, { place: 2, coupons: 9360 }] },
+    registration: { desiredPlace: 2 },
+    assignment: null
+  });
+  assert(detailMsg.includes('Мощные Силы'));
+  assert(/18[\s\u00A0\u202F]?000/.test(detailMsg));
+  assert(detailMsg.includes('Ваша заявка принята'));
+  assert(detailMsg.includes('#2'));
+
+  const detailKb = formatEventDetailRegistrationKeyboard({
+    eventId: 6,
+    eventType: { places: [{ place: 1, coupons: 18000 }, { place: 2, coupons: 9360 }] },
+    registration: { desiredPlace: 2 }
+  });
+  assert(Array.isArray(detailKb.inline_keyboard));
+  assert(detailKb.inline_keyboard.flat().some(b => b.callback_data === 'unreg_event:6'));
+  assert(detailKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events'));
+
   // 5. getTelegramMainMenuKeyboard
-  const r3Keyboard = getTelegramMainMenuKeyboard({ isStaff: false });
+  const r3Keyboard = getTelegramMainMenuKeyboard({ isStaff: false, webAppUrl: 'https://kow.example.com' });
   assert(Array.isArray(r3Keyboard.inline_keyboard));
+  assert(r3Keyboard.inline_keyboard[0][0].web_app && r3Keyboard.inline_keyboard[0][0].web_app.url === 'https://kow.example.com');
   const r3Callbacks = r3Keyboard.inline_keyboard.flat().map(b => b.callback_data);
   assert(r3Callbacks.includes('cmd_me'));
   assert(r3Callbacks.includes('cmd_deficit'));

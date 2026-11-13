@@ -775,7 +775,8 @@ async function handleTelegramUpdate(update) {
         const fromId = msg.from?.id;
         const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
         const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
-        const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
+        const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
+        const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
         await telegram.sendTelegramMessage({
           token,
           chatId,
@@ -901,6 +902,18 @@ async function handleTelegramUpdate(update) {
       const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
 
       const allEvents = db.getEvents ? db.getEvents() : [];
+      const eventTypes = db.getEventTypes ? db.getEventTypes() : [];
+      const typesMap = new Map((eventTypes || []).map(t => [t.id, t]));
+      const enrichedEvents = (allEvents || []).map(e => {
+        const et = typesMap.get(e.typeId);
+        return {
+          ...e,
+          title: et?.name || e.title || `Событие #${e.id}`,
+          eventTypeName: et?.name,
+          places: et?.places || []
+        };
+      });
+
       const nowIso = new Date().toISOString();
       const isPastRequested = /(?:past|прошедш|завершен|старые)/i.test(text);
 
@@ -909,11 +922,11 @@ async function handleTelegramUpdate(update) {
 
       if (isPastRequested) {
         mode = 'past';
-        eventsList = (allEvents || [])
+        eventsList = enrichedEvents
           .filter(e => e.dateTo && e.dateTo < nowIso.slice(0, 10))
           .sort((a, b) => (b.dateFrom || '').localeCompare(a.dateFrom || ''));
       } else {
-        eventsList = (allEvents || [])
+        eventsList = enrichedEvents
           .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
           .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
       }
@@ -924,7 +937,9 @@ async function handleTelegramUpdate(update) {
         mode
       });
 
-      const keyboard = logic.getTelegramEventsKeyboard ? logic.getTelegramEventsKeyboard({ mode }) : logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+      const keyboard = logic.getTelegramEventsKeyboard
+        ? logic.getTelegramEventsKeyboard({ events: eventsList, mode })
+        : logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -942,7 +957,8 @@ async function handleTelegramUpdate(update) {
       const fromId = msg.from?.id;
       const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
       const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
+      const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -952,7 +968,7 @@ async function handleTelegramUpdate(update) {
           replyMarkup: keyboard
         });
       }
-      return { ok: true, command: 'menu', chatId };
+      return { ok: true, command: 'menu', userId: user?.id };
     }
 
     // Helper for checking officer access
@@ -1448,7 +1464,7 @@ async function handleTelegramUpdate(update) {
     const chatMsg = cq.message;
 
     // A) Main Menu callbacks
-    if (data === 'cmd_me' || data === 'cmd_deficit' || data === 'cmd_events' || data === 'cmd_events_upcoming' || data === 'cmd_events_past' || data === 'cmd_menu' || data === 'cmd_stock_help') {
+    if (data === 'cmd_me' || data === 'cmd_deficit' || data === 'cmd_events' || data === 'cmd_events_upcoming' || data === 'cmd_events_past' || data === 'cmd_menu' || data === 'cmd_stock_help' || data === 'cmd_digest' || data === 'cmd_stale' || data.startsWith('cmd_ev_view:')) {
       const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
       if (!user) {
         if (token) {
@@ -1469,7 +1485,8 @@ async function handleTelegramUpdate(update) {
       const sectors = db.getPlayersByUserId(user.id);
       const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
       const isStaff = user.rank === 'r4' || user.rank === 'r5';
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
+      const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
       const targetChatId = chatMsg?.chat?.id || fromId;
 
       if (data === 'cmd_menu') {
@@ -1509,12 +1526,26 @@ async function handleTelegramUpdate(update) {
 
       if (data === 'cmd_events' || data === 'cmd_events_upcoming') {
         const allEvents = db.getEvents ? db.getEvents() : [];
+        const eventTypes = db.getEventTypes ? db.getEventTypes() : [];
+        const typesMap = new Map((eventTypes || []).map(t => [t.id, t]));
+        const enrichedEvents = (allEvents || []).map(e => {
+          const et = typesMap.get(e.typeId);
+          return {
+            ...e,
+            title: et?.name || e.title || `Событие #${e.id}`,
+            eventTypeName: et?.name,
+            places: et?.places || []
+          };
+        });
+
         const nowIso = new Date().toISOString();
-        const upcomingEvents = (allEvents || [])
+        const upcomingEvents = enrichedEvents
           .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
           .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
         const replyText = logic.formatTelegramEventsListMessage({ events: upcomingEvents, playerId: player?.id, mode: 'upcoming' });
-        const eventsMarkup = logic.getTelegramEventsKeyboard ? logic.getTelegramEventsKeyboard({ mode: 'upcoming' }) : keyboard;
+        const eventsMarkup = logic.getTelegramEventsKeyboard
+          ? logic.getTelegramEventsKeyboard({ events: upcomingEvents, mode: 'upcoming' })
+          : keyboard;
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: eventsMarkup });
         }
@@ -1523,25 +1554,75 @@ async function handleTelegramUpdate(update) {
 
       if (data === 'cmd_events_past') {
         const allEvents = db.getEvents ? db.getEvents() : [];
+        const eventTypes = db.getEventTypes ? db.getEventTypes() : [];
+        const typesMap = new Map((eventTypes || []).map(t => [t.id, t]));
+        const enrichedEvents = (allEvents || []).map(e => {
+          const et = typesMap.get(e.typeId);
+          return {
+            ...e,
+            title: et?.name || e.title || `Событие #${e.id}`,
+            eventTypeName: et?.name,
+            places: et?.places || []
+          };
+        });
+
         const nowIso = new Date().toISOString();
-        const pastEvents = (allEvents || [])
+        const pastEvents = enrichedEvents
           .filter(e => e.dateTo && e.dateTo < nowIso.slice(0, 10))
           .sort((a, b) => (b.dateFrom || '').localeCompare(a.dateFrom || ''));
         const replyText = logic.formatTelegramEventsListMessage({ events: pastEvents, playerId: player?.id, mode: 'past' });
-        const eventsMarkup = logic.getTelegramEventsKeyboard ? logic.getTelegramEventsKeyboard({ mode: 'past' }) : keyboard;
+        const eventsMarkup = logic.getTelegramEventsKeyboard
+          ? logic.getTelegramEventsKeyboard({ events: pastEvents, mode: 'past' })
+          : keyboard;
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: eventsMarkup });
         }
         return { ok: true, action: 'cmd_events_past', userId: user.id };
       }
 
-      if (data === 'cmd_stock_help') {
-        const helpText = '📦 <b>Как обновить склад через Telegram:</b>\n\n' +
-          '1. Отправьте команду: <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code>\n' +
-          '<i>(Пример: <code>/stock 15000 350</code> или <code>/stock 15k 350</code>)</i>\n\n' +
-          '2. Или просто пришлите в чат <b>скриншот инвентаря</b> — он сохранится в журнале аудита.';
+      if (data.startsWith('cmd_ev_view:')) {
+        const eventId = Number(data.split(':')[1]);
+        const ev = db.getEventById ? db.getEventById(eventId) : null;
+        if (!ev) {
+          if (token) {
+            await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: '⚠️ Событие не найдено или было удалено.', replyMarkup: keyboard });
+          }
+          return { ok: true, action: 'cmd_ev_view', error: 'not_found' };
+        }
+        const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
+        const reg = player ? (db.getUserRegistration ? db.getUserRegistration(eventId, player.id) : null) : null;
+        const assign = (ev.assignments || []).find(a => Number(a.playerId) === Number(player?.id));
+        const detailText = logic.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: reg, assignment: assign });
+        const detailKb = logic.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: reg });
         if (token) {
-          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: helpText, replyMarkup: keyboard });
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: detailText, replyMarkup: detailKb });
+        }
+        return { ok: true, action: 'cmd_ev_view', eventId, userId: user.id };
+      }
+
+      if (data === 'cmd_stock_help') {
+        const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : { label: 'нет данных' };
+        const couponsStr = (player?.coupons || 0).toLocaleString('ru-RU');
+        const puzzlesStr = (player?.puzzles || 0).toLocaleString('ru-RU');
+        const starCouponsStr = (player?.starCoupons || 0).toLocaleString('ru-RU');
+        const helpText = `📦 <b>Склад сектора [${logic.escapeHtml(player?.name || '—')}]:</b>\n\n` +
+          `• Универсальные купоны: <b>${couponsStr} 🎟️</b>\n` +
+          `• Фрагменты офицеров: <b>${puzzlesStr} 🧩</b>\n` +
+          `• Звёздные купоны: <b>${starCouponsStr} ⭐</b>\n` +
+          `• Давность обновления: <i>${freshness.label}</i>\n\n` +
+          `<b>Как обновить остатки склада:</b>\n` +
+          `1. 📷 <b>Скриншот склада:</b> просто отправьте фото инвентаря в этот диалог — бот распознает остатки через OCR.\n` +
+          `2. ⚡ <b>Текстовая команда:</b> <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> (например: <code>/stock 15k 350</code>).\n` +
+          (webAppUrl ? `3. 🚀 <b>В приложении:</b> нажмите кнопку ниже для ввода через Mini App.` : '');
+
+        const stockKb = [];
+        if (webAppUrl) {
+          stockKb.push([{ text: '🚀 Открыть склад в Mini App', web_app: { url: webAppUrl } }]);
+        }
+        stockKb.push([{ text: '◀️ Главное меню', callback_data: 'cmd_menu' }]);
+
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: helpText, replyMarkup: { inline_keyboard: stockKb } });
         }
         return { ok: true, action: 'cmd_stock_help', userId: user.id };
       }
@@ -1560,6 +1641,8 @@ async function handleTelegramUpdate(update) {
           freshnessStats[fr.status] = (freshnessStats[fr.status] || 0) + 1;
         });
         const allEvents = db.getEvents ? db.getEvents() : [];
+        const eventTypes = db.getEventTypes ? db.getEventTypes() : [];
+        const typesMap = new Map((eventTypes || []).map(t => [t.id, t]));
         const nowIso = new Date().toISOString();
         const nextEv = (allEvents || [])
           .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
@@ -1567,12 +1650,13 @@ async function handleTelegramUpdate(update) {
 
         let nextEvInfo = null;
         if (nextEv) {
+          const et = typesMap.get(nextEv.typeId);
           const regs = db.getRegistrationsByEventId ? db.getRegistrationsByEventId(nextEv.id) : (nextEv.registrations || []);
           nextEvInfo = {
-            title: nextEv.title || nextEv.name,
+            title: et?.name || nextEv.title || nextEv.name,
             dateFrom: nextEv.dateFrom,
             assignedCount: (nextEv.assignments || []).length,
-            totalPlaces: 5,
+            totalPlaces: (et?.places || []).length || 5,
             registrationsCount: regs.length
           };
         }
@@ -1750,13 +1834,17 @@ async function handleTelegramUpdate(update) {
         });
 
         if (chatMsg?.chat?.id && chatMsg?.message_id) {
-          const newKb = logic.formatEventRegistrationConfirmedKeyboard(eventId, desiredPlace);
+          const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
+          const reg = db.getUserRegistration ? db.getUserRegistration(eventId, player.id) : null;
+          const assign = (ev.assignments || []).find(a => Number(a.playerId) === Number(player?.id));
+          const updatedText = logic.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: reg, assignment: assign });
+          const updatedKb = logic.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: reg });
           await telegram.editTelegramMessageText({
             token,
             chatId: chatMsg.chat.id,
             messageId: chatMsg.message_id,
-            text: chatMsg.text || 'Заявка на событие',
-            replyMarkup: newKb
+            text: updatedText,
+            replyMarkup: updatedKb
           }).catch(() => {});
         }
       }
@@ -1807,13 +1895,16 @@ async function handleTelegramUpdate(update) {
         });
 
         if (chatMsg?.chat?.id && chatMsg?.message_id) {
-          const newKb = logic.formatEventRegistrationKeyboard(eventId);
+          const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
+          const assign = (ev.assignments || []).find(a => Number(a.playerId) === Number(player?.id));
+          const updatedText = logic.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: null, assignment: assign });
+          const updatedKb = logic.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: null });
           await telegram.editTelegramMessageText({
             token,
             chatId: chatMsg.chat.id,
             messageId: chatMsg.message_id,
-            text: chatMsg.text || 'Заявка на событие',
-            replyMarkup: newKb
+            text: updatedText,
+            replyMarkup: updatedKb
           }).catch(() => {});
         }
       }
@@ -4218,12 +4309,15 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
+      const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
+
       return sendJson(res, 200, {
         hasToken: Boolean(token),
         tokenMasked,
         staffChatId: staffChatId || null,
         announcementChatId: announcementChatId || null,
         botUsername: botUsername || null,
+        webAppUrl: webAppUrl || null,
         polling: pollingStatus
       });
     }
@@ -4254,10 +4348,25 @@ function createRequestHandler(staticDir, s3Manager = null) {
         db.setAppSetting('telegram_bot_username', cleanBotUsername);
       }
 
+      if (body.webAppUrl !== undefined || body.telegram_webapp_url !== undefined) {
+        const rawWebAppUrl = String(body.webAppUrl !== undefined ? body.webAppUrl : body.telegram_webapp_url).trim();
+        db.setAppSetting('telegram_webapp_url', rawWebAppUrl);
+        const liveToken = db.getAppSetting('telegram_bot_token');
+        if (liveToken && rawWebAppUrl) {
+          telegram.setTelegramChatMenuButton(liveToken, {
+            text: '🚀 KoW Tracker',
+            url: rawWebAppUrl
+          }).catch(err => {
+            console.warn('[Telegram] Could not set chat menu button on settings update:', err.message);
+          });
+        }
+      }
+
       const token = db.getAppSetting('telegram_bot_token');
       const staffChatId = db.getAppSetting('telegram_staff_chat_id');
       const announcementChatId = db.getAppSetting('telegram_announcement_chat_id');
       const botUsername = db.getAppSetting('telegram_bot_username');
+      const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
 
       syncTelegramBotInfoAndPolling().catch(err => {
         console.warn('[Telegram] Sync error on settings save:', err.message);
@@ -4269,6 +4378,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         staffChatId: staffChatId || null,
         announcementChatId: announcementChatId || null,
         botUsername: botUsername || null,
+        webAppUrl: webAppUrl || null,
         polling: telegram.getTelegramPollingStatus()
       });
     }

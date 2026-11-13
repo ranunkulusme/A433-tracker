@@ -5469,6 +5469,41 @@ test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async
     assert.equal(cbMenuRes.ok, true);
     assert.equal(cbMenuRes.action, 'cmd_menu');
 
+    const cbStockHelpRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_stock_help_1',
+        from: { id: 999111 },
+        data: 'cmd_stock_help',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbStockHelpRes.ok, true);
+    assert.equal(cbStockHelpRes.action, 'cmd_stock_help');
+
+    // Make user R5 to test staff buttons (cmd_digest, cmd_stale)
+    db.updateUser(user.id, { rank: 'r5' });
+    const cbDigestRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_digest_1',
+        from: { id: 999111 },
+        data: 'cmd_digest',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbDigestRes.ok, true);
+    assert.equal(cbDigestRes.action, 'cmd_digest');
+
+    const cbStaleRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_stale_1',
+        from: { id: 999111 },
+        data: 'cmd_stale',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbStaleRes.ok, true);
+    assert.equal(cbStaleRes.action, 'cmd_stale');
+
     // Test /events past command
     sentMessages.length = 0;
     const evPastCmdRes = await handleTelegramUpdate({
@@ -5488,6 +5523,19 @@ test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async
     const allEvents = db.getEvents();
     assert.ok(allEvents.length > 0);
     const targetEvent = allEvents[0];
+
+    // Test cmd_ev_view to view event card
+    const viewRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_view_1',
+        from: { id: 999111 },
+        data: `cmd_ev_view:${targetEvent.id}`,
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(viewRes.ok, true);
+    assert.equal(viewRes.action, 'cmd_ev_view');
+    assert.equal(viewRes.eventId, targetEvent.id);
 
     const regRes = await handleTelegramUpdate({
       callback_query: {
