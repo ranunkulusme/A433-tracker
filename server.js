@@ -3220,7 +3220,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const updated = db.getMieruSettings();
       if (updated.enabled && (updated.server || updated.configJson)) {
         const dataDir = path.join(__dirname, 'data');
-        mieru.startMieruProcess(configToApply, dataDir);
+        if (mieru.isMieruBinaryAvailable()) {
+          mieru.startMieruProcess(configToApply, dataDir);
+        }
         telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${updated.socks5Port || 1080}`);
       } else {
         mieru.stopMieruProcess();
@@ -3267,7 +3269,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       // If mieru binary is available and not running, ensure process is started before test
       const status = mieru.getMieruStatus();
-      if (!status.running && (settings.server || settings.configJson)) {
+      if (!status.running && mieru.isMieruBinaryAvailable() && (settings.server || settings.configJson)) {
         const fullConfig = settings.configJson
           ? (mieru.parseMieruConfig(settings.configJson).config || mieru.formatMieruConfig(settings))
           : mieru.formatMieruConfig(settings);
@@ -3612,10 +3614,12 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   try {
     const mieruSettings = db.getMieruSettings();
     if (mieruSettings.enabled && (mieruSettings.server || mieruSettings.configJson)) {
-      const fullConfig = mieruSettings.configJson
-        ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
-        : mieru.formatMieruConfig(mieruSettings);
-      mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+      if (mieru.isMieruBinaryAvailable()) {
+        const fullConfig = mieruSettings.configJson
+          ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
+          : mieru.formatMieruConfig(mieruSettings);
+        mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+      }
       telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}`);
     }
   } catch (mErr) {

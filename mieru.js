@@ -24,12 +24,24 @@ function isIpAddress(str) {
 
 function isMieruBinaryAvailable() {
   try {
-    const { execSync } = require('node:child_process');
-    execSync('which mieru || where mieru', { stdio: 'ignore' });
-    return true;
-  } catch (e) {
-    return false;
-  }
+    const pathEnv = process.env.PATH || '';
+    const delimiter = process.platform === 'win32' ? ';' : ':';
+    const dirs = pathEnv.split(delimiter);
+    const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
+    for (const dir of dirs) {
+      if (!dir) continue;
+      for (const ext of exts) {
+        const fullPath = path.join(dir, `mieru${ext}`);
+        try {
+          if (fs.existsSync(fullPath)) {
+            const stat = fs.statSync(fullPath);
+            if (stat.isFile()) return true;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return false;
 }
 
 /**
@@ -178,7 +190,24 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, 'data')) {
 
     const port = configObj.socks5Port || 1080;
 
-    // Check if mieru binary is available in PATH
+    // Check if mieru binary is available in PATH before attempting to spawn
+    if (!isMieruBinaryAvailable()) {
+      mieruStatus = {
+        running: false,
+        pid: null,
+        startedAt: null,
+        port,
+        error: 'BINARY_NOT_FOUND',
+        binaryAvailable: false
+      };
+      return {
+        success: false,
+        error: 'BINARY_NOT_FOUND',
+        message: 'Mieru binary is not installed in system PATH',
+        status: mieruStatus
+      };
+    }
+
     try {
       const proc = spawn('mieru', ['run'], {
         detached: false,
@@ -342,5 +371,6 @@ module.exports = {
   stopMieruProcess,
   getMieruStatus,
   testMieruConnection,
-  isMieruBinaryAvailable
+  isMieruBinaryAvailable,
+  isMieruAvailable: isMieruBinaryAvailable
 };
