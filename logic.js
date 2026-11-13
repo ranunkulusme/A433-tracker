@@ -2988,6 +2988,95 @@
     return null;
   }
 
+  function parseTelegramStockCommand(text) {
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    const cmdMatch = trimmed.match(/^\/(?:stock|склад)(?:@\w+)?(?:\s+(.*))?$/i);
+    if (!cmdMatch) return null;
+
+    const argsStr = cmdMatch[1];
+    if (!argsStr || !argsStr.trim()) return null;
+
+    // Сворачиваем разделители тысяч вида "25 000" -> "25000" (1-3 цифры, пробел, ровно три нуля)
+    const normalizedArgs = argsStr.replace(/\b(\d{1,3})\s+(000)\b/g, '$1$2').trim();
+    const tokens = normalizedArgs.split(/[\s,]+/).filter(Boolean);
+    if (!tokens.length) return null;
+
+    const numbers = [];
+    for (const token of tokens) {
+      let val = null;
+      const lower = token.toLowerCase();
+      if (/^\d+k$/i.test(lower)) {
+        val = parseInt(lower, 10) * 1000;
+      } else if (/^\d+m$/i.test(lower)) {
+        val = parseInt(lower, 10) * 1000000;
+      } else if (/^\d+$/.test(token)) {
+        val = parseInt(token, 10);
+      }
+      if (val === null || isNaN(val) || val < 0) return null;
+      numbers.push(val);
+    }
+
+    if (!numbers.length) return null;
+
+    const result = {
+      coupons: numbers[0],
+      puzzles: numbers.length > 1 ? numbers[1] : 0
+    };
+
+    if (numbers.length > 2) result.starCoupons = numbers[2];
+    if (numbers.length > 3) result.legendaryStars1 = numbers[3];
+    if (numbers.length > 4) result.legendaryStars2 = numbers[4];
+    if (numbers.length > 5) result.legendaryStars3 = numbers[5];
+
+    return result;
+  }
+
+  function formatStockUpdateSuccessMessage(diff, newStock, options = {}) {
+    const parts = [];
+    parts.push('✅ <b>Склад успешно обновлен!</b>');
+
+    const sectorName = typeof options === 'string' ? options : (options && options.sectorName);
+    if (sectorName) {
+      parts.push(`👤 Сектор: <b>${escapeHtml(sectorName)}</b>`);
+    }
+
+    parts.push('\n📦 <b>Текущие запасы:</b>');
+    const coupons = newStock ? (newStock.coupons || 0) : 0;
+    parts.push(`• Купоны: <b>${formatInputNumber(coupons)}</b>`);
+
+    if (newStock && newStock.puzzles !== undefined) {
+      parts.push(`• Пазлы: <b>${formatInputNumber(newStock.puzzles)}</b>`);
+    }
+    if (newStock && newStock.starCoupons) {
+      parts.push(`• Звездные купоны: <b>${formatInputNumber(newStock.starCoupons)}</b>`);
+    }
+    if (newStock && (newStock.legendaryStars1 || newStock.legendaryStars2 || newStock.legendaryStars3)) {
+      const stars = [
+        newStock.legendaryStars1 || 0,
+        newStock.legendaryStars2 || 0,
+        newStock.legendaryStars3 || 0
+      ].join(' / ');
+      parts.push(`• Звезды (I/II/III): <b>${stars}</b>`);
+    }
+
+    if (diff && diff.summary && diff.summary !== 'Без изменений') {
+      parts.push(`\n📊 <b>Изменения:</b> ${escapeHtml(diff.summary)}`);
+    }
+
+    const targetDeficit = typeof options === 'number' ? options : (options && options.targetDeficit);
+    const targetOfficer = options && options.targetOfficer;
+    if (targetOfficer && targetDeficit !== undefined) {
+      if (targetDeficit <= 0) {
+        parts.push(`\n🎉 <b>${escapeHtml(targetOfficer)}</b>: дефицит закрыт! Готов к максимальной прокачке.`);
+      } else {
+        parts.push(`\n🎯 <b>${escapeHtml(targetOfficer)}</b>: осталось собрать <b>${formatInputNumber(targetDeficit)}</b> купонов.`);
+      }
+    }
+
+    return parts.join('\n');
+  }
+
   const USER_PERMISSIONS = Object.freeze({
     VIEW_SECTORS: 'view_sectors',     // Просмотр всех секторов и командиров альянса
     VIEW_STOCKS: 'view_stocks',       // Просмотр точных остатков складов других игроков
@@ -3212,10 +3301,26 @@
       parseMode: 'HTML',
       placeholders: Object.freeze(['eventName', 'totalAssigned', 'confirmedCount', 'unconfirmedCount', 'totalCoupons', 'link']),
       template: `🏆 <b>Итоги события: {eventName}</b>\n\nВсего участников: <b>{totalAssigned}</b>\n✅ Подтвердили результат: <b>{confirmedCount}</b>\n⏳ Ожидают подтверждения: <b>{unconfirmedCount}</b>\n🎟️ Всего добыто купонов альянсом: <b>+{totalCoupons}</b>\n\n🔗 <a href="{link}">Просмотреть итоговую сетку в трекере</a>`
+    }),
+    event_morning_briefing: Object.freeze({
+      key: 'event_morning_briefing',
+      title: 'Утренний брифинг в день события (09:00)',
+      channel: 'personal',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['sectorName', 'eventName', 'place', 'coupons', 'officerName', 'link']),
+      template: `☀️ <b>Доброе утро, {sectorName}!</b>\n\n📅 Сегодня стартует событие: <b>{eventName}</b>\n🎯 Ваше назначенное место: <b>#{place}</b> ({coupons} куп.)\n🎖 Офицер: <b>{officerName}</b>\n\n<i>Событие уже активно на игровом сервере (старт в 00:00 UTC). Желаем побед!</i>\n\n🔗 <a href="{link}">Открыть событие в трекере</a>`
     })
   });
 
   const NOTIFICATION_TEMPLATE_SAMPLE_DATA = Object.freeze({
+    event_morning_briefing: Object.freeze({
+      sectorName: 'Sector 7 (Рейнджер)',
+      eventName: 'Мощные силы (Mighty Forces)',
+      place: '1',
+      coupons: '50',
+      officerName: 'Элизабет',
+      link: 'https://kow.example.com/#event/1'
+    }),
     event_place_assigned: Object.freeze({
       eventName: 'Битва за трон (King of War)',
       eventDate: '2026-11-10 12:00 UTC',
@@ -3452,6 +3557,36 @@
     return null;
   }
 
+  function shouldSendMorningEventReminder({
+    eventDateFrom,
+    now = null,
+    timezoneOffset = 3,
+    targetHour = 9,
+    lastSentDate = null
+  } = {}) {
+    if (!eventDateFrom) return false;
+    const currentZoned = getZonedDateParts(now || new Date(), timezoneOffset);
+    if (!currentZoned) return false;
+
+    const eventStartDate = String(eventDateFrom).slice(0, 10);
+    if (currentZoned.dateString !== eventStartDate) {
+      return false;
+    }
+
+    if (currentZoned.hour < targetHour) {
+      return false; // Sleep protection: do not send morning briefings before 9 AM
+    }
+
+    if (lastSentDate) {
+      const lastZonedDate = String(lastSentDate).slice(0, 10);
+      if (lastZonedDate === currentZoned.dateString) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   function formatTimezoneOffsetLabel(offsetHours, timeZoneName = null) {
     const num = Number(offsetHours || 0);
     const sign = num >= 0 ? '+' : '-';
@@ -3514,6 +3649,100 @@
       targetMinute
     };
   }
+
+  /**
+   * Formats ISO date into human-readable relative time string:
+   * "только что", "X мин. назад", "X ч. назад", "вчера", "X дн. назад", "X нед. назад", "X мес. назад", "более года назад"
+   * Supports 'ru', 'en', 'de' language codes via options.lang.
+   */
+  function formatRelativeTime(dateIso, now = new Date(), options = {}) {
+    let lang = (typeof options === 'string' ? options : (options && options.lang)) || 'ru';
+    if (!['ru', 'en', 'de'].includes(lang)) {
+      lang = 'ru';
+    }
+
+    const labels = {
+      ru: {
+        never: 'Никогда',
+        justNow: 'только что',
+        minAgo: n => `${n} мин. назад`,
+        hourAgo: n => `${n} ч. назад`,
+        yesterday: 'вчера',
+        dayAgo: n => `${n} дн. назад`,
+        weekAgo: n => `${n} нед. назад`,
+        monthAgo: n => `${n} мес. назад`,
+        yearAgo: 'более года назад'
+      },
+      en: {
+        never: 'Never',
+        justNow: 'just now',
+        minAgo: n => `${n}m ago`,
+        hourAgo: n => `${n}h ago`,
+        yesterday: 'yesterday',
+        dayAgo: n => `${n}d ago`,
+        weekAgo: n => `${n}w ago`,
+        monthAgo: n => `${n}mo ago`,
+        yearAgo: 'more than a year ago'
+      },
+      de: {
+        never: 'Nie',
+        justNow: 'gerade eben',
+        minAgo: n => `vor ${n} Min.`,
+        hourAgo: n => `vor ${n} Std.`,
+        yesterday: 'gestern',
+        dayAgo: n => `vor ${n} Tg.`,
+        weekAgo: n => `vor ${n} Wo.`,
+        monthAgo: n => `vor ${n} Mon.`,
+        yearAgo: 'vor mehr als einem Jahr'
+      }
+    };
+
+    const l = labels[lang] || labels.ru;
+
+    if (!dateIso) return l.never;
+    const targetDate = dateIso instanceof Date ? dateIso : new Date(dateIso);
+    if (isNaN(targetDate.getTime())) return l.never;
+
+    const nowDate = now instanceof Date ? now : new Date(now);
+    if (isNaN(nowDate.getTime())) return l.never;
+
+    const diffMs = nowDate.getTime() - targetDate.getTime();
+    if (diffMs <= 0) return l.justNow;
+
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMin < 1) {
+      return l.justNow;
+    }
+    if (diffMin < 60) {
+      return l.minAgo(diffMin);
+    }
+    if (diffHours < 24) {
+      return l.hourAgo(diffHours);
+    }
+    if (diffDays === 1) {
+      return l.yesterday;
+    }
+    if (diffDays < 7) {
+      return l.dayAgo(diffDays);
+    }
+
+    const diffWeeks = Math.floor(diffDays / 7);
+    if (diffDays < 30) {
+      return l.weekAgo(diffWeeks);
+    }
+
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffDays < 365) {
+      return l.monthAgo(diffMonths);
+    }
+
+    return l.yearAgo;
+  }
+
 
   return {
     COUPON_PER_PUZZLE,
@@ -3596,6 +3825,7 @@
     getZonedDateParts,
     shouldRunStaleStockAlert,
     calculateNextStaleRun,
+    shouldSendMorningEventReminder,
     formatTimezoneOffsetLabel,
     getUserTimezoneInfo,
     convertTimeBetweenTimezones,
@@ -3610,5 +3840,9 @@
     filterOfficersByQuery,
     getHashForRoute,
     parseRouteFromHash,
+    parseTelegramStockCommand,
+    formatStockUpdateSuccessMessage,
+    formatRelativeTime,
+    escapeHtml,
   };
 });

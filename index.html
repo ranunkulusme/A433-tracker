@@ -114,18 +114,48 @@
     <div class="content" id="content">
       <!-- Hidden initial structure for page-my-cabinet and page-notifications -->
       <div id="page-my-cabinet" style="display:none">
-        <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
-          <div class="cabinet-card-title">
-            <span>📱 <span data-i18n="telegram.card_title">Интеграция с Telegram</span></span>
-            <span id="tg-status-badge" class="badge badge-none tg-badge-disconnected">⚪ <span data-i18n="telegram.status_not_connected">Не привязан</span></span>
+        <div class="cabinet-bottom-grid">
+          <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
+            <div class="cabinet-card-title">
+              <span>📱 <span data-i18n="telegram.card_title">Интеграция с Telegram</span></span>
+              <span id="tg-status-badge" class="badge badge-none tg-badge-disconnected">⚪ <span data-i18n="telegram.status_not_connected">Не привязан</span></span>
+            </div>
+            <div class="tg-cabinet-content">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()" data-i18n="telegram.btn_connect">📱 Подключить Telegram</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()" style="display:none" data-i18n="telegram.btn_disconnect">Отключить</button>
+              <label class="switch-toggle" style="display:none">
+                <input type="checkbox" id="tg-notifications-toggle" onchange="toggleTelegramNotifications(this.checked)">
+                <span data-i18n="telegram.notifications_enabled">Уведомления в Telegram</span>
+              </label>
+            </div>
           </div>
-          <div class="tg-cabinet-content">
-            <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()" data-i18n="telegram.btn_connect">📱 Подключить Telegram</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()" style="display:none" data-i18n="telegram.btn_disconnect">Отключить</button>
-            <label class="switch-toggle" style="display:none">
-              <input type="checkbox" id="tg-notifications-toggle" onchange="toggleTelegramNotifications(this.checked)">
-              <span data-i18n="telegram.notifications_enabled">Уведомления в Telegram</span>
-            </label>
+
+          <div class="cabinet-card tz-cabinet-card" id="cabinet-timezone-card">
+            <div class="cabinet-card-title">
+              <span>⏰ <span data-i18n="cabinet.timezone_card_title">Часовой пояс и утренние напоминания</span></span>
+              <span id="tz-current-time-badge" class="badge badge-info"></span>
+            </div>
+            <div class="tz-cabinet-content">
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px" data-i18n="cabinet.timezone_desc">
+                Все ивенты стартуют в 00:00 UTC (глубокой ночью). Бот отправляет утренний брифинг в 09:00 по вашему местному времени, чтобы не беспокоить вас ночью.
+              </p>
+              <div class="form-row form-row-2" style="align-items:flex-end;margin-bottom:12px">
+                <div class="form-group" style="margin-bottom:0">
+                  <label for="cabinet-timezone-select" data-i18n="cabinet.timezone_select_label">Ваш часовой пояс</label>
+                  <select id="cabinet-timezone-select" class="form-control" onchange="onCabinetTimezoneChange(this.value)">
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label for="cabinet-timezone-offset" data-i18n="cabinet.timezone_offset_label">Смещение (UTC)</label>
+                  <input type="number" id="cabinet-timezone-offset" step="0.5" min="-12" max="14" class="form-control" value="3">
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-save-tz" onclick="saveUserTimezone()" data-i18n="cabinet.btn_save_timezone">💾 Сохранить часовой пояс</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-autodetect-tz" onclick="autoDetectUserTimezone()" data-i18n="cabinet.btn_autodetect_tz">🔄 Автоопределить по браузеру</button>
+                <span id="tz-save-status" style="font-size:12px;color:var(--text3)"></span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1002,7 +1032,7 @@
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeAllModals()">Отмена</button>
-    <button class="btn-primary" onclick="saveEvent()">Сохранить</button>
+    <button class="btn-primary" id="btn-save-event" onclick="saveEvent()">Сохранить</button>
   </div>
 </div>
 

@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.41.0';
+const APP_VERSION = 'v3.42.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -1744,6 +1744,8 @@ async function renderMyCabinet() {
   const isTgConnected = Boolean(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id || currentUser?.telegramChatId);
   const rawNotif = profileUser.telegramNotificationsEnabled ?? profileUser.telegram_notifications_enabled ?? currentUser?.telegramNotificationsEnabled ?? currentUser?.telegram_notifications_enabled;
   const isTgNotificationsEnabled = rawNotif !== false && rawNotif !== 0;
+  const userTimezone = profileUser.timezone || currentUser?.timezone || 'Europe/Moscow';
+  const userTimezoneOffset = profileUser.timezoneOffset ?? profileUser.timezone_offset ?? currentUser?.timezoneOffset ?? currentUser?.timezone_offset ?? 3;
 
   const statsLine = typeof t === 'function'
     ? t('cabinet.stats_line', { vip: profile.sector.vipLevel, conf: profile.sector.confidentialityLevel, power: fmtNum(profile.sector.power), kills: fmtNum(profile.sector.kills), points: fmtOne(profile.sector.killPoints) })
@@ -1875,49 +1877,90 @@ async function renderMyCabinet() {
       </div>
     </div>
 
-    <!-- TELEGRAM INTEGRATION CARD -->
-    <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
-      <div class="cabinet-card-title">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span>📱 ${typeof t === 'function' ? t('telegram.card_title') : 'Интеграция с Telegram'}</span>
-          <span id="tg-status-badge" class="badge ${isTgConnected ? 'badge-success tg-badge-connected' : 'badge-none tg-badge-disconnected'}">
-            ${isTgConnected ? '🟢 ' + (typeof t === 'function' ? t('telegram.status_connected') : 'Подключен') : '⚪ ' + (typeof t === 'function' ? t('telegram.status_not_connected') : 'Не привязан')}
-          </span>
+    <!-- CABINET BOTTOM GRID: TELEGRAM & TIMEZONE -->
+    <div class="cabinet-bottom-grid">
+      <!-- TELEGRAM INTEGRATION CARD -->
+      <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
+        <div class="cabinet-card-title">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>📱 ${typeof t === 'function' ? t('telegram.card_title') : 'Интеграция с Telegram'}</span>
+            <span id="tg-status-badge" class="badge ${isTgConnected ? 'badge-success tg-badge-connected' : 'badge-none tg-badge-disconnected'}">
+              ${isTgConnected ? '🟢 ' + (typeof t === 'function' ? t('telegram.status_connected') : 'Подключен') : '⚪ ' + (typeof t === 'function' ? t('telegram.status_not_connected') : 'Не привязан')}
+            </span>
+          </div>
+        </div>
+        <div class="tg-cabinet-content">
+          ${isTgConnected ? `
+            <div class="tg-connected-info">
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                ${(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)
+                  ? (typeof t === 'function' ? t('telegram.connected_as', { username: (profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username) }) : `Привязан как @${escapeHtml(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)}`)
+                  : (typeof t === 'function' ? t('telegram.connected_id', { chatId: (profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id) }) : `Chat ID: ${(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id)}`)}
+              </p>
+              <div class="tg-toggle-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                <label class="switch-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input type="checkbox" id="tg-notifications-toggle" ${isTgNotificationsEnabled ? 'checked' : ''} onchange="toggleTelegramNotifications(this.checked)">
+                  <span style="font-size:13px">${typeof t === 'function' ? t('telegram.notifications_enabled') : 'Уведомления в Telegram'}</span>
+                </label>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()">
+                ${typeof t === 'function' ? t('telegram.btn_disconnect') : 'Отключить'}
+              </button>
+            </div>
+          ` : `
+            <div class="tg-disconnected-info">
+              <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+                Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
+              </p>
+              <div class="tg-btn-group">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
+                  ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-check-tg" onclick="checkTelegramBindStatus()">
+                  ${typeof t === 'function' ? t('telegram.btn_check_status') : '🔄 Проверить статус'}
+                </button>
+              </div>
+            </div>
+          `}
         </div>
       </div>
-      <div class="tg-cabinet-content">
-        ${isTgConnected ? `
-          <div class="tg-connected-info">
-            <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
-              ${(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)
-                ? (typeof t === 'function' ? t('telegram.connected_as', { username: (profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username) }) : `Привязан как @${escapeHtml(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)}`)
-                : (typeof t === 'function' ? t('telegram.connected_id', { chatId: (profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id) }) : `Chat ID: ${(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id)}`)}
-            </p>
-            <div class="tg-toggle-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-              <label class="switch-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" id="tg-notifications-toggle" ${isTgNotificationsEnabled ? 'checked' : ''} onchange="toggleTelegramNotifications(this.checked)">
-                <span style="font-size:13px">${typeof t === 'function' ? t('telegram.notifications_enabled') : 'Уведомления в Telegram'}</span>
-              </label>
+
+      <!-- TIMEZONE & MORNING BRIEFINGS CARD -->
+      <div class="cabinet-card tz-cabinet-card" id="cabinet-timezone-card">
+        <div class="cabinet-card-title">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>⏰ ${typeof t === 'function' ? t('cabinet.timezone_card_title') : 'Часовой пояс и утренние напоминания'}</span>
+            <span id="tz-current-time-badge" class="badge badge-info" style="font-weight:600">
+              ${(typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:')} ${escapeHtml(formatLocalTime(userTimezoneOffset, userTimezone))}
+            </span>
+          </div>
+        </div>
+        <div class="tz-cabinet-content">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+            ${typeof t === 'function' ? t('cabinet.timezone_desc') : 'Все ивенты стартуют в 00:00 UTC (глубокой ночью). Бот отправляет утренний брифинг в 09:00 по вашему местному времени, чтобы не беспокоить вас ночью.'}
+          </p>
+          <div class="form-row form-row-2" style="align-items:flex-end;margin-bottom:12px">
+            <div class="form-group" style="margin-bottom:0">
+              <label for="cabinet-timezone-select">${typeof t === 'function' ? t('cabinet.timezone_select_label') : 'Ваш часовой пояс'}</label>
+              <select id="cabinet-timezone-select" class="form-control" onchange="onCabinetTimezoneChange(this.value)">
+                ${renderTimezoneSelectOptions(userTimezone, userTimezoneOffset)}
+              </select>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()">
-              ${typeof t === 'function' ? t('telegram.btn_disconnect') : 'Отключить'}
+            <div class="form-group" style="margin-bottom:0">
+              <label for="cabinet-timezone-offset">${typeof t === 'function' ? t('cabinet.timezone_offset_label') : 'Смещение (UTC)'}</label>
+              <input type="number" id="cabinet-timezone-offset" step="0.5" min="-12" max="14" class="form-control" value="${userTimezoneOffset}">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-save-tz" onclick="saveUserTimezone()">
+              ${typeof t === 'function' ? t('cabinet.btn_save_timezone') : '💾 Сохранить часовой пояс'}
             </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-autodetect-tz" onclick="autoDetectUserTimezone()">
+              ${typeof t === 'function' ? t('cabinet.btn_autodetect_tz') : '🔄 Автоопределить по браузеру'}
+            </button>
+            <span id="tz-save-status" style="font-size:12px;color:var(--text3)"></span>
           </div>
-        ` : `
-          <div class="tg-disconnected-info">
-            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
-              Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
-            </p>
-            <div class="tg-btn-group">
-              <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
-                ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
-              </button>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-check-tg" onclick="checkTelegramBindStatus()">
-                ${typeof t === 'function' ? t('telegram.btn_check_status') : '🔄 Проверить статус'}
-              </button>
-            </div>
-          </div>
-        `}
+        </div>
       </div>
     </div>
 
@@ -2074,6 +2117,194 @@ async function toggleTelegramNotifications(enabled) {
     showToast(typeof t === 'function' ? t('toasts.saved_success') : 'Настройки уведомлений сохранены', 'success');
   } catch (err) {
     showToast(err.message || 'Ошибка обновления настроек', 'error');
+  }
+}
+
+const POPULAR_TIMEZONES = [
+  { id: 'Europe/Kaliningrad', label: 'Калининград (UTC+2)', offset: 2 },
+  { id: 'Europe/Moscow', label: 'Москва, Минск, СПб (UTC+3)', offset: 3 },
+  { id: 'Europe/Samara', label: 'Самара, Ижевск, Баку (UTC+4)', offset: 4 },
+  { id: 'Asia/Yekaterinburg', label: 'Екатеринбург, Уфа, Тюмень (UTC+5)', offset: 5 },
+  { id: 'Asia/Omsk', label: 'Омск, Астана (UTC+6)', offset: 6 },
+  { id: 'Asia/Novosibirsk', label: 'Новосибирск, Томск, Барнаул (UTC+7)', offset: 7 },
+  { id: 'Asia/Krasnoyarsk', label: 'Красноярск (UTC+7)', offset: 7 },
+  { id: 'Asia/Irkutsk', label: 'Иркутск, Улан-Удэ (UTC+8)', offset: 8 },
+  { id: 'Asia/Yakutsk', label: 'Якутск, Чита (UTC+9)', offset: 9 },
+  { id: 'Asia/Vladivostok', label: 'Владивосток, Хабаровск (UTC+10)', offset: 10 },
+  { id: 'Asia/Magadan', label: 'Магадан, Сахалин (UTC+11)', offset: 11 },
+  { id: 'Asia/Kamchatka', label: 'Камчатка, Анадырь (UTC+12)', offset: 12 },
+  { id: 'UTC', label: 'UTC / GMT (UTC+0)', offset: 0 },
+  { id: 'Europe/London', label: 'Лондон, Дублин (UTC+0/+1)', offset: 0 },
+  { id: 'Europe/Berlin', label: 'Берлин, Париж, Рим (UTC+1/+2)', offset: 1 },
+  { id: 'Europe/Kyiv', label: 'Киев, Кишинёв (UTC+2/+3)', offset: 2 },
+  { id: 'America/New_York', label: 'Нью-Йорк, Торонто (UTC-5/-4)', offset: -5 },
+  { id: 'America/Chicago', label: 'Чикаго (UTC-6/-5)', offset: -6 },
+  { id: 'America/Denver', label: 'Денвер (UTC-7/-6)', offset: -7 },
+  { id: 'America/Los_Angeles', label: 'Лос-Анджелес, Сиэтл (UTC-8/-7)', offset: -8 }
+];
+
+function formatLocalTime(offsetHours, timeZoneName) {
+  try {
+    if (timeZoneName && typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      return new Intl.DateTimeFormat('ru-RU', {
+        timeZone: timeZoneName,
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(new Date());
+    }
+  } catch (_) {}
+  const now = new Date();
+  const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const target = new Date(utcMs + (Number(offsetHours || 0) * 3600000));
+  return `${String(target.getHours()).padStart(2, '0')}:${String(target.getMinutes()).padStart(2, '0')}`;
+}
+
+function calculateOffsetForTimezone(timeZoneName) {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZoneName,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(now);
+    const d = {};
+    for (const p of parts) d[p.type] = p.value;
+    const targetDate = new Date(Date.UTC(Number(d.year), Number(d.month) - 1, Number(d.day), Number(d.hour === '24' ? 0 : d.hour), Number(d.minute), Number(d.second)));
+    const offsetMs = targetDate.getTime() - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds());
+    return Math.round((offsetMs / 3600000) * 10) / 10;
+  } catch (_) {
+    const found = POPULAR_TIMEZONES.find(t => t.id === timeZoneName);
+    return found ? found.offset : 3;
+  }
+}
+
+function renderTimezoneSelectOptions(currentTimezone, currentOffset) {
+  const isCustom = !POPULAR_TIMEZONES.some(t => t.id === currentTimezone);
+  let html = '';
+  if (isCustom && currentTimezone) {
+    const sign = currentOffset >= 0 ? '+' : '';
+    html += `<option value="${escapeHtml(currentTimezone)}" selected>${escapeHtml(currentTimezone)} (UTC${sign}${currentOffset})</option>`;
+  }
+  html += POPULAR_TIMEZONES.map(t => {
+    const isSelected = !isCustom && t.id === currentTimezone;
+    return `<option value="${escapeHtml(t.id)}" ${isSelected ? 'selected' : ''}>${escapeHtml(t.label)}</option>`;
+  }).join('');
+  return html;
+}
+
+function onCabinetTimezoneChange(tzValue) {
+  const offsetInput = document.getElementById('cabinet-timezone-offset');
+  const badge = document.getElementById('tz-current-time-badge');
+  const offset = calculateOffsetForTimezone(tzValue);
+  if (offsetInput) offsetInput.value = offset;
+  if (badge) {
+    const timePrefix = typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:';
+    badge.textContent = `${timePrefix} ${formatLocalTime(offset, tzValue)}`;
+  }
+}
+
+function autoDetectUserTimezone() {
+  const select = document.getElementById('cabinet-timezone-select');
+  const offsetInput = document.getElementById('cabinet-timezone-offset');
+  const badge = document.getElementById('tz-current-time-badge');
+  const statusEl = document.getElementById('tz-save-status');
+
+  const tzInfo = (typeof logic !== 'undefined' && logic.getUserTimezoneInfo)
+    ? logic.getUserTimezoneInfo()
+    : { timeZone: 'Europe/Moscow', offsetHours: 3 };
+
+  if (select) {
+    let opt = select.querySelector(`option[value="${tzInfo.timeZone}"]`);
+    if (!opt) {
+      opt = document.createElement('option');
+      opt.value = tzInfo.timeZone;
+      const sign = tzInfo.offsetHours >= 0 ? '+' : '';
+      opt.textContent = `${tzInfo.timeZone} (UTC${sign}${tzInfo.offsetHours})`;
+      select.insertBefore(opt, select.firstChild);
+    }
+    select.value = tzInfo.timeZone;
+  }
+  if (offsetInput) {
+    offsetInput.value = tzInfo.offsetHours;
+  }
+  if (badge) {
+    const timePrefix = typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:';
+    badge.textContent = `${timePrefix} ${formatLocalTime(tzInfo.offsetHours, tzInfo.timeZone)}`;
+  }
+  const sign = tzInfo.offsetHours >= 0 ? '+' : '';
+  const detectMsg = typeof t === 'function'
+    ? t('cabinet.timezone_detected', { tz: tzInfo.timeZone, offset: `${sign}${tzInfo.offsetHours}` })
+    : `Часовой пояс определён: ${tzInfo.timeZone} (UTC${sign}${tzInfo.offsetHours})`;
+  if (statusEl) {
+    statusEl.textContent = detectMsg;
+    statusEl.style.color = 'var(--accent)';
+  }
+  showToast(detectMsg, 'info');
+}
+
+async function saveUserTimezone() {
+  const select = document.getElementById('cabinet-timezone-select');
+  const offsetInput = document.getElementById('cabinet-timezone-offset');
+  const btn = document.getElementById('btn-save-tz');
+  const statusEl = document.getElementById('tz-save-status');
+
+  const timezone = select ? select.value : 'Europe/Moscow';
+  const timezoneOffset = offsetInput ? Number(offsetInput.value) : 3;
+
+  if (isNaN(timezoneOffset) || timezoneOffset < -12 || timezoneOffset > 14) {
+    showToast('Смещение часового пояса должно быть от -12 до +14', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Сохранение...';
+  }
+
+  try {
+    const res = await apiFetch('/api/my-profile/timezone', {
+      method: 'PUT',
+      body: JSON.stringify({ timezone, timezoneOffset })
+    });
+    if (currentUser) {
+      currentUser.timezone = res.timezone || timezone;
+      currentUser.timezoneOffset = res.timezoneOffset ?? timezoneOffset;
+      currentUser.timezone_offset = currentUser.timezoneOffset;
+      try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+    }
+    if (myCabinetProfile && myCabinetProfile.user) {
+      myCabinetProfile.user.timezone = res.timezone || timezone;
+      myCabinetProfile.user.timezoneOffset = res.timezoneOffset ?? timezoneOffset;
+      myCabinetProfile.user.timezone_offset = myCabinetProfile.user.timezoneOffset;
+    }
+    const successMsg = typeof t === 'function' ? t('cabinet.timezone_saved') : 'Часовой пояс успешно сохранён';
+    showToast(successMsg, 'success');
+    if (statusEl) {
+      statusEl.textContent = '✓ ' + successMsg;
+      statusEl.style.color = '#3fb950';
+    }
+    const badge = document.getElementById('tz-current-time-badge');
+    if (badge) {
+      const timePrefix = typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:';
+      badge.textContent = `${timePrefix} ${formatLocalTime(timezoneOffset, timezone)}`;
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения часового пояса', 'error');
+    if (statusEl) {
+      statusEl.textContent = '✕ Ошибка';
+      statusEl.style.color = 'var(--red)';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = typeof t === 'function' ? t('cabinet.btn_save_timezone') : '💾 Сохранить часовой пояс';
+    }
   }
 }
 
@@ -4197,6 +4428,7 @@ async function renderUsers() {
               <th>${typeof t === 'function' ? t('users.th_rank') : 'Ранг'}</th>
               <th>${typeof t === 'function' ? t('users.th_permissions') : 'Права доступа'}</th>
               <th>${typeof t === 'function' ? t('users.th_status') : 'Статус'}</th>
+              <th>${typeof t === 'function' ? t('users.th_activity') : 'Активность'}</th>
               <th>${typeof t === 'function' ? t('users.th_registered') : 'Регистрация'}</th>
               <th style="text-align:right">${typeof t === 'function' ? t('common.actions') : 'Действия'}</th>
             </tr>
@@ -4260,12 +4492,41 @@ async function renderUsers() {
                 }
               }
 
+              const userLastActive = u.lastActiveAt || u.last_active_at;
+              const activeLang = typeof currentLang !== 'undefined' ? currentLang : 'ru';
+              const relativeText = userLastActive && typeof logic?.formatRelativeTime === 'function'
+                ? logic.formatRelativeTime(userLastActive, new Date(), { lang: activeLang })
+                : '';
+
+              let activityHtml = '';
+              if (u.isOnline) {
+                activityHtml = `
+                  <span class="badge" style="background:rgba(46,160,67,0.15);border:1px solid rgba(46,160,67,0.35);color:#2ea043;font-size:12px;padding:3px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:5px;font-weight:600">
+                    <span class="user-status-dot online" style="margin:0"></span> ${typeof t === 'function' ? t('users.status_online') : 'В сети'}
+                  </span>
+                `;
+              } else if (userLastActive) {
+                activityHtml = `
+                  <span style="color:var(--text2);font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px" title="${formatDateTime(userLastActive)}">
+                    🕒 ${escapeHtml(relativeText || formatDateTime(userLastActive))}
+                  </span>
+                `;
+              } else {
+                activityHtml = `<span style="color:var(--text3);font-size:12px">${typeof t === 'function' ? t('users.time_never') : 'Никогда'}</span>`;
+              }
+
+              const dotTooltip = u.isOnline
+                ? (typeof t === 'function' ? t('users.tooltip_online') : 'В сети (онлайн)')
+                : (userLastActive
+                    ? `${typeof t === 'function' ? t('users.tooltip_last_seen', { time: relativeText }) : `Был в сети: ${relativeText}`} (${formatDateTime(userLastActive)})`
+                    : (typeof t === 'function' ? t('users.tooltip_offline') : 'Не был в сети'));
+
               return `
                 <tr class="${isBlocked ? 'row-blocked' : ''}">
                   <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
                   <td style="white-space:nowrap">
                     <span class="user-status-dot ${u.isOnline ? 'online' : 'offline'}"
-                          title="${u.isOnline ? (typeof t === 'function' ? t('users.tooltip_online') : 'В сети (онлайн)') : (u.lastActiveAt ? (typeof t === 'function' ? t('users.tooltip_last_seen', { time: formatDateTime(u.lastActiveAt) }) : `Был в сети: ${formatDateTime(u.lastActiveAt)}`) : (typeof t === 'function' ? t('users.tooltip_offline') : 'Не был в сети'))}"></span>
+                          title="${escapeHtml(dotTooltip)}"></span>
                     <span style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</span>
                   </td>
                   <td>${u.playerName ? (u.playerId ? `<a href="#player-${u.playerId}" style="color:var(--accent);font-weight:600;text-decoration:none" title="Перейти к сектору" onclick="event.preventDefault();navigate('player_detail',{id:${u.playerId}})">${escapeHtml(u.playerName)}</a>` : escapeHtml(u.playerName)) : '<span style="color:var(--text3)">—</span>'}</td>
@@ -4278,6 +4539,7 @@ async function renderUsers() {
                   </td>
                   <td>${permsHtml}</td>
                   <td>${statusBadge}</td>
+                  <td>${activityHtml}</td>
                   <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
                   <td style="text-align:right;white-space:nowrap">
                     <button class="action-btn" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
@@ -6360,6 +6622,10 @@ function renderEventDetail(eventId) {
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="downloadEventGridPoster(${ev.id})" title="${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}">🖼 ${typeof t === 'function' ? t('events.btn_download_poster') : 'Скачать сетку'}</button>
+        ${(canManage() || hasPermission('manage_events')) ? `
+          <button class="btn btn-secondary btn-sm" onclick="shareEventGridToTelegram(${ev.id})" title="${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}">📤 ${typeof t === 'function' ? t('events.btn_share_poster') : 'Сетка в Telegram'}</button>
+        ` : ''}
         ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) ? `
           <button class="btn btn-secondary btn-sm" onclick="requestEventResultsTg(${ev.id})" title="Разослать участникам запрос фактического места в Telegram">🏁 ${typeof t === 'function' ? t('events.btn_request_results_tg') : 'Запросить итоги в TG'}</button>
           <button class="btn btn-secondary btn-sm" onclick="sendEventSummaryStaff(${ev.id})" title="Отправить сводку по итогам события в штабной чат Telegram">📊 ${typeof t === 'function' ? t('events.btn_send_staff_summary') : 'Отчёт в штаб'}</button>
@@ -6415,6 +6681,268 @@ function renderEventDetail(eventId) {
       </table>
     </div>
   `;
+}
+
+function renderEventGridPosterCanvas(ev, et, players = [], catalog = []) {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  const width = 1200;
+
+  const assignMap = {};
+  (ev.assignments || []).forEach(a => { assignMap[a.place] = a; });
+
+  const allPlaces = [...new Set([
+    ...(et?.places || []).map(p => p.place),
+    ...(ev.assignments || []).map(a => a.place)
+  ])].sort((a, b) => a - b);
+
+  const rowHeight = 48;
+  const headerHeight = 170;
+  const footerHeight = 60;
+  const height = Math.max(680, headerHeight + allPlaces.length * rowHeight + footerHeight);
+
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  // 1. Background gradient (deep space/military dark theme)
+  const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+  bgGrad.addColorStop(0, '#0d1117');
+  bgGrad.addColorStop(0.5, '#161b22');
+  bgGrad.addColorStop(1, '#0b0e14');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, width, height);
+
+  // Outer border with accent color glow
+  const themeColor = et?.color || '#58a6ff';
+  ctx.strokeStyle = themeColor;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(10, 10, width - 20, height - 20);
+
+  // Inner subtle border
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(16, 16, width - 32, height - 32);
+
+  // 2. Header banner
+  // Alliance / App Brand
+  ctx.fillStyle = '#f0883e';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('👑 KISS OF WAR TRACKER • ШТАБ АЛЬЯНСА', 40, 52);
+
+  // Event Title
+  const title = ev.title || et?.name || 'Событие';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.fillText(title, 40, 92);
+
+  // Event Dates & Status
+  const datesText = `📅 Период: ${ev.dateFrom || '—'}  —  ${ev.dateTo || '—'}`;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(datesText, 40, 126);
+
+  // Right side badges in header: total assignments & total coupons
+  const totalCoupons = (ev.assignments || []).reduce((sum, a) => {
+    const pi = (typeof logic !== 'undefined' && logic.placeInfo) ? logic.placeInfo(et, a.place, ev.dateFrom) : (et?.places || []).find(p => p.place === a.place);
+    const c = (a.actualCoupons !== undefined && a.actualCoupons !== null) ? Number(a.actualCoupons) : (Number(pi?.coupons) || 0);
+    return sum + c;
+  }, 0);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#58a6ff';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(`🎖 Назначено: ${(ev.assignments || []).length} / ${allPlaces.length}`, width - 40, 75);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText(`🎫 Итого купонов: ${totalCoupons.toLocaleString('ru-RU')}`, width - 40, 110);
+  ctx.textAlign = 'left';
+
+  // Divider line
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(36, 146);
+  ctx.lineTo(width - 36, 146);
+  ctx.stroke();
+
+  // 3. Table Column Headers
+  const tableY = 166;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText('МЕСТО', 44, tableY);
+  ctx.fillText('СЕКТОР (БАЗА)', 140, tableY);
+  ctx.fillText('КОМАНДИР / ОФИЦЕР', 460, tableY);
+  ctx.fillText('НАГРАДА (КУПОНЫ)', 800, tableY);
+  ctx.fillText('СТАТУС УЧАСТИЯ', 1010, tableY);
+
+  // 4. Rows
+  let currentY = tableY + 14;
+  allPlaces.forEach((pl, idx) => {
+    const a = assignMap[pl];
+    const p = a ? (players.find(plItem => Number(plItem.id) === Number(a.playerId)) || { name: a.playerName || `Сектор #${a.playerId}` }) : null;
+    const pi = (typeof logic !== 'undefined' && logic.placeInfo) ? logic.placeInfo(et, pl, ev.dateFrom) : (et?.places || []).find(x => x.place === pl);
+    const coupons = (a && a.actualCoupons !== undefined && a.actualCoupons !== null)
+      ? Number(a.actualCoupons)
+      : (Number(pi?.coupons) || 0);
+
+    const isFirst = pl === 1;
+    const isSecond = pl === 2;
+    const isThird = pl === 3;
+
+    // Row background
+    if (isFirst) {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.12)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+      ctx.strokeRect(36, currentY, width - 72, rowHeight - 6);
+    } else if (isSecond) {
+      ctx.fillStyle = 'rgba(192, 192, 192, 0.10)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+      ctx.strokeStyle = 'rgba(192, 192, 192, 0.35)';
+      ctx.strokeRect(36, currentY, width - 72, rowHeight - 6);
+    } else if (isThird) {
+      ctx.fillStyle = 'rgba(205, 127, 50, 0.10)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+      ctx.strokeStyle = 'rgba(205, 127, 50, 0.35)';
+      ctx.strokeRect(36, currentY, width - 72, rowHeight - 6);
+    } else {
+      ctx.fillStyle = (idx % 2 === 0) ? 'rgba(255, 255, 255, 0.025)' : 'rgba(255, 255, 255, 0.045)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+    }
+
+    const textBaselineY = currentY + 26;
+
+    // Place #
+    let placeIcon = `#${pl}`;
+    if (isFirst) placeIcon = '🥇 #1';
+    else if (isSecond) placeIcon = '🥈 #2';
+    else if (isThird) placeIcon = '🥉 #3';
+    ctx.fillStyle = isFirst ? '#ffd700' : isSecond ? '#e0e0e0' : isThird ? '#cd7f32' : '#c9d1d9';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText(placeIcon, 44, textBaselineY);
+
+    // Player / Sector
+    if (p) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px sans-serif';
+      const pName = p.name || 'Сектор';
+      const vip = p.sector?.vipLevel ?? p.vip ?? '';
+      const vipStr = vip !== '' ? ` (VIP ${vip})` : '';
+      ctx.fillText(`${pName}${vipStr}`, 140, textBaselineY);
+    } else {
+      ctx.fillStyle = '#6e7681';
+      ctx.font = 'italic 13px sans-serif';
+      ctx.fillText('— Свободное место —', 140, textBaselineY);
+    }
+
+    // Officer
+    if (a && a.officerId) {
+      let offName = a.officerName;
+      if (!offName && p && p.officers) {
+        const foundOff = p.officers.find(o => o.id === a.officerId);
+        if (foundOff) {
+          const cat = catalog.find(c => c.id === foundOff.catalogId);
+          offName = cat?.name || foundOff.name || foundOff.id;
+        }
+      }
+      ctx.fillStyle = '#58a6ff';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(offName || 'Офицер', 460, textBaselineY);
+    } else {
+      ctx.fillStyle = '#6e7681';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('—', 460, textBaselineY);
+    }
+
+    // Reward Coupons
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(`🎫 +${coupons.toLocaleString('ru-RU')}`, 800, textBaselineY);
+
+    // Status
+    if (a) {
+      if (a.resultStatus === 'confirmed') {
+        ctx.fillStyle = '#3fb950';
+        ctx.font = 'bold 13px sans-serif';
+        const actPl = a.actualPlace !== undefined ? a.actualPlace : pl;
+        ctx.fillText(`✓ Итог: #${actPl}`, 1010, textBaselineY);
+      } else if (a.rsvpStatus === 'confirmed') {
+        ctx.fillStyle = '#58a6ff';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('🟢 Подтвердил', 1010, textBaselineY);
+      } else if (a.rsvpStatus === 'declined') {
+        ctx.fillStyle = '#f85149';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('🔴 Отказ', 1010, textBaselineY);
+      } else {
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('⏳ Ожидает', 1010, textBaselineY);
+      }
+    } else {
+      ctx.fillStyle = '#484f58';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('—', 1010, textBaselineY);
+    }
+
+    currentY += rowHeight;
+  });
+
+  // 5. Footer
+  const footerY = height - 26;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('⚡ KoW Tracker • Официальная сетка альянса', 40, footerY);
+
+  ctx.textAlign = 'right';
+  const nowStr = new Date().toLocaleString('ru-RU');
+  ctx.fillText(`Сформировано: ${nowStr}`, width - 40, footerY);
+  ctx.textAlign = 'left';
+
+  return canvas;
+}
+
+function downloadEventGridPoster(eventId) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+  const canvas = renderEventGridPosterCanvas(ev, et, state.players, state.officerCatalog);
+  if (!canvas) return;
+
+  const titleSlug = (ev.title || et?.name || 'event').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
+  const filename = `grid_${titleSlug}_${ev.dateFrom || 'event'}.png`;
+
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+  showToast(typeof t === 'function' ? t('events.poster_downloaded') : 'Инфографика сетки сохранена', 'success');
+}
+
+async function shareEventGridToTelegram(eventId) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+  const canvas = renderEventGridPosterCanvas(ev, et, state.players, state.officerCatalog);
+  if (!canvas) return;
+
+  const imageBase64 = canvas.toDataURL('image/png');
+  showToast(typeof t === 'function' ? t('events.poster_generating') : 'Генерация инфографики...', 'info');
+
+  try {
+    const res = await apiFetch(`/api/events/${eventId}/share-grid`, {
+      method: 'POST',
+      body: JSON.stringify({ imageBase64 })
+    });
+    if (res && res.success) {
+      showToast(typeof t === 'function' ? t('events.poster_sent_success') : 'Инфографика сетки успешно отправлена в чат штаба', 'success');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка отправки постера в Telegram', 'error');
+  }
 }
 
 // ─── EVENT REGISTRATIONS (PLAYER) ───────────────────────────
@@ -10725,9 +11253,16 @@ async function submitSeasonSchedule() {
 // ─── EVENT MODAL ─────────────────────────────────────────────
 let editEventId = null;
 let eventAssignments = []; // [{place, playerId, officerId, actualCoupons?}]
+let isSavingEvent = false;
 
 function openEventModal(eventId=null) {
   editEventId = eventId;
+  isSavingEvent = false;
+  const saveBtn = document.getElementById('btn-save-event');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = typeof t === 'function' ? t('common.save') : 'Сохранить';
+  }
   document.getElementById('modal-event-title').textContent = eventId ? 'Редактировать ивент' : 'Новый ивент';
 
   // populate event type select
@@ -10990,6 +11525,8 @@ async function autoPickWithRegistrationsServer() {
 }
 
 async function saveEvent() {
+  if (isSavingEvent) return;
+
   const typeId = parseInt(document.getElementById('fe-type').value);
   const dateFrom = document.getElementById('fe-from').value;
   const dateTo = document.getElementById('fe-to').value;
@@ -10997,6 +11534,14 @@ async function saveEvent() {
 
   if (!typeId) { toast('Выберите тип ивента','error'); return; }
   if (!dateFrom || !dateTo) { toast('Укажите даты','error'); return; }
+
+  const saveBtn = document.getElementById('btn-save-event');
+  isSavingEvent = true;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.dataset.origText = saveBtn.textContent;
+    saveBtn.textContent = typeof t === 'function' ? t('common.saving') : 'Сохранение...';
+  }
 
   const assignments = eventAssignments.filter(a=>a.playerId).map(a=>({
     place: a.place,
@@ -11029,6 +11574,12 @@ async function saveEvent() {
     navigate('calendar');
   } catch (err) {
     toast('Ошибка сохранения ивента: ' + err.message, 'error');
+  } finally {
+    isSavingEvent = false;
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = saveBtn.dataset.origText || (typeof t === 'function' ? t('common.save') : 'Сохранить');
+    }
   }
 }
 
@@ -12438,6 +12989,10 @@ if (typeof window !== 'undefined') {
   window.connectUserTelegram = connectUserTelegram;
   window.disconnectUserTelegram = disconnectUserTelegram;
   window.toggleTelegramNotifications = toggleTelegramNotifications;
+  window.onCabinetTimezoneChange = onCabinetTimezoneChange;
+  window.autoDetectUserTimezone = autoDetectUserTimezone;
+  window.saveUserTimezone = saveUserTimezone;
+  window.renderTimezoneSelectOptions = renderTimezoneSelectOptions;
   window.renderNotificationsPage = renderNotificationsPage;
   window.onSelectNotificationTemplate = onSelectNotificationTemplate;
   window.insertTemplateTag = insertTemplateTag;
@@ -12494,6 +13049,9 @@ if (typeof window !== 'undefined') {
   window.submitEventResultFromModal = submitEventResultFromModal;
   window.requestEventResultsTg = requestEventResultsTg;
   window.sendEventSummaryStaff = sendEventSummaryStaff;
+  window.renderEventGridPosterCanvas = renderEventGridPosterCanvas;
+  window.downloadEventGridPoster = downloadEventGridPoster;
+  window.shareEventGridToTelegram = shareEventGridToTelegram;
   window.dismissAppUpdate = dismissAppUpdate;
   window.applyAppUpdate = applyAppUpdate;
 

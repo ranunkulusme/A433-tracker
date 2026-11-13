@@ -56,6 +56,7 @@ function verifySession(token) {
     SELECT s.token, s.user_id, s.created_at, s.expires_at,
            u.id, u.username, u.rank, u.is_approved, u.is_blocked, u.player_id, u.permissions,
            u.telegram_chat_id, u.telegram_username, u.telegram_notifications_enabled,
+           u.timezone, u.timezone_offset,
            p.name as player_name
     FROM sessions s
     JOIN users u ON s.user_id = u.id
@@ -79,7 +80,9 @@ function verifySession(token) {
     telegramUsername: row.telegram_username,
     telegram_username: row.telegram_username,
     telegramNotificationsEnabled: row.telegram_notifications_enabled !== 0,
-    telegram_notifications_enabled: row.telegram_notifications_enabled
+    telegram_notifications_enabled: row.telegram_notifications_enabled,
+    timezone: row.timezone || 'Europe/Moscow',
+    timezoneOffset: (row.timezone_offset !== null && row.timezone_offset !== undefined) ? Number(row.timezone_offset) : 3
   };
 }
 
@@ -102,7 +105,9 @@ function findUserByUsername(username) {
     permissions: parsePermissions(user.permissions),
     telegramChatId: user.telegram_chat_id,
     telegramUsername: user.telegram_username,
-    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0
+    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0,
+    timezone: user.timezone || 'Europe/Moscow',
+    timezoneOffset: (user.timezone_offset !== null && user.timezone_offset !== undefined) ? Number(user.timezone_offset) : 3
   };
 }
 
@@ -114,7 +119,9 @@ function findUserById(id) {
     permissions: parsePermissions(user.permissions),
     telegramChatId: user.telegram_chat_id,
     telegramUsername: user.telegram_username,
-    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0
+    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0,
+    timezone: user.timezone || 'Europe/Moscow',
+    timezoneOffset: (user.timezone_offset !== null && user.timezone_offset !== undefined) ? Number(user.timezone_offset) : 3
   };
 }
 
@@ -312,6 +319,7 @@ function getPendingUsers() {
            u.telegram_username as telegramUsername, u.telegram_username,
            u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
            u.last_active_at as lastActiveAt, u.last_active_at,
+           u.timezone, u.timezone_offset as timezoneOffset,
            u.created_at as createdAt, u.created_at,
            COALESCE(p_direct.name, p_owner.name) as playerName
     FROM users u
@@ -333,6 +341,8 @@ function getPendingUsers() {
       isBlocked: Boolean(r.is_blocked),
       permissions: parsePermissions(r.permissions),
       telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0,
+      timezone: r.timezone || 'Europe/Moscow',
+      timezoneOffset: (r.timezone_offset !== null && r.timezone_offset !== undefined) ? Number(r.timezone_offset) : (r.timezoneOffset !== undefined ? Number(r.timezoneOffset) : 3),
       lastActiveAt,
       isOnline
     };
@@ -373,6 +383,7 @@ function getUsers() {
            u.telegram_username as telegramUsername, u.telegram_username,
            u.telegram_notifications_enabled as telegramNotificationsEnabled, u.telegram_notifications_enabled,
            u.last_active_at as lastActiveAt, u.last_active_at,
+           u.timezone, u.timezone_offset as timezoneOffset,
            u.created_at as createdAt, u.created_at,
            COALESCE(p_direct.name, p_owner.name) as playerName
     FROM users u
@@ -393,6 +404,8 @@ function getUsers() {
       isBlocked: Boolean(r.is_blocked),
       permissions: parsePermissions(r.permissions),
       telegramNotificationsEnabled: r.telegram_notifications_enabled !== 0,
+      timezone: r.timezone || 'Europe/Moscow',
+      timezoneOffset: (r.timezone_offset !== null && r.timezone_offset !== undefined) ? Number(r.timezone_offset) : (r.timezoneOffset !== undefined ? Number(r.timezoneOffset) : 3),
       lastActiveAt,
       isOnline
     };
@@ -1828,6 +1841,12 @@ function migrateSchema(db) {
     if (!userCols.includes('last_active_at')) {
       db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT NULL;");
     }
+    if (!userCols.includes('timezone')) {
+      db.exec("ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/Moscow';");
+    }
+    if (!userCols.includes('timezone_offset')) {
+      db.exec("ALTER TABLE users ADD COLUMN timezone_offset REAL NOT NULL DEFAULT 3;");
+    }
   }
 
   const playerCols = getColumns('players');
@@ -1958,7 +1977,7 @@ function migrateSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo')),
       snapshot_before TEXT NOT NULL,
       snapshot_after TEXT NOT NULL,
       diff_summary TEXT NOT NULL,
@@ -1971,14 +1990,14 @@ function migrateSchema(db) {
 
   try {
     const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_history_records'").get();
-    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('manual_confirm')) {
+    if (tableInfo && tableInfo.sql && (!tableInfo.sql.includes('manual_confirm') || !tableInfo.sql.includes('telegram_command') || !tableInfo.sql.includes('telegram_photo'))) {
       db.exec(`
         PRAGMA foreign_keys = OFF;
         CREATE TABLE stock_history_records_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
           user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-          source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+          source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo')),
           snapshot_before TEXT NOT NULL,
           snapshot_after TEXT NOT NULL,
           diff_summary TEXT NOT NULL,
@@ -2011,6 +2030,16 @@ function migrateSchema(db) {
       default_template TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS event_reminders_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id INTEGER NOT NULL,
+      place INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      reminder_date TEXT NOT NULL,
+      sent_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_reminders_lookup ON event_reminders_log(event_id, place, user_id, reminder_date);
   `);
 
   try {
@@ -2095,6 +2124,8 @@ function initDb(filePath) {
       telegram_bind_token TEXT NULL,
       telegram_bind_expires_at TEXT NULL,
       last_active_at TEXT NULL,
+      timezone TEXT NOT NULL DEFAULT 'Europe/Moscow',
+      timezone_offset REAL NOT NULL DEFAULT 3,
       created_at TEXT NOT NULL
     );
 
@@ -2203,7 +2234,7 @@ function initDb(filePath) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo')),
       snapshot_before TEXT NOT NULL,
       snapshot_after TEXT NOT NULL,
       diff_summary TEXT NOT NULL,
@@ -2235,6 +2266,16 @@ function initDb(filePath) {
       default_template TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS event_reminders_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id INTEGER NOT NULL,
+      place INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      reminder_date TEXT NOT NULL,
+      sent_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_reminders_lookup ON event_reminders_log(event_id, place, user_id, reminder_date);
   `);
 
   migrateSchema(db);
@@ -2525,6 +2566,37 @@ function verifyAndBindStaffChat(token, chatId) {
   return { success: true, chatId };
 }
 
+// ─── USER TIMEZONE & EVENT MORNING REMINDERS ─────────────────
+function updateUserTimezone(userId, { timezone = 'Europe/Moscow', timezoneOffset = 3 } = {}) {
+  const numId = Number(userId);
+  if (!numId) return false;
+  const tz = String(timezone || 'Europe/Moscow').trim();
+  const offset = Number(timezoneOffset !== undefined && timezoneOffset !== null ? timezoneOffset : 3);
+  getDb().prepare(`
+    UPDATE users
+    SET timezone = ?, timezone_offset = ?
+    WHERE id = ?
+  `).run(tz, offset, numId);
+  return true;
+}
+
+function hasEventReminderBeenSent(eventId, place, userId, reminderDate) {
+  const row = getDb().prepare(`
+    SELECT id FROM event_reminders_log
+    WHERE event_id = ? AND place = ? AND user_id = ? AND reminder_date = ?
+  `).get(Number(eventId), Number(place), Number(userId), String(reminderDate));
+  return Boolean(row);
+}
+
+function recordEventReminderSent(eventId, place, userId, reminderDate) {
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO event_reminders_log (event_id, place, user_id, reminder_date, sent_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(Number(eventId), Number(place), Number(userId), String(reminderDate), now);
+  return true;
+}
+
 module.exports = {
   initDb,
   getDb,
@@ -2606,4 +2678,7 @@ module.exports = {
   updateStaleAlertSchedule,
   recordStaleAlertRun,
   updatePlayerStockReminderTime,
+  updateUserTimezone,
+  hasEventReminderBeenSent,
+  recordEventReminderSent,
 };

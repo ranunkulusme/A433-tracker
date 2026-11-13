@@ -3473,6 +3473,144 @@ test('API Telegram Webhook: /start bind, /connect_staff, and inline callbacks', 
   }
 });
 
+test('Telegram Webhook handles /stock text commands and photo screenshots with audit history', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  db.setAppSetting('telegram_bot_token', 'test_bot_token_123');
+
+  const soldier = db.registerUser({ username: 'vault_soldier', password: 'password', playerName: 'База Сталкер' });
+  db.approveUser(soldier.userId, 'r3');
+  db.bindUserTelegram(soldier.userId, 888777, 'vault_soldier_tg');
+  const boundUser = db.findUserById(soldier.userId);
+  const player = db.getPlayerById(boundUser.player_id);
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(options.body);
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 101, chat: { id: payload.chat_id } } })
+      };
+    }
+    if (url.includes('/getFile')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { file_id: 'photo_high_res', file_path: 'photos/warehouse_shot.jpg', file_size: 50000 } })
+      };
+    }
+    if (url.includes('/file/bottest_bot_token_123/photos/warehouse_shot.jpg')) {
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => Buffer.from('fake_image_bytes_for_screenshot')
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. /stock 12500 300 text command from bound soldier
+    const stockRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 100,
+        message: {
+          chat: { id: 888777, type: 'private' },
+          from: { id: 888777, username: 'vault_soldier_tg' },
+          text: '/stock 12500 300'
+        }
+      })
+    });
+    assert.equal(stockRes.status, 200);
+    const updatedPlayer = db.getPlayerById(player.id);
+    assert.equal(updatedPlayer.stock.coupons, 12500);
+    assert.equal(updatedPlayer.stock.puzzles, 300);
+    assert.equal(updatedPlayer.stockUpdateSource, 'telegram_command');
+
+    const history = db.getStockHistory(player.id, 5);
+    assert.ok(history.length >= 1);
+    assert.equal(history[0].source, 'telegram_command');
+    assert.ok(sentMessages.some(m => m.chat_id === 888777 && m.text.includes('Склад успешно обновлен') && m.text.includes('12 500')));
+
+    // 2. Photo upload with caption /stock 18000 450
+    sentMessages.length = 0;
+    const photoRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 101,
+        message: {
+          chat: { id: 888777, type: 'private' },
+          from: { id: 888777, username: 'vault_soldier_tg' },
+          caption: '/stock 18000 450',
+          photo: [
+            { file_id: 'thumb_id', file_size: 500 },
+            { file_id: 'photo_high_res', file_size: 50000 }
+          ]
+        }
+      })
+    });
+    assert.equal(photoRes.status, 200);
+    const updatedPlayer2 = db.getPlayerById(player.id);
+    assert.equal(updatedPlayer2.stock.coupons, 18000);
+    assert.equal(updatedPlayer2.stock.puzzles, 450);
+    assert.equal(updatedPlayer2.stockUpdateSource, 'telegram_photo');
+
+    const history2 = db.getStockHistory(player.id, 5);
+    assert.equal(history2[0].source, 'telegram_photo');
+    assert.ok(history2[0].screenshotPath);
+    assert.ok(sentMessages.some(m => m.chat_id === 888777 && m.text.includes('Склад успешно обновлен') && m.text.includes('18 000')));
+
+    // 3. Photo upload without caption
+    sentMessages.length = 0;
+    const photoNoCaptionRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 102,
+        message: {
+          chat: { id: 888777, type: 'private' },
+          from: { id: 888777, username: 'vault_soldier_tg' },
+          photo: [
+            { file_id: 'photo_high_res', file_size: 50000 }
+          ]
+        }
+      })
+    });
+    assert.equal(photoNoCaptionRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 888777 && m.text.includes('Скриншот склада получен')));
+
+    // 4. Unbound user sends /stock 5000
+    sentMessages.length = 0;
+    const unboundRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 103,
+        message: {
+          chat: { id: 111222, type: 'private' },
+          from: { id: 111222 },
+          text: '/stock 5000'
+        }
+      })
+    });
+    assert.equal(unboundRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 111222 && m.text.includes('не привязан к аккаунту')));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 test('API Notification Templates CRUD, reset, and test send', async () => {
   const { startServer } = require('./server.js');
   const telegram = require('./telegram.js');
@@ -3501,13 +3639,13 @@ test('API Notification Templates CRUD, reset, and test send', async () => {
       body: JSON.stringify({ username: 'admin', password: 'admin123' })
     })).json();
 
-    // 1. GET /api/notification-templates (9 default templates)
+    // 1. GET /api/notification-templates (10 default templates)
     const listRes = await fetch(`${baseUrl}/api/notification-templates`, {
       headers: { Authorization: `Bearer ${adminLogin.token}` }
     });
     assert.equal(listRes.status, 200);
     const templates = await listRes.json();
-    assert.equal(templates.length, 9);
+    assert.equal(templates.length, 10);
 
     // 2. PUT /api/notification-templates/:key
     const putRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned`, {
@@ -3703,6 +3841,33 @@ test('API Notification Triggers: event creation broadcasts registration opened',
     assert.ok(broadcastMsg.text.includes(et.name));
     assert.ok(broadcastMsg.text.includes('2026-11-20'));
     assert.ok(broadcastMsg.text.includes('Подайте заявку'));
+
+    // Send immediate duplicate creation request with identical params (simulating rapid double click)
+    const duplicateRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        typeId: et.id,
+        dateFrom: '2026-11-20',
+        dateTo: '2026-11-22',
+        note: 'Season Championship'
+      })
+    });
+    assert.equal(duplicateRes.status, 200);
+    const createdEvent = await createRes.json();
+    const dupeEvent = await duplicateRes.json();
+    assert.equal(dupeEvent.id, createdEvent.id, 'Duplicate request must return existing event ID');
+
+    // Assert NO additional messages were sent (still exactly 2 messages)
+    assert.equal(sentMessages.length, 2, 'Duplicate event creation must not send duplicate notifications');
+
+    // Assert only 1 event exists in database with this date
+    const allEvents = db.getEvents();
+    const matching = allEvents.filter(e => e.typeId === et.id && e.dateFrom === '2026-11-20');
+    assert.equal(matching.length, 1, 'Only one event record must exist in DB');
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();
@@ -4897,6 +5062,269 @@ test('API Event RSVP, Post-Event Results submission, and stock rewards accrual',
     const place1Coupons = et.places.find(p => p.place === 1)?.coupons || 0;
     const place2Coupons = et.places.find(p => p.place === 2)?.coupons || 0;
     assert.equal(afterCorrectionCoupons, beforeCorrectionCoupons + (place2Coupons - place1Coupons));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('Player timezone management and 09:00 AM local morning event briefings', async () => {
+  const { startServer, checkScheduledEventMorningReminders } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  db.setAppSetting('telegram_bot_token', 'test_morning_token_999');
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(options.body);
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 888, chat: { id: payload.chat_id } } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create soldier with Moscow timezone (UTC+3)
+    const mskSoldier = db.registerUser({ username: 'msk_warrior', password: 'password', playerName: 'База Москва' });
+    db.approveUser(mskSoldier.userId, 'r3');
+    db.bindUserTelegram(mskSoldier.userId, 10101, 'msk_tg');
+
+    // 2. Create soldier with Yekaterinburg timezone (UTC+5)
+    const yekatSoldier = db.registerUser({ username: 'ural_warrior', password: 'password', playerName: 'База Урал' });
+    db.approveUser(yekatSoldier.userId, 'r3');
+    db.bindUserTelegram(yekatSoldier.userId, 20202, 'ural_tg');
+
+    // Login as ural_warrior and set timezone via PUT /api/my-profile/timezone
+    const uralLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'ural_warrior', password: 'password' })
+    })).json();
+
+    const tzUpdateRes = await fetch(`${baseUrl}/api/my-profile/timezone`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${uralLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        timezone: 'Asia/Yekaterinburg',
+        timezoneOffset: 5
+      })
+    });
+    assert.equal(tzUpdateRes.status, 200);
+    const tzData = await tzUpdateRes.json();
+    assert.equal(tzData.success, true);
+    assert.equal(tzData.timezone, 'Asia/Yekaterinburg');
+    assert.equal(tzData.timezoneOffset, 5);
+
+    // Verify GET /api/my-profile reflects timezone
+    const profileRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { 'Authorization': `Bearer ${uralLogin.token}` }
+    });
+    assert.equal(profileRes.status, 200);
+    const profile = await profileRes.json();
+    assert.equal(profile.user.timezone, 'Asia/Yekaterinburg');
+    assert.equal(profile.user.timezoneOffset, 5);
+
+    // 3. Create Event starting on 2026-11-16
+    const eventTypes = db.getEventTypes();
+    const et = eventTypes[0]; // King of War
+    const mskUser = db.findUserById(mskSoldier.userId);
+    const uralUser = db.findUserById(yekatSoldier.userId);
+
+    const ev = db.saveEvent({
+      typeId: et.id,
+      dateFrom: '2026-11-16',
+      dateTo: '2026-11-18',
+      note: 'Большая битва',
+      assignments: [
+        { place: 1, playerId: mskUser.player_id, rsvpStatus: 'confirmed' },
+        { place: 2, playerId: uralUser.player_id, rsvpStatus: 'confirmed' }
+      ]
+    });
+
+    // 4. Test Night Protection: At 00:00 UTC (03:00 MSK / 05:00 Yekaterinburg)
+    // Game event starts on game server, but players are asleep! Must NOT send.
+    sentMessages.length = 0;
+    const nightResult = await checkScheduledEventMorningReminders(null, {
+      now: '2026-11-16T00:00:00.000Z'
+    });
+    assert.equal(nightResult.remindersSent, 0, 'No morning reminders sent at 00:00 UTC');
+    assert.equal(sentMessages.length, 0);
+
+    // 5. At 04:00 UTC:
+    // - Ural player (UTC+5): local time is 09:00 AM -> Must trigger!
+    // - Moscow player (UTC+3): local time is 07:00 AM -> Must NOT trigger yet!
+    sentMessages.length = 0;
+    const morningUralResult = await checkScheduledEventMorningReminders(null, {
+      now: '2026-11-16T04:00:00.000Z'
+    });
+    assert.equal(morningUralResult.remindersSent, 1, 'Only Ural player receives reminder at 04:00 UTC (09:00 local)');
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].chat_id, 20202);
+    assert.ok(sentMessages[0].text.includes('Доброе утро, База Урал'));
+    assert.ok(sentMessages[0].text.includes('#2'));
+    assert.ok(sentMessages[0].text.includes('00:00 UTC'));
+
+    // 6. At 06:00 UTC:
+    // - Moscow player (UTC+3): local time is 09:00 AM -> Must trigger!
+    // - Ural player (UTC+5): already sent -> Deduplicated!
+    sentMessages.length = 0;
+    const morningMskResult = await checkScheduledEventMorningReminders(null, {
+      now: '2026-11-16T06:00:00.000Z'
+    });
+    assert.equal(morningMskResult.remindersSent, 1, 'Moscow player receives reminder at 06:00 UTC (09:00 local)');
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].chat_id, 10101);
+    assert.ok(sentMessages[0].text.includes('Доброе утро, База Москва'));
+    assert.ok(sentMessages[0].text.includes('#1'));
+
+    // 7. Test manual trigger endpoint POST /api/telegram/check-morning-reminders
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const triggerRes = await fetch(`${baseUrl}/api/telegram/check-morning-reminders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ force: false })
+    });
+    assert.equal(triggerRes.status, 200);
+    const triggerData = await triggerRes.json();
+    assert.equal(triggerData.success, true);
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('API POST /api/events/:id/share-grid enforces RBAC and sends poster to staff chat', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentPhotos = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendPhoto')) {
+      const isFormData = init && init.body && typeof init.body.get === 'function';
+      const chatId = isFormData ? init.body.get('chat_id') : JSON.parse(init.body || '{}').chat_id;
+      const caption = isFormData ? init.body.get('caption') : JSON.parse(init.body || '{}').caption;
+      const replyMarkup = isFormData ? init.body.get('reply_markup') : JSON.parse(init.body || '{}').reply_markup;
+      sentPhotos.push({ chatId, caption, replyMarkup });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 888 } }),
+        text: async () => JSON.stringify({ ok: true, result: { message_id: 888 } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: {} }),
+      text: async () => JSON.stringify({ ok: true, result: {} })
+    };
+  });
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Configure staff chat ID
+    await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: '12345:TEST_TOKEN', staffChatId: '-100987654321' })
+    });
+
+    // Create an event
+    const eventTypesRes = await fetch(`${baseUrl}/api/event-types`);
+    const eventTypes = await eventTypesRes.json();
+    const eventType = eventTypes[0] || { id: 'king-of-war' };
+
+    const eventRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeId: eventType.id,
+        title: 'Битва за трон',
+        dateFrom: '2026-11-20',
+        dateTo: '2026-11-22'
+      })
+    });
+    const event = await eventRes.json();
+    assert(event && event.id);
+
+    // Register R3 user
+    const r3Reg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_grid_sharer', password: 'password123' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${r3Reg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_grid_sharer', password: 'password123' })
+    })).json();
+
+    // 1. R3 attempt -> 403 Forbidden
+    const r3Res = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Login.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+      })
+    });
+    assert.equal(r3Res.status, 403);
+
+    // 2. Admin without imageBase64 -> 400
+    const emptyRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.equal(emptyRes.status, 400);
+
+    // 3. Admin valid share -> 200 and photo sent to staff chat
+    const shareRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        caption: '📊 Инфографика сетки: Битва за трон'
+      })
+    });
+    assert.equal(shareRes.status, 200);
+    const shareData = await shareRes.json();
+    assert.equal(shareData.success, true);
+    assert.equal(shareData.messageId, 888);
+
+    assert.equal(sentPhotos.length, 1);
+    assert.equal(String(sentPhotos[0].chatId), '-100987654321');
+    assert.ok(sentPhotos[0].caption.includes('Битва за трон'));
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();

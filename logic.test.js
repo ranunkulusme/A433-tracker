@@ -63,6 +63,9 @@ const {
   filterOfficersByQuery,
   getHashForRoute,
   parseRouteFromHash,
+  parseTelegramStockCommand,
+  formatStockUpdateSuccessMessage,
+  shouldSendMorningEventReminder,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -3336,9 +3339,210 @@ test('deep linking hash routing: getHashForRoute and parseRouteFromHash', () => 
   assert.strictEqual(parseRouteFromHash(null), null);
 });
 
+test('parseTelegramStockCommand parses /stock and /склад commands accurately', () => {
+  // 1. Basic /stock with coupons and puzzles
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock 15000 350'), {
+    coupons: 15000,
+    puzzles: 350
+  });
 
+  // 2. Cyrillic /склад command with spaces and formatting
+  assert.deepStrictEqual(parseTelegramStockCommand('/склад 25 000 450'), {
+    coupons: 25000,
+    puzzles: 450
+  });
 
+  // 3. Only coupons provided
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock 12500'), {
+    coupons: 12500,
+    puzzles: 0
+  });
 
+  // 4. Full parameters: coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock 50000 400 120 10 5 2'), {
+    coupons: 50000,
+    puzzles: 400,
+    starCoupons: 120,
+    legendaryStars1: 10,
+    legendaryStars2: 5,
+    legendaryStars3: 2
+  });
 
+  // 5. Bot username suffix (e.g. in group or direct chat)
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock@kow_bot 18000 220'), {
+    coupons: 18000,
+    puzzles: 220
+  });
 
+  // 6. Non-stock messages or invalid formats
+  assert.strictEqual(parseTelegramStockCommand('/help'), null);
+  assert.strictEqual(parseTelegramStockCommand('/stock'), null);
+  assert.strictEqual(parseTelegramStockCommand('/stock abc'), null);
+  assert.strictEqual(parseTelegramStockCommand('Привет, как дела?'), null);
+  assert.strictEqual(parseTelegramStockCommand(null), null);
+});
+
+test('formatStockUpdateSuccessMessage formats message with stocks, diff and deficit', () => {
+  const diff = { summary: '+5 000 куп., +50 пазл.' };
+  const stock = { coupons: 25000, puzzles: 350, starCoupons: 120 };
+  const msg = formatStockUpdateSuccessMessage(diff, stock, {
+    sectorName: 'Alpha Base',
+    targetOfficer: 'Элизабет',
+    targetDeficit: 8000
+  });
+
+  assert.ok(msg.includes('✅ <b>Склад успешно обновлен!</b>'));
+  assert.ok(msg.includes('Alpha Base'));
+  assert.ok(msg.includes('25 000'));
+  assert.ok(msg.includes('350'));
+  assert.ok(msg.includes('120'));
+  assert.ok(msg.includes('+5 000 куп., +50 пазл.'));
+  assert.ok(msg.includes('Элизабет'));
+  assert.ok(msg.includes('8 000'));
+});
+
+test('shouldSendMorningEventReminder accurately triggers at 09:00 AM local player time on event day', () => {
+  // Event starts on 2026-11-16 (game start 00:00 UTC)
+  const eventDate = '2026-11-16';
+
+  // 1. At 00:00 UTC (03:00 MSK / UTC+3) -> Must NOT send (Sleep protection!)
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T00:00:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), false, '03:00 local time must not trigger reminder');
+
+  // 2. At 06:05 UTC (09:05 MSK / UTC+3) -> Must trigger!
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T06:05:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), true, '09:05 local time must trigger morning reminder');
+
+  // 3. Already sent today -> Must NOT send duplicate
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T06:05:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9,
+    lastSentDate: '2026-11-16'
+  }), false, 'Already sent today must be deduplicated');
+
+  // 4. Multi-timezone staggered test at 04:00 UTC:
+  // - Yekaterinburg (UTC+5): local time is 09:00 -> triggers!
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T04:00:00.000Z',
+    timezoneOffset: 5,
+    targetHour: 9
+  }), true, 'UTC+5 player receives reminder at 04:00 UTC (09:00 local)');
+
+  // - Moscow (UTC+3): local time is 07:00 -> not yet!
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T04:00:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), false, 'UTC+3 player does not receive reminder at 07:00 local');
+
+  // - Vladivostok (UTC+10): local time is 14:00 -> triggers if not yet sent
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T04:00:00.000Z',
+    timezoneOffset: 10,
+    targetHour: 9
+  }), true, 'UTC+10 player receives reminder during day if not yet sent');
+
+  // 5. Wrong date (e.g. day before or day after)
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-15T06:00:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), false, 'Day before event must not trigger');
+});
+
+test('DEFAULT_NOTIFICATION_TEMPLATES contains event_morning_briefing template', () => {
+  const briefing = DEFAULT_NOTIFICATION_TEMPLATES.event_morning_briefing;
+  assert.ok(briefing, 'event_morning_briefing must be defined');
+  assert.equal(briefing.channel, 'personal');
+  assert.ok(briefing.template.includes('Доброе утро'));
+  assert.ok(briefing.template.includes('{eventName}'));
+  assert.ok(briefing.template.includes('{place}'));
+  assert.ok(briefing.template.includes('{officerName}'));
+
+  const sample = NOTIFICATION_TEMPLATE_SAMPLE_DATA.event_morning_briefing;
+  assert.ok(sample, 'event_morning_briefing sample data must exist');
+  const rendered = renderTemplate(briefing.template, sample);
+  assert.ok(rendered.includes('Мощные силы'));
+  assert.ok(rendered.includes('#1'));
+  assert.ok(rendered.includes('Элизабет'));
+});
+
+test('formatRelativeTime formats user activity across minutes, hours, days, weeks, months', () => {
+  const { formatRelativeTime } = require('./logic.js');
+  assert.equal(typeof formatRelativeTime, 'function', 'formatRelativeTime must be exported');
+
+  const fixedNow = new Date('2026-11-13T12:00:00.000Z');
+
+  // 1. Empty and invalid inputs
+  assert.equal(formatRelativeTime(null, fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime(undefined, fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime('', fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime('invalid-date', fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime(null, fixedNow, { lang: 'en' }), 'Never');
+  assert.equal(formatRelativeTime(null, fixedNow, { lang: 'de' }), 'Nie');
+
+  // 2. Just now (< 1 min)
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:45.000Z'), fixedNow), 'только что');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T12:00:05.000Z'), fixedNow), 'только что'); // Future/clock drift
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:45.000Z'), fixedNow, { lang: 'en' }), 'just now');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:45.000Z'), fixedNow, { lang: 'de' }), 'gerade eben');
+
+  // 3. Minutes (1..59 min)
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:00.000Z'), fixedNow), '1 мин. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:55:00.000Z'), fixedNow), '5 мин. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:15:00.000Z'), fixedNow), '45 мин. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:55:00.000Z'), fixedNow, { lang: 'en' }), '5m ago');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:55:00.000Z'), fixedNow, { lang: 'de' }), 'vor 5 Min.');
+
+  // 4. Hours (1..23 h)
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:00:00.000Z'), fixedNow), '1 ч. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T09:00:00.000Z'), fixedNow), '3 ч. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T15:00:00.000Z'), fixedNow), '21 ч. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T09:00:00.000Z'), fixedNow, { lang: 'en' }), '3h ago');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T09:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 3 Std.');
+
+  // 5. Yesterday (24..47 h / 1 day)
+  assert.equal(formatRelativeTime(new Date('2026-11-12T11:00:00.000Z'), fixedNow), 'вчера');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T04:00:00.000Z'), fixedNow), 'вчера');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T11:00:00.000Z'), fixedNow, { lang: 'en' }), 'yesterday');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T11:00:00.000Z'), fixedNow, { lang: 'de' }), 'gestern');
+
+  // 6. Days (2..6 days)
+  assert.equal(formatRelativeTime(new Date('2026-11-11T12:00:00.000Z'), fixedNow), '2 дн. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-08T12:00:00.000Z'), fixedNow), '5 дн. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-08T12:00:00.000Z'), fixedNow, { lang: 'en' }), '5d ago');
+  assert.equal(formatRelativeTime(new Date('2026-11-08T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 5 Tg.');
+
+  // 7. Weeks (7..29 days)
+  assert.equal(formatRelativeTime(new Date('2026-11-06T12:00:00.000Z'), fixedNow), '1 нед. назад');
+  assert.equal(formatRelativeTime(new Date('2026-10-30T12:00:00.000Z'), fixedNow), '2 нед. назад');
+  assert.equal(formatRelativeTime(new Date('2026-10-23T12:00:00.000Z'), fixedNow), '3 нед. назад');
+  assert.equal(formatRelativeTime(new Date('2026-10-30T12:00:00.000Z'), fixedNow, { lang: 'en' }), '2w ago');
+  assert.equal(formatRelativeTime(new Date('2026-10-30T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 2 Wo.');
+
+  // 8. Months (30..364 days)
+  assert.equal(formatRelativeTime(new Date('2026-10-01T12:00:00.000Z'), fixedNow), '1 мес. назад');
+  assert.equal(formatRelativeTime(new Date('2026-08-01T12:00:00.000Z'), fixedNow), '3 мес. назад');
+  assert.equal(formatRelativeTime(new Date('2026-08-01T12:00:00.000Z'), fixedNow, { lang: 'en' }), '3mo ago');
+  assert.equal(formatRelativeTime(new Date('2026-08-01T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 3 Mon.');
+
+  // 9. Over a year (>= 365 days)
+  assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow), 'более года назад');
+  assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow, { lang: 'en' }), 'more than a year ago');
+  assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor mehr als einem Jahr');
+});
 

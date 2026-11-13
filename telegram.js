@@ -297,7 +297,9 @@ function requestViaProxy({
           } catch (e) {
             return { ok: false, error: e.message };
           }
-        }
+        },
+        arrayBuffer: async () => finalBody.buffer.slice(finalBody.byteOffset, finalBody.byteOffset + finalBody.byteLength),
+        buffer: async () => Buffer.from(finalBody)
       };
 
       cleanup(null, responseObj);
@@ -338,13 +340,29 @@ async function callTelegramApi(token, method, payload = null, options = {}) {
     let response;
 
     if (proxyUrl && !options.fetchFn) {
+      let reqBody = null;
+      const reqHeaders = { 'Accept': 'application/json' };
+      if (payload !== null) {
+        if (typeof FormData !== 'undefined' && payload instanceof FormData) {
+          if (typeof Response !== 'undefined') {
+            const formResp = new Response(payload);
+            reqBody = Buffer.from(await formResp.arrayBuffer());
+            const ct = formResp.headers.get('content-type');
+            if (ct) reqHeaders['Content-Type'] = ct;
+          } else {
+            reqBody = payload;
+          }
+        } else {
+          reqHeaders['Content-Type'] = 'application/json';
+          reqBody = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        }
+      }
+
       response = await requestViaProxy({
         url,
         method: payload !== null ? 'POST' : 'GET',
-        headers: {
-          'Accept': 'application/json'
-        },
-        body: payload !== null ? JSON.stringify(payload) : null,
+        headers: reqHeaders,
+        body: reqBody,
         proxyUrl,
         timeoutMs: options.timeoutMs || 10000,
         skipTls: Boolean(options.skipTls)
@@ -364,8 +382,12 @@ async function callTelegramApi(token, method, payload = null, options = {}) {
       };
 
       if (payload !== null) {
-        fetchOptions.headers['Content-Type'] = 'application/json; charset=utf-8';
-        fetchOptions.body = JSON.stringify(payload);
+        if (typeof FormData !== 'undefined' && payload instanceof FormData) {
+          fetchOptions.body = payload;
+        } else {
+          fetchOptions.headers['Content-Type'] = 'application/json; charset=utf-8';
+          fetchOptions.body = JSON.stringify(payload);
+        }
       }
 
       response = await fetchFn(url, fetchOptions);
@@ -439,6 +461,124 @@ async function sendTelegramMessage({
   }
 
   return callTelegramApi(token, 'sendMessage', payload, options);
+}
+
+/**
+ * Send a photo to a Telegram chat.
+ * `photo` can be a URL string, a Telegram file_id, a data-URL base64 string, or a Buffer.
+ */
+async function sendTelegramPhoto({
+  token,
+  chatId,
+  photo,
+  caption,
+  parseMode = 'HTML',
+  replyMarkup = undefined
+}, options = {}) {
+  if (!chatId) {
+    return { ok: false, error: 'MISSING_CHAT_ID' };
+  }
+  if (!photo) {
+    return { ok: false, error: 'MISSING_PHOTO' };
+  }
+
+  let isBuffer = Buffer.isBuffer(photo) || (typeof Uint8Array !== 'undefined' && photo instanceof Uint8Array);
+  let photoBuffer = isBuffer ? photo : null;
+  let filename = options.filename || 'photo.png';
+  let mimeType = options.mimeType || 'image/png';
+
+  if (typeof photo === 'string' && photo.startsWith('data:')) {
+    const match = photo.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      mimeType = match[1];
+      photoBuffer = Buffer.from(match[2], 'base64');
+      filename = `photo.${mimeType.split('/')[1] || 'png'}`;
+      isBuffer = true;
+    }
+  }
+
+  if (isBuffer && photoBuffer) {
+    if (typeof FormData === 'undefined') {
+      return { ok: false, error: 'FORMDATA_NOT_AVAILABLE' };
+    }
+    const formData = new FormData();
+    formData.append('chat_id', String(chatId));
+    const blob = new Blob([photoBuffer], { type: mimeType });
+    formData.append('photo', blob, filename);
+    if (caption) formData.append('caption', caption);
+    if (parseMode && parseMode !== 'none') formData.append('parse_mode', parseMode);
+    if (replyMarkup !== undefined && replyMarkup !== null) {
+      formData.append('reply_markup', typeof replyMarkup === 'string' ? replyMarkup : JSON.stringify(replyMarkup));
+    }
+    return callTelegramApi(token, 'sendPhoto', formData, options);
+  }
+
+  const payload = {
+    chat_id: chatId,
+    photo: photo
+  };
+  if (caption) payload.caption = caption;
+  if (parseMode && parseMode !== 'none') payload.parse_mode = parseMode;
+  if (replyMarkup !== undefined && replyMarkup !== null) payload.reply_markup = replyMarkup;
+
+  return callTelegramApi(token, 'sendPhoto', payload, options);
+}
+
+/**
+ * Get file information by file_id from Telegram Bot API.
+ */
+async function getTelegramFile(token, fileId, options = {}) {
+  if (!fileId || typeof fileId !== 'string') {
+    return { ok: false, error: 'MISSING_FILE_ID' };
+  }
+  return callTelegramApi(token, 'getFile', { file_id: fileId }, options);
+}
+
+/**
+ * Download a file from Telegram by file_path.
+ * Returns a Buffer.
+ */
+async function downloadTelegramFile(token, filePath, options = {}) {
+  if (!token) throw new Error('MISSING_BOT_TOKEN');
+  if (!filePath) throw new Error('MISSING_FILE_PATH');
+
+  const baseUrl = (options.baseUrl || DEFAULT_TELEGRAM_API_BASE).replace(/\/+$/, '');
+  const cleanPath = filePath.replace(/^\/+/, '');
+  const url = `${baseUrl}/file/bot${token}/${cleanPath}`;
+  const proxyUrl = options.proxyUrl || getDefaultProxyUrl();
+
+  let response;
+  if (proxyUrl && !options.fetchFn && !customTelegramFetch) {
+    response = await requestViaProxy({
+      url,
+      method: 'GET',
+      proxyUrl,
+      timeoutMs: options.timeoutMs || 15000,
+      skipTls: Boolean(options.skipTls)
+    });
+  } else {
+    const fetchFn = options.fetchFn || customTelegramFetch || globalThis.fetch;
+    if (typeof fetchFn !== 'function') {
+      throw new Error('FETCH_NOT_AVAILABLE');
+    }
+    const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(options.timeoutMs || 15000) : undefined);
+    response = await fetchFn(url, { method: 'GET', signal });
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to download file from Telegram: HTTP ${response.status}`);
+  }
+
+  if (typeof response.arrayBuffer === 'function') {
+    const ab = await response.arrayBuffer();
+    return Buffer.from(ab);
+  } else if (typeof response.buffer === 'function') {
+    return await response.buffer();
+  } else if (typeof response.text === 'function') {
+    const txt = await response.text();
+    return Buffer.from(txt, 'utf8');
+  }
+  throw new Error('Unsupported response body type');
 }
 
 /**
@@ -744,6 +884,9 @@ module.exports = {
   callTelegramApi,
   getTelegramMe,
   sendTelegramMessage,
+  sendTelegramPhoto,
+  getTelegramFile,
+  downloadTelegramFile,
   editTelegramMessageText,
   answerTelegramCallback,
   getTelegramUpdates,

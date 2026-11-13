@@ -327,14 +327,15 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
         return { sent: true, sentCount, totalTargets: targets.length };
       }
 
-      if (options.chatId) {
+      const directChatId = options.chatId || options.recipientChatId;
+      if (directChatId) {
         const res = await telegram.sendTelegramMessage({
           token,
-          chatId: options.chatId,
+          chatId: directChatId,
           text: renderedText,
           parseMode,
           replyMarkup
-        });
+        }, sendOpts);
         return { sent: res.ok, result: res };
       }
 
@@ -489,6 +490,95 @@ async function checkScheduledStaleStockReminders() {
   }
 }
 
+async function checkScheduledEventMorningReminders(req = null, options = {}) {
+  try {
+    const events = db.getEvents();
+    if (!events || !events.length) {
+      return { eventsChecked: 0, remindersSent: 0 };
+    }
+
+    const eventTypes = db.getEventTypes();
+    const now = options.now ? new Date(options.now) : new Date();
+    const baseUrl = getAppBaseUrl(req);
+    let sentCount = 0;
+
+    const nowTime = now.getTime();
+    for (const ev of events) {
+      const assignments = ev.assignments || [];
+      if (!assignments.length) continue;
+
+      // Ранний отсев архивных и далеких будущих событий (окно старта ±36 часов от текущего момента)
+      if (!options.force && ev.dateFrom) {
+        const evTime = new Date(ev.dateFrom).getTime();
+        if (!isNaN(evTime) && Math.abs(evTime - nowTime) > 36 * 3600 * 1000) {
+          continue;
+        }
+      }
+
+      const et = eventTypes.find(t => t.id === ev.typeId);
+      const effectivePlaces = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
+
+      for (const a of assignments) {
+        if (!a.playerId || !a.place) continue;
+        const player = db.getPlayerById(a.playerId);
+        if (!player || !player.userId) continue;
+
+        const user = db.findUserById(player.userId);
+        if (!user || !user.telegramChatId || user.telegramNotificationsEnabled === false) continue;
+
+        const timezoneOffset = user.timezoneOffset !== undefined ? user.timezoneOffset : 3;
+        const targetHour = options.targetHour !== undefined ? options.targetHour : 9;
+
+        const shouldSend = logic.shouldSendMorningEventReminder({
+          eventDateFrom: ev.dateFrom,
+          now,
+          timezoneOffset,
+          targetHour
+        });
+
+        if (!shouldSend && !options.force) continue;
+
+        const zonedParts = logic.getZonedDateParts(now, timezoneOffset);
+        const reminderDate = zonedParts ? zonedParts.dateString : String(ev.dateFrom).slice(0, 10);
+
+        if (!options.force && db.hasEventReminderBeenSent(ev.id, a.place, user.id, reminderDate)) {
+          continue;
+        }
+
+        const placeInfo = (effectivePlaces || []).find(p => Number(p.place) === Number(a.place));
+        const coupons = placeInfo ? (placeInfo.coupons || 0) : 0;
+
+        let officerName = 'Любой';
+        if (a.officerId) {
+          const off = (player.officers || []).find(o => o.id === a.officerId || o.catalogId === a.officerId);
+          if (off) officerName = off.name;
+        }
+
+        const link = `${baseUrl}/#event/${ev.id}`;
+        await dispatchNotification('event_morning_briefing', {
+          sectorName: player.name,
+          eventName: et ? et.name : 'Событие альянса',
+          place: String(a.place),
+          coupons: String(coupons),
+          officerName,
+          link
+        }, {
+          userId: user.id,
+          chatId: user.telegramChatId
+        });
+
+        db.recordEventReminderSent(ev.id, a.place, user.id, reminderDate);
+        sentCount++;
+      }
+    }
+
+    return { eventsChecked: events.length, remindersSent: sentCount };
+  } catch (err) {
+    console.warn('[MorningReminders] Error in checkScheduledEventMorningReminders:', err.message);
+    return { eventsChecked: 0, remindersSent: 0, error: err.message };
+  }
+}
+
 // ─── TELEGRAM BOT MESSAGE & UPDATE PROCESSOR ─────────────────────────
 
 async function handleTelegramUpdate(update) {
@@ -586,6 +676,8 @@ async function handleTelegramUpdate(update) {
                 '1. Откройте KoW Tracker ➔ <b>Личный кабинет</b>\n' +
                 '2. Нажмите <b>«Подключить Telegram»</b>\n' +
                 '3. Бот автоматически привяжет ваш игровой профиль.\n\n' +
+                '📦 <b>Управление складом:</b>\n' +
+                'Отправьте команду <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> или пришлите скриншот инвентаря.\n\n' +
                 '🛡️ <b>Подключение чата штаба:</b>\n' +
                 'Добавьте бота в группу офицеров и выполните команду:\n' +
                 '<code>/connect_staff &lt;PIN&gt;</code>\n' +
@@ -593,6 +685,214 @@ async function handleTelegramUpdate(update) {
         });
       }
       return { ok: true, command: 'help', chatId };
+    }
+
+    // E) /stock or /склад text command
+    const stockParsed = logic.parseTelegramStockCommand(text);
+    if (stockParsed) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите ваш Telegram-аккаунт в Личном кабинете трекера, чтобы управлять складом через бота.'
+          });
+        }
+        return { ok: true, command: 'stock', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      if (!player) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Сектор не найден.</b>\nУ вашего аккаунта нет активного сектора в KoW Tracker.'
+          });
+        }
+        return { ok: true, command: 'stock', error: 'no_player' };
+      }
+
+      const before = player.stock || {};
+      const after = {
+        ...before,
+        ...stockParsed
+      };
+      const diff = logic.calculateStockDiff(before, after);
+      const now = new Date().toISOString();
+
+      db.recordStockHistory({
+        playerId: player.id,
+        userId: user.id,
+        source: 'telegram_command',
+        snapshotBefore: before,
+        snapshotAfter: after,
+        diffSummary: diff.summary,
+        screenshotPath: null,
+        createdAt: now
+      });
+
+      db.updatePlayer(player.id, {
+        stock: after,
+        stockUpdatedAt: now,
+        stockUpdateSource: 'telegram_command',
+        recordHistory: false
+      });
+
+      if (token) {
+        const replyText = logic.formatStockUpdateSuccessMessage(diff, after, {
+          sectorName: player.name
+        });
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: replyText
+        });
+      }
+
+      return { ok: true, command: 'stock', playerId: player.id, stock: after };
+    }
+
+    // F) Photo or Document screenshot upload
+    const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
+    const hasDocImage = msg.document && (
+      (msg.document.mime_type && msg.document.mime_type.startsWith('image/')) ||
+      (msg.document.file_name && /\.(jpe?g|png|webp)$/i.test(msg.document.file_name))
+    );
+
+    if (hasPhoto || hasDocImage) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПожалуйста, привяжите Telegram в Личном кабинете, чтобы отправлять скриншоты склада.'
+          });
+        }
+        return { ok: true, photo: true, error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      if (!player) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Сектор не найден.</b>\nУ вашего аккаунта нет активного сектора в KoW Tracker.'
+          });
+        }
+        return { ok: true, photo: true, error: 'no_player' };
+      }
+
+      // Pick file_id (highest resolution photo or document)
+      const fileId = hasPhoto ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id;
+
+      let screenshotPath = null;
+      if (token && fileId) {
+        try {
+          const fileInfo = await telegram.getTelegramFile(token, fileId);
+          if (fileInfo && fileInfo.ok && fileInfo.result?.file_path) {
+            const fileBuf = await telegram.downloadTelegramFile(token, fileInfo.result.file_path);
+            if (fileBuf && fileBuf.length > 0) {
+              const yyyyMm = new Date().toISOString().slice(0, 7);
+              const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
+              if (!fs.existsSync(screenshotsDir)) {
+                fs.mkdirSync(screenshotsDir, { recursive: true });
+              }
+
+              const rawExt = (path.extname(fileInfo.result.file_path) || '').toLowerCase();
+              const ext = ['.jpg', '.jpeg', '.png', '.webp'].includes(rawExt) ? rawExt : '.jpg';
+              const hash = crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0, 8);
+              const filename = `${player.id}_${Date.now()}_${hash}${ext}`;
+              const fullPath = path.join(screenshotsDir, filename);
+              await fs.promises.writeFile(fullPath, fileBuf);
+              screenshotPath = `${yyyyMm}/${filename}`;
+            }
+          }
+        } catch (downloadErr) {
+          console.warn('[Telegram] Error downloading photo:', downloadErr.message);
+        }
+      }
+
+      const caption = (msg.caption || '').trim();
+      let photoStockParsed = logic.parseTelegramStockCommand(caption);
+      if (!photoStockParsed && caption) {
+        photoStockParsed = logic.parseTelegramStockCommand('/stock ' + caption);
+      }
+
+      const before = player.stock || {};
+      const now = new Date().toISOString();
+
+      if (photoStockParsed) {
+        const after = {
+          ...before,
+          ...photoStockParsed
+        };
+        const diff = logic.calculateStockDiff(before, after);
+
+        db.recordStockHistory({
+          playerId: player.id,
+          userId: user.id,
+          source: 'telegram_photo',
+          snapshotBefore: before,
+          snapshotAfter: after,
+          diffSummary: diff.summary,
+          screenshotPath,
+          createdAt: now
+        });
+
+        db.updatePlayer(player.id, {
+          stock: after,
+          stockUpdatedAt: now,
+          stockUpdateSource: 'telegram_photo',
+          recordHistory: false
+        });
+
+        if (token) {
+          const replyText = logic.formatStockUpdateSuccessMessage(diff, after, {
+            sectorName: player.name
+          });
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: replyText
+          });
+        }
+
+        return { ok: true, photo: true, updated: true, playerId: player.id, stock: after };
+      } else {
+        db.recordStockHistory({
+          playerId: player.id,
+          userId: user.id,
+          source: 'telegram_photo',
+          snapshotBefore: before,
+          snapshotAfter: before,
+          diffSummary: 'Скриншот склада прикреплен',
+          screenshotPath,
+          createdAt: now
+        });
+
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: `📸 <b>Скриншот склада получен и сохранен в журнале аудита!</b>\n` +
+                  `👤 Сектор: <b>${logic.escapeHtml(player.name)}</b>\n\n` +
+                  `Чтобы сразу обновить остатки, отправьте команду:\n` +
+                  `<code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code>\n` +
+                  `<i>(Например: <code>/stock 15000 350</code>)</i>\n` +
+                  `или укажите числа прямо в подписи к скриншоту.`
+          });
+        }
+
+        return { ok: true, photo: true, updated: false, playerId: player.id, screenshotPath };
+      }
     }
   }
 
@@ -1006,6 +1306,29 @@ function serveStaticFile(req, res, staticDir, pathname) {
   });
 }
 
+// Sliding in-memory cache for deduplicating rapid duplicate event creation requests (double-clicks / retries)
+const recentCreatedEventsCache = [];
+
+function getRecentCreatedEvent(dedupeKey, ttlMs = 5000) {
+  const now = Date.now();
+  while (recentCreatedEventsCache.length > 0 && (now - recentCreatedEventsCache[0].timestamp > 15000)) {
+    recentCreatedEventsCache.shift();
+  }
+  const found = recentCreatedEventsCache.find(r => r.key === dedupeKey && (now - r.timestamp < ttlMs));
+  if (!found || !found.saved || !found.saved.id) return null;
+  try {
+    const existingInDb = db.getEventById(Number(found.saved.id));
+    if (!existingInDb) return null;
+  } catch (e) {
+    return null;
+  }
+  return found;
+}
+
+function recordRecentCreatedEvent(dedupeKey, saved) {
+  recentCreatedEventsCache.push({ key: dedupeKey, saved, timestamp: Date.now() });
+}
+
 function createRequestHandler(staticDir, s3Manager = null) {
   return async (req, res) => {
     try {
@@ -1319,13 +1642,36 @@ function createRequestHandler(staticDir, s3Manager = null) {
           telegram_notifications_enabled: req.user.telegram_notifications_enabled !== 0,
           telegramChatId: req.user.telegram_chat_id,
           telegramUsername: req.user.telegram_username,
-          telegramNotificationsEnabled: req.user.telegram_notifications_enabled !== 0
+          telegramNotificationsEnabled: req.user.telegram_notifications_enabled !== 0,
+          timezone: req.user.timezone || 'Europe/Moscow',
+          timezoneOffset: (req.user.timezoneOffset !== undefined && req.user.timezoneOffset !== null) ? Number(req.user.timezoneOffset) : 3
         },
         sectors,
         activeSectorId: activeSector ? activeSector.id : null,
         sector: activeSector ? activeSector.sector : null,
         stock: activeSector ? activeSector.stock : null,
         officers: activeSector ? (activeSector.officers || []) : []
+      });
+    }
+
+    if (pathname === '/api/my-profile/timezone' && req.method === 'PUT') {
+      if (!requireAuth(req, res)) return;
+      const timezone = body.timezone ? String(body.timezone).trim() : 'Europe/Moscow';
+      const timezoneOffset = body.timezoneOffset !== undefined && body.timezoneOffset !== null
+        ? Number(body.timezoneOffset)
+        : (body.timezone_offset !== undefined && body.timezone_offset !== null ? Number(body.timezone_offset) : 3);
+
+      if (isNaN(timezoneOffset) || timezoneOffset < -12 || timezoneOffset > 14) {
+        return sendError(res, 400, 'INVALID_TIMEZONE_OFFSET', 'Смещение часового пояса должно быть от -12 до +14');
+      }
+
+      db.updateUserTimezone(req.user.id, { timezone, timezoneOffset });
+      req.user.timezone = timezone;
+      req.user.timezoneOffset = timezoneOffset;
+      return sendJson(res, 200, {
+        success: true,
+        timezone,
+        timezoneOffset
       });
     }
 
@@ -1985,12 +2331,29 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/events' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const isNew = !body.id;
+
+      // Idempotent deduplication for rapid double-clicks on event creation
+      const dedupeKey = isNew
+        ? `${Number(body.typeId)}_${String(body.dateFrom)}_${String(body.dateTo)}_${Number(req.user?.id || 0)}`
+        : null;
+
+      if (isNew && dedupeKey) {
+        const existing = getRecentCreatedEvent(dedupeKey, 5000);
+        if (existing && existing.saved) {
+          console.log(`[Events] Deduplicated duplicate creation request for key: ${dedupeKey} (event #${existing.saved.id})`);
+          return sendJson(res, 200, existing.saved);
+        }
+      }
+
       const previousEvent = body.id ? db.getEventById(Number(body.id)) : null;
       const previousAssignments = previousEvent ? (previousEvent.assignments || []) : [];
 
       const saved = db.saveEvent(body);
 
       if (isNew && saved && saved.id) {
+        if (dedupeKey) {
+          recordRecentCreatedEvent(dedupeKey, saved);
+        }
         try {
           const eventTypes = db.getEventTypes();
           const et = eventTypes.find(t => t.id === saved.typeId);
@@ -2572,6 +2935,60 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, { success: true, totalAssigned, confirmedCount, unconfirmedCount, totalCoupons });
     }
 
+    const shareGridEventMatch = pathname.match(/^\/api\/events\/(\d+)\/share-grid$/);
+    if (shareGridEventMatch && req.method === 'POST') {
+      if (!requirePermission(req, res, 'manage_events')) return;
+      const eventId = Number(shareGridEventMatch[1]);
+      const ev = db.getEventById(eventId);
+      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
+
+      const imageBase64 = body && (body.imageBase64 || body.image_base64);
+      if (!imageBase64 || typeof imageBase64 !== 'string') {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр imageBase64 обязателен');
+      }
+
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 400, 'BOT_TOKEN_NOT_CONFIGURED', 'Токен бота не настроен в системе');
+      }
+
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      if (!staffChatId) {
+        return sendError(res, 400, 'STAFF_CHAT_NOT_CONFIGURED', 'Чат штаба не настроен в системе');
+      }
+
+      const baseUrl = getAppBaseUrl(req);
+      const et = db.getEventTypes().find(t => t.id === ev.typeId);
+      const eventTitle = ev.title || et?.name || 'Событие';
+      const escape = (typeof logic.escapeHtml === 'function') ? logic.escapeHtml : (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+      const defaultCaption = `📊 <b>Сетка события: ${escape(eventTitle)}</b>\n📅 Период: ${escape(ev.dateFrom || '')} — ${escape(ev.dateTo || '')}\n🎖 Назначений: ${(ev.assignments || []).length}`;
+      const caption = (body.caption && String(body.caption).trim()) ? String(body.caption).trim() : defaultCaption;
+
+      const replyMarkup = {
+        inline_keyboard: [
+          [{ text: '🔗 Открыть сетку ивента', url: `${baseUrl}/#event/${ev.id}` }]
+        ]
+      };
+
+      const result = await telegram.sendTelegramPhoto({
+        token: botToken,
+        chatId: staffChatId,
+        photo: imageBase64,
+        caption,
+        parseMode: 'HTML',
+        replyMarkup
+      });
+
+      if (!result.ok) {
+        return sendError(res, 502, 'TELEGRAM_ERROR', result.description || result.error || 'Ошибка отправки изображения в Telegram');
+      }
+
+      return sendJson(res, 200, {
+        success: true,
+        messageId: result.result?.message_id
+      });
+    }
+
     // ─────────────────────────────────────────────────────────
     // ADMIN EXPORT & IMPORT
     // ─────────────────────────────────────────────────────────
@@ -2695,8 +3112,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
-      const result = await handleTelegramUpdate(body || {});
-      return sendJson(res, 200, result);
+      try {
+        const result = await handleTelegramUpdate(body || {});
+        return sendJson(res, 200, result);
+      } catch (err) {
+        console.error('[Telegram Webhook Error]', err);
+        return sendError(res, 500, 'WEBHOOK_ERROR', err.message);
+      }
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'GET') {
@@ -2848,7 +3270,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const updated = db.getMieruSettings();
       if (updated.enabled && (updated.server || updated.configJson)) {
         const dataDir = path.join(__dirname, 'data');
-        mieru.startMieruProcess(configToApply, dataDir);
+        if (mieru.isMieruBinaryAvailable()) {
+          mieru.startMieruProcess(configToApply, dataDir);
+        }
         telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${updated.socks5Port || 1080}`);
       } else {
         mieru.stopMieruProcess();
@@ -2895,7 +3319,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       // If mieru binary is available and not running, ensure process is started before test
       const status = mieru.getMieruStatus();
-      if (!status.running && (settings.server || settings.configJson)) {
+      if (!status.running && mieru.isMieruBinaryAvailable() && (settings.server || settings.configJson)) {
         const fullConfig = settings.configJson
           ? (mieru.parseMieruConfig(settings.configJson).config || mieru.formatMieruConfig(settings))
           : mieru.formatMieruConfig(settings);
@@ -3041,6 +3465,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const force = (body && body.force !== undefined) ? Boolean(body.force) : true;
       const forcePersonal = Boolean(body && body.forcePersonal);
       const result = await checkStaleStockReminders(req, { isScheduled: false, force, forcePersonal });
+      return sendJson(res, 200, { success: true, ...result });
+    }
+
+    if (pathname === '/api/telegram/check-morning-reminders' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const force = Boolean(body && body.force);
+      const now = body && body.now ? body.now : null;
+      const targetHour = body && body.targetHour !== undefined ? Number(body.targetHour) : 9;
+      const result = await checkScheduledEventMorningReminders(req, { force, now, targetHour });
       return sendJson(res, 200, { success: true, ...result });
     }
 
@@ -3213,14 +3652,24 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   }, 60 * 1000);
   if (staleReminderInterval.unref) staleReminderInterval.unref();
 
+  // Schedule minute ticker for morning event briefings at 09:00 local time
+  const morningReminderInterval = setInterval(() => {
+    checkScheduledEventMorningReminders().catch(err => {
+      console.error('[MorningReminders] Error in scheduled morning ticker:', err);
+    });
+  }, 60 * 1000);
+  if (morningReminderInterval.unref) morningReminderInterval.unref();
+
   // Auto-start Mieru tunnel client if enabled
   try {
     const mieruSettings = db.getMieruSettings();
     if (mieruSettings.enabled && (mieruSettings.server || mieruSettings.configJson)) {
-      const fullConfig = mieruSettings.configJson
-        ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
-        : mieru.formatMieruConfig(mieruSettings);
-      mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+      if (mieru.isMieruBinaryAvailable()) {
+        const fullConfig = mieruSettings.configJson
+          ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
+          : mieru.formatMieruConfig(mieruSettings);
+        mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+      }
       telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}`);
     }
   } catch (mErr) {
@@ -3244,9 +3693,11 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   server.close = function (callback) {
     clearInterval(retentionInterval);
     clearInterval(staleReminderInterval);
+    clearInterval(morningReminderInterval);
     mieru.stopMieruProcess();
     telegram.stopTelegramPolling();
     telegram.setDefaultProxyUrl(null);
+    recentCreatedEventsCache.length = 0;
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);
@@ -3331,6 +3782,7 @@ module.exports = {
   MIME_TYPES,
   dispatchNotification,
   checkStaleStockReminders,
+  checkScheduledEventMorningReminders,
   handleTelegramUpdate,
   syncTelegramBotInfoAndPolling
 };
