@@ -3546,3 +3546,78 @@ test('formatRelativeTime formats user activity across minutes, hours, days, week
   assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor mehr als einem Jahr');
 });
 
+test('telegram fighter suite formatters and keyboards', () => {
+  const {
+    formatTelegramMeMessage,
+    formatTelegramDeficitMessage,
+    formatTelegramEventsListMessage,
+    getTelegramMainMenuKeyboard,
+  } = require('./logic.js');
+
+  // 1. formatTelegramMeMessage
+  const meText = formatTelegramMeMessage({
+    user: { id: 1, username: 'ranger', rank: 'r3' },
+    player: {
+      id: 1,
+      name: 'Sector 7 (Рейнджер)',
+      power: 48200000,
+      vip: 14,
+      stock: { coupons: 18450, puzzles: 320, starCoupons: 100, legendaryStars1: 5, legendaryStars2: 2, legendaryStars3: 1 },
+      stockUpdatedAt: '2026-11-11T12:00:00Z'
+    },
+    freshness: { status: 'fresh', days: 2, label: '2 дн. назад' },
+    targetOfficer: { name: 'Элизабет', skills: [5, 4, 3, 2], stars: 4 },
+    targetDeficit: 4200
+  });
+
+  assert(meText.includes('Sector 7 (Рейнджер)'));
+  assert(meText.includes('Р3'));
+  assert(meText.includes('VIP: <b>14</b>') || meText.includes('VIP: 14'));
+  assert(meText.includes('18 450') || meText.includes('18450'));
+  assert(meText.includes('320'));
+  assert(meText.includes('Элизабет'));
+  assert(meText.includes('4 200') || meText.includes('4200'));
+
+  // 2. formatTelegramDeficitMessage
+  const deficitText = formatTelegramDeficitMessage({
+    player: { name: 'Sector 7' },
+    targetOfficer: { name: 'Элизабет', skills: [5, 4, 3, 2], stars: 4, type: 'Танк' },
+    deficit: { coupons: 4200, puzzles: 84, medalsRemaining: 140, isMaxSkills: false },
+    dailyRewards: { coupons: 300, puzzles: 0 },
+    daysEstimate: 14
+  });
+
+  assert(deficitText.includes('Элизабет'));
+  assert(deficitText.includes('4 200') || deficitText.includes('4200'));
+  assert(deficitText.includes('14 дн') || deficitText.includes('14'));
+
+  // 3. formatTelegramEventsListMessage
+  const eventsText = formatTelegramEventsListMessage({
+    events: [
+      { id: 1, title: 'Мощные силы', dateFrom: '2026-11-15T00:00:00Z', assignments: [{ playerId: 1, place: 1, coupons: 50, rsvpStatus: 'confirmed' }] },
+      { id: 2, title: 'Битва за трон', dateFrom: '2026-11-22T00:00:00Z', registrations: [{ playerId: 1, desiredPlace: 2 }] },
+      { id: 3, title: 'Мощь времени', dateFrom: '2026-11-29T00:00:00Z', assignments: [], registrations: [] }
+    ],
+    playerId: 1
+  });
+
+  assert(eventsText.includes('Мощные силы'));
+  assert(eventsText.includes('#1'));
+  assert(eventsText.includes('Битва за трон'));
+  assert(eventsText.includes('Мощь времени'));
+
+  // 4. getTelegramMainMenuKeyboard
+  const r3Keyboard = getTelegramMainMenuKeyboard({ isStaff: false });
+  assert(Array.isArray(r3Keyboard.inline_keyboard));
+  const r3Callbacks = r3Keyboard.inline_keyboard.flat().map(b => b.callback_data);
+  assert(r3Callbacks.includes('cmd_me'));
+  assert(r3Callbacks.includes('cmd_deficit'));
+  assert(r3Callbacks.includes('cmd_events'));
+  assert(!r3Callbacks.includes('cmd_digest')); // only for staff
+
+  const r4Keyboard = getTelegramMainMenuKeyboard({ isStaff: true });
+  const r4Callbacks = r4Keyboard.inline_keyboard.flat().map(b => b.callback_data);
+  assert(r4Callbacks.includes('cmd_digest'));
+  assert(r4Callbacks.includes('cmd_stale'));
+});
+

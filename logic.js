@@ -3743,6 +3743,145 @@
     return l.yearAgo;
   }
 
+  function formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit }) {
+    const parts = [];
+    const rankMap = { r5: 'Р5', r4: 'Р4', r3: 'Р3', r2: 'Р2', r1: 'Р1' };
+    const rankLabel = rankMap[(user?.rank || '').toLowerCase()] || (user?.rank || 'Р3').toUpperCase();
+    const sectorName = player?.name || user?.username || 'Сектор';
+    parts.push(`👤 <b>Ваш профиль:</b> <b>${escapeHtml(sectorName)}</b> [${rankLabel}]`);
+
+    const power = player?.power || 0;
+    const powerFormatted = formatInputNumber(power);
+    const vip = player?.vip !== undefined ? player.vip : (user?.vip !== undefined ? user.vip : '—');
+    parts.push(`📊 Сила: <b>${powerFormatted}</b> | VIP: <b>${vip}</b>`);
+
+    parts.push('\n📦 <b>Запасы склада:</b>');
+    const stock = player?.stock || {};
+    const coupons = stock.coupons || 0;
+    const puzzles = stock.puzzles || 0;
+    parts.push(`• Купоны: <b>${formatInputNumber(coupons)}</b> 🎟️`);
+    parts.push(`• Пазлы: <b>${formatInputNumber(puzzles)}</b> 🧩`);
+    if (stock.starCoupons) {
+      parts.push(`• Звездные купоны: <b>${formatInputNumber(stock.starCoupons)}</b> ⭐`);
+    }
+    if (stock.legendaryStars1 || stock.legendaryStars2 || stock.legendaryStars3) {
+      const stars = [
+        stock.legendaryStars1 || 0,
+        stock.legendaryStars2 || 0,
+        stock.legendaryStars3 || 0
+      ].join(' / ');
+      parts.push(`• Звезды (I/II/III): <b>${stars}</b> ✨`);
+    }
+
+    if (freshness) {
+      const badgeIcon = freshness.status === 'fresh' ? '🟢' : (freshness.status === 'warning' ? '🟡' : '🔴');
+      parts.push(`• Актуальность: ${badgeIcon} ${freshness.label || (freshness.days + ' дн. назад')}`);
+    }
+
+    if (targetOfficer) {
+      const offName = typeof targetOfficer === 'string' ? targetOfficer : targetOfficer.name;
+      parts.push(`\n🎯 <b>Целевой офицер:</b> <b>${escapeHtml(offName)}</b>`);
+      if (targetDeficit !== undefined && targetDeficit !== null) {
+        if (targetDeficit <= 0) {
+          parts.push('• Дефицит: <b>0</b> (готов к максимальной прокачке! 🎉)');
+        } else {
+          parts.push(`• Остаточный дефицит: <b>${formatInputNumber(targetDeficit)}</b> купонов`);
+        }
+      }
+    }
+
+    return parts.join('\n');
+  }
+
+  function formatTelegramDeficitMessage({ player, targetOfficer, deficit, dailyRewards, daysEstimate }) {
+    const parts = [];
+    const sectorName = player?.name || 'Сектор';
+    const offName = typeof targetOfficer === 'string' ? targetOfficer : (targetOfficer?.name || 'Офицер');
+    parts.push(`📊 <b>Расчет дефицита прокачки</b>`);
+    parts.push(`👤 Сектор: <b>${escapeHtml(sectorName)}</b>`);
+    parts.push(`🎯 Офицер: <b>${escapeHtml(offName)}</b>`);
+
+    if (deficit) {
+      parts.push('\n🎯 <b>Необходимо ресурсов:</b>');
+      if (deficit.coupons !== undefined) {
+        parts.push(`• Купоны: <b>${formatInputNumber(deficit.coupons)}</b> 🎟️`);
+      }
+      if (deficit.puzzles !== undefined) {
+        parts.push(`• Пазлы: <b>${formatInputNumber(deficit.puzzles)}</b> 🧩`);
+      }
+      if (deficit.medalsRemaining !== undefined) {
+        parts.push(`• Медалей до максимума (5-5-5-5): <b>${deficit.medalsRemaining}</b>`);
+      }
+    }
+
+    if (dailyRewards && (dailyRewards.coupons || dailyRewards.puzzles)) {
+      parts.push('\n👑 <b>Ежедневный доход (VIP):</b>');
+      if (dailyRewards.coupons) parts.push(`• +${formatInputNumber(dailyRewards.coupons)} купонов/день`);
+      if (dailyRewards.puzzles) parts.push(`• +${dailyRewards.puzzles} пазлов/день`);
+    }
+
+    if (daysEstimate !== undefined && daysEstimate !== null) {
+      parts.push(`\n⏳ <b>Прогноз завершения:</b> ~<b>${daysEstimate} дн.</b>`);
+    }
+
+    return parts.join('\n');
+  }
+
+  function formatTelegramEventsListMessage({ events, playerId }) {
+    const parts = [];
+    parts.push('📅 <b>Ближайшие события альянса:</b>\n');
+
+    if (!events || !events.length) {
+      parts.push('В ближайшее время активных событий не запланировано.');
+      return parts.join('\n');
+    }
+
+    events.slice(0, 5).forEach((ev, idx) => {
+      const title = ev.title || ev.name || `Событие #${ev.id}`;
+      const dateStr = ev.dateFrom ? new Date(ev.dateFrom).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—';
+
+      const assignment = (ev.assignments || []).find(a => Number(a.playerId) === Number(playerId));
+      const registration = (ev.registrations || []).find(r => Number(r.playerId) === Number(playerId));
+
+      let statusLine = '📢 <i>Открыта регистрация</i>';
+      if (assignment) {
+        const place = assignment.place;
+        const coup = assignment.coupons ? ` (+${assignment.coupons} куп.)` : '';
+        const rsvp = assignment.rsvpStatus === 'confirmed' ? ' [✅ подтверждено]' : (assignment.rsvpStatus === 'declined' ? ' [❌ отказ]' : ' [⏳ ожидает RSVP]');
+        statusLine = `🎯 <b>Вам назначено Место #${place}</b>${coup}${rsvp}`;
+      } else if (registration) {
+        const desPlace = registration.desiredPlace ? `#${registration.desiredPlace}` : 'любое';
+        statusLine = `⏳ <i>Подана заявка (желаемое место: ${desPlace})</i>`;
+      }
+
+      parts.push(`${idx + 1}. <b>${escapeHtml(title)}</b> (${dateStr})`);
+      parts.push(`   ${statusLine}\n`);
+    });
+
+    return parts.join('\n').trim();
+  }
+
+  function getTelegramMainMenuKeyboard({ isStaff = false } = {}) {
+    const keyboard = [
+      [
+        { text: '👤 Мой сектор', callback_data: 'cmd_me' },
+        { text: '📊 Дефицит', callback_data: 'cmd_deficit' }
+      ],
+      [
+        { text: '📅 Мои ивенты', callback_data: 'cmd_events' },
+        { text: '📦 Обновить склад', callback_data: 'cmd_stock_help' }
+      ]
+    ];
+
+    if (isStaff) {
+      keyboard.push([
+        { text: '📋 Сводка штаба', callback_data: 'cmd_digest' },
+        { text: '⚠️ Должники', callback_data: 'cmd_stale' }
+      ]);
+    }
+
+    return { inline_keyboard: keyboard };
+  }
 
   return {
     COUPON_PER_PUZZLE,
@@ -3843,6 +3982,10 @@
     parseTelegramStockCommand,
     formatStockUpdateSuccessMessage,
     formatRelativeTime,
+    formatTelegramMeMessage,
+    formatTelegramDeficitMessage,
+    formatTelegramEventsListMessage,
+    getTelegramMainMenuKeyboard,
     escapeHtml,
   };
 });
