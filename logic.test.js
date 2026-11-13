@@ -3643,3 +3643,64 @@ test('telegram event registration keyboards', () => {
   assert(btnTexts.some(t => t.includes('Заявка подана') && t.includes('#1')));
 });
 
+test('telegram officer suite formatters', () => {
+  const {
+    formatTelegramWhoMessage,
+    formatTelegramStaleReport,
+    formatTelegramDigestMessage,
+  } = require('./logic.js');
+
+  // 1. formatTelegramWhoMessage
+  const whoText = formatTelegramWhoMessage({
+    player: {
+      id: 5,
+      name: 'Sector 12 (Викинг)',
+      power: 42000000,
+      vip: 13,
+      stock: { coupons: 5000, puzzles: 120 },
+      stockUpdatedAt: '2026-10-25T12:00:00Z'
+    },
+    user: { id: 10, username: 'viking_lord', rank: 'r3' },
+    freshness: { status: 'stale', days: 19, label: '19 дн. назад' },
+    recentEvents: [
+      { title: 'Битва за трон', place: 2, actualPlace: 2, coupons: 40 }
+    ]
+  });
+
+  assert(whoText.includes('Sector 12 (Викинг)'));
+  assert(whoText.includes('viking_lord'));
+  assert(whoText.includes('42 000 000') || whoText.includes('42000000'));
+  assert(whoText.includes('5 000') || whoText.includes('5000'));
+  assert(whoText.includes('19 дн. назад'));
+  assert(whoText.includes('Битва за трон'));
+
+  // 2. formatTelegramStaleReport
+  const emptyStale = formatTelegramStaleReport({ stalePlayers: [] });
+  assert(emptyStale.includes('Все склады альянса актуальны'));
+
+  const staleText = formatTelegramStaleReport({
+    stalePlayers: [
+      { name: 'Sector 9', days: 22, username: 'soldier9' },
+      { name: 'Sector 15', days: 18, username: null }
+    ]
+  });
+  assert(staleText.includes('Sector 9'));
+  assert(staleText.includes('@soldier9'));
+  assert(staleText.includes('22 дн. назад') || staleText.includes('22 дн'));
+  assert(staleText.includes('Sector 15'));
+
+  // 3. formatTelegramDigestMessage
+  const digestText = formatTelegramDigestMessage({
+    totalSectors: 42,
+    freshnessStats: { fresh: 28, warning: 8, stale: 6 },
+    nextEvent: { title: 'Мощные силы', dateStr: '15 нояб', assignedCount: 4, totalPlaces: 5, registrationsCount: 11 },
+    pendingUsersCount: 2
+  });
+
+  assert(digestText.includes('42'));
+  assert(digestText.includes('28'));
+  assert(digestText.includes('Мощные силы'));
+  assert(digestText.includes('11'));
+  assert(digestText.includes('2'));
+});
+

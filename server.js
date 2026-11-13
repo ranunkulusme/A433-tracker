@@ -863,6 +863,222 @@ async function handleTelegramUpdate(update) {
       return { ok: true, command: 'menu', chatId };
     }
 
+    // Helper for checking officer access
+    function isOfficerOrStaffChat(senderId, currentChatId) {
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      if (staffChatId && String(staffChatId) === String(currentChatId)) {
+        return true;
+      }
+      const user = senderId ? db.findUserByTelegramChatId(senderId) : null;
+      if (!user) return false;
+      return user.rank === 'r5' || user.rank === 'r4' || logic.hasUserPermission(user, 'view_sectors');
+    }
+
+    // D5) /who or /кто
+    if (/^\/(?:who|кто|досье)(?:@\w+)?(?:\s+(.*))?$/i.test(text)) {
+      const whoMatch = text.match(/^\/(?:who|кто|досье)(?:@\w+)?(?:\s+(.*))?$/i);
+      const query = (whoMatch && whoMatch[1] ? whoMatch[1] : '').trim();
+
+      const fromId = msg.from?.id;
+      if (!isOfficerOrStaffChat(fromId, chatId)) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⛔ <b>Доступ запрещен.</b>\nКоманда доступна только офицерам альянса (Р4/Р5) или в чате штаба.'
+          });
+        }
+        return { ok: true, authorized: false, command: 'who' };
+      }
+
+      if (!query) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: 'ℹ️ <b>Использование команды:</b> <code>/who &lt;сектор_или_ник&gt;</code>\n<i>Например: <code>/who Sector 1</code></i>'
+          });
+        }
+        return { ok: true, command: 'who', error: 'missing_query' };
+      }
+
+      const allPlayers = db.getPlayers ? db.getPlayers() : [];
+      const allUsers = db.getUsers ? db.getUsers() : [];
+      const lowerQ = query.toLowerCase();
+
+      let targetPlayer = allPlayers.find(p => (p.name || '').toLowerCase() === lowerQ);
+      if (!targetPlayer) {
+        targetPlayer = allPlayers.find(p => (p.name || '').toLowerCase().includes(lowerQ));
+      }
+      if (!targetPlayer) {
+        const foundUser = allUsers.find(u => (u.username || '').toLowerCase().includes(lowerQ));
+        if (foundUser) {
+          const sectors = db.getPlayersByUserId(foundUser.id);
+          targetPlayer = (foundUser.player_id ? db.getPlayerById(foundUser.player_id) : null) || sectors[0];
+        }
+      }
+
+      if (!targetPlayer) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: `⚠️ Сектор или игрок по запросу «<b>${logic.escapeHtml(query)}</b>» не найден.`
+          });
+        }
+        return { ok: true, command: 'who', found: false };
+      }
+
+      const targetUser = targetPlayer.userId ? db.findUserById(targetPlayer.userId) : null;
+      const freshness = targetPlayer.stockUpdatedAt ? logic.getStockFreshness(targetPlayer.stockUpdatedAt) : null;
+
+      const allEvents = db.getEvents ? db.getEvents() : [];
+      const recentEvents = [];
+      (allEvents || []).forEach(e => {
+        const a = (e.assignments || []).find(asgn => Number(asgn.playerId) === Number(targetPlayer.id));
+        if (a) {
+          recentEvents.push({
+            title: e.title || e.name || 'Ивент',
+            place: a.place,
+            actualPlace: a.actualPlace,
+            coupons: a.actualCoupons || a.coupons || 0
+          });
+        }
+      });
+
+      const whoMsg = logic.formatTelegramWhoMessage({
+        player: targetPlayer,
+        user: targetUser,
+        freshness,
+        recentEvents
+      });
+
+      if (token) {
+        await telegram.sendTelegramMessage({ token, chatId, text: whoMsg });
+      }
+      return { ok: true, command: 'who', found: true, playerId: targetPlayer.id };
+    }
+
+    // D6) /stale or /должники
+    if (/^\/(?:stale|должники)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      if (!isOfficerOrStaffChat(fromId, chatId)) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⛔ <b>Доступ запрещен.</b>\nКоманда доступна только офицерам альянса (Р4/Р5) или в чате штаба.'
+          });
+        }
+        return { ok: true, authorized: false, command: 'stale' };
+      }
+
+      const allPlayers = db.getPlayers ? db.getPlayers() : [];
+      const allUsers = db.getUsers ? db.getUsers() : [];
+      const usersById = new Map(allUsers.map(u => [u.id, u]));
+
+      const staleList = [];
+      allPlayers.forEach(p => {
+        const fr = p.stockUpdatedAt ? logic.getStockFreshness(p.stockUpdatedAt) : { status: 'stale', days: 30 };
+        if (fr.status === 'stale') {
+          const u = p.userId ? usersById.get(p.userId) : null;
+          staleList.push({
+            name: p.name,
+            days: fr.days,
+            username: u?.username || null
+          });
+        }
+      });
+
+      staleList.sort((a, b) => b.days - a.days);
+      const staleMsg = logic.formatTelegramStaleReport({ stalePlayers: staleList });
+
+      if (token) {
+        await telegram.sendTelegramMessage({ token, chatId, text: staleMsg });
+      }
+      return { ok: true, command: 'stale', count: staleList.length };
+    }
+
+    // D7) /ping_stale or /пинг
+    if (/^\/(?:ping_stale|пинг)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      if (!isOfficerOrStaffChat(fromId, chatId)) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⛔ <b>Доступ запрещен.</b>\nКоманда доступна только офицерам альянса (Р4/Р5).'
+          });
+        }
+        return { ok: true, authorized: false, command: 'ping_stale' };
+      }
+
+      const res = await checkStaleStockReminders(null, { force: true, forcePersonal: true });
+      const sentCount = res ? (res.personalRemindersSent || 0) : 0;
+      const totalStale = res ? (res.staleCount || 0) : 0;
+
+      const replyMsg = `📨 <b>Рассылка напоминаний завершена:</b>\n• Найдено устаревших складов: <b>${totalStale}</b>\n• Отправлено персональных сообщений в ЛС: <b>${sentCount}</b>`;
+
+      if (token) {
+        await telegram.sendTelegramMessage({ token, chatId, text: replyMsg });
+      }
+      return { ok: true, command: 'ping_stale', sentCount, totalStale };
+    }
+
+    // D8) /digest or /сводка
+    if (/^\/(?:digest|дайджест|сводка)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      if (!isOfficerOrStaffChat(fromId, chatId)) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⛔ <b>Доступ запрещен.</b>\nКоманда доступна только офицерам альянса (Р4/Р5) или в чате штаба.'
+          });
+        }
+        return { ok: true, authorized: false, command: 'digest' };
+      }
+
+      const allPlayers = db.getPlayers ? db.getPlayers() : [];
+      const freshnessStats = { fresh: 0, warning: 0, stale: 0 };
+      allPlayers.forEach(p => {
+        const fr = p.stockUpdatedAt ? logic.getStockFreshness(p.stockUpdatedAt) : { status: 'stale' };
+        freshnessStats[fr.status] = (freshnessStats[fr.status] || 0) + 1;
+      });
+
+      const allEvents = db.getEvents ? db.getEvents() : [];
+      const nowIso = new Date().toISOString();
+      const nextEv = (allEvents || [])
+        .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
+        .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''))[0] || null;
+
+      let nextEvInfo = null;
+      if (nextEv) {
+        const regs = db.getRegistrationsByEventId ? db.getRegistrationsByEventId(nextEv.id) : (nextEv.registrations || []);
+        nextEvInfo = {
+          title: nextEv.title || nextEv.name,
+          dateFrom: nextEv.dateFrom,
+          assignedCount: (nextEv.assignments || []).length,
+          totalPlaces: 5,
+          registrationsCount: regs.length
+        };
+      }
+
+      const pendingUsers = db.getPendingUsers ? db.getPendingUsers() : [];
+
+      const digestMsg = logic.formatTelegramDigestMessage({
+        totalSectors: allPlayers.length,
+        freshnessStats,
+        nextEvent: nextEvInfo,
+        pendingUsersCount: pendingUsers.length
+      });
+
+      if (token) {
+        await telegram.sendTelegramMessage({ token, chatId, text: digestMsg });
+      }
+      return { ok: true, command: 'digest' };
+    }
+
     // E) /stock or /склад text command
     const stockParsed = logic.parseTelegramStockCommand(text);
     if (stockParsed) {
@@ -1150,6 +1366,76 @@ async function handleTelegramUpdate(update) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: helpText, replyMarkup: keyboard });
         }
         return { ok: true, action: 'cmd_stock_help', userId: user.id };
+      }
+
+      if (data === 'cmd_digest') {
+        if (!isStaff) {
+          if (token) {
+            await telegram.answerTelegramCallback({ token, callbackQueryId: cqId, text: '⛔ Доступ запрещен (только Р4/Р5)', showAlert: true });
+          }
+          return { ok: true, action: 'cmd_digest', authorized: false };
+        }
+        const allPlayers = db.getPlayers ? db.getPlayers() : [];
+        const freshnessStats = { fresh: 0, warning: 0, stale: 0 };
+        allPlayers.forEach(p => {
+          const fr = p.stockUpdatedAt ? logic.getStockFreshness(p.stockUpdatedAt) : { status: 'stale' };
+          freshnessStats[fr.status] = (freshnessStats[fr.status] || 0) + 1;
+        });
+        const allEvents = db.getEvents ? db.getEvents() : [];
+        const nowIso = new Date().toISOString();
+        const nextEv = (allEvents || [])
+          .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
+          .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''))[0] || null;
+
+        let nextEvInfo = null;
+        if (nextEv) {
+          const regs = db.getRegistrationsByEventId ? db.getRegistrationsByEventId(nextEv.id) : (nextEv.registrations || []);
+          nextEvInfo = {
+            title: nextEv.title || nextEv.name,
+            dateFrom: nextEv.dateFrom,
+            assignedCount: (nextEv.assignments || []).length,
+            totalPlaces: 5,
+            registrationsCount: regs.length
+          };
+        }
+        const pendingUsers = db.getPendingUsers ? db.getPendingUsers() : [];
+        const digestMsg = logic.formatTelegramDigestMessage({
+          totalSectors: allPlayers.length,
+          freshnessStats,
+          nextEvent: nextEvInfo,
+          pendingUsersCount: pendingUsers.length
+        });
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: digestMsg, replyMarkup: keyboard });
+        }
+        return { ok: true, action: 'cmd_digest', userId: user.id };
+      }
+
+      if (data === 'cmd_stale') {
+        if (!isStaff) {
+          if (token) {
+            await telegram.answerTelegramCallback({ token, callbackQueryId: cqId, text: '⛔ Доступ запрещен (только Р4/Р5)', showAlert: true });
+          }
+          return { ok: true, action: 'cmd_stale', authorized: false };
+        }
+        const allPlayers = db.getPlayers ? db.getPlayers() : [];
+        const allUsers = db.getUsers ? db.getUsers() : [];
+        const usersById = new Map(allUsers.map(u => [u.id, u]));
+
+        const staleList = [];
+        allPlayers.forEach(p => {
+          const fr = p.stockUpdatedAt ? logic.getStockFreshness(p.stockUpdatedAt) : { status: 'stale', days: 30 };
+          if (fr.status === 'stale') {
+            const u = p.userId ? usersById.get(p.userId) : null;
+            staleList.push({ name: p.name, days: fr.days, username: u?.username || null });
+          }
+        });
+        staleList.sort((a, b) => b.days - a.days);
+        const staleMsg = logic.formatTelegramStaleReport({ stalePlayers: staleList });
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: staleMsg, replyMarkup: keyboard });
+        }
+        return { ok: true, action: 'cmd_stale', userId: user.id };
       }
     }
 

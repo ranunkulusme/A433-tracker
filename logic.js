@@ -3914,6 +3914,99 @@
     return { inline_keyboard: keyboard };
   }
 
+  function formatTelegramWhoMessage({ player, user, freshness, recentEvents }) {
+    const parts = [];
+    const sectorName = player?.name || user?.username || 'Сектор';
+    const rankMap = { r5: 'Р5', r4: 'Р4', r3: 'Р3', r2: 'Р2', r1: 'Р1' };
+    const rankLabel = rankMap[(user?.rank || '').toLowerCase()] || (user?.rank || 'Р3').toUpperCase();
+    const tgHandle = user?.username ? `@${user.username}` : (user?.telegram_chat_id ? `ID ${user.telegram_chat_id}` : 'не привязан');
+
+    parts.push(`🪪 <b>Досье бойца:</b> <b>${escapeHtml(sectorName)}</b>`);
+    parts.push(`👤 Владелец: <b>${escapeHtml(tgHandle)}</b> | Ранг: <b>${rankLabel}</b>`);
+
+    const power = player?.power || 0;
+    const powerFormatted = formatInputNumber(power);
+    const vip = player?.vip !== undefined ? player.vip : (user?.vip !== undefined ? user.vip : '—');
+    parts.push(`📊 Сила: <b>${powerFormatted}</b> | VIP: <b>${vip}</b>`);
+
+    parts.push('\n📦 <b>Склад:</b>');
+    const stock = player?.stock || {};
+    const coupons = stock.coupons || 0;
+    const puzzles = stock.puzzles || 0;
+    parts.push(`• Купоны: <b>${formatInputNumber(coupons)}</b> 🎟️`);
+    parts.push(`• Пазлы: <b>${formatInputNumber(puzzles)}</b> 🧩`);
+    if (freshness) {
+      const badgeIcon = freshness.status === 'fresh' ? '🟢' : (freshness.status === 'warning' ? '🟡' : '🔴');
+      parts.push(`• Свежесть: ${badgeIcon} ${freshness.label || (freshness.days + ' дн. назад')}`);
+    }
+
+    if (recentEvents && recentEvents.length) {
+      parts.push('\n📅 <b>Участие в ивентах:</b>');
+      recentEvents.slice(0, 3).forEach(e => {
+        const title = e.title || e.name || 'Ивент';
+        const pl = e.actualPlace ? `#${e.actualPlace}` : (e.place ? `#${e.place} (план)` : '—');
+        const coup = e.coupons ? ` (+${e.coupons} куп.)` : '';
+        parts.push(`• ${escapeHtml(title)}: место ${pl}${coup}`);
+      });
+    }
+
+    return parts.join('\n');
+  }
+
+  function formatTelegramStaleReport({ stalePlayers }) {
+    const parts = [];
+    parts.push('📋 <b>Отчет по устаревшим складам (>14 дн.):</b>\n');
+
+    if (!stalePlayers || !stalePlayers.length) {
+      parts.push('🟢 <b>Все склады альянса актуальны!</b> Устаревших данных нет.');
+      return parts.join('\n');
+    }
+
+    stalePlayers.slice(0, 25).forEach((p, idx) => {
+      const name = p.name || 'Сектор';
+      const days = p.days !== undefined ? p.days : (p.freshness?.days || 14);
+      const handle = p.username ? `@${p.username}` : (p.tgHandle || 'не привязан');
+      parts.push(`${idx + 1}. <b>${escapeHtml(name)}</b> — ${days} дн. назад (${escapeHtml(handle)})`);
+    });
+
+    if (stalePlayers.length > 25) {
+      parts.push(`\n<i>...и еще ${stalePlayers.length - 25} секторов.</i>`);
+    }
+
+    parts.push('\n💡 <i>Отправьте <code>/ping_stale</code> для автоматической рассылки персональных напоминаний должникам.</i>');
+    return parts.join('\n');
+  }
+
+  function formatTelegramDigestMessage({ totalSectors = 0, freshnessStats = {}, nextEvent = null, pendingUsersCount = 0 }) {
+    const parts = [];
+    parts.push('📊 <b>Оперативная сводка альянса:</b>\n');
+    parts.push(`👥 Всего активных секторов: <b>${totalSectors}</b>`);
+
+    const fresh = freshnessStats.fresh || 0;
+    const warning = freshnessStats.warning || 0;
+    const stale = freshnessStats.stale || 0;
+    parts.push(`📦 Актуальность складов:\n   🟢 Свежие: <b>${fresh}</b> | 🟡 Внимание: <b>${warning}</b> | 🔴 Устарели: <b>${stale}</b>`);
+
+    if (nextEvent) {
+      const eTitle = nextEvent.title || nextEvent.name || 'Событие';
+      const eDate = nextEvent.dateStr || (nextEvent.dateFrom ? new Date(nextEvent.dateFrom).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—');
+      const assigned = nextEvent.assignedCount !== undefined ? nextEvent.assignedCount : 0;
+      const totalPl = nextEvent.totalPlaces !== undefined ? nextEvent.totalPlaces : 5;
+      const regs = nextEvent.registrationsCount !== undefined ? nextEvent.registrationsCount : 0;
+      parts.push(`\n📅 <b>Ближайший ивент:</b> <b>${escapeHtml(eTitle)}</b> (${eDate})`);
+      parts.push(`   • Мест распределено: <b>${assigned}/${totalPl}</b>`);
+      parts.push(`   • Подано заявок: <b>${regs}</b>`);
+    } else {
+      parts.push('\n📅 Ближайших запланированных событий нет.');
+    }
+
+    if (pendingUsersCount > 0) {
+      parts.push(`\n🔔 <b>Новые бойцы на модерацию:</b> <b>${pendingUsersCount}</b> чел.`);
+    }
+
+    return parts.join('\n');
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -4019,6 +4112,9 @@
     getTelegramMainMenuKeyboard,
     formatEventRegistrationKeyboard,
     formatEventRegistrationConfirmedKeyboard,
+    formatTelegramWhoMessage,
+    formatTelegramStaleReport,
+    formatTelegramDigestMessage,
     escapeHtml,
   };
 });

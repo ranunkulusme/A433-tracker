@@ -5481,6 +5481,90 @@ test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async
   }
 });
 
+test('Telegram bot officer suite commands: /who, /stale, /ping_stale, /digest (RBAC)', async () => {
+  const { startServer, handleTelegramUpdate } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+
+  db.setAppSetting('telegram_bot_token', 'test_officer_token_123');
+  db.setAppSetting('telegram_staff_chat_id', '-100999888');
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 555 } }) };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create officer R4 and fighter R3
+    const officer = db.registerUser({ username: 'officer_alex', password: 'password123' });
+    db.approveUser(officer.id, 'r4');
+    db.bindUserTelegram(officer.id, 888111, 'alex_tg');
+
+    const fighter = db.registerUser({ username: 'soldier_bob', password: 'password123' });
+    db.approveUser(fighter.id, 'r3');
+    db.bindUserTelegram(fighter.id, 888222, 'bob_tg');
+    db.createPlayer({ name: 'Sector 7 (Рейнджер)', power: 45000000, vipLevel: 14, userId: fighter.id });
+
+    // 2. R3 attempts officer commands -> Forbidden
+    sentMessages.length = 0;
+    const r3WhoRes = await handleTelegramUpdate({
+      message: { chat: { id: 888222, type: 'private' }, from: { id: 888222 }, text: '/who Sector 1' }
+    });
+    assert.equal(r3WhoRes.ok, true);
+    assert.equal(r3WhoRes.authorized, false);
+    assert.ok(sentMessages[0].text.includes('Доступ запрещен'));
+
+    // 3. Officer R4 runs /who
+    sentMessages.length = 0;
+    const r4WhoRes = await handleTelegramUpdate({
+      message: { chat: { id: 888111, type: 'private' }, from: { id: 888111 }, text: '/who Sector' }
+    });
+    assert.equal(r4WhoRes.ok, true);
+    assert.equal(r4WhoRes.command, 'who');
+    assert.ok(sentMessages[0].text.includes('Досье бойца'));
+
+    // 4. Officer R4 runs /stale
+    sentMessages.length = 0;
+    const r4StaleRes = await handleTelegramUpdate({
+      message: { chat: { id: 888111, type: 'private' }, from: { id: 888111 }, text: '/stale' }
+    });
+    assert.equal(r4StaleRes.ok, true);
+    assert.equal(r4StaleRes.command, 'stale');
+    assert.ok(sentMessages[0].text.includes('Отчет по устаревшим складам') || sentMessages[0].text.includes('актуальны'));
+
+    // 5. Staff Chat runs /digest
+    sentMessages.length = 0;
+    const staffDigestRes = await handleTelegramUpdate({
+      message: { chat: { id: -100999888, type: 'supergroup' }, from: { id: 888111 }, text: '/digest' }
+    });
+    assert.equal(staffDigestRes.ok, true);
+    assert.equal(staffDigestRes.command, 'digest');
+    assert.ok(sentMessages[0].text.includes('Оперативная сводка альянса'));
+
+    // 6. Officer runs /ping_stale
+    sentMessages.length = 0;
+    const pingStaleRes = await handleTelegramUpdate({
+      message: { chat: { id: -100999888, type: 'supergroup' }, from: { id: 888111 }, text: '/ping_stale' }
+    });
+    assert.equal(pingStaleRes.ok, true);
+    assert.equal(pingStaleRes.command, 'ping_stale');
+    assert.ok(sentMessages.some(m => m.text && m.text.includes('напоминаний')));
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 
 
 
