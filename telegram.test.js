@@ -187,6 +187,33 @@ async function runTests() {
     assert.equal(res.errorCode, 400);
   })();
 
+  await (async () => {
+    // 7b. Mock setTelegramChatMenuButton
+    let capturedBody = null;
+    const mockFetch = async (url, options) => {
+      assert.equal(url, 'https://mock.telegram.org/bot12345/setChatMenuButton');
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: true })
+      };
+    };
+
+    const res = await telegram.setTelegramChatMenuButton('12345', {
+      text: 'KoW Tracker',
+      url: 'https://kow.example.com/app'
+    }, {
+      baseUrl: 'https://mock.telegram.org',
+      fetchFn: mockFetch
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(capturedBody.menu_button.type, 'web_app');
+    assert.equal(capturedBody.menu_button.text, 'KoW Tracker');
+    assert.equal(capturedBody.menu_button.web_app.url, 'https://kow.example.com/app');
+  })();
+
   // 8. Native SOCKS5 proxy test (without auth)
   await (async () => {
     const net = require('node:net');

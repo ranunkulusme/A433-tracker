@@ -3744,4 +3744,64 @@ test('telegram OCR and stock fallback formatters and keyboards', () => {
   assert.ok(fallbackKb.inline_keyboard[0][0].text.includes('актуальны'));
 });
 
+test('validateTelegramWebAppData HMAC validation and expiration', () => {
+  const logic = require('./logic.js');
+  const crypto = require('node:crypto');
+  const botToken = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
+  const nowSec = Math.floor(Date.now() / 1000);
+  const userObj = { id: 777888, username: 'hero_ivan', first_name: 'Иван' };
+  const userStr = JSON.stringify(userObj);
+
+  function createValidInitData(overrides = {}) {
+    const authDate = overrides.authDate !== undefined ? overrides.authDate : nowSec;
+    const queryId = overrides.queryId !== undefined ? overrides.queryId : 'AAH888';
+    const uStr = overrides.userStr !== undefined ? overrides.userStr : userStr;
+
+    const pairs = [
+      `auth_date=${authDate}`,
+      `query_id=${queryId}`,
+      `user=${uStr}`
+    ];
+    pairs.sort();
+    const dataCheckString = pairs.join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+    const params = new URLSearchParams();
+    params.set('query_id', queryId);
+    params.set('user', uStr);
+    params.set('auth_date', String(authDate));
+    params.set('hash', overrides.hash !== undefined ? overrides.hash : hash);
+    return params.toString();
+  }
+
+  // 1. Valid initData
+  const validData = createValidInitData();
+  const res1 = logic.validateTelegramWebAppData(validData, botToken, { nowSec });
+  assert.equal(res1.valid, true);
+  assert.equal(res1.user.id, 777888);
+  assert.equal(res1.user.username, 'hero_ivan');
+  assert.equal(res1.queryId, 'AAH888');
+
+  // 2. Tampered data (bad hash)
+  const tamperedData = createValidInitData({ hash: 'deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb' });
+  const res2 = logic.validateTelegramWebAppData(tamperedData, botToken, { nowSec });
+  assert.equal(res2.valid, false);
+  assert.equal(res2.error, 'invalid_hash');
+
+  // 3. Expired data (>24h)
+  const expiredData = createValidInitData({ authDate: nowSec - 90000 });
+  const res3 = logic.validateTelegramWebAppData(expiredData, botToken, { nowSec });
+  assert.equal(res3.valid, false);
+  assert.equal(res3.error, 'expired');
+
+  // 4. Missing hash
+  const paramsNoHash = new URLSearchParams(validData);
+  paramsNoHash.delete('hash');
+  const res4 = logic.validateTelegramWebAppData(paramsNoHash.toString(), botToken, { nowSec });
+  assert.equal(res4.valid, false);
+  assert.equal(res4.error, 'missing_hash');
+});
+
+
 

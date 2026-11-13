@@ -728,6 +728,32 @@ async function handleTelegramUpdate(update) {
       }
     }
 
+    // B2) /connect_channel <PIN> (also supports /connect_channel@bot <PIN>)
+    const channelMatch = text.match(/^\/connect_channel(?:@\w+)?\s+([a-zA-Z0-9_-]+)/i);
+    if (channelMatch) {
+      const pin = channelMatch[1].trim().toUpperCase();
+      const bindRes = db.verifyAndBindChannelChat(pin, chatId);
+      if (bindRes.success) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '✅ <b>Канал/чат анонсов успешно подключен к KoW Tracker!</b>\nПубличные анонсы и сетки событий будут транслироваться сюда.'
+          });
+        }
+        return { ok: true, channelConnected: true, chatId };
+      } else {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '❌ <b>Неверный или истекший код привязки канала анонсов.</b>\nСгенерируйте свежий PIN в настройках KoW Tracker.'
+          });
+        }
+        return { ok: true, channelConnected: false, reason: bindRes.reason };
+      }
+    }
+
     // C) /ping or /status
     if (/^\/(?:ping|status)(?:@\w+)?(?:\s|$)/i.test(text)) {
       if (token) {
@@ -2150,6 +2176,16 @@ async function syncTelegramBotInfoAndPolling() {
         db.setAppSetting('telegram_bot_username', liveUsername);
       }
     }
+
+    const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
+    if (webAppUrl) {
+      telegram.setTelegramChatMenuButton(token, {
+        text: 'KoW Tracker',
+        url: webAppUrl
+      }).catch(err => {
+        console.warn('[Telegram] Could not set chat menu button:', err.message);
+      });
+    }
   } catch (err) {
     console.warn('[Telegram] Could not sync bot info:', err.message);
   }
@@ -2398,6 +2434,66 @@ function createRequestHandler(staticDir, s3Manager = null) {
           is_approved: regRes.is_approved
         });
       }
+
+    if (pathname === '/api/auth/telegram-webapp' && req.method === 'POST') {
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен на сервере');
+      }
+
+      const initData = body && (body.initData || body.init_data);
+      if (!initData || typeof initData !== 'string') {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
+      }
+
+      const validation = logic.validateTelegramWebAppData(initData, botToken);
+      if (!validation.valid) {
+        return sendError(res, 401, 'INVALID_TELEGRAM_DATA', `Ошибка валидации Telegram WebApp: ${validation.error}`);
+      }
+
+      const tgUserId = validation.user?.id;
+      if (!tgUserId) {
+        return sendError(res, 400, 'MISSING_TELEGRAM_USER', 'Не найден объект пользователя Telegram в initData');
+      }
+
+      const user = db.findUserByTelegramChatId(tgUserId);
+      if (!user) {
+        return sendError(res, 404, 'USER_NOT_BOUND', 'Пользователь с данным Telegram ID не найден в KoW Tracker. Привяжите Telegram в личном кабинете.');
+      }
+
+      if (user.is_approved === 0) {
+        return sendError(res, 403, 'PENDING_APPROVAL', 'Ваш аккаунт ожидает подтверждения офицером');
+      }
+
+      if (user.is_active === 0) {
+        return sendError(res, 403, 'ACCOUNT_BLOCKED', 'Ваш аккаунт заблокирован администрацией');
+      }
+
+      const sessionToken = db.createSession(user.id);
+      db.touchUserActive(user.id);
+
+      const cookieHeader = `token=${encodeURIComponent(sessionToken)}; HttpOnly; SameSite=Lax; Path=/`;
+      res.setHeader('Set-Cookie', cookieHeader);
+
+      const player = user.player_id ? db.getPlayerById(user.player_id) : (db.getPlayersByUserId(user.id)[0] || null);
+
+      return sendJson(res, 200, {
+        success: true,
+        token: sessionToken,
+        user: {
+          id: user.id,
+          username: user.username,
+          rank: user.rank,
+          playerId: user.player_id || (player ? player.id : null),
+          permissions: user.permissions || [],
+          telegramChatId: user.telegram_chat_id || null,
+          telegramUsername: user.telegram_username || null,
+          hasDefaultAdminPassword: user.username === 'admin' ? db.isDefaultAdminPassword() : false
+        },
+        player,
+        telegramUser: validation.user
+      });
+    }
 
     if (pathname === '/api/auth/login' && req.method === 'POST') {
       const { username, password } = body;
@@ -4064,6 +4160,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const token = db.getAppSetting('telegram_bot_token');
       const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      const announcementChatId = db.getAppSetting('telegram_announcement_chat_id');
       const botUsername = db.getAppSetting('telegram_bot_username');
       const pollingStatus = telegram.getTelegramPollingStatus();
 
@@ -4085,6 +4182,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         hasToken: Boolean(token),
         tokenMasked,
         staffChatId: staffChatId || null,
+        announcementChatId: announcementChatId || null,
         botUsername: botUsername || null,
         polling: pollingStatus
       });
@@ -4107,6 +4205,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
         db.setAppSetting('telegram_staff_chat_id', String(body.staffChatId).trim());
       }
 
+      if (body.announcementChatId !== undefined) {
+        db.setAppSetting('telegram_announcement_chat_id', String(body.announcementChatId).trim());
+      }
+
       if (body.botUsername !== undefined) {
         const cleanBotUsername = String(body.botUsername).replace(/^@+/, '').trim();
         db.setAppSetting('telegram_bot_username', cleanBotUsername);
@@ -4114,6 +4216,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const token = db.getAppSetting('telegram_bot_token');
       const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      const announcementChatId = db.getAppSetting('telegram_announcement_chat_id');
       const botUsername = db.getAppSetting('telegram_bot_username');
 
       syncTelegramBotInfoAndPolling().catch(err => {
@@ -4124,6 +4227,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         success: true,
         hasToken: Boolean(token),
         staffChatId: staffChatId || null,
+        announcementChatId: announcementChatId || null,
         botUsername: botUsername || null,
         polling: telegram.getTelegramPollingStatus()
       });
@@ -4326,6 +4430,24 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const pin = `KOW-STAFF-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
       db.createStaffBindToken(pin, expiresAt);
+
+      return sendJson(res, 200, {
+        pin,
+        expiresAt
+      });
+    }
+
+    if (pathname === '/api/telegram/channel-bind-token' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки канала анонсов');
+      }
+
+      const pin = `KOW-CHAN-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      db.createChannelBindToken(pin, expiresAt);
 
       return sendJson(res, 200, {
         pin,

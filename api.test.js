@@ -5693,6 +5693,143 @@ test('Telegram Webhook server screenshot OCR processing and interactive confirma
   }
 });
 
+test('Telegram Mini App HMAC auth and multi-chat announcement channel binding', async () => {
+  const crypto = require('node:crypto');
+  const { startServer, handleTelegramUpdate } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const botToken = '987654321:XYZ_Test_Token_For_TMA';
+  db.setAppSetting('telegram_bot_token', botToken);
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 101 } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Setup users
+    const admin = db.findUserByUsername('admin');
+    const adminSession = db.createSession(admin.id);
+
+    const fighter = db.registerUser({ username: 'tma_soldier', password: 'password123' });
+    db.approveUser(fighter.id, 'r3');
+    db.bindUserTelegram(fighter.id, 555444333, 'tma_soldier_tg');
+
+    // Helper to generate initData
+    function createInitData(userObj, authDate = Math.floor(Date.now() / 1000), customToken = botToken) {
+      const uStr = JSON.stringify(userObj);
+      const pairs = [
+        `auth_date=${authDate}`,
+        `query_id=AAH555`,
+        `user=${uStr}`
+      ];
+      pairs.sort();
+      const dataCheckString = pairs.join('\n');
+      const secretKey = crypto.createHmac('sha256', 'WebAppData').update(customToken).digest();
+      const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+      const params = new URLSearchParams();
+      params.set('query_id', 'AAH555');
+      params.set('user', uStr);
+      params.set('auth_date', String(authDate));
+      params.set('hash', hash);
+      return params.toString();
+    }
+
+    // 2. Test POST /api/auth/telegram-webapp with valid initData
+    const validInitData = createInitData({ id: 555444333, username: 'tma_soldier_tg', first_name: 'Soldier' });
+    const authRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: validInitData })
+    });
+    assert.equal(authRes.status, 200);
+    const authData = await authRes.json();
+    assert.equal(authData.success, true);
+    assert.equal(authData.user.username, 'tma_soldier');
+    assert.ok(authData.token);
+    assert.ok(authRes.headers.get('set-cookie')?.includes('token='));
+
+    // 3. Test POST /api/auth/telegram-webapp with invalid signature
+    const invalidRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: validInitData.replace(/hash=[a-f0-9]{10}/, 'hash=0000000000') })
+    });
+    assert.equal(invalidRes.status, 401);
+
+    // 4. Test POST /api/auth/telegram-webapp with unbound user
+    const unboundInitData = createInitData({ id: 999999999, username: 'unknown_stranger' });
+    const unboundRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: unboundInitData })
+    });
+    assert.equal(unboundRes.status, 404);
+
+    // 5. Test Channel PIN generation (POST /api/telegram/channel-bind-token)
+    const pinRes = await fetch(`${baseUrl}/api/telegram/channel-bind-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminSession}`
+      }
+    });
+    assert.equal(pinRes.status, 200);
+    const pinData = await pinRes.json();
+    assert.ok(pinData.pin.startsWith('KOW-CHAN-'));
+
+    // 6. Test /connect_channel <PIN> command in Telegram
+    sentMessages.length = 0;
+    const channelBindRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: -100777666, type: 'channel', title: 'KoW Announcements' },
+        from: { id: 555444333 },
+        text: `/connect_channel ${pinData.pin}`
+      }
+    });
+    assert.equal(channelBindRes.ok, true);
+    assert.equal(channelBindRes.channelConnected, true);
+    assert.equal(db.getAppSetting('telegram_announcement_chat_id'), '-100777666');
+    assert.ok(sentMessages[0].text.includes('Канал/чат анонсов успешно подключен'));
+
+    // 7. Verify GET & PUT /api/telegram/settings with announcementChatId
+    const getSettingsRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      headers: { Authorization: `Bearer ${adminSession}` }
+    });
+    assert.equal(getSettingsRes.status, 200);
+    const settingsData = await getSettingsRes.json();
+    assert.equal(settingsData.announcementChatId, '-100777666');
+
+    // Update announcementChatId via PUT
+    const putSettingsRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminSession}`
+      },
+      body: JSON.stringify({ announcementChatId: '-100123456789' })
+    });
+    assert.equal(putSettingsRes.status, 200);
+    const putData = await putSettingsRes.json();
+    assert.equal(putData.announcementChatId, '-100123456789');
+    assert.equal(db.getAppSetting('telegram_announcement_chat_id'), '-100123456789');
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+
 
 
 

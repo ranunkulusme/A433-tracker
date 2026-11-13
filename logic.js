@@ -4054,6 +4054,75 @@
     };
   }
 
+  function validateTelegramWebAppData(initData, botToken, options = {}) {
+    if (!initData || !botToken) {
+      return { valid: false, error: 'missing_arguments' };
+    }
+
+    try {
+      const cryptoModule = typeof require === 'function' ? require('node:crypto') : (typeof globalThis !== 'undefined' ? globalThis.crypto : null);
+      if (!cryptoModule || typeof cryptoModule.createHmac !== 'function') {
+        return { valid: false, error: 'crypto_not_supported' };
+      }
+
+      const params = new URLSearchParams(initData);
+      const hash = params.get('hash');
+      if (!hash) {
+        return { valid: false, error: 'missing_hash' };
+      }
+
+      const authDate = Number(params.get('auth_date')) || 0;
+      const nowSec = options.nowSec !== undefined ? options.nowSec : Math.floor(Date.now() / 1000);
+      const maxAgeSec = options.maxAgeSec !== undefined ? options.maxAgeSec : 86400;
+
+      if (maxAgeSec > 0) {
+        if (!authDate || (nowSec - authDate) > maxAgeSec || (authDate - nowSec) > 300) {
+          return { valid: false, error: 'expired' };
+        }
+      }
+
+      const pairs = [];
+      for (const [key, val] of params.entries()) {
+        if (key !== 'hash') {
+          pairs.push(`${key}=${val}`);
+        }
+      }
+      pairs.sort();
+      const dataCheckString = pairs.join('\n');
+
+      const secretKey = cryptoModule.createHmac('sha256', 'WebAppData').update(botToken).digest();
+      const calculatedHash = cryptoModule.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+      let hashesMatch = false;
+      if (typeof cryptoModule.timingSafeEqual === 'function' && hash.length === 64 && calculatedHash.length === 64) {
+        hashesMatch = cryptoModule.timingSafeEqual(Buffer.from(calculatedHash, 'hex'), Buffer.from(hash, 'hex'));
+      } else {
+        hashesMatch = (calculatedHash === hash);
+      }
+
+      if (!hashesMatch) {
+        return { valid: false, error: 'invalid_hash' };
+      }
+
+      let user = null;
+      const userRaw = params.get('user');
+      if (userRaw) {
+        try {
+          user = JSON.parse(userRaw);
+        } catch (_) {}
+      }
+
+      return {
+        valid: true,
+        user,
+        authDate,
+        queryId: params.get('query_id') || null
+      };
+    } catch (err) {
+      return { valid: false, error: err.message };
+    }
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -4165,6 +4234,7 @@
     formatTelegramOcrConfirmationMessage,
     getTelegramOcrConfirmationKeyboard,
     getTelegramStockFallbackKeyboard,
+    validateTelegramWebAppData,
     escapeHtml,
   };
 });

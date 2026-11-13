@@ -2617,6 +2617,37 @@ function verifyAndBindStaffChat(token, chatId) {
   return { success: true, chatId };
 }
 
+// ─── ANNOUNCEMENT CHANNEL BINDING ────────────────────────────
+function createChannelBindToken(token, expiresAt) {
+  if (!token) return false;
+  setAppSetting('telegram_channel_bind_token', token);
+  setAppSetting('telegram_channel_bind_expires_at', expiresAt);
+  return true;
+}
+
+function verifyAndBindChannelChat(token, chatId) {
+  if (!token || !chatId) {
+    return { success: false, reason: 'invalid' };
+  }
+  const currentToken = getAppSetting('telegram_channel_bind_token');
+  const expiresAt = getAppSetting('telegram_channel_bind_expires_at');
+
+  if (!currentToken || currentToken.toUpperCase() !== token.toUpperCase()) {
+    return { success: false, reason: 'invalid' };
+  }
+
+  if (expiresAt && new Date(expiresAt).getTime() < Date.now()) {
+    return { success: false, reason: 'expired' };
+  }
+
+  // Valid: save announcement channel chat ID and clear token
+  setAppSetting('telegram_announcement_chat_id', String(chatId));
+  setAppSetting('telegram_channel_bind_token', '');
+  setAppSetting('telegram_channel_bind_expires_at', '');
+
+  return { success: true, chatId };
+}
+
 // ─── USER TIMEZONE & EVENT MORNING REMINDERS ─────────────────
 function updateUserTimezone(userId, { timezone = 'Europe/Moscow', timezoneOffset = 3 } = {}) {
   const numId = Number(userId);
@@ -2724,6 +2755,8 @@ module.exports = {
   toggleTelegramNotifications,
   createStaffBindToken,
   verifyAndBindStaffChat,
+  createChannelBindToken,
+  verifyAndBindChannelChat,
   getMieruSettings,
   saveMieruSettings,
   touchUserActive,
