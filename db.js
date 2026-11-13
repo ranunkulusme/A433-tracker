@@ -414,20 +414,36 @@ function getUsers() {
 
 function updateUser(userId, updates = {}) {
   const db = getDb();
-  const existing = findUserById(userId);
+  const uId = Number(userId);
+  const existing = findUserById(uId);
   if (!existing) return null;
   const rank = updates.rank !== undefined ? updates.rank : existing.rank;
   const isApproved = updates.is_approved !== undefined ? updates.is_approved : existing.is_approved;
-  const playerId = updates.player_id !== undefined ? updates.player_id : (updates.playerId !== undefined ? updates.playerId : existing.player_id);
+  const rawPlayerId = updates.player_id !== undefined ? updates.player_id : (updates.playerId !== undefined ? updates.playerId : existing.player_id);
+  const playerId = (rawPlayerId !== undefined && rawPlayerId !== null && rawPlayerId !== '') ? Number(rawPlayerId) : null;
   const permissionsStr = updates.permissions !== undefined
     ? JSON.stringify(parsePermissions(updates.permissions))
     : JSON.stringify(parsePermissions(existing.permissions));
 
   db.prepare(`
     UPDATE users SET rank = ?, is_approved = ?, player_id = ?, permissions = ? WHERE id = ?
-  `).run(rank, isApproved, playerId, permissionsStr, userId);
+  `).run(rank, isApproved, playerId, permissionsStr, uId);
 
-  return findUserById(userId);
+  // Sync players.user_id if player_id was specified
+  if (updates.player_id !== undefined || updates.playerId !== undefined) {
+    if (playerId) {
+      db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(uId, playerId);
+      if (existing.player_id && Number(existing.player_id) !== playerId) {
+        db.prepare('UPDATE players SET user_id = NULL WHERE id = ? AND user_id = ?').run(existing.player_id, uId);
+      }
+    } else {
+      if (existing.player_id) {
+        db.prepare('UPDATE players SET user_id = NULL WHERE id = ? AND user_id = ?').run(existing.player_id, uId);
+      }
+    }
+  }
+
+  return findUserById(uId);
 }
 
 function changePassword(userId, newPassword) {
@@ -597,22 +613,54 @@ function getPlayerById(id) {
 function getPlayersByUserId(userId) {
   if (userId === undefined || userId === null) return [];
   const db = getDb();
-  const playerRows = db.prepare(`
+  const uId = Number(userId);
+
+  let playerRows = db.prepare(`
     SELECT p.*, u.username as owner_username, u.rank as owner_rank
     FROM players p
     LEFT JOIN users u ON u.id = p.user_id
     WHERE p.user_id = ?
     ORDER BY p.id ASC
-  `).all(Number(userId));
+  `).all(uId);
+
+  // If no players found by user_id, check if user is linked via users.player_id
+  if (playerRows.length === 0) {
+    const userRow = db.prepare('SELECT id, player_id FROM users WHERE id = ?').get(uId);
+    if (userRow && userRow.player_id) {
+      const linked = db.prepare(`
+        SELECT p.*, u.username as owner_username, u.rank as owner_rank
+        FROM players p
+        LEFT JOIN users u ON u.id = p.user_id
+        WHERE p.id = ?
+      `).get(userRow.player_id);
+
+      if (linked) {
+        // Auto-heal: set user_id if null or empty, or already belongs to this user
+        if (!linked.user_id || linked.user_id === uId) {
+          db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(uId, linked.id);
+          linked.user_id = uId;
+        }
+        playerRows = [linked];
+      }
+    }
+  } else {
+    // If user has sectors but user.player_id is missing, set it to the first sector
+    const userRow = db.prepare('SELECT player_id FROM users WHERE id = ?').get(uId);
+    if (userRow && !userRow.player_id && playerRows.length > 0) {
+      db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(playerRows[0].id, uId);
+    }
+  }
+
   if (playerRows.length === 0) return [];
 
+  const playerIds = playerRows.map(p => p.id);
+  const placeholders = playerIds.map(() => '?').join(',');
   const officerRows = db.prepare(`
     SELECT po.*
     FROM player_officers po
-    JOIN players p ON p.id = po.player_id
-    WHERE p.user_id = ?
+    WHERE po.player_id IN (${placeholders})
     ORDER BY po.rowid ASC
-  `).all(Number(userId));
+  `).all(...playerIds);
 
   const officersByPlayer = new Map();
   for (const o of officerRows) {
@@ -669,9 +717,15 @@ function setUserActiveSector(userId, sectorId) {
   const uId = Number(userId);
   const sId = Number(sectorId);
 
-  const owned = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(sId, uId);
-  if (!owned) {
+  let target = db.prepare('SELECT id, user_id FROM players WHERE id = ?').get(sId);
+  if (!target) {
+    return { ok: false, error: 'PLAYER_NOT_FOUND' };
+  }
+  if (target.user_id && Number(target.user_id) !== uId) {
     return { ok: false, error: 'NOT_OWNER' };
+  }
+  if (!target.user_id) {
+    db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(uId, sId);
   }
 
   db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(sId, uId);

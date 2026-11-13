@@ -365,7 +365,15 @@ function handleOfflineApiRequest(url, method, bodyObj) {
     }
     if (url === '/api/my-profile') {
       const pl = myCabinetProfile || (state.players || []).find(p => p.id === currentUser?.playerId);
-      if (pl) return pl;
+      if (pl) {
+        const sectors = getUserSectors();
+        return {
+          ...pl,
+          sectors: sectors.length ? sectors : [pl],
+          activeSectorId: pl.id,
+          user: currentUser
+        };
+      }
       return { offline: true };
     }
     if (url === '/api/catalog') return state.officerCatalog || [];
@@ -1665,25 +1673,48 @@ async function renderMyCabinet() {
     profile = await apiFetch('/api/my-profile');
   } catch (err) {
     if (err.status === 404 || err.message === 'NO_LINKED_PLAYER') {
-      myCabinetProfile = null;
-      myCabinetSectors = [];
-      c.innerHTML = `
-        <div class="section-header">
-          <div class="section-title">👤 ${typeof t === 'function' ? t('cabinet.title') : 'Личный кабинет'}</div>
-        </div>
-        <div class="sim-box cabinet-empty-card">
-          <div style="font-size:36px;margin-bottom:12px">🏰</div>
-          <h3 style="margin-bottom:8px">${typeof t === 'function' ? t('cabinet.no_sectors_title') : 'У вас пока нет секторов'}</h3>
-          <p style="color:var(--text2);font-size:13px;max-width:440px;margin-bottom:20px;text-align:center">
-            ${typeof t === 'function' ? t('cabinet.no_sectors_desc') : 'Добавьте свою первую базу для отслеживания прокачки офицеров, запасов и участия в ивентах альянса!'}
-          </p>
-          <button type="button" class="btn-primary" onclick="openAddSectorModal()">${typeof t === 'function' ? t('cabinet.btn_create_first_sector') : '+ Создать свой первый сектор'}</button>
-        </div>
-      `;
+      const fallbackSectors = getUserSectors();
+      if (fallbackSectors && fallbackSectors.length > 0) {
+        const active = fallbackSectors.find(s => Number(s.id) === Number(currentUser?.playerId)) || fallbackSectors[0];
+        profile = { ...active, sectors: fallbackSectors, activeSectorId: active.id, user: currentUser };
+      } else {
+        myCabinetProfile = null;
+        myCabinetSectors = [];
+        c.innerHTML = `
+          <div class="section-header">
+            <div class="section-title">👤 ${typeof t === 'function' ? t('cabinet.title') : 'Личный кабинет'}</div>
+          </div>
+          <div class="sim-box cabinet-empty-card">
+            <div style="font-size:36px;margin-bottom:12px">🏰</div>
+            <h3 style="margin-bottom:8px">${typeof t === 'function' ? t('cabinet.no_sectors_title') : 'У вас пока нет секторов'}</h3>
+            <p style="color:var(--text2);font-size:13px;max-width:440px;margin-bottom:20px;text-align:center">
+              ${typeof t === 'function' ? t('cabinet.no_sectors_desc') : 'Добавьте свою первую базу для отслеживания прокачки офицеров, запасов и участия в ивентах альянса!'}
+            </p>
+            <button type="button" class="btn-primary" onclick="openAddSectorModal()">${typeof t === 'function' ? t('cabinet.btn_create_first_sector') : '+ Создать свой первый сектор'}</button>
+          </div>
+        `;
+        return;
+      }
+    } else {
+      c.innerHTML = `<div class="empty-state"><p>Ошибка загрузки профиля: ${escapeHtml(err.message)}</p></div>`;
       return;
     }
-    c.innerHTML = `<div class="empty-state"><p>Ошибка загрузки профиля: ${escapeHtml(err.message)}</p></div>`;
-    return;
+  }
+
+  // Ensure sectors array is properly populated if profile is loaded
+  if (profile) {
+    if (!profile.sectors || profile.sectors.length === 0) {
+      if (profile.id) {
+        profile.sectors = [profile];
+        profile.activeSectorId = profile.id;
+      } else {
+        const fallbackSectors = getUserSectors();
+        if (fallbackSectors && fallbackSectors.length > 0) {
+          profile.sectors = fallbackSectors;
+          profile.activeSectorId = currentUser?.playerId || fallbackSectors[0].id;
+        }
+      }
+    }
   }
 
   if (!profile || !profile.sectors || profile.sectors.length === 0) {
@@ -3346,6 +3377,7 @@ async function submitAddSector() {
 
       if (currentUser) {
         currentUser.playerId = created.id;
+        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
       }
       state.currentPlayerId = created.id;
     }
