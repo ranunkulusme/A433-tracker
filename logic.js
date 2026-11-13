@@ -3650,6 +3650,100 @@
     };
   }
 
+  /**
+   * Formats ISO date into human-readable relative time string:
+   * "только что", "X мин. назад", "X ч. назад", "вчера", "X дн. назад", "X нед. назад", "X мес. назад", "более года назад"
+   * Supports 'ru', 'en', 'de' language codes via options.lang.
+   */
+  function formatRelativeTime(dateIso, now = new Date(), options = {}) {
+    let lang = (typeof options === 'string' ? options : (options && options.lang)) || 'ru';
+    if (!['ru', 'en', 'de'].includes(lang)) {
+      lang = 'ru';
+    }
+
+    const labels = {
+      ru: {
+        never: 'Никогда',
+        justNow: 'только что',
+        minAgo: n => `${n} мин. назад`,
+        hourAgo: n => `${n} ч. назад`,
+        yesterday: 'вчера',
+        dayAgo: n => `${n} дн. назад`,
+        weekAgo: n => `${n} нед. назад`,
+        monthAgo: n => `${n} мес. назад`,
+        yearAgo: 'более года назад'
+      },
+      en: {
+        never: 'Never',
+        justNow: 'just now',
+        minAgo: n => `${n}m ago`,
+        hourAgo: n => `${n}h ago`,
+        yesterday: 'yesterday',
+        dayAgo: n => `${n}d ago`,
+        weekAgo: n => `${n}w ago`,
+        monthAgo: n => `${n}mo ago`,
+        yearAgo: 'more than a year ago'
+      },
+      de: {
+        never: 'Nie',
+        justNow: 'gerade eben',
+        minAgo: n => `vor ${n} Min.`,
+        hourAgo: n => `vor ${n} Std.`,
+        yesterday: 'gestern',
+        dayAgo: n => `vor ${n} Tg.`,
+        weekAgo: n => `vor ${n} Wo.`,
+        monthAgo: n => `vor ${n} Mon.`,
+        yearAgo: 'vor mehr als einem Jahr'
+      }
+    };
+
+    const l = labels[lang] || labels.ru;
+
+    if (!dateIso) return l.never;
+    const targetDate = dateIso instanceof Date ? dateIso : new Date(dateIso);
+    if (isNaN(targetDate.getTime())) return l.never;
+
+    const nowDate = now instanceof Date ? now : new Date(now);
+    if (isNaN(nowDate.getTime())) return l.never;
+
+    const diffMs = nowDate.getTime() - targetDate.getTime();
+    if (diffMs <= 0) return l.justNow;
+
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMin < 1) {
+      return l.justNow;
+    }
+    if (diffMin < 60) {
+      return l.minAgo(diffMin);
+    }
+    if (diffHours < 24) {
+      return l.hourAgo(diffHours);
+    }
+    if (diffDays === 1) {
+      return l.yesterday;
+    }
+    if (diffDays < 7) {
+      return l.dayAgo(diffDays);
+    }
+
+    const diffWeeks = Math.floor(diffDays / 7);
+    if (diffDays < 30) {
+      return l.weekAgo(diffWeeks);
+    }
+
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffDays < 365) {
+      return l.monthAgo(diffMonths);
+    }
+
+    return l.yearAgo;
+  }
+
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -3748,6 +3842,7 @@
     parseRouteFromHash,
     parseTelegramStockCommand,
     formatStockUpdateSuccessMessage,
+    formatRelativeTime,
     escapeHtml,
   };
 });

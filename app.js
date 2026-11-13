@@ -4428,6 +4428,7 @@ async function renderUsers() {
               <th>${typeof t === 'function' ? t('users.th_rank') : 'Ранг'}</th>
               <th>${typeof t === 'function' ? t('users.th_permissions') : 'Права доступа'}</th>
               <th>${typeof t === 'function' ? t('users.th_status') : 'Статус'}</th>
+              <th>${typeof t === 'function' ? t('users.th_activity') : 'Активность'}</th>
               <th>${typeof t === 'function' ? t('users.th_registered') : 'Регистрация'}</th>
               <th style="text-align:right">${typeof t === 'function' ? t('common.actions') : 'Действия'}</th>
             </tr>
@@ -4491,12 +4492,41 @@ async function renderUsers() {
                 }
               }
 
+              const userLastActive = u.lastActiveAt || u.last_active_at;
+              const activeLang = typeof currentLang !== 'undefined' ? currentLang : 'ru';
+              const relativeText = userLastActive && typeof logic?.formatRelativeTime === 'function'
+                ? logic.formatRelativeTime(userLastActive, new Date(), { lang: activeLang })
+                : '';
+
+              let activityHtml = '';
+              if (u.isOnline) {
+                activityHtml = `
+                  <span class="badge" style="background:rgba(46,160,67,0.15);border:1px solid rgba(46,160,67,0.35);color:#2ea043;font-size:12px;padding:3px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:5px;font-weight:600">
+                    <span class="user-status-dot online" style="margin:0"></span> ${typeof t === 'function' ? t('users.status_online') : 'В сети'}
+                  </span>
+                `;
+              } else if (userLastActive) {
+                activityHtml = `
+                  <span style="color:var(--text2);font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px" title="${formatDateTime(userLastActive)}">
+                    🕒 ${escapeHtml(relativeText || formatDateTime(userLastActive))}
+                  </span>
+                `;
+              } else {
+                activityHtml = `<span style="color:var(--text3);font-size:12px">${typeof t === 'function' ? t('users.time_never') : 'Никогда'}</span>`;
+              }
+
+              const dotTooltip = u.isOnline
+                ? (typeof t === 'function' ? t('users.tooltip_online') : 'В сети (онлайн)')
+                : (userLastActive
+                    ? `${typeof t === 'function' ? t('users.tooltip_last_seen', { time: relativeText }) : `Был в сети: ${relativeText}`} (${formatDateTime(userLastActive)})`
+                    : (typeof t === 'function' ? t('users.tooltip_offline') : 'Не был в сети'));
+
               return `
                 <tr class="${isBlocked ? 'row-blocked' : ''}">
                   <td style="color:var(--text3);font-family:var(--mono)">#${u.id}</td>
                   <td style="white-space:nowrap">
                     <span class="user-status-dot ${u.isOnline ? 'online' : 'offline'}"
-                          title="${u.isOnline ? (typeof t === 'function' ? t('users.tooltip_online') : 'В сети (онлайн)') : (u.lastActiveAt ? (typeof t === 'function' ? t('users.tooltip_last_seen', { time: formatDateTime(u.lastActiveAt) }) : `Был в сети: ${formatDateTime(u.lastActiveAt)}`) : (typeof t === 'function' ? t('users.tooltip_offline') : 'Не был в сети'))}"></span>
+                          title="${escapeHtml(dotTooltip)}"></span>
                     <span style="font-weight:600;color:var(--text)">${escapeHtml(u.username)}</span>
                   </td>
                   <td>${u.playerName ? (u.playerId ? `<a href="#player-${u.playerId}" style="color:var(--accent);font-weight:600;text-decoration:none" title="Перейти к сектору" onclick="event.preventDefault();navigate('player_detail',{id:${u.playerId}})">${escapeHtml(u.playerName)}</a>` : escapeHtml(u.playerName)) : '<span style="color:var(--text3)">—</span>'}</td>
@@ -4509,6 +4539,7 @@ async function renderUsers() {
                   </td>
                   <td>${permsHtml}</td>
                   <td>${statusBadge}</td>
+                  <td>${activityHtml}</td>
                   <td style="color:var(--text2);font-size:12px">${formatDateTime(u.createdAt || u.created_at)}</td>
                   <td style="text-align:right;white-space:nowrap">
                     <button class="action-btn" onclick="openUserPermissionsModal(${u.id})" title="Настроить права">${typeof t === 'function' ? t('users.btn_rights') : '🛡️ Права'}</button>
@@ -11222,9 +11253,16 @@ async function submitSeasonSchedule() {
 // ─── EVENT MODAL ─────────────────────────────────────────────
 let editEventId = null;
 let eventAssignments = []; // [{place, playerId, officerId, actualCoupons?}]
+let isSavingEvent = false;
 
 function openEventModal(eventId=null) {
   editEventId = eventId;
+  isSavingEvent = false;
+  const saveBtn = document.getElementById('btn-save-event');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = typeof t === 'function' ? t('common.save') : 'Сохранить';
+  }
   document.getElementById('modal-event-title').textContent = eventId ? 'Редактировать ивент' : 'Новый ивент';
 
   // populate event type select
@@ -11487,6 +11525,8 @@ async function autoPickWithRegistrationsServer() {
 }
 
 async function saveEvent() {
+  if (isSavingEvent) return;
+
   const typeId = parseInt(document.getElementById('fe-type').value);
   const dateFrom = document.getElementById('fe-from').value;
   const dateTo = document.getElementById('fe-to').value;
@@ -11494,6 +11534,14 @@ async function saveEvent() {
 
   if (!typeId) { toast('Выберите тип ивента','error'); return; }
   if (!dateFrom || !dateTo) { toast('Укажите даты','error'); return; }
+
+  const saveBtn = document.getElementById('btn-save-event');
+  isSavingEvent = true;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.dataset.origText = saveBtn.textContent;
+    saveBtn.textContent = typeof t === 'function' ? t('common.saving') : 'Сохранение...';
+  }
 
   const assignments = eventAssignments.filter(a=>a.playerId).map(a=>({
     place: a.place,
@@ -11526,6 +11574,12 @@ async function saveEvent() {
     navigate('calendar');
   } catch (err) {
     toast('Ошибка сохранения ивента: ' + err.message, 'error');
+  } finally {
+    isSavingEvent = false;
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = saveBtn.dataset.origText || (typeof t === 'function' ? t('common.save') : 'Сохранить');
+    }
   }
 }
 

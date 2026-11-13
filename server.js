@@ -1306,6 +1306,29 @@ function serveStaticFile(req, res, staticDir, pathname) {
   });
 }
 
+// Sliding in-memory cache for deduplicating rapid duplicate event creation requests (double-clicks / retries)
+const recentCreatedEventsCache = [];
+
+function getRecentCreatedEvent(dedupeKey, ttlMs = 5000) {
+  const now = Date.now();
+  while (recentCreatedEventsCache.length > 0 && (now - recentCreatedEventsCache[0].timestamp > 15000)) {
+    recentCreatedEventsCache.shift();
+  }
+  const found = recentCreatedEventsCache.find(r => r.key === dedupeKey && (now - r.timestamp < ttlMs));
+  if (!found || !found.saved || !found.saved.id) return null;
+  try {
+    const existingInDb = db.getEventById(Number(found.saved.id));
+    if (!existingInDb) return null;
+  } catch (e) {
+    return null;
+  }
+  return found;
+}
+
+function recordRecentCreatedEvent(dedupeKey, saved) {
+  recentCreatedEventsCache.push({ key: dedupeKey, saved, timestamp: Date.now() });
+}
+
 function createRequestHandler(staticDir, s3Manager = null) {
   return async (req, res) => {
     try {
@@ -2308,12 +2331,29 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/events' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const isNew = !body.id;
+
+      // Idempotent deduplication for rapid double-clicks on event creation
+      const dedupeKey = isNew
+        ? `${Number(body.typeId)}_${String(body.dateFrom)}_${String(body.dateTo)}_${Number(req.user?.id || 0)}`
+        : null;
+
+      if (isNew && dedupeKey) {
+        const existing = getRecentCreatedEvent(dedupeKey, 5000);
+        if (existing && existing.saved) {
+          console.log(`[Events] Deduplicated duplicate creation request for key: ${dedupeKey} (event #${existing.saved.id})`);
+          return sendJson(res, 200, existing.saved);
+        }
+      }
+
       const previousEvent = body.id ? db.getEventById(Number(body.id)) : null;
       const previousAssignments = previousEvent ? (previousEvent.assignments || []) : [];
 
       const saved = db.saveEvent(body);
 
       if (isNew && saved && saved.id) {
+        if (dedupeKey) {
+          recordRecentCreatedEvent(dedupeKey, saved);
+        }
         try {
           const eventTypes = db.getEventTypes();
           const et = eventTypes.find(t => t.id === saved.typeId);
@@ -3657,6 +3697,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     mieru.stopMieruProcess();
     telegram.stopTelegramPolling();
     telegram.setDefaultProxyUrl(null);
+    recentCreatedEventsCache.length = 0;
     return new Promise((resolve, reject) => {
       originalClose(err => {
         if (callback) callback(err);

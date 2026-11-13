@@ -500,7 +500,10 @@ const I18N_RESOURCES = {
         "stat_blocked": "Заблокировано",
         "tooltip_online": "В сети (онлайн)",
         "tooltip_offline": "Не был в сети",
-        "tooltip_last_seen": "Был в сети: {{time}}"
+        "tooltip_last_seen": "Был в сети: {{time}}",
+        "th_activity": "Активность",
+        "status_online": "В сети",
+        "time_never": "Никогда"
       }
     }
   },
@@ -999,7 +1002,10 @@ const I18N_RESOURCES = {
         "stat_blocked": "Blocked",
         "tooltip_online": "Online",
         "tooltip_offline": "Never seen online",
-        "tooltip_last_seen": "Last seen: {{time}}"
+        "tooltip_last_seen": "Last seen: {{time}}",
+        "th_activity": "Activity",
+        "status_online": "Online",
+        "time_never": "Never"
       }
     }
   },
@@ -1498,7 +1504,10 @@ const I18N_RESOURCES = {
         "stat_blocked": "Gesperrt",
         "tooltip_online": "Online",
         "tooltip_offline": "Nie online gesehen",
-        "tooltip_last_seen": "Zuletzt online: {{time}}"
+        "tooltip_last_seen": "Zuletzt online: {{time}}",
+        "th_activity": "Aktivität",
+        "status_online": "Online",
+        "time_never": "Nie"
       }
     }
   }

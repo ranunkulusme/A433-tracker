@@ -3841,6 +3841,33 @@ test('API Notification Triggers: event creation broadcasts registration opened',
     assert.ok(broadcastMsg.text.includes(et.name));
     assert.ok(broadcastMsg.text.includes('2026-11-20'));
     assert.ok(broadcastMsg.text.includes('Подайте заявку'));
+
+    // Send immediate duplicate creation request with identical params (simulating rapid double click)
+    const duplicateRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        typeId: et.id,
+        dateFrom: '2026-11-20',
+        dateTo: '2026-11-22',
+        note: 'Season Championship'
+      })
+    });
+    assert.equal(duplicateRes.status, 200);
+    const createdEvent = await createRes.json();
+    const dupeEvent = await duplicateRes.json();
+    assert.equal(dupeEvent.id, createdEvent.id, 'Duplicate request must return existing event ID');
+
+    // Assert NO additional messages were sent (still exactly 2 messages)
+    assert.equal(sentMessages.length, 2, 'Duplicate event creation must not send duplicate notifications');
+
+    // Assert only 1 event exists in database with this date
+    const allEvents = db.getEvents();
+    const matching = allEvents.filter(e => e.typeId === et.id && e.dateFrom === '2026-11-20');
+    assert.equal(matching.length, 1, 'Only one event record must exist in DB');
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();

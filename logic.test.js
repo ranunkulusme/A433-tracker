@@ -3481,9 +3481,68 @@ test('DEFAULT_NOTIFICATION_TEMPLATES contains event_morning_briefing template', 
   assert.ok(rendered.includes('Элизабет'));
 });
 
+test('formatRelativeTime formats user activity across minutes, hours, days, weeks, months', () => {
+  const { formatRelativeTime } = require('./logic.js');
+  assert.equal(typeof formatRelativeTime, 'function', 'formatRelativeTime must be exported');
 
+  const fixedNow = new Date('2026-11-13T12:00:00.000Z');
 
+  // 1. Empty and invalid inputs
+  assert.equal(formatRelativeTime(null, fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime(undefined, fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime('', fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime('invalid-date', fixedNow), 'Никогда');
+  assert.equal(formatRelativeTime(null, fixedNow, { lang: 'en' }), 'Never');
+  assert.equal(formatRelativeTime(null, fixedNow, { lang: 'de' }), 'Nie');
 
+  // 2. Just now (< 1 min)
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:45.000Z'), fixedNow), 'только что');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T12:00:05.000Z'), fixedNow), 'только что'); // Future/clock drift
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:45.000Z'), fixedNow, { lang: 'en' }), 'just now');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:45.000Z'), fixedNow, { lang: 'de' }), 'gerade eben');
 
+  // 3. Minutes (1..59 min)
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:59:00.000Z'), fixedNow), '1 мин. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:55:00.000Z'), fixedNow), '5 мин. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:15:00.000Z'), fixedNow), '45 мин. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:55:00.000Z'), fixedNow, { lang: 'en' }), '5m ago');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:55:00.000Z'), fixedNow, { lang: 'de' }), 'vor 5 Min.');
 
+  // 4. Hours (1..23 h)
+  assert.equal(formatRelativeTime(new Date('2026-11-13T11:00:00.000Z'), fixedNow), '1 ч. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T09:00:00.000Z'), fixedNow), '3 ч. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T15:00:00.000Z'), fixedNow), '21 ч. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T09:00:00.000Z'), fixedNow, { lang: 'en' }), '3h ago');
+  assert.equal(formatRelativeTime(new Date('2026-11-13T09:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 3 Std.');
+
+  // 5. Yesterday (24..47 h / 1 day)
+  assert.equal(formatRelativeTime(new Date('2026-11-12T11:00:00.000Z'), fixedNow), 'вчера');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T04:00:00.000Z'), fixedNow), 'вчера');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T11:00:00.000Z'), fixedNow, { lang: 'en' }), 'yesterday');
+  assert.equal(formatRelativeTime(new Date('2026-11-12T11:00:00.000Z'), fixedNow, { lang: 'de' }), 'gestern');
+
+  // 6. Days (2..6 days)
+  assert.equal(formatRelativeTime(new Date('2026-11-11T12:00:00.000Z'), fixedNow), '2 дн. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-08T12:00:00.000Z'), fixedNow), '5 дн. назад');
+  assert.equal(formatRelativeTime(new Date('2026-11-08T12:00:00.000Z'), fixedNow, { lang: 'en' }), '5d ago');
+  assert.equal(formatRelativeTime(new Date('2026-11-08T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 5 Tg.');
+
+  // 7. Weeks (7..29 days)
+  assert.equal(formatRelativeTime(new Date('2026-11-06T12:00:00.000Z'), fixedNow), '1 нед. назад');
+  assert.equal(formatRelativeTime(new Date('2026-10-30T12:00:00.000Z'), fixedNow), '2 нед. назад');
+  assert.equal(formatRelativeTime(new Date('2026-10-23T12:00:00.000Z'), fixedNow), '3 нед. назад');
+  assert.equal(formatRelativeTime(new Date('2026-10-30T12:00:00.000Z'), fixedNow, { lang: 'en' }), '2w ago');
+  assert.equal(formatRelativeTime(new Date('2026-10-30T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 2 Wo.');
+
+  // 8. Months (30..364 days)
+  assert.equal(formatRelativeTime(new Date('2026-10-01T12:00:00.000Z'), fixedNow), '1 мес. назад');
+  assert.equal(formatRelativeTime(new Date('2026-08-01T12:00:00.000Z'), fixedNow), '3 мес. назад');
+  assert.equal(formatRelativeTime(new Date('2026-08-01T12:00:00.000Z'), fixedNow, { lang: 'en' }), '3mo ago');
+  assert.equal(formatRelativeTime(new Date('2026-08-01T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor 3 Mon.');
+
+  // 9. Over a year (>= 365 days)
+  assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow), 'более года назад');
+  assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow, { lang: 'en' }), 'more than a year ago');
+  assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor mehr als einem Jahr');
+});
 
