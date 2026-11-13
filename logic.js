@@ -3845,13 +3845,15 @@
     }
 
     events.slice(0, 5).forEach((ev, idx) => {
-      const title = ev.title || ev.name || `Событие #${ev.id}`;
+      const title = ev.title || ev.name || ev.eventTypeName || `Событие #${ev.id}`;
       const dateStr = ev.dateFrom ? new Date(ev.dateFrom).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—';
+      const dateToStr = ev.dateTo ? new Date(ev.dateTo).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
+      const fullDate = dateToStr ? `${dateStr} — ${dateToStr}` : dateStr;
 
       const assignment = (ev.assignments || []).find(a => Number(a.playerId) === Number(playerId));
       const registration = (ev.registrations || []).find(r => Number(r.playerId) === Number(playerId));
 
-      let statusLine = '📢 <i>Открыта регистрация</i>';
+      let statusLine = '📢 <i>Открыта регистрация (выберите кнопку записи ниже)</i>';
       if (mode === 'past') {
         if (assignment) {
           const finalPlace = assignment.actualPlace || assignment.place;
@@ -3868,19 +3870,29 @@
           statusLine = `🎯 <b>Вам назначено Место #${place}</b>${coup}${rsvp}`;
         } else if (registration) {
           const desPlace = registration.desiredPlace ? `#${registration.desiredPlace}` : 'любое';
-          statusLine = `⏳ <i>Подана заявка (желаемое место: ${desPlace})</i>`;
+          statusLine = `✓ <b>Заявка подана</b> (желаемое место: ${desPlace})`;
         }
       }
 
-      parts.push(`${idx + 1}. <b>${escapeHtml(title)}</b> (${dateStr})`);
+      parts.push(`${idx + 1}. 🏆 <b>${escapeHtml(title)}</b> (${fullDate})`);
       parts.push(`   ${statusLine}\n`);
     });
 
     return parts.join('\n').trim();
   }
 
-  function getTelegramEventsKeyboard({ mode = 'upcoming' } = {}) {
+  function getTelegramEventsKeyboard({ events = [], mode = 'upcoming' } = {}) {
     const keyboard = [];
+
+    if (mode === 'upcoming' && events && events.length) {
+      events.slice(0, 4).forEach(ev => {
+        const title = ev.title || ev.name || ev.eventTypeName || `Событие #${ev.id}`;
+        keyboard.push([
+          { text: `📝 Записаться: ${title}`, callback_data: `cmd_ev_view:${ev.id}` }
+        ]);
+      });
+    }
+
     if (mode === 'past') {
       keyboard.push([
         { text: '◎ Предстоящие события', callback_data: 'cmd_events_upcoming' }
@@ -3896,17 +3908,110 @@
     return { inline_keyboard: keyboard };
   }
 
-  function getTelegramMainMenuKeyboard({ isStaff = false } = {}) {
-    const keyboard = [
-      [
-        { text: '👤 Мой сектор', callback_data: 'cmd_me' },
-        { text: '📊 Дефицит', callback_data: 'cmd_deficit' }
-      ],
-      [
-        { text: '📅 Мои ивенты', callback_data: 'cmd_events' },
-        { text: '📦 Обновить склад', callback_data: 'cmd_stock_help' }
-      ]
-    ];
+  function formatTelegramEventDetailMessage({ event, eventType, registration, assignment }) {
+    const title = event.title || event.name || eventType?.name || `Событие #${event.id}`;
+    const dateStr = event.dateFrom ? new Date(event.dateFrom).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—';
+    const dateToStr = event.dateTo ? new Date(event.dateTo).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
+    const fullDate = dateToStr ? `${dateStr} — ${dateToStr}` : dateStr;
+
+    const parts = [];
+    parts.push(`🏆 <b>${escapeHtml(title)}</b> (${fullDate})\n`);
+
+    if (event.note) {
+      parts.push(`📝 <i>${escapeHtml(event.note)}</i>\n`);
+    }
+
+    const places = eventType?.places || [];
+    if (places.length) {
+      parts.push('<b>Регламент наград (купоны):</b>');
+      places.slice(0, 5).forEach((p, idx) => {
+        const placeNum = p.place || (idx + 1);
+        const coupons = p.coupons ? `${p.coupons.toLocaleString('ru-RU')} 🎟️` : '—';
+        const label = p.label ? ` (${escapeHtml(p.label)})` : '';
+        parts.push(`• Место #${placeNum}: <b>+${coupons}</b>${label}`);
+      });
+      parts.push('');
+    }
+
+    if (assignment) {
+      const place = assignment.place;
+      const coup = assignment.coupons ? ` (+${assignment.coupons} куп.)` : '';
+      const rsvp = assignment.rsvpStatus === 'confirmed' ? ' [✅ подтверждено]' : (assignment.rsvpStatus === 'declined' ? ' [❌ отказ]' : ' [⏳ ожидает RSVP]');
+      parts.push(`🎯 <b>Вам назначено Место #${place}</b>${coup}${rsvp}`);
+    } else if (registration) {
+      const desPlace = registration.desiredPlace ? `#${registration.desiredPlace}` : 'любое';
+      parts.push(`✓ <b>Ваша заявка принята!</b> Желаемое место: <b>${desPlace}</b>`);
+      parts.push('<i>Вы можете изменить желаемое место или отозвать заявку кнопками ниже.</i>');
+    } else {
+      parts.push('📢 <i>Вы ещё не подали заявку на этот ивент.</i>');
+      parts.push('Выберите желаемое место для регистрации:');
+    }
+
+    return parts.join('\n').trim();
+  }
+
+  function formatEventDetailRegistrationKeyboard({ eventId, eventType, registration }) {
+    const keyboard = [];
+    const places = (eventType?.places || []).slice(0, 4);
+
+    const placeButtons = [];
+    if (places.length) {
+      places.forEach((p, idx) => {
+        const placeNum = p.place || (idx + 1);
+        const coup = p.coupons ? ` (${Math.round(p.coupons / 1000)}к)` : '';
+        const isCurrent = registration && Number(registration.desiredPlace) === Number(placeNum);
+        placeButtons.push({
+          text: `${isCurrent ? '✓ ' : ''}#${placeNum}${coup}`,
+          callback_data: `reg_event:${eventId}:${placeNum}`
+        });
+      });
+    } else {
+      placeButtons.push(
+        { text: '#1 (50к)', callback_data: `reg_event:${eventId}:1` },
+        { text: '#2 (40к)', callback_data: `reg_event:${eventId}:2` },
+        { text: '#3 (30к)', callback_data: `reg_event:${eventId}:3` }
+      );
+    }
+    const isAnyCurrent = registration && Number(registration.desiredPlace) === 0;
+    placeButtons.push({
+      text: `${isAnyCurrent ? '✓ ' : ''}Любое`,
+      callback_data: `reg_event:${eventId}:0`
+    });
+
+    for (let i = 0; i < placeButtons.length; i += 2) {
+      keyboard.push(placeButtons.slice(i, i + 2));
+    }
+
+    if (registration) {
+      keyboard.push([
+        { text: '✕ Отозвать заявку', callback_data: `unreg_event:${eventId}` }
+      ]);
+    }
+
+    keyboard.push([
+      { text: '◀️ К списку ивентов', callback_data: 'cmd_events' }
+    ]);
+
+    return { inline_keyboard: keyboard };
+  }
+
+  function getTelegramMainMenuKeyboard({ isStaff = false, webAppUrl = null } = {}) {
+    const keyboard = [];
+
+    if (webAppUrl) {
+      keyboard.push([
+        { text: '🚀 Открыть KoW Mini App', web_app: { url: webAppUrl } }
+      ]);
+    }
+
+    keyboard.push([
+      { text: '👤 Мой сектор', callback_data: 'cmd_me' },
+      { text: '📊 Дефицит', callback_data: 'cmd_deficit' }
+    ]);
+    keyboard.push([
+      { text: '📅 Мои ивенты', callback_data: 'cmd_events' },
+      { text: '📦 Обновить склад', callback_data: 'cmd_stock_help' }
+    ]);
 
     if (isStaff) {
       keyboard.push([
@@ -4261,6 +4366,8 @@
     formatTelegramDeficitMessage,
     formatTelegramEventsListMessage,
     getTelegramEventsKeyboard,
+    formatTelegramEventDetailMessage,
+    formatEventDetailRegistrationKeyboard,
     getTelegramMainMenuKeyboard,
     formatEventRegistrationKeyboard,
     formatEventRegistrationConfirmedKeyboard,

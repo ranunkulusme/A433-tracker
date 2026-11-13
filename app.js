@@ -4913,6 +4913,7 @@ async function renderNotificationsPage() {
     const botTokenVal = (settingsRes && settingsRes.tokenMasked) ? settingsRes.tokenMasked : '';
     const botUserVal = (settingsRes && settingsRes.botUsername) ? settingsRes.botUsername : '';
     const staffChatVal = (settingsRes && settingsRes.staffChatId) ? settingsRes.staffChatId : '';
+    const webAppUrlVal = (settingsRes && settingsRes.webAppUrl) ? settingsRes.webAppUrl : (window.location.origin || '');
 
     const userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo
       ? logic.getUserTimezoneInfo()
@@ -4954,6 +4955,13 @@ async function renderNotificationsPage() {
               <div class="form-group">
                 <label for="tg-setting-chat-id">${typeof t === 'function' ? t('telegram.staff_chat_id') : 'ID чата штаба'}</label>
                 <input type="text" id="tg-setting-chat-id" placeholder="-1001234567890" value="${escapeHtml(staffChatVal)}" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-row" style="margin-top:10px">
+              <div class="form-group" style="width:100%">
+                <label for="tg-setting-webapp-url">URL Telegram Mini App (TMA)</label>
+                <input type="text" id="tg-setting-webapp-url" placeholder="https://your-domain.com" value="${escapeHtml(webAppUrlVal)}" autocomplete="off">
+                <span class="form-hint" style="font-size:11px;color:var(--text3);margin-top:2px">URL трекера для кнопки Menu Button и вызова Mini App в Telegram</span>
               </div>
             </div>
             <div class="form-actions" style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
@@ -5543,6 +5551,7 @@ async function saveTelegramSettings() {
   const tokenInput = document.getElementById('tg-setting-token');
   const userInput = document.getElementById('tg-setting-username');
   const chatInput = document.getElementById('tg-setting-chat-id');
+  const webAppInput = document.getElementById('tg-setting-webapp-url');
 
   const payload = {};
   if (tokenInput && tokenInput.value && !tokenInput.value.includes('***')) {
@@ -5553,6 +5562,9 @@ async function saveTelegramSettings() {
   }
   if (chatInput) {
     payload.staffChatId = chatInput.value.trim();
+  }
+  if (webAppInput) {
+    payload.webAppUrl = webAppInput.value.trim();
   }
 
   try {
