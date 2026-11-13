@@ -5185,6 +5185,125 @@ test('Player timezone management and 09:00 AM local morning event briefings', as
   }
 });
 
+test('API POST /api/events/:id/share-grid enforces RBAC and sends poster to staff chat', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const sentPhotos = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendPhoto')) {
+      const isFormData = init && init.body && typeof init.body.get === 'function';
+      const chatId = isFormData ? init.body.get('chat_id') : JSON.parse(init.body || '{}').chat_id;
+      const caption = isFormData ? init.body.get('caption') : JSON.parse(init.body || '{}').caption;
+      const replyMarkup = isFormData ? init.body.get('reply_markup') : JSON.parse(init.body || '{}').reply_markup;
+      sentPhotos.push({ chatId, caption, replyMarkup });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 888 } }),
+        text: async () => JSON.stringify({ ok: true, result: { message_id: 888 } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: {} }),
+      text: async () => JSON.stringify({ ok: true, result: {} })
+    };
+  });
+
+  try {
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    // Configure staff chat ID
+    await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: '12345:TEST_TOKEN', staffChatId: '-100987654321' })
+    });
+
+    // Create an event
+    const eventTypesRes = await fetch(`${baseUrl}/api/event-types`);
+    const eventTypes = await eventTypesRes.json();
+    const eventType = eventTypes[0] || { id: 'king-of-war' };
+
+    const eventRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeId: eventType.id,
+        title: 'Битва за трон',
+        dateFrom: '2026-11-20',
+        dateTo: '2026-11-22'
+      })
+    });
+    const event = await eventRes.json();
+    assert(event && event.id);
+
+    // Register R3 user
+    const r3Reg = await (await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_grid_sharer', password: 'password123' })
+    })).json();
+    await fetch(`${baseUrl}/api/users/${r3Reg.userId}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    const r3Login = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'r3_grid_sharer', password: 'password123' })
+    })).json();
+
+    // 1. R3 attempt -> 403 Forbidden
+    const r3Res = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${r3Login.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+      })
+    });
+    assert.equal(r3Res.status, 403);
+
+    // 2. Admin without imageBase64 -> 400
+    const emptyRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.equal(emptyRes.status, 400);
+
+    // 3. Admin valid share -> 200 and photo sent to staff chat
+    const shareRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        caption: '📊 Инфографика сетки: Битва за трон'
+      })
+    });
+    assert.equal(shareRes.status, 200);
+    const shareData = await shareRes.json();
+    assert.equal(shareData.success, true);
+    assert.equal(shareData.messageId, 888);
+
+    assert.equal(sentPhotos.length, 1);
+    assert.equal(String(sentPhotos[0].chatId), '-100987654321');
+    assert.ok(sentPhotos[0].caption.includes('Битва за трон'));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 
 
 

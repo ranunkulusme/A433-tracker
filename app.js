@@ -6591,6 +6591,10 @@ function renderEventDetail(eventId) {
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="downloadEventGridPoster(${ev.id})" title="${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}">🖼 ${typeof t === 'function' ? t('events.btn_download_poster') : 'Скачать сетку'}</button>
+        ${(canManage() || hasPermission('manage_events')) ? `
+          <button class="btn btn-secondary btn-sm" onclick="shareEventGridToTelegram(${ev.id})" title="${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}">📤 ${typeof t === 'function' ? t('events.btn_share_poster') : 'Сетка в Telegram'}</button>
+        ` : ''}
         ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) ? `
           <button class="btn btn-secondary btn-sm" onclick="requestEventResultsTg(${ev.id})" title="Разослать участникам запрос фактического места в Telegram">🏁 ${typeof t === 'function' ? t('events.btn_request_results_tg') : 'Запросить итоги в TG'}</button>
           <button class="btn btn-secondary btn-sm" onclick="sendEventSummaryStaff(${ev.id})" title="Отправить сводку по итогам события в штабной чат Telegram">📊 ${typeof t === 'function' ? t('events.btn_send_staff_summary') : 'Отчёт в штаб'}</button>
@@ -6646,6 +6650,268 @@ function renderEventDetail(eventId) {
       </table>
     </div>
   `;
+}
+
+function renderEventGridPosterCanvas(ev, et, players = [], catalog = []) {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  const width = 1200;
+
+  const assignMap = {};
+  (ev.assignments || []).forEach(a => { assignMap[a.place] = a; });
+
+  const allPlaces = [...new Set([
+    ...(et?.places || []).map(p => p.place),
+    ...(ev.assignments || []).map(a => a.place)
+  ])].sort((a, b) => a - b);
+
+  const rowHeight = 48;
+  const headerHeight = 170;
+  const footerHeight = 60;
+  const height = Math.max(680, headerHeight + allPlaces.length * rowHeight + footerHeight);
+
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  // 1. Background gradient (deep space/military dark theme)
+  const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+  bgGrad.addColorStop(0, '#0d1117');
+  bgGrad.addColorStop(0.5, '#161b22');
+  bgGrad.addColorStop(1, '#0b0e14');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, width, height);
+
+  // Outer border with accent color glow
+  const themeColor = et?.color || '#58a6ff';
+  ctx.strokeStyle = themeColor;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(10, 10, width - 20, height - 20);
+
+  // Inner subtle border
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(16, 16, width - 32, height - 32);
+
+  // 2. Header banner
+  // Alliance / App Brand
+  ctx.fillStyle = '#f0883e';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillText('👑 KISS OF WAR TRACKER • ШТАБ АЛЬЯНСА', 40, 52);
+
+  // Event Title
+  const title = ev.title || et?.name || 'Событие';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.fillText(title, 40, 92);
+
+  // Event Dates & Status
+  const datesText = `📅 Период: ${ev.dateFrom || '—'}  —  ${ev.dateTo || '—'}`;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(datesText, 40, 126);
+
+  // Right side badges in header: total assignments & total coupons
+  const totalCoupons = (ev.assignments || []).reduce((sum, a) => {
+    const pi = (typeof logic !== 'undefined' && logic.placeInfo) ? logic.placeInfo(et, a.place, ev.dateFrom) : (et?.places || []).find(p => p.place === a.place);
+    const c = (a.actualCoupons !== undefined && a.actualCoupons !== null) ? Number(a.actualCoupons) : (Number(pi?.coupons) || 0);
+    return sum + c;
+  }, 0);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#58a6ff';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(`🎖 Назначено: ${(ev.assignments || []).length} / ${allPlaces.length}`, width - 40, 75);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText(`🎫 Итого купонов: ${totalCoupons.toLocaleString('ru-RU')}`, width - 40, 110);
+  ctx.textAlign = 'left';
+
+  // Divider line
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(36, 146);
+  ctx.lineTo(width - 36, 146);
+  ctx.stroke();
+
+  // 3. Table Column Headers
+  const tableY = 166;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText('МЕСТО', 44, tableY);
+  ctx.fillText('СЕКТОР (БАЗА)', 140, tableY);
+  ctx.fillText('КОМАНДИР / ОФИЦЕР', 460, tableY);
+  ctx.fillText('НАГРАДА (КУПОНЫ)', 800, tableY);
+  ctx.fillText('СТАТУС УЧАСТИЯ', 1010, tableY);
+
+  // 4. Rows
+  let currentY = tableY + 14;
+  allPlaces.forEach((pl, idx) => {
+    const a = assignMap[pl];
+    const p = a ? (players.find(plItem => Number(plItem.id) === Number(a.playerId)) || { name: a.playerName || `Сектор #${a.playerId}` }) : null;
+    const pi = (typeof logic !== 'undefined' && logic.placeInfo) ? logic.placeInfo(et, pl, ev.dateFrom) : (et?.places || []).find(x => x.place === pl);
+    const coupons = (a && a.actualCoupons !== undefined && a.actualCoupons !== null)
+      ? Number(a.actualCoupons)
+      : (Number(pi?.coupons) || 0);
+
+    const isFirst = pl === 1;
+    const isSecond = pl === 2;
+    const isThird = pl === 3;
+
+    // Row background
+    if (isFirst) {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.12)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+      ctx.strokeRect(36, currentY, width - 72, rowHeight - 6);
+    } else if (isSecond) {
+      ctx.fillStyle = 'rgba(192, 192, 192, 0.10)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+      ctx.strokeStyle = 'rgba(192, 192, 192, 0.35)';
+      ctx.strokeRect(36, currentY, width - 72, rowHeight - 6);
+    } else if (isThird) {
+      ctx.fillStyle = 'rgba(205, 127, 50, 0.10)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+      ctx.strokeStyle = 'rgba(205, 127, 50, 0.35)';
+      ctx.strokeRect(36, currentY, width - 72, rowHeight - 6);
+    } else {
+      ctx.fillStyle = (idx % 2 === 0) ? 'rgba(255, 255, 255, 0.025)' : 'rgba(255, 255, 255, 0.045)';
+      ctx.fillRect(36, currentY, width - 72, rowHeight - 6);
+    }
+
+    const textBaselineY = currentY + 26;
+
+    // Place #
+    let placeIcon = `#${pl}`;
+    if (isFirst) placeIcon = '🥇 #1';
+    else if (isSecond) placeIcon = '🥈 #2';
+    else if (isThird) placeIcon = '🥉 #3';
+    ctx.fillStyle = isFirst ? '#ffd700' : isSecond ? '#e0e0e0' : isThird ? '#cd7f32' : '#c9d1d9';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText(placeIcon, 44, textBaselineY);
+
+    // Player / Sector
+    if (p) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px sans-serif';
+      const pName = p.name || 'Сектор';
+      const vip = p.sector?.vipLevel ?? p.vip ?? '';
+      const vipStr = vip !== '' ? ` (VIP ${vip})` : '';
+      ctx.fillText(`${pName}${vipStr}`, 140, textBaselineY);
+    } else {
+      ctx.fillStyle = '#6e7681';
+      ctx.font = 'italic 13px sans-serif';
+      ctx.fillText('— Свободное место —', 140, textBaselineY);
+    }
+
+    // Officer
+    if (a && a.officerId) {
+      let offName = a.officerName;
+      if (!offName && p && p.officers) {
+        const foundOff = p.officers.find(o => o.id === a.officerId);
+        if (foundOff) {
+          const cat = catalog.find(c => c.id === foundOff.catalogId);
+          offName = cat?.name || foundOff.name || foundOff.id;
+        }
+      }
+      ctx.fillStyle = '#58a6ff';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(offName || 'Офицер', 460, textBaselineY);
+    } else {
+      ctx.fillStyle = '#6e7681';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('—', 460, textBaselineY);
+    }
+
+    // Reward Coupons
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(`🎫 +${coupons.toLocaleString('ru-RU')}`, 800, textBaselineY);
+
+    // Status
+    if (a) {
+      if (a.resultStatus === 'confirmed') {
+        ctx.fillStyle = '#3fb950';
+        ctx.font = 'bold 13px sans-serif';
+        const actPl = a.actualPlace !== undefined ? a.actualPlace : pl;
+        ctx.fillText(`✓ Итог: #${actPl}`, 1010, textBaselineY);
+      } else if (a.rsvpStatus === 'confirmed') {
+        ctx.fillStyle = '#58a6ff';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('🟢 Подтвердил', 1010, textBaselineY);
+      } else if (a.rsvpStatus === 'declined') {
+        ctx.fillStyle = '#f85149';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('🔴 Отказ', 1010, textBaselineY);
+      } else {
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('⏳ Ожидает', 1010, textBaselineY);
+      }
+    } else {
+      ctx.fillStyle = '#484f58';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('—', 1010, textBaselineY);
+    }
+
+    currentY += rowHeight;
+  });
+
+  // 5. Footer
+  const footerY = height - 26;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('⚡ KoW Tracker • Официальная сетка альянса', 40, footerY);
+
+  ctx.textAlign = 'right';
+  const nowStr = new Date().toLocaleString('ru-RU');
+  ctx.fillText(`Сформировано: ${nowStr}`, width - 40, footerY);
+  ctx.textAlign = 'left';
+
+  return canvas;
+}
+
+function downloadEventGridPoster(eventId) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+  const canvas = renderEventGridPosterCanvas(ev, et, state.players, state.officerCatalog);
+  if (!canvas) return;
+
+  const titleSlug = (ev.title || et?.name || 'event').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
+  const filename = `grid_${titleSlug}_${ev.dateFrom || 'event'}.png`;
+
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+  showToast(typeof t === 'function' ? t('events.poster_downloaded') : 'Инфографика сетки сохранена', 'success');
+}
+
+async function shareEventGridToTelegram(eventId) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const et = getEventType(ev.typeId);
+  const canvas = renderEventGridPosterCanvas(ev, et, state.players, state.officerCatalog);
+  if (!canvas) return;
+
+  const imageBase64 = canvas.toDataURL('image/png');
+  showToast(typeof t === 'function' ? t('events.poster_generating') : 'Генерация инфографики...', 'info');
+
+  try {
+    const res = await apiFetch(`/api/events/${eventId}/share-grid`, {
+      method: 'POST',
+      body: JSON.stringify({ imageBase64 })
+    });
+    if (res && res.success) {
+      showToast(typeof t === 'function' ? t('events.poster_sent_success') : 'Инфографика сетки успешно отправлена в чат штаба', 'success');
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка отправки постера в Telegram', 'error');
+  }
 }
 
 // ─── EVENT REGISTRATIONS (PLAYER) ───────────────────────────
@@ -12729,6 +12995,9 @@ if (typeof window !== 'undefined') {
   window.submitEventResultFromModal = submitEventResultFromModal;
   window.requestEventResultsTg = requestEventResultsTg;
   window.sendEventSummaryStaff = sendEventSummaryStaff;
+  window.renderEventGridPosterCanvas = renderEventGridPosterCanvas;
+  window.downloadEventGridPoster = downloadEventGridPoster;
+  window.shareEventGridToTelegram = shareEventGridToTelegram;
   window.dismissAppUpdate = dismissAppUpdate;
   window.applyAppUpdate = applyAppUpdate;
 

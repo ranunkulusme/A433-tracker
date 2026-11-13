@@ -2885,6 +2885,60 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, { success: true, totalAssigned, confirmedCount, unconfirmedCount, totalCoupons });
     }
 
+    const shareGridEventMatch = pathname.match(/^\/api\/events\/(\d+)\/share-grid$/);
+    if (shareGridEventMatch && req.method === 'POST') {
+      if (!requirePermission(req, res, 'manage_events')) return;
+      const eventId = Number(shareGridEventMatch[1]);
+      const ev = db.getEventById(eventId);
+      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
+
+      const imageBase64 = body && (body.imageBase64 || body.image_base64);
+      if (!imageBase64 || typeof imageBase64 !== 'string') {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр imageBase64 обязателен');
+      }
+
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 400, 'BOT_TOKEN_NOT_CONFIGURED', 'Токен бота не настроен в системе');
+      }
+
+      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
+      if (!staffChatId) {
+        return sendError(res, 400, 'STAFF_CHAT_NOT_CONFIGURED', 'Чат штаба не настроен в системе');
+      }
+
+      const baseUrl = getAppBaseUrl(req);
+      const et = db.getEventTypes().find(t => t.id === ev.typeId);
+      const eventTitle = ev.title || et?.name || 'Событие';
+      const escape = (typeof logic.escapeHtml === 'function') ? logic.escapeHtml : (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+      const defaultCaption = `📊 <b>Сетка события: ${escape(eventTitle)}</b>\n📅 Период: ${escape(ev.dateFrom || '')} — ${escape(ev.dateTo || '')}\n🎖 Назначений: ${(ev.assignments || []).length}`;
+      const caption = (body.caption && String(body.caption).trim()) ? String(body.caption).trim() : defaultCaption;
+
+      const replyMarkup = {
+        inline_keyboard: [
+          [{ text: '🔗 Открыть сетку ивента', url: `${baseUrl}/#event/${ev.id}` }]
+        ]
+      };
+
+      const result = await telegram.sendTelegramPhoto({
+        token: botToken,
+        chatId: staffChatId,
+        photo: imageBase64,
+        caption,
+        parseMode: 'HTML',
+        replyMarkup
+      });
+
+      if (!result.ok) {
+        return sendError(res, 502, 'TELEGRAM_ERROR', result.description || result.error || 'Ошибка отправки изображения в Telegram');
+      }
+
+      return sendJson(res, 200, {
+        success: true,
+        messageId: result.result?.message_id
+      });
+    }
+
     // ─────────────────────────────────────────────────────────
     // ADMIN EXPORT & IMPORT
     // ─────────────────────────────────────────────────────────
