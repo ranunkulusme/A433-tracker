@@ -5423,7 +5423,7 @@ test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async
     assert.equal(sentMessages.length, 1);
     assert.ok(sentMessages[0].reply_markup && sentMessages[0].reply_markup.inline_keyboard);
 
-    // 6. Test callback queries for menu buttons (cmd_me, cmd_deficit, cmd_events, cmd_stock_help)
+    // 6. Test callback queries for menu buttons (cmd_me, cmd_deficit, cmd_events, cmd_stock_help, cmd_events_past, cmd_menu)
     sentMessages.length = 0;
     const cbMeRes = await handleTelegramUpdate({
       callback_query: {
@@ -5435,6 +5435,54 @@ test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async
     });
     assert.equal(cbMeRes.ok, true);
     assert.equal(cbMeRes.action, 'cmd_me');
+
+    const cbEventsPastRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_ev_past_1',
+        from: { id: 999111 },
+        data: 'cmd_events_past',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbEventsPastRes.ok, true);
+    assert.equal(cbEventsPastRes.action, 'cmd_events_past');
+
+    const cbEventsUpcomingRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_ev_up_1',
+        from: { id: 999111 },
+        data: 'cmd_events_upcoming',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbEventsUpcomingRes.ok, true);
+    assert.equal(cbEventsUpcomingRes.action, 'cmd_events_upcoming');
+
+    const cbMenuRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_menu_1',
+        from: { id: 999111 },
+        data: 'cmd_menu',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbMenuRes.ok, true);
+    assert.equal(cbMenuRes.action, 'cmd_menu');
+
+    // Test /events past command
+    sentMessages.length = 0;
+    const evPastCmdRes = await handleTelegramUpdate({
+      message: {
+        message_id: 1236,
+        from: { id: 999111, username: 'ranger' },
+        chat: { id: 999111, type: 'private' },
+        text: '/events past'
+      }
+    });
+    assert.equal(evPastCmdRes.ok, true);
+    assert.equal(evPastCmdRes.command, 'events');
+    assert.equal(evPastCmdRes.mode, 'past');
+    assert.ok(sentMessages.length > 0);
 
     // 7. Test interactive event registration via Telegram Callback
     const allEvents = db.getEvents();

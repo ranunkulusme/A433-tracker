@@ -3827,12 +3827,20 @@
     return parts.join('\n');
   }
 
-  function formatTelegramEventsListMessage({ events, playerId }) {
+  function formatTelegramEventsListMessage({ events, playerId, mode = 'upcoming' }) {
     const parts = [];
-    parts.push('📅 <b>Ближайшие события альянса:</b>\n');
+    if (mode === 'past') {
+      parts.push('🏁 <b>Прошедшие события альянса:</b>\n');
+    } else {
+      parts.push('📅 <b>Ближайшие события альянса:</b>\n');
+    }
 
     if (!events || !events.length) {
-      parts.push('В ближайшее время активных событий не запланировано.');
+      if (mode === 'past') {
+        parts.push('Завершённых событий пока нет.');
+      } else {
+        parts.push('В ближайшее время активных событий не запланировано.');
+      }
       return parts.join('\n');
     }
 
@@ -3844,14 +3852,24 @@
       const registration = (ev.registrations || []).find(r => Number(r.playerId) === Number(playerId));
 
       let statusLine = '📢 <i>Открыта регистрация</i>';
-      if (assignment) {
-        const place = assignment.place;
-        const coup = assignment.coupons ? ` (+${assignment.coupons} куп.)` : '';
-        const rsvp = assignment.rsvpStatus === 'confirmed' ? ' [✅ подтверждено]' : (assignment.rsvpStatus === 'declined' ? ' [❌ отказ]' : ' [⏳ ожидает RSVP]');
-        statusLine = `🎯 <b>Вам назначено Место #${place}</b>${coup}${rsvp}`;
-      } else if (registration) {
-        const desPlace = registration.desiredPlace ? `#${registration.desiredPlace}` : 'любое';
-        statusLine = `⏳ <i>Подана заявка (желаемое место: ${desPlace})</i>`;
+      if (mode === 'past') {
+        if (assignment) {
+          const finalPlace = assignment.actualPlace || assignment.place;
+          const coup = (assignment.actualCoupons ?? assignment.coupons) ? ` (+${assignment.actualCoupons ?? assignment.coupons} куп.)` : '';
+          statusLine = `🎯 <b>Итог: Место #${finalPlace}</b>${coup}`;
+        } else {
+          statusLine = '◌ <i>Событие завершено</i>';
+        }
+      } else {
+        if (assignment) {
+          const place = assignment.place;
+          const coup = assignment.coupons ? ` (+${assignment.coupons} куп.)` : '';
+          const rsvp = assignment.rsvpStatus === 'confirmed' ? ' [✅ подтверждено]' : (assignment.rsvpStatus === 'declined' ? ' [❌ отказ]' : ' [⏳ ожидает RSVP]');
+          statusLine = `🎯 <b>Вам назначено Место #${place}</b>${coup}${rsvp}`;
+        } else if (registration) {
+          const desPlace = registration.desiredPlace ? `#${registration.desiredPlace}` : 'любое';
+          statusLine = `⏳ <i>Подана заявка (желаемое место: ${desPlace})</i>`;
+        }
       }
 
       parts.push(`${idx + 1}. <b>${escapeHtml(title)}</b> (${dateStr})`);
@@ -3859,6 +3877,23 @@
     });
 
     return parts.join('\n').trim();
+  }
+
+  function getTelegramEventsKeyboard({ mode = 'upcoming' } = {}) {
+    const keyboard = [];
+    if (mode === 'past') {
+      keyboard.push([
+        { text: '◎ Предстоящие события', callback_data: 'cmd_events_upcoming' }
+      ]);
+    } else {
+      keyboard.push([
+        { text: '◌ Прошедшие события', callback_data: 'cmd_events_past' }
+      ]);
+    }
+    keyboard.push([
+      { text: '◀️ Главное меню', callback_data: 'cmd_menu' }
+    ]);
+    return { inline_keyboard: keyboard };
   }
 
   function getTelegramMainMenuKeyboard({ isStaff = false } = {}) {
@@ -4225,6 +4260,7 @@
     formatTelegramMeMessage,
     formatTelegramDeficitMessage,
     formatTelegramEventsListMessage,
+    getTelegramEventsKeyboard,
     getTelegramMainMenuKeyboard,
     formatEventRegistrationKeyboard,
     formatEventRegistrationConfirmedKeyboard,

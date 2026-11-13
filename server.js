@@ -902,16 +902,29 @@ async function handleTelegramUpdate(update) {
 
       const allEvents = db.getEvents ? db.getEvents() : [];
       const nowIso = new Date().toISOString();
-      const upcomingEvents = (allEvents || [])
-        .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
-        .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
+      const isPastRequested = /(?:past|прошедш|завершен|старые)/i.test(text);
+
+      let eventsList = [];
+      let mode = 'upcoming';
+
+      if (isPastRequested) {
+        mode = 'past';
+        eventsList = (allEvents || [])
+          .filter(e => e.dateTo && e.dateTo < nowIso.slice(0, 10))
+          .sort((a, b) => (b.dateFrom || '').localeCompare(a.dateFrom || ''));
+      } else {
+        eventsList = (allEvents || [])
+          .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
+          .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
+      }
 
       const replyText = logic.formatTelegramEventsListMessage({
-        events: upcomingEvents,
-        playerId: player?.id
+        events: eventsList,
+        playerId: player?.id,
+        mode
       });
 
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+      const keyboard = logic.getTelegramEventsKeyboard ? logic.getTelegramEventsKeyboard({ mode }) : logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -921,7 +934,7 @@ async function handleTelegramUpdate(update) {
           replyMarkup: keyboard
         });
       }
-      return { ok: true, command: 'events', userId: user.id, playerId: player?.id };
+      return { ok: true, command: 'events', userId: user.id, playerId: player?.id, mode };
     }
 
     // D4) /menu
@@ -1435,7 +1448,7 @@ async function handleTelegramUpdate(update) {
     const chatMsg = cq.message;
 
     // A) Main Menu callbacks
-    if (data === 'cmd_me' || data === 'cmd_deficit' || data === 'cmd_events' || data === 'cmd_stock_help') {
+    if (data === 'cmd_me' || data === 'cmd_deficit' || data === 'cmd_events' || data === 'cmd_events_upcoming' || data === 'cmd_events_past' || data === 'cmd_menu' || data === 'cmd_stock_help') {
       const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
       if (!user) {
         if (token) {
@@ -1458,6 +1471,18 @@ async function handleTelegramUpdate(update) {
       const isStaff = user.rank === 'r4' || user.rank === 'r5';
       const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
       const targetChatId = chatMsg?.chat?.id || fromId;
+
+      if (data === 'cmd_menu') {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId: targetChatId,
+            text: '📱 <b>Главное меню KoW Tracker:</b>\nВыберите необходимое действие:',
+            replyMarkup: keyboard
+          });
+        }
+        return { ok: true, action: 'cmd_menu', userId: user.id };
+      }
 
       if (data === 'cmd_me') {
         const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
@@ -1482,17 +1507,32 @@ async function handleTelegramUpdate(update) {
         return { ok: true, action: 'cmd_deficit', userId: user.id };
       }
 
-      if (data === 'cmd_events') {
+      if (data === 'cmd_events' || data === 'cmd_events_upcoming') {
         const allEvents = db.getEvents ? db.getEvents() : [];
         const nowIso = new Date().toISOString();
         const upcomingEvents = (allEvents || [])
           .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
           .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
-        const replyText = logic.formatTelegramEventsListMessage({ events: upcomingEvents, playerId: player?.id });
+        const replyText = logic.formatTelegramEventsListMessage({ events: upcomingEvents, playerId: player?.id, mode: 'upcoming' });
+        const eventsMarkup = logic.getTelegramEventsKeyboard ? logic.getTelegramEventsKeyboard({ mode: 'upcoming' }) : keyboard;
         if (token) {
-          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: eventsMarkup });
         }
-        return { ok: true, action: 'cmd_events', userId: user.id };
+        return { ok: true, action: data, userId: user.id };
+      }
+
+      if (data === 'cmd_events_past') {
+        const allEvents = db.getEvents ? db.getEvents() : [];
+        const nowIso = new Date().toISOString();
+        const pastEvents = (allEvents || [])
+          .filter(e => e.dateTo && e.dateTo < nowIso.slice(0, 10))
+          .sort((a, b) => (b.dateFrom || '').localeCompare(a.dateFrom || ''));
+        const replyText = logic.formatTelegramEventsListMessage({ events: pastEvents, playerId: player?.id, mode: 'past' });
+        const eventsMarkup = logic.getTelegramEventsKeyboard ? logic.getTelegramEventsKeyboard({ mode: 'past' }) : keyboard;
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: eventsMarkup });
+        }
+        return { ok: true, action: 'cmd_events_past', userId: user.id };
       }
 
       if (data === 'cmd_stock_help') {

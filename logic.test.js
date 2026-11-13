@@ -3551,6 +3551,7 @@ test('telegram fighter suite formatters and keyboards', () => {
     formatTelegramMeMessage,
     formatTelegramDeficitMessage,
     formatTelegramEventsListMessage,
+    getTelegramEventsKeyboard,
     getTelegramMainMenuKeyboard,
   } = require('./logic.js');
 
@@ -3606,7 +3607,32 @@ test('telegram fighter suite formatters and keyboards', () => {
   assert(eventsText.includes('Битва за трон'));
   assert(eventsText.includes('Мощь времени'));
 
-  // 4. getTelegramMainMenuKeyboard
+  // 3b. formatTelegramEventsListMessage (past events mode)
+  const pastEventsText = formatTelegramEventsListMessage({
+    events: [
+      { id: 4, title: 'Осада крепости', dateFrom: '2026-11-01T00:00:00Z', assignments: [{ playerId: 1, place: 2, actualPlace: 2, actualCoupons: 40 }] },
+      { id: 5, title: 'Гонка вооружений', dateFrom: '2026-10-25T00:00:00Z', assignments: [] }
+    ],
+    playerId: 1,
+    mode: 'past'
+  });
+  assert(pastEventsText.includes('Прошедшие события'));
+  assert(pastEventsText.includes('Осада крепости'));
+  assert(pastEventsText.includes('Итог: Место #2'));
+  assert(pastEventsText.includes('+40'));
+  assert(pastEventsText.includes('Гонка вооружений'));
+  assert(pastEventsText.includes('Событие завершено'));
+
+  // 4. getTelegramEventsKeyboard
+  const upcomingKb = getTelegramEventsKeyboard({ mode: 'upcoming' });
+  assert(Array.isArray(upcomingKb.inline_keyboard));
+  assert(upcomingKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events_past'));
+
+  const pastKb = getTelegramEventsKeyboard({ mode: 'past' });
+  assert(Array.isArray(pastKb.inline_keyboard));
+  assert(pastKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events_upcoming'));
+
+  // 5. getTelegramMainMenuKeyboard
   const r3Keyboard = getTelegramMainMenuKeyboard({ isStaff: false });
   assert(Array.isArray(r3Keyboard.inline_keyboard));
   const r3Callbacks = r3Keyboard.inline_keyboard.flat().map(b => b.callback_data);
