@@ -1,6 +1,6 @@
 {
   "name": "kow-tracker",
-  "version": "3.43.1",
+  "version": "3.43.2",
   "description": "Kiss of War Officer Tracker and Event Planner",
   "main": "server.js",
   "scripts": {

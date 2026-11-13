@@ -2261,6 +2261,63 @@ test('db.getStockHistoryRecordById and updateStockHistoryRecord', () => {
   assert.equal(updated.diffSummary, '+100 купонов (подтверждено)');
 });
 
+test('getPlayersByUserId self-heals and returns sector if users.player_id is set but players.user_id is NULL', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const p = dbModule.createPlayer({ name: 'Desynced Sector', power: 500000 });
+  const reg = dbModule.registerUser({ username: 'desync_user', password: 'pwd' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Simulate desync where users.player_id is set but players.user_id is NULL (e.g. legacy import or admin edit)
+  dbModule.getDb().prepare('UPDATE users SET player_id = ? WHERE id = ?').run(p.id, reg.userId);
+  dbModule.getDb().prepare('UPDATE players SET user_id = NULL WHERE id = ?').run(p.id);
+
+  const sectors = dbModule.getPlayersByUserId(reg.userId);
+  assert.equal(sectors.length, 1, 'Must find sector linked via users.player_id');
+  assert.equal(sectors[0].id, p.id);
+  assert.equal(sectors[0].name, 'Desynced Sector');
+
+  // Verify auto-heal persisted in players table
+  const healedPlayer = dbModule.getPlayerById(p.id);
+  assert.equal(healedPlayer.userId, reg.userId, 'Must heal players.user_id to match user');
+});
+
+test('updateUser with playerId updates both users.player_id and players.user_id and unlinks old sector', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const p1 = dbModule.createPlayer({ name: 'Sector 1' });
+  const p2 = dbModule.createPlayer({ name: 'Sector 2' });
+  const reg = dbModule.registerUser({ username: 'switch_owner', password: 'pwd' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Assign p1 to user
+  dbModule.updateUser(reg.userId, { playerId: p1.id });
+  assert.equal(dbModule.getPlayerById(p1.id).userId, reg.userId);
+  assert.equal(dbModule.findUserById(reg.userId).player_id, p1.id);
+
+  // Reassign to p2
+  dbModule.updateUser(reg.userId, { playerId: p2.id });
+  assert.equal(dbModule.getPlayerById(p2.id).userId, reg.userId);
+  assert.equal(dbModule.getPlayerById(p1.id).userId, null, 'Old sector must be unlinked');
+});
+
+test('setUserActiveSector claims sector if players.user_id was NULL and links it to user', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const p = dbModule.createPlayer({ name: 'Free Sector' });
+  const reg = dbModule.registerUser({ username: 'claimer_user', password: 'pwd' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  const res = dbModule.setUserActiveSector(reg.userId, p.id);
+  assert.equal(res.ok, true);
+  assert.equal(res.activeSectorId, p.id);
+  assert.equal(dbModule.getPlayerById(p.id).userId, reg.userId);
+});
+
+
 
 
 

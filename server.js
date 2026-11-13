@@ -2774,9 +2774,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     // PLAYER CABINET & SECTORS (/api/my-profile, /api/my-sectors)
     // ─────────────────────────────────────────────────────────
+    function resolveUserPlayerId(req) {
+      if (req.user && req.user.playerId) return req.user.playerId;
+      if (!req.user || !req.user.id) return null;
+      const sectors = db.getPlayersByUserId(req.user.id);
+      if (sectors && sectors.length > 0) {
+        req.user.playerId = sectors[0].id;
+        db.setUserActiveSector(req.user.id, sectors[0].id);
+        return req.user.playerId;
+      }
+      return null;
+    }
+
     if (pathname === '/api/my-profile' && req.method === 'GET') {
       if (!requireAuth(req, res)) return;
-      const sectors = db.getPlayersByUserId(req.user.id);
+      let sectors = db.getPlayersByUserId(req.user.id);
       let activeSector = null;
       const requestedSectorId = parsedUrl.searchParams.get('sectorId')
         ? Number(parsedUrl.searchParams.get('sectorId'))
@@ -2788,6 +2800,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
         activeSector = sectors.find(s => s.id === req.user.playerId);
       } else if (sectors.length > 0) {
         activeSector = sectors[0];
+      }
+
+      if (activeSector && req.user.playerId !== activeSector.id) {
+        req.user.playerId = activeSector.id;
+        db.setUserActiveSector(req.user.id, activeSector.id);
       }
 
       return sendJson(res, 200, {
@@ -2880,7 +2897,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/my-profile' && req.method === 'PUT') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const activePlayerId = resolveUserPlayerId(req);
+      if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       delete body.rank;
@@ -2916,29 +2934,30 @@ function createRequestHandler(staticDir, s3Manager = null) {
             o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
           }
           if (o.id) {
-            const updatedOff = db.updatePlayerOfficer(req.user.playerId, o.id, o);
+            const updatedOff = db.updatePlayerOfficer(activePlayerId, o.id, o);
             if (!updatedOff) {
-              db.addPlayerOfficer(req.user.playerId, o);
+              db.addPlayerOfficer(activePlayerId, o);
             }
           } else {
-            db.addPlayerOfficer(req.user.playerId, o);
+            db.addPlayerOfficer(activePlayerId, o);
           }
         }
       }
 
-      const updated = db.updatePlayer(req.user.playerId, { ...body, editorUserId: req.user.id });
+      const updated = db.updatePlayer(activePlayerId, { ...body, editorUserId: req.user.id });
       if (body.stock) {
-        db.recordStockHistory(req.user.playerId, body.stock);
+        db.recordStockHistory(activePlayerId, body.stock);
       }
       return sendJson(res, 200, updated);
     }
 
     if (pathname === '/api/my-profile/confirm-stock' && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const activePlayerId = resolveUserPlayerId(req);
+      if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан сектор');
       }
-      const updated = db.confirmPlayerStock(req.user.playerId, req.user.id);
+      const updated = db.confirmPlayerStock(activePlayerId, req.user.id);
       if (!updated) {
         return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
       }
@@ -2952,7 +2971,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/my-profile/officers' && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const activePlayerId = resolveUserPlayerId(req);
+      if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       if (body.skills !== undefined) {
@@ -2967,14 +2987,15 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
         body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
       }
-      const off = db.addPlayerOfficer(req.user.playerId, body);
+      const off = db.addPlayerOfficer(activePlayerId, body);
       return sendJson(res, 200, off);
     }
 
     const myOfficerMatch = pathname.match(/^\/api\/my-profile\/officers\/([^/]+)$/);
     if (myOfficerMatch && req.method === 'PUT') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const activePlayerId = resolveUserPlayerId(req);
+      if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
@@ -2990,7 +3011,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
         body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
       }
-      const off = db.updatePlayerOfficer(req.user.playerId, officerId, body);
+      const off = db.updatePlayerOfficer(activePlayerId, officerId, body);
       if (!off) {
         return sendError(res, 404, 'OFFICER_NOT_FOUND', 'Офицер не найден');
       }
@@ -2999,11 +3020,12 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (myOfficerMatch && req.method === 'DELETE') {
       if (!requireAuth(req, res)) return;
-      if (!req.user.playerId) {
+      const activePlayerId = resolveUserPlayerId(req);
+      if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
-      db.deletePlayerOfficer(req.user.playerId, officerId);
+      db.deletePlayerOfficer(activePlayerId, officerId);
       return sendJson(res, 200, { success: true });
     }
 

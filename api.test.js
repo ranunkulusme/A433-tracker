@@ -5925,6 +5925,65 @@ test('Telegram Mini App HMAC auth and multi-chat announcement channel binding', 
   }
 });
 
+test('API /api/my-profile auto-heals desynced sector and prevents empty cabinet state', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const p = db.createPlayer({
+      name: 'Воин Света',
+      power: 25000000,
+      stock: { coupons: 150, puzzles: 50 }
+    });
+    const reg = db.registerUser({ username: 'sol_user', password: 'password123' });
+    db.approveUser(reg.userId, 'r3');
+
+    // Desync: user has player_id, but player has user_id = null
+    db.getDb().prepare('UPDATE users SET player_id = ? WHERE id = ?').run(p.id, reg.userId);
+    db.getDb().prepare('UPDATE players SET user_id = NULL WHERE id = ?').run(p.id);
+
+    const token = db.createSession(reg.userId);
+
+    // 1. GET /api/my-profile must self-heal and return the sector
+    const profileRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(profileRes.status, 200);
+    const profile = await profileRes.json();
+    assert.ok(Array.isArray(profile.sectors));
+    assert.equal(profile.sectors.length, 1, 'Profile must contain the linked sector');
+    assert.equal(profile.sectors[0].name, 'Воин Света');
+    assert.equal(profile.activeSectorId, p.id);
+    assert.equal(profile.stock.coupons, 150);
+
+    // 2. PUT /api/my-profile must succeed and update player stock
+    const updateRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        stock: { coupons: 250, puzzles: 60 }
+      })
+    });
+    assert.equal(updateRes.status, 200);
+    const updated = await updateRes.json();
+    assert.equal(updated.stock.coupons, 250);
+
+    // Verify DB player was healed and updated
+    const healed = db.getPlayerById(p.id);
+    assert.equal(healed.userId, reg.userId);
+    assert.equal(healed.stock.coupons, 250);
+  } finally {
+    await server.close();
+  }
+});
+
+
 
 
 
