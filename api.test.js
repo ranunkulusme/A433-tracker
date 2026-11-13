@@ -5565,6 +5565,135 @@ test('Telegram bot officer suite commands: /who, /stale, /ping_stale, /digest (R
   }
 });
 
+test('Telegram Webhook server screenshot OCR processing and interactive confirmation callbacks', async () => {
+  const { startServer, handleTelegramUpdate, setServerOcrRunner } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+
+  db.setAppSetting('telegram_bot_token', 'test_ocr_token_456');
+
+  const sentMessages = [];
+  const answeredCallbacks = [];
+
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 888 } }) };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      const payload = JSON.parse(init.body);
+      answeredCallbacks.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    if (url.includes('/getFile')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { file_path: 'photos/warehouse_test.jpg' } }) };
+    }
+    if (url.includes('/file/bot')) {
+      // Return dummy JPEG buffer
+      return { ok: true, status: 200, arrayBuffer: async () => Buffer.from('FAKE_JPEG_IMAGE_DATA') };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    const soldier = db.registerUser({ username: 'ocr_soldier', password: 'password123' });
+    db.approveUser(soldier.id, 'r3');
+    db.bindUserTelegram(soldier.id, 999333, 'ocr_soldier_tg');
+    const player = db.createPlayer({
+      name: 'Sector OCR (Снайпер)',
+      power: 35000000,
+      stock: { coupons: 5000, puzzles: 100, starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 },
+      userId: soldier.id
+    });
+
+    // 1. Mock OCR to recognize numbers
+    setServerOcrRunner(async () => ({
+      coupons: 16500,
+      puzzles: 410,
+      starCoupons: 14,
+      legendaryStars1: 2,
+      legendaryStars2: 1,
+      legendaryStars3: 0
+    }));
+
+    sentMessages.length = 0;
+    const ocrUploadRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999333, type: 'private' },
+        from: { id: 999333 },
+        photo: [{ file_id: 'photo_ocr_test', file_size: 1024 }]
+      }
+    });
+
+    assert.equal(ocrUploadRes.ok, true);
+    assert.equal(ocrUploadRes.ocr, true);
+    assert.ok(ocrUploadRes.historyId > 0);
+    assert.ok(sentMessages[0].text.includes('Распознаны данные склада'));
+    assert.ok(sentMessages[0].text.includes('16 500'));
+    assert.ok(sentMessages[0].text.includes('410'));
+    assert.equal(sentMessages[0].reply_markup.inline_keyboard[0][0].callback_data, `confirm_ocr_stock:${ocrUploadRes.historyId}`);
+
+    // 2. Confirm OCR changes
+    answeredCallbacks.length = 0;
+    sentMessages.length = 0;
+    const confirmOcrRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_confirm_ocr_1',
+        from: { id: 999333 },
+        message: { chat: { id: 999333 } },
+        data: `confirm_ocr_stock:${ocrUploadRes.historyId}`
+      }
+    });
+
+    assert.equal(confirmOcrRes.ok, true);
+    assert.equal(confirmOcrRes.action, 'confirm_ocr_stock');
+    assert.ok(answeredCallbacks.some(c => c.text.includes('успешно применены')));
+    const updatedPlayer = db.getPlayerById(player.id);
+    assert.equal(updatedPlayer.stock.coupons, 16500);
+    assert.equal(updatedPlayer.stock.puzzles, 410);
+
+    // 3. Fallback: OCR returns null or unavailable
+    setServerOcrRunner(async () => null);
+    sentMessages.length = 0;
+    const fallbackUploadRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999333, type: 'private' },
+        from: { id: 999333 },
+        photo: [{ file_id: 'photo_fallback_test', file_size: 1024 }]
+      }
+    });
+
+    assert.equal(fallbackUploadRes.ok, true);
+    assert.equal(fallbackUploadRes.fallback, true);
+    assert.ok(sentMessages[0].text.includes('Скриншот склада получен'));
+    assert.equal(sentMessages[0].reply_markup.inline_keyboard[0][0].callback_data, 'confirm_current_stock');
+
+    // 4. Confirm current stock callback
+    answeredCallbacks.length = 0;
+    sentMessages.length = 0;
+    const confirmFallbackRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_confirm_current_1',
+        from: { id: 999333 },
+        message: { chat: { id: 999333 } },
+        data: 'confirm_current_stock'
+      }
+    });
+
+    assert.equal(confirmFallbackRes.ok, true);
+    assert.equal(confirmFallbackRes.action, 'confirm_current_stock');
+    assert.ok(answeredCallbacks.some(c => c.text.includes('актуальный')));
+
+  } finally {
+    setServerOcrRunner(null);
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+
 
 
 

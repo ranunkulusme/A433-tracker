@@ -3704,3 +3704,44 @@ test('telegram officer suite formatters', () => {
   assert(digestText.includes('2'));
 });
 
+test('telegram OCR and stock fallback formatters and keyboards', () => {
+  const logic = require('./logic.js');
+  const {
+    formatTelegramOcrConfirmationMessage,
+    getTelegramOcrConfirmationKeyboard,
+    getTelegramStockFallbackKeyboard
+  } = logic;
+
+  // 1. OCR Confirmation message
+  const msg = formatTelegramOcrConfirmationMessage({
+    player: { name: 'Sector 77' },
+    recognizedStock: {
+      coupons: 14500,
+      puzzles: 320,
+      starCoupons: 15,
+      legendaryStars1: 2,
+      legendaryStars2: 1,
+      legendaryStars3: 0
+    }
+  });
+
+  assert(msg.includes('Sector 77'));
+  assert(msg.includes('14 500'));
+  assert(msg.includes('320'));
+  assert(msg.includes('15'));
+  assert(msg.includes('2 / 1 / 0'));
+
+  // 2. OCR Confirmation keyboard
+  const kb = getTelegramOcrConfirmationKeyboard(42);
+  assert.equal(kb.inline_keyboard.length, 2);
+  assert.equal(kb.inline_keyboard[0][0].callback_data, 'confirm_ocr_stock:42');
+  assert.ok(kb.inline_keyboard[0][0].text.includes('Применить'));
+
+  // 3. Fallback keyboard
+  const fallbackKb = getTelegramStockFallbackKeyboard();
+  assert.equal(fallbackKb.inline_keyboard.length, 2);
+  assert.equal(fallbackKb.inline_keyboard[0][0].callback_data, 'confirm_current_stock');
+  assert.ok(fallbackKb.inline_keyboard[0][0].text.includes('актуальны'));
+});
+
+

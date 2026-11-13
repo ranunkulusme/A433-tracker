@@ -30,6 +30,59 @@ const MIME_TYPES = {
   '.wasm': 'application/wasm'
 };
 
+let customOcrRunner = null;
+function setServerOcrRunner(runner) {
+  customOcrRunner = runner;
+}
+
+async function tryServerOcr(imageBufferOrPath) {
+  if (typeof customOcrRunner === 'function') {
+    try {
+      const res = await customOcrRunner(imageBufferOrPath);
+      return res;
+    } catch (err) {
+      console.warn('[OCR] Custom OCR runner error:', err.message);
+      return null;
+    }
+  }
+
+  try {
+    const { execFile } = require('node:child_process');
+    const os = require('node:os');
+
+    let filePath = imageBufferOrPath;
+    let tempCreated = false;
+    if (Buffer.isBuffer(imageBufferOrPath)) {
+      filePath = path.join(os.tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
+      await fs.promises.writeFile(filePath, imageBufferOrPath);
+      tempCreated = true;
+    }
+
+    try {
+      const ocrText = await new Promise((resolve, reject) => {
+        execFile('tesseract', [filePath, 'stdout', '-l', 'eng+rus'], { timeout: 15000 }, (error, stdout) => {
+          if (error) return reject(error);
+          resolve(stdout || '');
+        });
+      });
+
+      if (ocrText && ocrText.trim()) {
+        const parsedStock = logic.parseWarehouseScreenshotText(ocrText);
+        if (parsedStock && (parsedStock.coupons > 0 || parsedStock.puzzles > 0 || parsedStock.starCoupons > 0)) {
+          return parsedStock;
+        }
+      }
+      return null;
+    } finally {
+      if (tempCreated) {
+        fs.promises.unlink(filePath).catch(() => {});
+      }
+    }
+  } catch (ocrErr) {
+    return null;
+  }
+}
+
 function sendJson(res, statusCode, data) {
   const json = JSON.stringify(data);
   res.writeHead(statusCode, {
@@ -1186,12 +1239,14 @@ async function handleTelegramUpdate(update) {
       const fileId = hasPhoto ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id;
 
       let screenshotPath = null;
+      let downloadedFileBuf = null;
       if (token && fileId) {
         try {
           const fileInfo = await telegram.getTelegramFile(token, fileId);
           if (fileInfo && fileInfo.ok && fileInfo.result?.file_path) {
             const fileBuf = await telegram.downloadTelegramFile(token, fileInfo.result.file_path);
             if (fileBuf && fileBuf.length > 0) {
+              downloadedFileBuf = fileBuf;
               const yyyyMm = new Date().toISOString().slice(0, 7);
               const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
               if (!fs.existsSync(screenshotsDir)) {
@@ -1259,31 +1314,88 @@ async function handleTelegramUpdate(update) {
 
         return { ok: true, photo: true, updated: true, playerId: player.id, stock: after };
       } else {
-        db.recordStockHistory({
-          playerId: player.id,
-          userId: user.id,
-          source: 'telegram_photo',
-          snapshotBefore: before,
-          snapshotAfter: before,
-          diffSummary: 'Скриншот склада прикреплен',
-          screenshotPath,
-          createdAt: now
-        });
-
-        if (token) {
-          await telegram.sendTelegramMessage({
-            token,
-            chatId,
-            text: `📸 <b>Скриншот склада получен и сохранен в журнале аудита!</b>\n` +
-                  `👤 Сектор: <b>${logic.escapeHtml(player.name)}</b>\n\n` +
-                  `Чтобы сразу обновить остатки, отправьте команду:\n` +
-                  `<code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code>\n` +
-                  `<i>(Например: <code>/stock 15000 350</code>)</i>\n` +
-                  `или укажите числа прямо в подписи к скриншоту.`
-          });
+        // Try server-side OCR on downloaded screenshot
+        let recognizedStock = null;
+        if (downloadedFileBuf && downloadedFileBuf.length > 0) {
+          recognizedStock = await tryServerOcr(downloadedFileBuf);
         }
 
-        return { ok: true, photo: true, updated: false, playerId: player.id, screenshotPath };
+        if (recognizedStock && (recognizedStock.coupons > 0 || recognizedStock.puzzles > 0 || recognizedStock.starCoupons > 0)) {
+          const recStockFull = {
+            coupons: Number(recognizedStock.coupons) || 0,
+            puzzles: Number(recognizedStock.puzzles) || 0,
+            starCoupons: Number(recognizedStock.starCoupons) || 0,
+            legendaryStars1: Number(recognizedStock.legendaryStars1) || 0,
+            legendaryStars2: Number(recognizedStock.legendaryStars2) || 0,
+            legendaryStars3: Number(recognizedStock.legendaryStars3) || 0,
+            chests: before.chests || 0
+          };
+
+          const diff = logic.calculateStockDiff(before, recStockFull);
+
+          const historyRecord = db.recordStockHistory({
+            playerId: player.id,
+            userId: user.id,
+            source: 'telegram_photo',
+            snapshotBefore: before,
+            snapshotAfter: recStockFull,
+            diffSummary: `${diff.summary} (ожидает подтверждения OCR)`,
+            screenshotPath,
+            createdAt: now
+          });
+
+          if (token) {
+            const ocrMsg = logic.formatTelegramOcrConfirmationMessage({
+              player,
+              recognizedStock: recStockFull
+            });
+            const ocrKb = logic.getTelegramOcrConfirmationKeyboard(historyRecord.id);
+            await telegram.sendTelegramMessage({
+              token,
+              chatId,
+              text: ocrMsg,
+              replyMarkup: ocrKb
+            });
+          }
+
+          return {
+            ok: true,
+            photo: true,
+            ocr: true,
+            historyId: historyRecord.id,
+            recognizedStock: recStockFull,
+            playerId: player.id,
+            screenshotPath
+          };
+        } else {
+          db.recordStockHistory({
+            playerId: player.id,
+            userId: user.id,
+            source: 'telegram_photo',
+            snapshotBefore: before,
+            snapshotAfter: before,
+            diffSummary: 'Скриншот склада прикреплен',
+            screenshotPath,
+            createdAt: now
+          });
+
+          if (token) {
+            const fallbackKb = logic.getTelegramStockFallbackKeyboard();
+            await telegram.sendTelegramMessage({
+              token,
+              chatId,
+              text: `📸 <b>Скриншот склада получен и сохранен в журнале аудита!</b>\n` +
+                    `👤 Сектор: <b>${logic.escapeHtml(player.name)}</b>\n\n` +
+                    `Если данные склада не изменились, подтвердите их актуальность кнопкой ниже.\n` +
+                    `Чтобы обновить остатки вручную, отправьте команду:\n` +
+                    `<code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code>\n` +
+                    `<i>(Например: <code>/stock 15000 350</code>)</i>`,
+              replyMarkup: fallbackKb
+            });
+          }
+
+          return { ok: true, photo: true, updated: false, fallback: true, playerId: player.id, screenshotPath };
+        }
       }
     }
   }
@@ -1866,6 +1978,156 @@ async function handleTelegramUpdate(update) {
       }
 
       return { ok: true, action: 'result_submitted', eventId, actualPlace, prizeCoupons };
+    }
+
+    const confirmOcrMatch = data.match(/^confirm_ocr_stock:(\d+)$/);
+    if (confirmOcrMatch) {
+      const historyId = Number(confirmOcrMatch[1]);
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'confirm_ocr_stock', error: 'user_not_bound' };
+      }
+
+      const rec = db.getStockHistoryRecordById(historyId);
+      if (!rec) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Запись распознавания не найдена или устарела.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'confirm_ocr_stock', error: 'record_not_found' };
+      }
+
+      const isStaff = user.rank === 'r5' || user.rank === 'r4';
+      if (rec.userId !== user.id && !isStaff) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⛔ Вы можете подтверждать остатки только для своего сектора.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'confirm_ocr_stock', error: 'forbidden' };
+      }
+
+      const player = db.getPlayerById(rec.playerId);
+      if (!player) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Сектор не найден.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'confirm_ocr_stock', error: 'player_not_found' };
+      }
+
+      const now = new Date().toISOString();
+      const diff = logic.calculateStockDiff(rec.snapshotBefore, rec.snapshotAfter);
+
+      db.updatePlayer(player.id, {
+        stock: rec.snapshotAfter,
+        stockUpdatedAt: now,
+        stockUpdateSource: 'telegram_photo',
+        recordHistory: false
+      });
+
+      db.updateStockHistoryRecord(rec.id, {
+        diffSummary: `${diff.summary} (подтверждено по OCR)`
+      });
+
+      if (token) {
+        await telegram.answerTelegramCallback({
+          token,
+          callbackQueryId: cqId,
+          text: '✅ Изменения склада успешно применены!'
+        });
+
+        if (chatMsg?.chat?.id && chatMsg?.message_id) {
+          const successMsg = logic.formatStockUpdateSuccessMessage(diff, rec.snapshotAfter, {
+            sectorName: player.name
+          });
+          await telegram.editTelegramMessageText({
+            token,
+            chatId: chatMsg.chat.id,
+            messageId: chatMsg.message_id,
+            text: successMsg,
+            replyMarkup: { inline_keyboard: [] }
+          }).catch(() => {});
+        }
+      }
+
+      return { ok: true, action: 'confirm_ocr_stock', historyId, playerId: player.id, stock: rec.snapshotAfter };
+    }
+
+    if (data === 'confirm_current_stock') {
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'confirm_current_stock', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      if (!player) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Сектор не найден.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'confirm_current_stock', error: 'no_player' };
+      }
+
+      db.confirmPlayerStock(player.id, user.id, 'manual_confirm');
+
+      if (token) {
+        await telegram.answerTelegramCallback({
+          token,
+          callbackQueryId: cqId,
+          text: '✅ Склад подтвержден как актуальный!'
+        });
+
+        if (chatMsg?.chat?.id && chatMsg?.message_id) {
+          const nowFormatted = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+          const confirmedText = `✅ <b>Склад подтвержден как актуальный!</b>\n` +
+            `👤 Сектор: <b>${logic.escapeHtml(player.name)}</b>\n` +
+            `📅 Дата актуальности: <b>${nowFormatted}</b>\n\n` +
+            `<i>Остатки в базе данных не изменялись, таймер устаревания сброшен.</i>`;
+
+          await telegram.editTelegramMessageText({
+            token,
+            chatId: chatMsg.chat.id,
+            messageId: chatMsg.message_id,
+            text: confirmedText,
+            replyMarkup: { inline_keyboard: [] }
+          }).catch(() => {});
+        }
+      }
+
+      return { ok: true, action: 'confirm_current_stock', playerId: player.id };
     }
   }
 
@@ -4455,5 +4717,7 @@ module.exports = {
   checkStaleStockReminders,
   checkScheduledEventMorningReminders,
   handleTelegramUpdate,
-  syncTelegramBotInfoAndPolling
+  syncTelegramBotInfoAndPolling,
+  setServerOcrRunner,
+  tryServerOcr
 };

@@ -4007,6 +4007,53 @@
     return parts.join('\n');
   }
 
+  function formatTelegramOcrConfirmationMessage({ player, recognizedStock = {} }) {
+    const parts = [];
+    const sectorName = player?.name || 'Сектор';
+    parts.push('📸 <b>Распознаны данные склада со скриншота:</b>');
+    parts.push(`👤 Сектор: <b>${escapeHtml(sectorName)}</b>\n`);
+
+    const coupons = Number(recognizedStock.coupons) || 0;
+    const puzzles = Number(recognizedStock.puzzles) || 0;
+    const starCoupons = Number(recognizedStock.starCoupons) || 0;
+    const s1 = Number(recognizedStock.legendaryStars1) || 0;
+    const s2 = Number(recognizedStock.legendaryStars2) || 0;
+    const s3 = Number(recognizedStock.legendaryStars3) || 0;
+
+    parts.push(`• Купоны: <b>${formatInputNumber(coupons)}</b>`);
+    parts.push(`• Пазлы: <b>${formatInputNumber(puzzles)}</b>`);
+    parts.push(`• Звездные купоны: <b>${formatInputNumber(starCoupons)}</b>`);
+    parts.push(`• Звезды (I / II / III): <b>${s1} / ${s2} / ${s3}</b>\n`);
+    parts.push('<i>Нажмите кнопку ниже, чтобы применить изменения, или скорректируйте их вручную.</i>');
+    return parts.join('\n');
+  }
+
+  function getTelegramOcrConfirmationKeyboard(historyId) {
+    return {
+      inline_keyboard: [
+        [
+          { text: '✅ Применить изменения', callback_data: `confirm_ocr_stock:${historyId}` }
+        ],
+        [
+          { text: '✏️ Ввести остатки /stock', callback_data: 'cmd_stock_help' }
+        ]
+      ]
+    };
+  }
+
+  function getTelegramStockFallbackKeyboard() {
+    return {
+      inline_keyboard: [
+        [
+          { text: '✅ Текущие остатки актуальны', callback_data: 'confirm_current_stock' }
+        ],
+        [
+          { text: '✏️ Ввести остатки /stock', callback_data: 'cmd_stock_help' }
+        ]
+      ]
+    };
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -4115,6 +4162,9 @@
     formatTelegramWhoMessage,
     formatTelegramStaleReport,
     formatTelegramDigestMessage,
+    formatTelegramOcrConfirmationMessage,
+    getTelegramOcrConfirmationKeyboard,
+    getTelegramStockFallbackKeyboard,
     escapeHtml,
   };
 });
