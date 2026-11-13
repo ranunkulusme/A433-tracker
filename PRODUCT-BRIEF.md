@@ -1,6 +1,6 @@
 # PRODUCT-BRIEF: KoW Tracker & Event Planner
 **Дата анализа:** 13 ноября 2026 г.  
-**Версия системы:** v3.41.0  
+**Версия системы:** v3.42.0  
 **Роль анализа:** Product Lens (YC-style Diagnostic, Founder Review & Strategic Product Audit)
 
 ---
