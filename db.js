@@ -1450,14 +1450,14 @@ function recordStockHistory(arg1, arg2, arg3) {
   `).run(playerId, d, stock.coupons || 0, stock.puzzles || 0, stock.chests || 0);
 }
 
-function confirmPlayerStock(playerId, userId = null) {
+function confirmPlayerStock(playerId, userId = null, source = 'manual_confirm') {
   const player = getPlayerById(playerId);
   if (!player) return null;
   const nowIso = new Date().toISOString();
   recordStockHistory({
     playerId: player.id,
     userId: userId ? Number(userId) : null,
-    source: 'manual_confirm',
+    source,
     snapshotBefore: player.stock || {},
     snapshotAfter: player.stock || {},
     diffSummary: 'Подтверждена актуальность склада без изменений',
@@ -1465,6 +1465,57 @@ function confirmPlayerStock(playerId, userId = null) {
     createdAt: nowIso
   });
   return getPlayerById(playerId);
+}
+
+function getStockHistoryRecordById(id) {
+  const db = getDb();
+  const r = db.prepare(`
+    SELECT shr.*, u.username as author_username, u.rank as author_rank
+    FROM stock_history_records shr
+    LEFT JOIN users u ON u.id = shr.user_id
+    WHERE shr.id = ?
+  `).get(Number(id));
+  if (!r) return null;
+  let before = {};
+  let after = {};
+  try {
+    before = typeof r.snapshot_before === 'string' ? JSON.parse(r.snapshot_before) : (r.snapshot_before || {});
+  } catch (e) {}
+  try {
+    after = typeof r.snapshot_after === 'string' ? JSON.parse(r.snapshot_after) : (r.snapshot_after || {});
+  } catch (e) {}
+
+  return {
+    id: r.id,
+    playerId: r.player_id,
+    userId: r.user_id,
+    authorUsername: r.author_username || null,
+    authorRank: r.author_rank || null,
+    source: r.source,
+    snapshotBefore: before,
+    snapshotAfter: after,
+    diffSummary: r.diff_summary,
+    screenshotPath: r.screenshot_path || null,
+    createdAt: r.created_at
+  };
+}
+
+function updateStockHistoryRecord(id, updates = {}) {
+  const db = getDb();
+  const fields = [];
+  const params = [];
+  if (updates.source !== undefined) {
+    fields.push('source = ?');
+    params.push(updates.source);
+  }
+  if (updates.diffSummary !== undefined) {
+    fields.push('diff_summary = ?');
+    params.push(updates.diffSummary);
+  }
+  if (fields.length === 0) return getStockHistoryRecordById(id);
+  params.push(Number(id));
+  db.prepare(`UPDATE stock_history_records SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  return getStockHistoryRecordById(id);
 }
 
 async function cleanupExpiredScreenshots(dbInstance, screenshotsBaseDir) {
@@ -2566,6 +2617,37 @@ function verifyAndBindStaffChat(token, chatId) {
   return { success: true, chatId };
 }
 
+// ─── ANNOUNCEMENT CHANNEL BINDING ────────────────────────────
+function createChannelBindToken(token, expiresAt) {
+  if (!token) return false;
+  setAppSetting('telegram_channel_bind_token', token);
+  setAppSetting('telegram_channel_bind_expires_at', expiresAt);
+  return true;
+}
+
+function verifyAndBindChannelChat(token, chatId) {
+  if (!token || !chatId) {
+    return { success: false, reason: 'invalid' };
+  }
+  const currentToken = getAppSetting('telegram_channel_bind_token');
+  const expiresAt = getAppSetting('telegram_channel_bind_expires_at');
+
+  if (!currentToken || currentToken.toUpperCase() !== token.toUpperCase()) {
+    return { success: false, reason: 'invalid' };
+  }
+
+  if (expiresAt && new Date(expiresAt).getTime() < Date.now()) {
+    return { success: false, reason: 'expired' };
+  }
+
+  // Valid: save announcement channel chat ID and clear token
+  setAppSetting('telegram_announcement_chat_id', String(chatId));
+  setAppSetting('telegram_channel_bind_token', '');
+  setAppSetting('telegram_channel_bind_expires_at', '');
+
+  return { success: true, chatId };
+}
+
 // ─── USER TIMEZONE & EVENT MORNING REMINDERS ─────────────────
 function updateUserTimezone(userId, { timezone = 'Europe/Moscow', timezoneOffset = 3 } = {}) {
   const numId = Number(userId);
@@ -2653,6 +2735,8 @@ module.exports = {
   getStockHistoryByPlayerId,
   recordStockHistory,
   confirmPlayerStock,
+  getStockHistoryRecordById,
+  updateStockHistoryRecord,
   cleanupExpiredScreenshots,
   exportKowJson,
   importKowJson,
@@ -2671,6 +2755,8 @@ module.exports = {
   toggleTelegramNotifications,
   createStaffBindToken,
   verifyAndBindStaffChat,
+  createChannelBindToken,
+  verifyAndBindChannelChat,
   getMieruSettings,
   saveMieruSettings,
   touchUserActive,

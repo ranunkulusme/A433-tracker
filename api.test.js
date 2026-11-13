@@ -5331,6 +5331,554 @@ test('API POST /api/events/:id/share-grid enforces RBAC and sends poster to staf
   }
 });
 
+test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async () => {
+  const { startServer, handleTelegramUpdate } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  db.setAppSetting('telegram_bot_token', 'test_fighter_bot_token');
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 1234 } }) };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create and bind user
+    await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'fighter1', password: 'password123', playerName: 'Sector 7' })
+    });
+    const user = db.findUserByUsername('fighter1');
+    assert.ok(user);
+    db.approveUser(user.id, 'r3');
+    db.bindUserTelegram(user.id, 999111, 'fighter_tg');
+
+    // 2. Test /me command
+    sentMessages.length = 0;
+    const meRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/me'
+      }
+    });
+    assert.equal(meRes.ok, true);
+    assert.equal(meRes.command, 'me');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes('Sector 7'));
+    assert.ok(sentMessages[0].text.includes('Купоны'));
+    assert.ok(sentMessages[0].reply_markup && sentMessages[0].reply_markup.inline_keyboard);
+
+    // 3. Test /deficit command
+    sentMessages.length = 0;
+    const defRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/deficit'
+      }
+    });
+    assert.equal(defRes.ok, true);
+    assert.equal(defRes.command, 'deficit');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes('дефицита') || sentMessages[0].text.includes('дефицит'));
+
+    // 4. Test /events command
+    sentMessages.length = 0;
+    const evRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/events'
+      }
+    });
+    assert.equal(evRes.ok, true);
+    assert.equal(evRes.command, 'events');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes('Ближайшие события'));
+
+    // 5. Test /menu command
+    sentMessages.length = 0;
+    const menuRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/menu'
+      }
+    });
+    assert.equal(menuRes.ok, true);
+    assert.equal(menuRes.command, 'menu');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].reply_markup && sentMessages[0].reply_markup.inline_keyboard);
+
+    // 6. Test callback queries for menu buttons (cmd_me, cmd_deficit, cmd_events, cmd_stock_help, cmd_events_past, cmd_menu)
+    sentMessages.length = 0;
+    const cbMeRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_me_1',
+        from: { id: 999111 },
+        data: 'cmd_me',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbMeRes.ok, true);
+    assert.equal(cbMeRes.action, 'cmd_me');
+
+    const cbEventsPastRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_ev_past_1',
+        from: { id: 999111 },
+        data: 'cmd_events_past',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbEventsPastRes.ok, true);
+    assert.equal(cbEventsPastRes.action, 'cmd_events_past');
+
+    const cbEventsUpcomingRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_ev_up_1',
+        from: { id: 999111 },
+        data: 'cmd_events_upcoming',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbEventsUpcomingRes.ok, true);
+    assert.equal(cbEventsUpcomingRes.action, 'cmd_events_upcoming');
+
+    const cbMenuRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_menu_1',
+        from: { id: 999111 },
+        data: 'cmd_menu',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbMenuRes.ok, true);
+    assert.equal(cbMenuRes.action, 'cmd_menu');
+
+    // Test /events past command
+    sentMessages.length = 0;
+    const evPastCmdRes = await handleTelegramUpdate({
+      message: {
+        message_id: 1236,
+        from: { id: 999111, username: 'ranger' },
+        chat: { id: 999111, type: 'private' },
+        text: '/events past'
+      }
+    });
+    assert.equal(evPastCmdRes.ok, true);
+    assert.equal(evPastCmdRes.command, 'events');
+    assert.equal(evPastCmdRes.mode, 'past');
+    assert.ok(sentMessages.length > 0);
+
+    // 7. Test interactive event registration via Telegram Callback
+    const allEvents = db.getEvents();
+    assert.ok(allEvents.length > 0);
+    const targetEvent = allEvents[0];
+
+    const regRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_reg_1',
+        from: { id: 999111 },
+        data: `reg_event:${targetEvent.id}:2`,
+        message: { chat: { id: 999111 }, message_id: 1234, text: 'Открыта регистрация' }
+      }
+    });
+    assert.equal(regRes.ok, true);
+    assert.equal(regRes.action, 'registered');
+    assert.equal(regRes.desiredPlace, 2);
+
+    // Verify registration saved in DB
+    const playerRecord = db.getPlayersByUserId(user.id)[0];
+    assert.ok(playerRecord);
+    const regItem = db.getUserRegistration(targetEvent.id, playerRecord.id);
+    assert.ok(regItem);
+    assert.equal(regItem.desiredPlace, 2);
+
+    // Test unregistration via Telegram Callback
+    const unregRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_unreg_1',
+        from: { id: 999111 },
+        data: `unreg_event:${targetEvent.id}`,
+        message: { chat: { id: 999111 }, message_id: 1234, text: 'Открыта регистрация' }
+      }
+    });
+    assert.equal(unregRes.ok, true);
+    assert.equal(unregRes.action, 'unregistered');
+
+    const regAfterItem = db.getUserRegistration(targetEvent.id, playerRecord.id);
+    assert.equal(regAfterItem, null);
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('Telegram bot officer suite commands: /who, /stale, /ping_stale, /digest (RBAC)', async () => {
+  const { startServer, handleTelegramUpdate } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+
+  db.setAppSetting('telegram_bot_token', 'test_officer_token_123');
+  db.setAppSetting('telegram_staff_chat_id', '-100999888');
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 555 } }) };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create officer R4 and fighter R3
+    const officer = db.registerUser({ username: 'officer_alex', password: 'password123' });
+    db.approveUser(officer.id, 'r4');
+    db.bindUserTelegram(officer.id, 888111, 'alex_tg');
+
+    const fighter = db.registerUser({ username: 'soldier_bob', password: 'password123' });
+    db.approveUser(fighter.id, 'r3');
+    db.bindUserTelegram(fighter.id, 888222, 'bob_tg');
+    db.createPlayer({ name: 'Sector 7 (Рейнджер)', power: 45000000, vipLevel: 14, userId: fighter.id });
+
+    // 2. R3 attempts officer commands -> Forbidden
+    sentMessages.length = 0;
+    const r3WhoRes = await handleTelegramUpdate({
+      message: { chat: { id: 888222, type: 'private' }, from: { id: 888222 }, text: '/who Sector 1' }
+    });
+    assert.equal(r3WhoRes.ok, true);
+    assert.equal(r3WhoRes.authorized, false);
+    assert.ok(sentMessages[0].text.includes('Доступ запрещен'));
+
+    // 3. Officer R4 runs /who
+    sentMessages.length = 0;
+    const r4WhoRes = await handleTelegramUpdate({
+      message: { chat: { id: 888111, type: 'private' }, from: { id: 888111 }, text: '/who Sector' }
+    });
+    assert.equal(r4WhoRes.ok, true);
+    assert.equal(r4WhoRes.command, 'who');
+    assert.ok(sentMessages[0].text.includes('Досье бойца'));
+
+    // 4. Officer R4 runs /stale
+    sentMessages.length = 0;
+    const r4StaleRes = await handleTelegramUpdate({
+      message: { chat: { id: 888111, type: 'private' }, from: { id: 888111 }, text: '/stale' }
+    });
+    assert.equal(r4StaleRes.ok, true);
+    assert.equal(r4StaleRes.command, 'stale');
+    assert.ok(sentMessages[0].text.includes('Отчет по устаревшим складам') || sentMessages[0].text.includes('актуальны'));
+
+    // 5. Staff Chat runs /digest
+    sentMessages.length = 0;
+    const staffDigestRes = await handleTelegramUpdate({
+      message: { chat: { id: -100999888, type: 'supergroup' }, from: { id: 888111 }, text: '/digest' }
+    });
+    assert.equal(staffDigestRes.ok, true);
+    assert.equal(staffDigestRes.command, 'digest');
+    assert.ok(sentMessages[0].text.includes('Оперативная сводка альянса'));
+
+    // 6. Officer runs /ping_stale
+    sentMessages.length = 0;
+    const pingStaleRes = await handleTelegramUpdate({
+      message: { chat: { id: -100999888, type: 'supergroup' }, from: { id: 888111 }, text: '/ping_stale' }
+    });
+    assert.equal(pingStaleRes.ok, true);
+    assert.equal(pingStaleRes.command, 'ping_stale');
+    assert.ok(sentMessages.some(m => m.text && m.text.includes('напоминаний')));
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('Telegram Webhook server screenshot OCR processing and interactive confirmation callbacks', async () => {
+  const { startServer, handleTelegramUpdate, setServerOcrRunner } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+
+  db.setAppSetting('telegram_bot_token', 'test_ocr_token_456');
+
+  const sentMessages = [];
+  const answeredCallbacks = [];
+
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 888 } }) };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      const payload = JSON.parse(init.body);
+      answeredCallbacks.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    if (url.includes('/getFile')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { file_path: 'photos/warehouse_test.jpg' } }) };
+    }
+    if (url.includes('/file/bot')) {
+      // Return dummy JPEG buffer
+      return { ok: true, status: 200, arrayBuffer: async () => Buffer.from('FAKE_JPEG_IMAGE_DATA') };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    const soldier = db.registerUser({ username: 'ocr_soldier', password: 'password123' });
+    db.approveUser(soldier.id, 'r3');
+    db.bindUserTelegram(soldier.id, 999333, 'ocr_soldier_tg');
+    const player = db.createPlayer({
+      name: 'Sector OCR (Снайпер)',
+      power: 35000000,
+      stock: { coupons: 5000, puzzles: 100, starCoupons: 0, legendaryStars1: 0, legendaryStars2: 0, legendaryStars3: 0 },
+      userId: soldier.id
+    });
+
+    // 1. Mock OCR to recognize numbers
+    setServerOcrRunner(async () => ({
+      coupons: 16500,
+      puzzles: 410,
+      starCoupons: 14,
+      legendaryStars1: 2,
+      legendaryStars2: 1,
+      legendaryStars3: 0
+    }));
+
+    sentMessages.length = 0;
+    const ocrUploadRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999333, type: 'private' },
+        from: { id: 999333 },
+        photo: [{ file_id: 'photo_ocr_test', file_size: 1024 }]
+      }
+    });
+
+    assert.equal(ocrUploadRes.ok, true);
+    assert.equal(ocrUploadRes.ocr, true);
+    assert.ok(ocrUploadRes.historyId > 0);
+    assert.ok(sentMessages[0].text.includes('Распознаны данные склада'));
+    assert.ok(sentMessages[0].text.includes('16 500'));
+    assert.ok(sentMessages[0].text.includes('410'));
+    assert.equal(sentMessages[0].reply_markup.inline_keyboard[0][0].callback_data, `confirm_ocr_stock:${ocrUploadRes.historyId}`);
+
+    // 2. Confirm OCR changes
+    answeredCallbacks.length = 0;
+    sentMessages.length = 0;
+    const confirmOcrRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_confirm_ocr_1',
+        from: { id: 999333 },
+        message: { chat: { id: 999333 } },
+        data: `confirm_ocr_stock:${ocrUploadRes.historyId}`
+      }
+    });
+
+    assert.equal(confirmOcrRes.ok, true);
+    assert.equal(confirmOcrRes.action, 'confirm_ocr_stock');
+    assert.ok(answeredCallbacks.some(c => c.text.includes('успешно применены')));
+    const updatedPlayer = db.getPlayerById(player.id);
+    assert.equal(updatedPlayer.stock.coupons, 16500);
+    assert.equal(updatedPlayer.stock.puzzles, 410);
+
+    // 3. Fallback: OCR returns null or unavailable
+    setServerOcrRunner(async () => null);
+    sentMessages.length = 0;
+    const fallbackUploadRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999333, type: 'private' },
+        from: { id: 999333 },
+        photo: [{ file_id: 'photo_fallback_test', file_size: 1024 }]
+      }
+    });
+
+    assert.equal(fallbackUploadRes.ok, true);
+    assert.equal(fallbackUploadRes.fallback, true);
+    assert.ok(sentMessages[0].text.includes('Скриншот склада получен'));
+    assert.equal(sentMessages[0].reply_markup.inline_keyboard[0][0].callback_data, 'confirm_current_stock');
+
+    // 4. Confirm current stock callback
+    answeredCallbacks.length = 0;
+    sentMessages.length = 0;
+    const confirmFallbackRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_confirm_current_1',
+        from: { id: 999333 },
+        message: { chat: { id: 999333 } },
+        data: 'confirm_current_stock'
+      }
+    });
+
+    assert.equal(confirmFallbackRes.ok, true);
+    assert.equal(confirmFallbackRes.action, 'confirm_current_stock');
+    assert.ok(answeredCallbacks.some(c => c.text.includes('актуальный')));
+
+  } finally {
+    setServerOcrRunner(null);
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('Telegram Mini App HMAC auth and multi-chat announcement channel binding', async () => {
+  const crypto = require('node:crypto');
+  const { startServer, handleTelegramUpdate } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const botToken = '987654321:XYZ_Test_Token_For_TMA';
+  db.setAppSetting('telegram_bot_token', botToken);
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 101 } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Setup users
+    const admin = db.findUserByUsername('admin');
+    const adminSession = db.createSession(admin.id);
+
+    const fighter = db.registerUser({ username: 'tma_soldier', password: 'password123' });
+    db.approveUser(fighter.id, 'r3');
+    db.bindUserTelegram(fighter.id, 555444333, 'tma_soldier_tg');
+
+    // Helper to generate initData
+    function createInitData(userObj, authDate = Math.floor(Date.now() / 1000), customToken = botToken) {
+      const uStr = JSON.stringify(userObj);
+      const pairs = [
+        `auth_date=${authDate}`,
+        `query_id=AAH555`,
+        `user=${uStr}`
+      ];
+      pairs.sort();
+      const dataCheckString = pairs.join('\n');
+      const secretKey = crypto.createHmac('sha256', 'WebAppData').update(customToken).digest();
+      const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+      const params = new URLSearchParams();
+      params.set('query_id', 'AAH555');
+      params.set('user', uStr);
+      params.set('auth_date', String(authDate));
+      params.set('hash', hash);
+      return params.toString();
+    }
+
+    // 2. Test POST /api/auth/telegram-webapp with valid initData
+    const validInitData = createInitData({ id: 555444333, username: 'tma_soldier_tg', first_name: 'Soldier' });
+    const authRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: validInitData })
+    });
+    assert.equal(authRes.status, 200);
+    const authData = await authRes.json();
+    assert.equal(authData.success, true);
+    assert.equal(authData.user.username, 'tma_soldier');
+    assert.ok(authData.token);
+    assert.ok(authRes.headers.get('set-cookie')?.includes('token='));
+
+    // 3. Test POST /api/auth/telegram-webapp with invalid signature
+    const invalidRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: validInitData.replace(/hash=[a-f0-9]{10}/, 'hash=0000000000') })
+    });
+    assert.equal(invalidRes.status, 401);
+
+    // 4. Test POST /api/auth/telegram-webapp with unbound user
+    const unboundInitData = createInitData({ id: 999999999, username: 'unknown_stranger' });
+    const unboundRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: unboundInitData })
+    });
+    assert.equal(unboundRes.status, 404);
+
+    // 5. Test Channel PIN generation (POST /api/telegram/channel-bind-token)
+    const pinRes = await fetch(`${baseUrl}/api/telegram/channel-bind-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminSession}`
+      }
+    });
+    assert.equal(pinRes.status, 200);
+    const pinData = await pinRes.json();
+    assert.ok(pinData.pin.startsWith('KOW-CHAN-'));
+
+    // 6. Test /connect_channel <PIN> command in Telegram
+    sentMessages.length = 0;
+    const channelBindRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: -100777666, type: 'channel', title: 'KoW Announcements' },
+        from: { id: 555444333 },
+        text: `/connect_channel ${pinData.pin}`
+      }
+    });
+    assert.equal(channelBindRes.ok, true);
+    assert.equal(channelBindRes.channelConnected, true);
+    assert.equal(db.getAppSetting('telegram_announcement_chat_id'), '-100777666');
+    assert.ok(sentMessages[0].text.includes('Канал/чат анонсов успешно подключен'));
+
+    // 7. Verify GET & PUT /api/telegram/settings with announcementChatId
+    const getSettingsRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      headers: { Authorization: `Bearer ${adminSession}` }
+    });
+    assert.equal(getSettingsRes.status, 200);
+    const settingsData = await getSettingsRes.json();
+    assert.equal(settingsData.announcementChatId, '-100777666');
+
+    // Update announcementChatId via PUT
+    const putSettingsRes = await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminSession}`
+      },
+      body: JSON.stringify({ announcementChatId: '-100123456789' })
+    });
+    assert.equal(putSettingsRes.status, 200);
+    const putData = await putSettingsRes.json();
+    assert.equal(putData.announcementChatId, '-100123456789');
+    assert.equal(db.getAppSetting('telegram_announcement_chat_id'), '-100123456789');
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+
+
 
 
 

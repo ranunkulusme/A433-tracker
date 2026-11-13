@@ -650,6 +650,27 @@ async function answerTelegramCallback({
 }
 
 /**
+ * Configure chat menu button (e.g. for opening Telegram Mini App WebApp).
+ */
+async function setTelegramChatMenuButton(token, { text = 'KoW Tracker', url = null, chatId = null } = {}, options = {}) {
+  if (!token) return { ok: false, error: 'MISSING_BOT_TOKEN' };
+  const payload = {};
+  if (chatId) {
+    payload.chat_id = chatId;
+  }
+  if (url) {
+    payload.menu_button = {
+      type: 'web_app',
+      text: text || 'KoW Tracker',
+      web_app: { url }
+    };
+  } else {
+    payload.menu_button = { type: 'default' };
+  }
+  return callTelegramApi(token, 'setChatMenuButton', payload, options);
+}
+
+/**
  * Retrieve updates via long polling (getUpdates).
  */
 async function getTelegramUpdates(token, {
@@ -889,6 +910,7 @@ module.exports = {
   downloadTelegramFile,
   editTelegramMessageText,
   answerTelegramCallback,
+  setTelegramChatMenuButton,
   getTelegramUpdates,
   deleteTelegramWebhook,
   setTelegramWebhook,

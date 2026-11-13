@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.42.0';
+const APP_VERSION = 'v3.43.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -6174,11 +6174,24 @@ document.querySelectorAll('.nav-item').forEach(el=>{
 });
 
 // ─── PAGE: CALENDAR ──────────────────────────────────────────
+let calendarActiveTab = 'upcoming';
+
+function setCalendarTab(tab) {
+  calendarActiveTab = tab;
+  renderCalendar();
+}
+window.setCalendarTab = setCalendarTab;
+
 function renderCalendar() {
   const sorted = [...state.events].sort((a,b)=>a.dateFrom.localeCompare(b.dateFrom));
   const active = sorted.filter(isEventActive);
   const upcoming = sorted.filter(isEventUpcoming);
-  const past = sorted.filter(isEventPast);
+  // Past events sorted descending (most recent first)
+  const past = sorted.filter(isEventPast).sort((a,b)=>b.dateFrom.localeCompare(a.dateFrom));
+
+  const upcomingCount = active.length + upcoming.length;
+  const pastCount = past.length;
+  const allCount = sorted.length;
 
   const c = document.getElementById('content');
   c.innerHTML = `
@@ -6191,19 +6204,37 @@ function renderCalendar() {
         </div>` : ''}
     </div>
 
-    ${active.length ? `
+    <div class="cal-tabs" style="display:flex;gap:6px;margin-bottom:16px;background:var(--bg2);padding:4px;border-radius:var(--radius);border:1px solid var(--border);width:fit-content;flex-wrap:wrap">
+      <button class="btn btn-sm ${calendarActiveTab === 'upcoming' ? 'btn-primary' : 'btn-ghost'}" onclick="setCalendarTab('upcoming')" style="border-radius:6px;font-size:12px;padding:6px 14px">
+        ◎ ${typeof t === 'function' ? t('events.tab_upcoming') : 'Предстоящие'} <span style="opacity:0.75;margin-left:4px">(${upcomingCount})</span>
+      </button>
+      <button class="btn btn-sm ${calendarActiveTab === 'past' ? 'btn-primary' : 'btn-ghost'}" onclick="setCalendarTab('past')" style="border-radius:6px;font-size:12px;padding:6px 14px">
+        ◌ ${typeof t === 'function' ? t('events.tab_past') : 'Прошедшие'} <span style="opacity:0.75;margin-left:4px">(${pastCount})</span>
+      </button>
+      <button class="btn btn-sm ${calendarActiveTab === 'all' ? 'btn-primary' : 'btn-ghost'}" onclick="setCalendarTab('all')" style="border-radius:6px;font-size:12px;padding:6px 14px">
+        📑 ${typeof t === 'function' ? t('events.tab_all') : 'Все'} <span style="opacity:0.75;margin-left:4px">(${allCount})</span>
+      </button>
+    </div>
+
+    ${(calendarActiveTab === 'upcoming' || calendarActiveTab === 'all') && active.length ? `
     <div class="cal-section-label active-label">${typeof t === 'function' ? t('events.active_now') : '● Идут сейчас'}</div>
     <div class="cal-cards">${active.map(ev=>calCard(ev,'active')).join('')}</div>` : ''}
 
-    ${upcoming.length ? `
+    ${(calendarActiveTab === 'upcoming' || calendarActiveTab === 'all') && upcoming.length ? `
     <div class="cal-section-label upcoming-label">${typeof t === 'function' ? t('events.upcoming') : '◎ Предстоящие'}</div>
     <div class="cal-cards">${upcoming.map(ev=>calCard(ev,'upcoming')).join('')}</div>` : ''}
 
-    ${past.length ? `
+    ${calendarActiveTab === 'upcoming' && !upcomingCount ? `
+    <div class="empty-state"><p>${typeof t === 'function' ? t('events.empty_upcoming_events') : 'Предстоящих ивентов пока нет'}</p></div>` : ''}
+
+    ${(calendarActiveTab === 'past' || calendarActiveTab === 'all') && past.length ? `
     <div class="cal-section-label past-label">${typeof t === 'function' ? t('events.past') : '◌ Прошедшие'}</div>
     <div class="cal-cards">${past.map(ev=>calCard(ev,'past')).join('')}</div>` : ''}
 
-    ${!sorted.length ? `<div class="empty-state"><p>${typeof t === 'function' ? t('events.empty_events') : 'Ивентов нет. Создайте первый!'}</p></div>` : ''}
+    ${calendarActiveTab === 'past' && !pastCount ? `
+    <div class="empty-state"><p>${typeof t === 'function' ? t('events.empty_past_events') : 'Завершённых ивентов пока нет'}</p></div>` : ''}
+
+    ${calendarActiveTab === 'all' && !allCount ? `<div class="empty-state"><p>${typeof t === 'function' ? t('events.empty_events') : 'Ивентов нет. Создайте первый!'}</p></div>` : ''}
   `;
 }
 
@@ -6622,9 +6653,9 @@ function renderEventDetail(eventId) {
     <div class="section-header" style="margin-top:24px">
       <div class="section-title">Таблица мест и назначений</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-secondary btn-sm" onclick="downloadEventGridPoster(${ev.id})" title="${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}">🖼 ${typeof t === 'function' ? t('events.btn_download_poster') : 'Скачать сетку'}</button>
+        <button class="btn btn-secondary btn-sm" onclick="downloadEventGridPoster(${ev.id})" title="${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}">${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}</button>
         ${(canManage() || hasPermission('manage_events')) ? `
-          <button class="btn btn-secondary btn-sm" onclick="shareEventGridToTelegram(${ev.id})" title="${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}">📤 ${typeof t === 'function' ? t('events.btn_share_poster') : 'Сетка в Telegram'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="shareEventGridToTelegram(${ev.id})" title="${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}">${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}</button>
         ` : ''}
         ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) ? `
           <button class="btn btn-secondary btn-sm" onclick="requestEventResultsTg(${ev.id})" title="Разослать участникам запрос фактического места в Telegram">🏁 ${typeof t === 'function' ? t('events.btn_request_results_tg') : 'Запросить итоги в TG'}</button>

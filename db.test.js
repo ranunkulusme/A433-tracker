@@ -2239,6 +2239,29 @@ test('user timezone management and event morning reminder logging in db', () => 
   assert.equal(dbModule.hasEventReminderBeenSent(10, 1, admin.id, '2026-11-17'), false);
 });
 
+test('db.getStockHistoryRecordById and updateStockHistoryRecord', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+  const p = dbModule.createPlayer({ name: 'Stock Record Sector', power: 1000 });
+  const rec = dbModule.recordStockHistory({
+    playerId: p.id,
+    source: 'telegram_photo',
+    snapshotBefore: { coupons: 100 },
+    snapshotAfter: { coupons: 200 },
+    diffSummary: '+100 купонов (ожидает подтверждения)'
+  });
+
+  assert.ok(rec.id > 0);
+  const fetched = dbModule.getStockHistoryRecordById(rec.id);
+  assert.equal(fetched.id, rec.id);
+  assert.equal(fetched.source, 'telegram_photo');
+  assert.equal(fetched.snapshotAfter.coupons, 200);
+
+  const updated = dbModule.updateStockHistoryRecord(rec.id, { diffSummary: '+100 купонов (подтверждено)' });
+  assert.equal(updated.diffSummary, '+100 купонов (подтверждено)');
+});
+
+
 
 
 

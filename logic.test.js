@@ -3546,3 +3546,288 @@ test('formatRelativeTime formats user activity across minutes, hours, days, week
   assert.equal(formatRelativeTime(new Date('2025-05-01T12:00:00.000Z'), fixedNow, { lang: 'de' }), 'vor mehr als einem Jahr');
 });
 
+test('telegram fighter suite formatters and keyboards', () => {
+  const {
+    formatTelegramMeMessage,
+    formatTelegramDeficitMessage,
+    formatTelegramEventsListMessage,
+    getTelegramEventsKeyboard,
+    getTelegramMainMenuKeyboard,
+  } = require('./logic.js');
+
+  // 1. formatTelegramMeMessage
+  const meText = formatTelegramMeMessage({
+    user: { id: 1, username: 'ranger', rank: 'r3' },
+    player: {
+      id: 1,
+      name: 'Sector 7 (Рейнджер)',
+      power: 48200000,
+      vip: 14,
+      stock: { coupons: 18450, puzzles: 320, starCoupons: 100, legendaryStars1: 5, legendaryStars2: 2, legendaryStars3: 1 },
+      stockUpdatedAt: '2026-11-11T12:00:00Z'
+    },
+    freshness: { status: 'fresh', days: 2, label: '2 дн. назад' },
+    targetOfficer: { name: 'Элизабет', skills: [5, 4, 3, 2], stars: 4 },
+    targetDeficit: 4200
+  });
+
+  assert(meText.includes('Sector 7 (Рейнджер)'));
+  assert(meText.includes('Р3'));
+  assert(meText.includes('VIP: <b>14</b>') || meText.includes('VIP: 14'));
+  assert(meText.includes('18 450') || meText.includes('18450'));
+  assert(meText.includes('320'));
+  assert(meText.includes('Элизабет'));
+  assert(meText.includes('4 200') || meText.includes('4200'));
+
+  // 2. formatTelegramDeficitMessage
+  const deficitText = formatTelegramDeficitMessage({
+    player: { name: 'Sector 7' },
+    targetOfficer: { name: 'Элизабет', skills: [5, 4, 3, 2], stars: 4, type: 'Танк' },
+    deficit: { coupons: 4200, puzzles: 84, medalsRemaining: 140, isMaxSkills: false },
+    dailyRewards: { coupons: 300, puzzles: 0 },
+    daysEstimate: 14
+  });
+
+  assert(deficitText.includes('Элизабет'));
+  assert(deficitText.includes('4 200') || deficitText.includes('4200'));
+  assert(deficitText.includes('14 дн') || deficitText.includes('14'));
+
+  // 3. formatTelegramEventsListMessage
+  const eventsText = formatTelegramEventsListMessage({
+    events: [
+      { id: 1, title: 'Мощные силы', dateFrom: '2026-11-15T00:00:00Z', assignments: [{ playerId: 1, place: 1, coupons: 50, rsvpStatus: 'confirmed' }] },
+      { id: 2, title: 'Битва за трон', dateFrom: '2026-11-22T00:00:00Z', registrations: [{ playerId: 1, desiredPlace: 2 }] },
+      { id: 3, title: 'Мощь времени', dateFrom: '2026-11-29T00:00:00Z', assignments: [], registrations: [] }
+    ],
+    playerId: 1
+  });
+
+  assert(eventsText.includes('Мощные силы'));
+  assert(eventsText.includes('#1'));
+  assert(eventsText.includes('Битва за трон'));
+  assert(eventsText.includes('Мощь времени'));
+
+  // 3b. formatTelegramEventsListMessage (past events mode)
+  const pastEventsText = formatTelegramEventsListMessage({
+    events: [
+      { id: 4, title: 'Осада крепости', dateFrom: '2026-11-01T00:00:00Z', assignments: [{ playerId: 1, place: 2, actualPlace: 2, actualCoupons: 40 }] },
+      { id: 5, title: 'Гонка вооружений', dateFrom: '2026-10-25T00:00:00Z', assignments: [] }
+    ],
+    playerId: 1,
+    mode: 'past'
+  });
+  assert(pastEventsText.includes('Прошедшие события'));
+  assert(pastEventsText.includes('Осада крепости'));
+  assert(pastEventsText.includes('Итог: Место #2'));
+  assert(pastEventsText.includes('+40'));
+  assert(pastEventsText.includes('Гонка вооружений'));
+  assert(pastEventsText.includes('Событие завершено'));
+
+  // 4. getTelegramEventsKeyboard
+  const upcomingKb = getTelegramEventsKeyboard({ mode: 'upcoming' });
+  assert(Array.isArray(upcomingKb.inline_keyboard));
+  assert(upcomingKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events_past'));
+
+  const pastKb = getTelegramEventsKeyboard({ mode: 'past' });
+  assert(Array.isArray(pastKb.inline_keyboard));
+  assert(pastKb.inline_keyboard.flat().some(b => b.callback_data === 'cmd_events_upcoming'));
+
+  // 5. getTelegramMainMenuKeyboard
+  const r3Keyboard = getTelegramMainMenuKeyboard({ isStaff: false });
+  assert(Array.isArray(r3Keyboard.inline_keyboard));
+  const r3Callbacks = r3Keyboard.inline_keyboard.flat().map(b => b.callback_data);
+  assert(r3Callbacks.includes('cmd_me'));
+  assert(r3Callbacks.includes('cmd_deficit'));
+  assert(r3Callbacks.includes('cmd_events'));
+  assert(!r3Callbacks.includes('cmd_digest')); // only for staff
+
+  const r4Keyboard = getTelegramMainMenuKeyboard({ isStaff: true });
+  const r4Callbacks = r4Keyboard.inline_keyboard.flat().map(b => b.callback_data);
+  assert(r4Callbacks.includes('cmd_digest'));
+  assert(r4Callbacks.includes('cmd_stale'));
+});
+
+test('telegram event registration keyboards', () => {
+  const {
+    formatEventRegistrationKeyboard,
+    formatEventRegistrationConfirmedKeyboard,
+  } = require('./logic.js');
+
+  const regKb = formatEventRegistrationKeyboard(42);
+  assert(Array.isArray(regKb.inline_keyboard));
+  const callbacks = regKb.inline_keyboard.flat().map(b => b.callback_data);
+  assert(callbacks.includes('reg_event:42:1'));
+  assert(callbacks.includes('reg_event:42:2'));
+  assert(callbacks.includes('reg_event:42:3'));
+  assert(callbacks.includes('reg_event:42:0')); // любое
+
+  const confKb = formatEventRegistrationConfirmedKeyboard(42, 1);
+  assert(Array.isArray(confKb.inline_keyboard));
+  const confCallbacks = confKb.inline_keyboard.flat().map(b => b.callback_data);
+  assert(confCallbacks.includes('unreg_event:42'));
+  const btnTexts = confKb.inline_keyboard.flat().map(b => b.text);
+  assert(btnTexts.some(t => t.includes('Заявка подана') && t.includes('#1')));
+});
+
+test('telegram officer suite formatters', () => {
+  const {
+    formatTelegramWhoMessage,
+    formatTelegramStaleReport,
+    formatTelegramDigestMessage,
+  } = require('./logic.js');
+
+  // 1. formatTelegramWhoMessage
+  const whoText = formatTelegramWhoMessage({
+    player: {
+      id: 5,
+      name: 'Sector 12 (Викинг)',
+      power: 42000000,
+      vip: 13,
+      stock: { coupons: 5000, puzzles: 120 },
+      stockUpdatedAt: '2026-10-25T12:00:00Z'
+    },
+    user: { id: 10, username: 'viking_lord', rank: 'r3' },
+    freshness: { status: 'stale', days: 19, label: '19 дн. назад' },
+    recentEvents: [
+      { title: 'Битва за трон', place: 2, actualPlace: 2, coupons: 40 }
+    ]
+  });
+
+  assert(whoText.includes('Sector 12 (Викинг)'));
+  assert(whoText.includes('viking_lord'));
+  assert(whoText.includes('42 000 000') || whoText.includes('42000000'));
+  assert(whoText.includes('5 000') || whoText.includes('5000'));
+  assert(whoText.includes('19 дн. назад'));
+  assert(whoText.includes('Битва за трон'));
+
+  // 2. formatTelegramStaleReport
+  const emptyStale = formatTelegramStaleReport({ stalePlayers: [] });
+  assert(emptyStale.includes('Все склады альянса актуальны'));
+
+  const staleText = formatTelegramStaleReport({
+    stalePlayers: [
+      { name: 'Sector 9', days: 22, username: 'soldier9' },
+      { name: 'Sector 15', days: 18, username: null }
+    ]
+  });
+  assert(staleText.includes('Sector 9'));
+  assert(staleText.includes('@soldier9'));
+  assert(staleText.includes('22 дн. назад') || staleText.includes('22 дн'));
+  assert(staleText.includes('Sector 15'));
+
+  // 3. formatTelegramDigestMessage
+  const digestText = formatTelegramDigestMessage({
+    totalSectors: 42,
+    freshnessStats: { fresh: 28, warning: 8, stale: 6 },
+    nextEvent: { title: 'Мощные силы', dateStr: '15 нояб', assignedCount: 4, totalPlaces: 5, registrationsCount: 11 },
+    pendingUsersCount: 2
+  });
+
+  assert(digestText.includes('42'));
+  assert(digestText.includes('28'));
+  assert(digestText.includes('Мощные силы'));
+  assert(digestText.includes('11'));
+  assert(digestText.includes('2'));
+});
+
+test('telegram OCR and stock fallback formatters and keyboards', () => {
+  const logic = require('./logic.js');
+  const {
+    formatTelegramOcrConfirmationMessage,
+    getTelegramOcrConfirmationKeyboard,
+    getTelegramStockFallbackKeyboard
+  } = logic;
+
+  // 1. OCR Confirmation message
+  const msg = formatTelegramOcrConfirmationMessage({
+    player: { name: 'Sector 77' },
+    recognizedStock: {
+      coupons: 14500,
+      puzzles: 320,
+      starCoupons: 15,
+      legendaryStars1: 2,
+      legendaryStars2: 1,
+      legendaryStars3: 0
+    }
+  });
+
+  assert(msg.includes('Sector 77'));
+  assert(msg.includes('14 500'));
+  assert(msg.includes('320'));
+  assert(msg.includes('15'));
+  assert(msg.includes('2 / 1 / 0'));
+
+  // 2. OCR Confirmation keyboard
+  const kb = getTelegramOcrConfirmationKeyboard(42);
+  assert.equal(kb.inline_keyboard.length, 2);
+  assert.equal(kb.inline_keyboard[0][0].callback_data, 'confirm_ocr_stock:42');
+  assert.ok(kb.inline_keyboard[0][0].text.includes('Применить'));
+
+  // 3. Fallback keyboard
+  const fallbackKb = getTelegramStockFallbackKeyboard();
+  assert.equal(fallbackKb.inline_keyboard.length, 2);
+  assert.equal(fallbackKb.inline_keyboard[0][0].callback_data, 'confirm_current_stock');
+  assert.ok(fallbackKb.inline_keyboard[0][0].text.includes('актуальны'));
+});
+
+test('validateTelegramWebAppData HMAC validation and expiration', () => {
+  const logic = require('./logic.js');
+  const crypto = require('node:crypto');
+  const botToken = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
+  const nowSec = Math.floor(Date.now() / 1000);
+  const userObj = { id: 777888, username: 'hero_ivan', first_name: 'Иван' };
+  const userStr = JSON.stringify(userObj);
+
+  function createValidInitData(overrides = {}) {
+    const authDate = overrides.authDate !== undefined ? overrides.authDate : nowSec;
+    const queryId = overrides.queryId !== undefined ? overrides.queryId : 'AAH888';
+    const uStr = overrides.userStr !== undefined ? overrides.userStr : userStr;
+
+    const pairs = [
+      `auth_date=${authDate}`,
+      `query_id=${queryId}`,
+      `user=${uStr}`
+    ];
+    pairs.sort();
+    const dataCheckString = pairs.join('\n');
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+    const params = new URLSearchParams();
+    params.set('query_id', queryId);
+    params.set('user', uStr);
+    params.set('auth_date', String(authDate));
+    params.set('hash', overrides.hash !== undefined ? overrides.hash : hash);
+    return params.toString();
+  }
+
+  // 1. Valid initData
+  const validData = createValidInitData();
+  const res1 = logic.validateTelegramWebAppData(validData, botToken, { nowSec });
+  assert.equal(res1.valid, true);
+  assert.equal(res1.user.id, 777888);
+  assert.equal(res1.user.username, 'hero_ivan');
+  assert.equal(res1.queryId, 'AAH888');
+
+  // 2. Tampered data (bad hash)
+  const tamperedData = createValidInitData({ hash: 'deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb' });
+  const res2 = logic.validateTelegramWebAppData(tamperedData, botToken, { nowSec });
+  assert.equal(res2.valid, false);
+  assert.equal(res2.error, 'invalid_hash');
+
+  // 3. Expired data (>24h)
+  const expiredData = createValidInitData({ authDate: nowSec - 90000 });
+  const res3 = logic.validateTelegramWebAppData(expiredData, botToken, { nowSec });
+  assert.equal(res3.valid, false);
+  assert.equal(res3.error, 'expired');
+
+  // 4. Missing hash
+  const paramsNoHash = new URLSearchParams(validData);
+  paramsNoHash.delete('hash');
+  const res4 = logic.validateTelegramWebAppData(paramsNoHash.toString(), botToken, { nowSec });
+  assert.equal(res4.valid, false);
+  assert.equal(res4.error, 'missing_hash');
+});
+
+
+
