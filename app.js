@@ -410,11 +410,6 @@ async function apiFetch(url, options = {}) {
     options.body = JSON.stringify(options.body);
   }
 
-  // Intercept if offline
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return handleOfflineApiRequest(url, method, bodyObj);
-  }
-
   const fetchOptions = {
     ...options,
     cache: 'no-store',
@@ -1636,14 +1631,17 @@ function renderSidebarNav() {
 
   const footer = document.querySelector('.sidebar-footer');
   if (footer) {
-    if (role === 'r5') {
-      footer.style.display = 'flex';
-      const importBtn = document.getElementById('btn-import-json');
-      if (importBtn) {
-        importBtn.style.display = 'flex';
-      }
-    } else {
-      footer.style.display = 'none';
+    footer.style.display = 'flex';
+    const adminActions = document.getElementById('sidebar-admin-actions');
+    if (adminActions) {
+      adminActions.style.display = (role === 'r5') ? 'flex' : 'none';
+    }
+    const importBtn = document.getElementById('btn-import-json');
+    if (importBtn) {
+      importBtn.style.display = (role === 'r5') ? 'flex' : 'none';
+    }
+    if (typeof updateSidebarVersion === 'function') {
+      updateSidebarVersion();
     }
   }
 }
@@ -2083,8 +2081,36 @@ async function connectUserTelegram() {
     const data = await apiFetch('/api/telegram/bind-token', { method: 'POST' });
     if (data && data.deepLink) {
       const cleanDeepLink = data.deepLink.replace('t.me/@', 't.me/');
-      window.open(cleanDeepLink, '_blank');
+      try {
+        window.open(cleanDeepLink, '_blank');
+      } catch (_) {}
       showToast(typeof t === 'function' ? t('telegram.open_telegram') : 'Откройте бота в Telegram и нажмите Start', 'info');
+
+      const tgInfoBox = document.querySelector('.tg-disconnected-info');
+      if (tgInfoBox) {
+        let helpBox = document.getElementById('tg-bind-inline-guide');
+        if (!helpBox) {
+          helpBox = document.createElement('div');
+          helpBox.id = 'tg-bind-inline-guide';
+          helpBox.style.cssText = 'margin-top:14px;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);';
+          tgInfoBox.appendChild(helpBox);
+        }
+        helpBox.innerHTML = `
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">🔗 Подключение к Telegram:</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:8px">Если Telegram не открылся автоматически, перейдите по ссылке:</div>
+          <div style="margin-bottom:10px">
+            <a href="${escapeHtml(cleanDeepLink)}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
+              🚀 Открыть бота @${escapeHtml(data.botUsername || 'KoWTrackerBot')}
+            </a>
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Или скопируйте команду и отправьте её боту в чат:</div>
+          <code style="display:block;padding:6px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;font-size:12px;cursor:pointer;word-break:break-all" onclick="if(navigator.clipboard){navigator.clipboard.writeText('/start bind_${data.token}');showToast('Команда скопирована!','info')}">/start bind_${data.token} 📋</code>
+          <div style="font-size:11px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:6px">
+            <span class="spinner" style="width:12px;height:12px;display:inline-block"></span>
+            Ожидание подтверждения от бота...
+          </div>
+        `;
+      }
 
       if (personalBindPollTimer) clearInterval(personalBindPollTimer);
       let pollCount = 0;

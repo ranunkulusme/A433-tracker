@@ -5983,6 +5983,121 @@ test('API /api/my-profile auto-heals desynced sector and prevents empty cabinet 
   }
 });
 
+test('Telegram bot auto-matching by username, /bind credentials command, and deleted password message', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const botToken = '12345:TEST_BOT_TOKEN_AUTO_MATCH';
+  db.setAppSetting('telegram_bot_token', botToken);
+
+  const sentMessages = [];
+  const deletedMessages = [];
+
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 200 + sentMessages.length, chat: { id: payload.chat_id } } }) };
+    }
+    if (url.includes('/deleteMessage')) {
+      deletedMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create a user with matching username but no telegram_chat_id bound yet
+    const reg1 = db.registerUser({ username: 'tg_matching_user', password: 'secretpassword123', playerName: 'Сектор 1' });
+    db.approveUser(reg1.userId, 'r3');
+
+    // User sends /start from Telegram with username "tg_matching_user"
+    const startRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 501,
+        message: {
+          chat: { id: 333444, type: 'private' },
+          from: { id: 333444, username: 'tg_matching_user' },
+          text: '/start'
+        }
+      })
+    });
+    assert.equal(startRes.status, 200);
+
+    // Verify user was automatically bound to chat_id 333444
+    const boundUser = db.findUserById(reg1.userId);
+    assert.equal(boundUser.telegram_chat_id, 333444);
+    assert.ok(sentMessages.some(m => m.chat_id === 333444 && m.text.includes('tg_matching_user')));
+
+    // 2. Test /bind <login> <password> from another chat/user
+    const reg2 = db.registerUser({ username: 'direct_bind_soldier', password: 'mysecretpass', playerName: 'Сектор 2' });
+    db.approveUser(reg2.userId, 'r3');
+
+    // Wrong password fails
+    const badBindRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 502,
+        message: {
+          message_id: 701,
+          chat: { id: 555666, type: 'private' },
+          from: { id: 555666, username: 'some_other_tg' },
+          text: '/bind direct_bind_soldier wrongpass'
+        }
+      })
+    });
+    assert.equal(badBindRes.status, 200);
+    assert.ok(deletedMessages.some(d => d.chat_id === 555666 && d.message_id === 701));
+    assert.ok(sentMessages.some(m => m.chat_id === 555666 && m.text.includes('Неверный логин или пароль')));
+    assert.equal(db.findUserById(reg2.userId).telegram_chat_id, null);
+
+    // Correct password binds and deletes password message
+    const goodBindRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 503,
+        message: {
+          message_id: 702,
+          chat: { id: 555666, type: 'private' },
+          from: { id: 555666, username: 'some_other_tg' },
+          text: '/bind direct_bind_soldier mysecretpass'
+        }
+      })
+    });
+    assert.equal(goodBindRes.status, 200);
+    assert.ok(deletedMessages.some(d => d.chat_id === 555666 && d.message_id === 702));
+    assert.equal(db.findUserById(reg2.userId).telegram_chat_id, 555666);
+    assert.ok(sentMessages.some(m => m.chat_id === 555666 && m.text.includes('успешно привязан')));
+
+    // 3. Unbound user receiving /start gets helpful instructions
+    const strangerRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 504,
+        message: {
+          chat: { id: 999888, type: 'private' },
+          from: { id: 999888, username: 'unregistered_stranger' },
+          text: '/start'
+        }
+      })
+    });
+    assert.equal(strangerRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 999888 && m.text.includes('/bind') && m.text.includes('ваш_логин')));
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 
 
 

@@ -1762,6 +1762,14 @@ test('user telegram binding lifecycle and queries', () => {
   assert.equal(unlinked.telegram_chat_id, null);
   assert.equal(unlinked.telegram_username, null);
   assert.equal(dbModule.findUserByTelegramChatId(123456789), null);
+
+  // Test findUserByTelegramUsername
+  assert.equal(dbModule.findUserByTelegramUsername('soldier_tg')?.id, reg.userId);
+  assert.equal(dbModule.findUserByTelegramUsername('@soldier_tg')?.id, reg.userId);
+  assert.equal(dbModule.findUserByTelegramUsername('SOLDIER_TG')?.id, reg.userId);
+  assert.equal(dbModule.findUserByTelegramUsername('nonexistent_user'), null);
+  assert.equal(dbModule.findUserByTelegramUsername(''), null);
+  assert.equal(dbModule.findUserByTelegramUsername(null), null);
 });
 
 test('staff chat binding lifecycle with PIN verification', () => {

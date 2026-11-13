@@ -54,6 +54,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
 .nav-item:hover { background: var(--bg3); color: var(--text); }
 .nav-item.active { background: var(--blue-glow); color: var(--blue); }
 .sidebar-footer { padding: 10px 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+.sidebar-admin-actions { display: flex; flex-direction: column; gap: 3px; }
 .btn-icon { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: none; border: none; border-radius: var(--radius); color: var(--text2); cursor: pointer; font-size: 12.5px; font-family: var(--font); width: 100%; transition: background .15s, color .15s; }
 .btn-icon:hover { background: var(--bg3); color: var(--text); }
 
