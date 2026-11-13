@@ -3621,3 +3621,25 @@ test('telegram fighter suite formatters and keyboards', () => {
   assert(r4Callbacks.includes('cmd_stale'));
 });
 
+test('telegram event registration keyboards', () => {
+  const {
+    formatEventRegistrationKeyboard,
+    formatEventRegistrationConfirmedKeyboard,
+  } = require('./logic.js');
+
+  const regKb = formatEventRegistrationKeyboard(42);
+  assert(Array.isArray(regKb.inline_keyboard));
+  const callbacks = regKb.inline_keyboard.flat().map(b => b.callback_data);
+  assert(callbacks.includes('reg_event:42:1'));
+  assert(callbacks.includes('reg_event:42:2'));
+  assert(callbacks.includes('reg_event:42:3'));
+  assert(callbacks.includes('reg_event:42:0')); // любое
+
+  const confKb = formatEventRegistrationConfirmedKeyboard(42, 1);
+  assert(Array.isArray(confKb.inline_keyboard));
+  const confCallbacks = confKb.inline_keyboard.flat().map(b => b.callback_data);
+  assert(confCallbacks.includes('unreg_event:42'));
+  const btnTexts = confKb.inline_keyboard.flat().map(b => b.text);
+  assert(btnTexts.some(t => t.includes('Заявка подана') && t.includes('#1')));
+});
+

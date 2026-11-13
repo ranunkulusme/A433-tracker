@@ -267,7 +267,10 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
 
     const renderedText = logic.renderTemplate(template.template, data);
     const parseMode = template.parse_mode || 'HTML';
-    const replyMarkup = options.replyMarkup || undefined;
+    let replyMarkup = options.replyMarkup || undefined;
+    if (!replyMarkup && eventKey === 'event_registration_opened' && data.eventId) {
+      replyMarkup = logic.formatEventRegistrationKeyboard(data.eventId);
+    }
 
     const mieruSettings = db.getMieruSettings();
     const proxyUrl = options.proxyUrl || (mieruSettings.enabled ? `socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}` : undefined);
@@ -1216,6 +1219,142 @@ async function handleTelegramUpdate(update) {
         }
         return { ok: true, action: 'rejected', userId: targetUserId };
       }
+    }
+
+    const regMatch = data.match(/^reg_event:(\d+):(\d+)$/);
+    if (regMatch) {
+      const eventId = Number(regMatch[1]);
+      const desiredPlace = Number(regMatch[2]);
+
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'reg_event', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      if (!player) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ У вас нет активного сектора в KoW Tracker.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'reg_event', error: 'no_player' };
+      }
+
+      const ev = db.getEventById(eventId);
+      if (!ev) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Событие не найдено или удалено.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'reg_event', error: 'event_not_found' };
+      }
+
+      const pOfficers = Array.isArray(player.officers) ? player.officers : [];
+      const officer = pOfficers.find(o => !o.onlyPersonalPuzzles) || pOfficers[0];
+      const officerId = (officer ? (officer.catalogId || officer.id) : '') || '';
+
+      db.registerForEvent({
+        eventId,
+        playerId: player.id,
+        officerId,
+        desiredPlace
+      });
+
+      if (token) {
+        const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'любое подходящее';
+        await telegram.answerTelegramCallback({
+          token,
+          callbackQueryId: cqId,
+          text: `✅ Заявка принята! Желаемое место: ${placeStr}`
+        });
+
+        if (chatMsg?.chat?.id && chatMsg?.message_id) {
+          const newKb = logic.formatEventRegistrationConfirmedKeyboard(eventId, desiredPlace);
+          await telegram.editTelegramMessageText({
+            token,
+            chatId: chatMsg.chat.id,
+            messageId: chatMsg.message_id,
+            text: chatMsg.text || 'Заявка на событие',
+            replyMarkup: newKb
+          }).catch(() => {});
+        }
+      }
+
+      return { ok: true, action: 'registered', eventId, desiredPlace, playerId: player.id };
+    }
+
+    const unregMatch = data.match(/^unreg_event:(\d+)$/);
+    if (unregMatch) {
+      const eventId = Number(unregMatch[1]);
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'unreg_event', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      const ev = db.getEventById(eventId);
+      if (!ev) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Событие не найдено.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: 'unreg_event', error: 'event_not_found' };
+      }
+
+      if (player) {
+        db.unregisterFromEvent(eventId, player.id);
+      }
+
+      if (token) {
+        await telegram.answerTelegramCallback({
+          token,
+          callbackQueryId: cqId,
+          text: '❌ Ваша заявка отозвана.'
+        });
+
+        if (chatMsg?.chat?.id && chatMsg?.message_id) {
+          const newKb = logic.formatEventRegistrationKeyboard(eventId);
+          await telegram.editTelegramMessageText({
+            token,
+            chatId: chatMsg.chat.id,
+            messageId: chatMsg.message_id,
+            text: chatMsg.text || 'Заявка на событие',
+            replyMarkup: newKb
+          }).catch(() => {});
+        }
+      }
+
+      return { ok: true, action: 'unregistered', eventId, playerId: player?.id };
     }
 
     const rsvpMatch = data.match(/^rsvp_event:(confirm|decline):(\d+):(\d+)$/);

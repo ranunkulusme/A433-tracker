@@ -3883,6 +3883,37 @@
     return { inline_keyboard: keyboard };
   }
 
+  function formatEventRegistrationKeyboard(eventId, places = null) {
+    const eId = Number(eventId);
+    const keyboard = [
+      [
+        { text: '🏆 Топ-1', callback_data: `reg_event:${eId}:1` },
+        { text: '🥈 Топ-2', callback_data: `reg_event:${eId}:2` },
+        { text: '🥉 Топ-3', callback_data: `reg_event:${eId}:3` }
+      ],
+      [
+        { text: '🎖 Место 4–10', callback_data: `reg_event:${eId}:4` },
+        { text: '🎲 Любое подходящее', callback_data: `reg_event:${eId}:0` }
+      ]
+    ];
+    return { inline_keyboard: keyboard };
+  }
+
+  function formatEventRegistrationConfirmedKeyboard(eventId, desiredPlace) {
+    const eId = Number(eventId);
+    const placeNum = Number(desiredPlace);
+    const placeLabel = placeNum > 0 ? `#${placeNum}` : 'Любое';
+    const keyboard = [
+      [
+        { text: `✅ Заявка подана: Место ${placeLabel}`, callback_data: `noop_reg:${eId}` }
+      ],
+      [
+        { text: '❌ Отозвать заявку', callback_data: `unreg_event:${eId}` }
+      ]
+    ];
+    return { inline_keyboard: keyboard };
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -3986,6 +4017,8 @@
     formatTelegramDeficitMessage,
     formatTelegramEventsListMessage,
     getTelegramMainMenuKeyboard,
+    formatEventRegistrationKeyboard,
+    formatEventRegistrationConfirmedKeyboard,
     escapeHtml,
   };
 });

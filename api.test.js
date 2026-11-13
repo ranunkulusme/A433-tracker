@@ -5436,6 +5436,45 @@ test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async
     assert.equal(cbMeRes.ok, true);
     assert.equal(cbMeRes.action, 'cmd_me');
 
+    // 7. Test interactive event registration via Telegram Callback
+    const allEvents = db.getEvents();
+    assert.ok(allEvents.length > 0);
+    const targetEvent = allEvents[0];
+
+    const regRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_reg_1',
+        from: { id: 999111 },
+        data: `reg_event:${targetEvent.id}:2`,
+        message: { chat: { id: 999111 }, message_id: 1234, text: 'Открыта регистрация' }
+      }
+    });
+    assert.equal(regRes.ok, true);
+    assert.equal(regRes.action, 'registered');
+    assert.equal(regRes.desiredPlace, 2);
+
+    // Verify registration saved in DB
+    const playerRecord = db.getPlayersByUserId(user.id)[0];
+    assert.ok(playerRecord);
+    const regItem = db.getUserRegistration(targetEvent.id, playerRecord.id);
+    assert.ok(regItem);
+    assert.equal(regItem.desiredPlace, 2);
+
+    // Test unregistration via Telegram Callback
+    const unregRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_unreg_1',
+        from: { id: 999111 },
+        data: `unreg_event:${targetEvent.id}`,
+        message: { chat: { id: 999111 }, message_id: 1234, text: 'Открыта регистрация' }
+      }
+    });
+    assert.equal(unregRes.ok, true);
+    assert.equal(unregRes.action, 'unregistered');
+
+    const regAfterItem = db.getUserRegistration(targetEvent.id, playerRecord.id);
+    assert.equal(regAfterItem, null);
+
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();
