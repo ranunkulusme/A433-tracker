@@ -451,6 +451,83 @@ async function runTests() {
     }
   })();
 
+  await (async () => {
+    // 12. Mock getTelegramFile and downloadTelegramFile
+    const mockFetch = async (url, options) => {
+      if (url.includes('/getFile')) {
+        const payload = JSON.parse(options.body);
+        assert.equal(payload.file_id, 'photo_123');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: { file_id: 'photo_123', file_path: 'photos/file_0.jpg', file_size: 45000 }
+          })
+        };
+      }
+      if (url.includes('/file/bot12345/photos/file_0.jpg')) {
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => Buffer.from('fake_image_bytes')
+        };
+      }
+      return { ok: false, status: 404 };
+    };
+
+    telegram.setTelegramFetch(mockFetch);
+    try {
+      const fileInfo = await telegram.getTelegramFile('12345', 'photo_123', { baseUrl: 'https://mock.telegram.org' });
+      assert.equal(fileInfo.ok, true);
+      assert.equal(fileInfo.result.file_path, 'photos/file_0.jpg');
+
+      const fileBuffer = await telegram.downloadTelegramFile('12345', 'photos/file_0.jpg');
+      assert.ok(fileBuffer instanceof Buffer);
+      assert.equal(fileBuffer.toString(), 'fake_image_bytes');
+    } finally {
+      telegram.setTelegramFetch(null);
+    }
+  })();
+
+  await (async () => {
+    // 13. Mock sendTelegramPhoto (JSON string url/file_id and buffer)
+    let capturedPhotoPayload = null;
+    const mockFetch = async (url, options) => {
+      assert.ok(url.includes('/sendPhoto'));
+      if (typeof options.body === 'string') {
+        capturedPhotoPayload = JSON.parse(options.body);
+      } else {
+        capturedPhotoPayload = options.body; // FormData
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          result: { message_id: 888, photo: [{ file_id: 'new_photo_id' }] }
+        })
+      };
+    };
+
+    telegram.setTelegramFetch(mockFetch);
+    try {
+      const res = await telegram.sendTelegramPhoto({
+        token: '12345',
+        chatId: 999000,
+        photo: 'https://example.com/grid.png',
+        caption: 'Итоговая сетка ивента'
+      }, { baseUrl: 'https://mock.telegram.org' });
+
+      assert.equal(res.ok, true);
+      assert.equal(capturedPhotoPayload.chat_id, 999000);
+      assert.equal(capturedPhotoPayload.photo, 'https://example.com/grid.png');
+      assert.equal(capturedPhotoPayload.caption, 'Итоговая сетка ивента');
+    } finally {
+      telegram.setTelegramFetch(null);
+    }
+  })();
+
   console.log('ok - all telegram.js unit tests passed');
 }
 

@@ -1958,7 +1958,7 @@ function migrateSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo')),
       snapshot_before TEXT NOT NULL,
       snapshot_after TEXT NOT NULL,
       diff_summary TEXT NOT NULL,
@@ -1971,14 +1971,14 @@ function migrateSchema(db) {
 
   try {
     const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_history_records'").get();
-    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('manual_confirm')) {
+    if (tableInfo && tableInfo.sql && (!tableInfo.sql.includes('manual_confirm') || !tableInfo.sql.includes('telegram_command') || !tableInfo.sql.includes('telegram_photo'))) {
       db.exec(`
         PRAGMA foreign_keys = OFF;
         CREATE TABLE stock_history_records_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
           user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-          source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+          source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo')),
           snapshot_before TEXT NOT NULL,
           snapshot_after TEXT NOT NULL,
           diff_summary TEXT NOT NULL,
@@ -2203,7 +2203,7 @@ function initDb(filePath) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
-      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward')),
+      source TEXT NOT NULL CHECK(source IN ('ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo')),
       snapshot_before TEXT NOT NULL,
       snapshot_after TEXT NOT NULL,
       diff_summary TEXT NOT NULL,

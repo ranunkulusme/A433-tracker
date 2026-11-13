@@ -586,6 +586,8 @@ async function handleTelegramUpdate(update) {
                 '1. Откройте KoW Tracker ➔ <b>Личный кабинет</b>\n' +
                 '2. Нажмите <b>«Подключить Telegram»</b>\n' +
                 '3. Бот автоматически привяжет ваш игровой профиль.\n\n' +
+                '📦 <b>Управление складом:</b>\n' +
+                'Отправьте команду <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> или пришлите скриншот инвентаря.\n\n' +
                 '🛡️ <b>Подключение чата штаба:</b>\n' +
                 'Добавьте бота в группу офицеров и выполните команду:\n' +
                 '<code>/connect_staff &lt;PIN&gt;</code>\n' +
@@ -593,6 +595,213 @@ async function handleTelegramUpdate(update) {
         });
       }
       return { ok: true, command: 'help', chatId };
+    }
+
+    // E) /stock or /склад text command
+    const stockParsed = logic.parseTelegramStockCommand(text);
+    if (stockParsed) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите ваш Telegram-аккаунт в Личном кабинете трекера, чтобы управлять складом через бота.'
+          });
+        }
+        return { ok: true, command: 'stock', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      if (!player) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Сектор не найден.</b>\nУ вашего аккаунта нет активного сектора в KoW Tracker.'
+          });
+        }
+        return { ok: true, command: 'stock', error: 'no_player' };
+      }
+
+      const before = player.stock || {};
+      const after = {
+        ...before,
+        ...stockParsed
+      };
+      const diff = logic.calculateStockDiff(before, after);
+      const now = new Date().toISOString();
+
+      db.recordStockHistory({
+        playerId: player.id,
+        userId: user.id,
+        source: 'telegram_command',
+        snapshotBefore: before,
+        snapshotAfter: after,
+        diffSummary: diff.summary,
+        screenshotPath: null,
+        createdAt: now
+      });
+
+      db.updatePlayer(player.id, {
+        stock: after,
+        stockUpdatedAt: now,
+        stockUpdateSource: 'telegram_command',
+        recordHistory: false
+      });
+
+      if (token) {
+        const replyText = logic.formatStockUpdateSuccessMessage(diff, after, {
+          sectorName: player.name
+        });
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: replyText
+        });
+      }
+
+      return { ok: true, command: 'stock', playerId: player.id, stock: after };
+    }
+
+    // F) Photo or Document screenshot upload
+    const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
+    const hasDocImage = msg.document && (
+      (msg.document.mime_type && msg.document.mime_type.startsWith('image/')) ||
+      (msg.document.file_name && /\.(jpe?g|png|webp)$/i.test(msg.document.file_name))
+    );
+
+    if (hasPhoto || hasDocImage) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПожалуйста, привяжите Telegram в Личном кабинете, чтобы отправлять скриншоты склада.'
+          });
+        }
+        return { ok: true, photo: true, error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      if (!player) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Сектор не найден.</b>\nУ вашего аккаунта нет активного сектора в KoW Tracker.'
+          });
+        }
+        return { ok: true, photo: true, error: 'no_player' };
+      }
+
+      // Pick file_id (highest resolution photo or document)
+      const fileId = hasPhoto ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id;
+
+      let screenshotPath = null;
+      if (token && fileId) {
+        try {
+          const fileInfo = await telegram.getTelegramFile(token, fileId);
+          if (fileInfo && fileInfo.ok && fileInfo.result?.file_path) {
+            const fileBuf = await telegram.downloadTelegramFile(token, fileInfo.result.file_path);
+            if (fileBuf && fileBuf.length > 0) {
+              const yyyyMm = new Date().toISOString().slice(0, 7);
+              const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
+              if (!fs.existsSync(screenshotsDir)) {
+                fs.mkdirSync(screenshotsDir, { recursive: true });
+              }
+
+              const ext = path.extname(fileInfo.result.file_path) || '.jpg';
+              const hash = crypto.createHash('sha256').update(fileBuf).digest('hex').slice(0, 8);
+              const filename = `${player.id}_${Date.now()}_${hash}${ext}`;
+              const fullPath = path.join(screenshotsDir, filename);
+              fs.writeFileSync(fullPath, fileBuf);
+              screenshotPath = `${yyyyMm}/${filename}`;
+            }
+          }
+        } catch (downloadErr) {
+          console.warn('[Telegram] Error downloading photo:', downloadErr.message);
+        }
+      }
+
+      const caption = (msg.caption || '').trim();
+      let photoStockParsed = logic.parseTelegramStockCommand(caption);
+      if (!photoStockParsed && caption) {
+        photoStockParsed = logic.parseTelegramStockCommand('/stock ' + caption);
+      }
+
+      const before = player.stock || {};
+      const now = new Date().toISOString();
+
+      if (photoStockParsed) {
+        const after = {
+          ...before,
+          ...photoStockParsed
+        };
+        const diff = logic.calculateStockDiff(before, after);
+
+        db.recordStockHistory({
+          playerId: player.id,
+          userId: user.id,
+          source: 'telegram_photo',
+          snapshotBefore: before,
+          snapshotAfter: after,
+          diffSummary: diff.summary,
+          screenshotPath,
+          createdAt: now
+        });
+
+        db.updatePlayer(player.id, {
+          stock: after,
+          stockUpdatedAt: now,
+          stockUpdateSource: 'telegram_photo',
+          recordHistory: false
+        });
+
+        if (token) {
+          const replyText = logic.formatStockUpdateSuccessMessage(diff, after, {
+            sectorName: player.name
+          });
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: replyText
+          });
+        }
+
+        return { ok: true, photo: true, updated: true, playerId: player.id, stock: after };
+      } else {
+        db.recordStockHistory({
+          playerId: player.id,
+          userId: user.id,
+          source: 'telegram_photo',
+          snapshotBefore: before,
+          snapshotAfter: before,
+          diffSummary: 'Скриншот склада прикреплен',
+          screenshotPath,
+          createdAt: now
+        });
+
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: `📸 <b>Скриншот склада получен и сохранен в журнале аудита!</b>\n` +
+                  `👤 Сектор: <b>${logic.escapeHtml(player.name)}</b>\n\n` +
+                  `Чтобы сразу обновить остатки, отправьте команду:\n` +
+                  `<code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code>\n` +
+                  `<i>(Например: <code>/stock 15000 350</code>)</i>\n` +
+                  `или укажите числа прямо в подписи к скриншоту.`
+          });
+        }
+
+        return { ok: true, photo: true, updated: false, playerId: player.id, screenshotPath };
+      }
     }
   }
 
@@ -2695,8 +2904,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
-      const result = await handleTelegramUpdate(body || {});
-      return sendJson(res, 200, result);
+      try {
+        const result = await handleTelegramUpdate(body || {});
+        return sendJson(res, 200, result);
+      } catch (err) {
+        console.error('[Telegram Webhook Error]', err);
+        return sendError(res, 500, 'WEBHOOK_ERROR', err.message);
+      }
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'GET') {

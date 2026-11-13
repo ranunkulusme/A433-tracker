@@ -2988,6 +2988,95 @@
     return null;
   }
 
+  function parseTelegramStockCommand(text) {
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    const cmdMatch = trimmed.match(/^\/(?:stock|склад)(?:@\w+)?(?:\s+(.*))?$/i);
+    if (!cmdMatch) return null;
+
+    const argsStr = cmdMatch[1];
+    if (!argsStr || !argsStr.trim()) return null;
+
+    // Сворачиваем разделители тысяч вида "25 000" -> "25000" (1-3 цифры, пробел, ровно три нуля)
+    const normalizedArgs = argsStr.replace(/\b(\d{1,3})\s+(000)\b/g, '$1$2').trim();
+    const tokens = normalizedArgs.split(/[\s,]+/).filter(Boolean);
+    if (!tokens.length) return null;
+
+    const numbers = [];
+    for (const token of tokens) {
+      let val = null;
+      const lower = token.toLowerCase();
+      if (/^\d+k$/i.test(lower)) {
+        val = parseInt(lower, 10) * 1000;
+      } else if (/^\d+m$/i.test(lower)) {
+        val = parseInt(lower, 10) * 1000000;
+      } else if (/^\d+$/.test(token)) {
+        val = parseInt(token, 10);
+      }
+      if (val === null || isNaN(val) || val < 0) return null;
+      numbers.push(val);
+    }
+
+    if (!numbers.length) return null;
+
+    const result = {
+      coupons: numbers[0],
+      puzzles: numbers.length > 1 ? numbers[1] : 0
+    };
+
+    if (numbers.length > 2) result.starCoupons = numbers[2];
+    if (numbers.length > 3) result.legendaryStars1 = numbers[3];
+    if (numbers.length > 4) result.legendaryStars2 = numbers[4];
+    if (numbers.length > 5) result.legendaryStars3 = numbers[5];
+
+    return result;
+  }
+
+  function formatStockUpdateSuccessMessage(diff, newStock, options = {}) {
+    const parts = [];
+    parts.push('✅ <b>Склад успешно обновлен!</b>');
+
+    const sectorName = typeof options === 'string' ? options : (options && options.sectorName);
+    if (sectorName) {
+      parts.push(`👤 Сектор: <b>${escapeHtml(sectorName)}</b>`);
+    }
+
+    parts.push('\n📦 <b>Текущие запасы:</b>');
+    const coupons = newStock ? (newStock.coupons || 0) : 0;
+    parts.push(`• Купоны: <b>${formatInputNumber(coupons)}</b>`);
+
+    if (newStock && newStock.puzzles !== undefined) {
+      parts.push(`• Пазлы: <b>${formatInputNumber(newStock.puzzles)}</b>`);
+    }
+    if (newStock && newStock.starCoupons) {
+      parts.push(`• Звездные купоны: <b>${formatInputNumber(newStock.starCoupons)}</b>`);
+    }
+    if (newStock && (newStock.legendaryStars1 || newStock.legendaryStars2 || newStock.legendaryStars3)) {
+      const stars = [
+        newStock.legendaryStars1 || 0,
+        newStock.legendaryStars2 || 0,
+        newStock.legendaryStars3 || 0
+      ].join(' / ');
+      parts.push(`• Звезды (I/II/III): <b>${stars}</b>`);
+    }
+
+    if (diff && diff.summary && diff.summary !== 'Без изменений') {
+      parts.push(`\n📊 <b>Изменения:</b> ${escapeHtml(diff.summary)}`);
+    }
+
+    const targetDeficit = typeof options === 'number' ? options : (options && options.targetDeficit);
+    const targetOfficer = options && options.targetOfficer;
+    if (targetOfficer && targetDeficit !== undefined) {
+      if (targetDeficit <= 0) {
+        parts.push(`\n🎉 <b>${escapeHtml(targetOfficer)}</b>: дефицит закрыт! Готов к максимальной прокачке.`);
+      } else {
+        parts.push(`\n🎯 <b>${escapeHtml(targetOfficer)}</b>: осталось собрать <b>${formatInputNumber(targetDeficit)}</b> купонов.`);
+      }
+    }
+
+    return parts.join('\n');
+  }
+
   const USER_PERMISSIONS = Object.freeze({
     VIEW_SECTORS: 'view_sectors',     // Просмотр всех секторов и командиров альянса
     VIEW_STOCKS: 'view_stocks',       // Просмотр точных остатков складов других игроков
@@ -3610,5 +3699,8 @@
     filterOfficersByQuery,
     getHashForRoute,
     parseRouteFromHash,
+    parseTelegramStockCommand,
+    formatStockUpdateSuccessMessage,
+    escapeHtml,
   };
 });

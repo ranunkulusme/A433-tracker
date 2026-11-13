@@ -3473,6 +3473,144 @@ test('API Telegram Webhook: /start bind, /connect_staff, and inline callbacks', 
   }
 });
 
+test('Telegram Webhook handles /stock text commands and photo screenshots with audit history', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  db.setAppSetting('telegram_bot_token', 'test_bot_token_123');
+
+  const soldier = db.registerUser({ username: 'vault_soldier', password: 'password', playerName: 'База Сталкер' });
+  db.approveUser(soldier.userId, 'r3');
+  db.bindUserTelegram(soldier.userId, 888777, 'vault_soldier_tg');
+  const boundUser = db.findUserById(soldier.userId);
+  const player = db.getPlayerById(boundUser.player_id);
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(options.body);
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 101, chat: { id: payload.chat_id } } })
+      };
+    }
+    if (url.includes('/getFile')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { file_id: 'photo_high_res', file_path: 'photos/warehouse_shot.jpg', file_size: 50000 } })
+      };
+    }
+    if (url.includes('/file/bottest_bot_token_123/photos/warehouse_shot.jpg')) {
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => Buffer.from('fake_image_bytes_for_screenshot')
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. /stock 12500 300 text command from bound soldier
+    const stockRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 100,
+        message: {
+          chat: { id: 888777, type: 'private' },
+          from: { id: 888777, username: 'vault_soldier_tg' },
+          text: '/stock 12500 300'
+        }
+      })
+    });
+    assert.equal(stockRes.status, 200);
+    const updatedPlayer = db.getPlayerById(player.id);
+    assert.equal(updatedPlayer.stock.coupons, 12500);
+    assert.equal(updatedPlayer.stock.puzzles, 300);
+    assert.equal(updatedPlayer.stockUpdateSource, 'telegram_command');
+
+    const history = db.getStockHistory(player.id, 5);
+    assert.ok(history.length >= 1);
+    assert.equal(history[0].source, 'telegram_command');
+    assert.ok(sentMessages.some(m => m.chat_id === 888777 && m.text.includes('Склад успешно обновлен') && m.text.includes('12 500')));
+
+    // 2. Photo upload with caption /stock 18000 450
+    sentMessages.length = 0;
+    const photoRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 101,
+        message: {
+          chat: { id: 888777, type: 'private' },
+          from: { id: 888777, username: 'vault_soldier_tg' },
+          caption: '/stock 18000 450',
+          photo: [
+            { file_id: 'thumb_id', file_size: 500 },
+            { file_id: 'photo_high_res', file_size: 50000 }
+          ]
+        }
+      })
+    });
+    assert.equal(photoRes.status, 200);
+    const updatedPlayer2 = db.getPlayerById(player.id);
+    assert.equal(updatedPlayer2.stock.coupons, 18000);
+    assert.equal(updatedPlayer2.stock.puzzles, 450);
+    assert.equal(updatedPlayer2.stockUpdateSource, 'telegram_photo');
+
+    const history2 = db.getStockHistory(player.id, 5);
+    assert.equal(history2[0].source, 'telegram_photo');
+    assert.ok(history2[0].screenshotPath);
+    assert.ok(sentMessages.some(m => m.chat_id === 888777 && m.text.includes('Склад успешно обновлен') && m.text.includes('18 000')));
+
+    // 3. Photo upload without caption
+    sentMessages.length = 0;
+    const photoNoCaptionRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 102,
+        message: {
+          chat: { id: 888777, type: 'private' },
+          from: { id: 888777, username: 'vault_soldier_tg' },
+          photo: [
+            { file_id: 'photo_high_res', file_size: 50000 }
+          ]
+        }
+      })
+    });
+    assert.equal(photoNoCaptionRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 888777 && m.text.includes('Скриншот склада получен')));
+
+    // 4. Unbound user sends /stock 5000
+    sentMessages.length = 0;
+    const unboundRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 103,
+        message: {
+          chat: { id: 111222, type: 'private' },
+          from: { id: 111222 },
+          text: '/stock 5000'
+        }
+      })
+    });
+    assert.equal(unboundRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 111222 && m.text.includes('не привязан к аккаунту')));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 test('API Notification Templates CRUD, reset, and test send', async () => {
   const { startServer } = require('./server.js');
   const telegram = require('./telegram.js');

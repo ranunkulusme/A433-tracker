@@ -63,6 +63,8 @@ const {
   filterOfficersByQuery,
   getHashForRoute,
   parseRouteFromHash,
+  parseTelegramStockCommand,
+  formatStockUpdateSuccessMessage,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -3334,6 +3336,68 @@ test('deep linking hash routing: getHashForRoute and parseRouteFromHash', () => 
   assert.strictEqual(parseRouteFromHash(''), null);
   assert.strictEqual(parseRouteFromHash('#'), null);
   assert.strictEqual(parseRouteFromHash(null), null);
+});
+
+test('parseTelegramStockCommand parses /stock and /склад commands accurately', () => {
+  // 1. Basic /stock with coupons and puzzles
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock 15000 350'), {
+    coupons: 15000,
+    puzzles: 350
+  });
+
+  // 2. Cyrillic /склад command with spaces and formatting
+  assert.deepStrictEqual(parseTelegramStockCommand('/склад 25 000 450'), {
+    coupons: 25000,
+    puzzles: 450
+  });
+
+  // 3. Only coupons provided
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock 12500'), {
+    coupons: 12500,
+    puzzles: 0
+  });
+
+  // 4. Full parameters: coupons, puzzles, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock 50000 400 120 10 5 2'), {
+    coupons: 50000,
+    puzzles: 400,
+    starCoupons: 120,
+    legendaryStars1: 10,
+    legendaryStars2: 5,
+    legendaryStars3: 2
+  });
+
+  // 5. Bot username suffix (e.g. in group or direct chat)
+  assert.deepStrictEqual(parseTelegramStockCommand('/stock@kow_bot 18000 220'), {
+    coupons: 18000,
+    puzzles: 220
+  });
+
+  // 6. Non-stock messages or invalid formats
+  assert.strictEqual(parseTelegramStockCommand('/help'), null);
+  assert.strictEqual(parseTelegramStockCommand('/stock'), null);
+  assert.strictEqual(parseTelegramStockCommand('/stock abc'), null);
+  assert.strictEqual(parseTelegramStockCommand('Привет, как дела?'), null);
+  assert.strictEqual(parseTelegramStockCommand(null), null);
+});
+
+test('formatStockUpdateSuccessMessage formats message with stocks, diff and deficit', () => {
+  const diff = { summary: '+5 000 куп., +50 пазл.' };
+  const stock = { coupons: 25000, puzzles: 350, starCoupons: 120 };
+  const msg = formatStockUpdateSuccessMessage(diff, stock, {
+    sectorName: 'Alpha Base',
+    targetOfficer: 'Элизабет',
+    targetDeficit: 8000
+  });
+
+  assert.ok(msg.includes('✅ <b>Склад успешно обновлен!</b>'));
+  assert.ok(msg.includes('Alpha Base'));
+  assert.ok(msg.includes('25 000'));
+  assert.ok(msg.includes('350'));
+  assert.ok(msg.includes('120'));
+  assert.ok(msg.includes('+5 000 куп., +50 пазл.'));
+  assert.ok(msg.includes('Элизабет'));
+  assert.ok(msg.includes('8 000'));
 });
 
 
