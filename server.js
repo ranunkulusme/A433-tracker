@@ -4641,6 +4641,27 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, testResult);
     }
 
+    if (pathname === '/api/telegram/bind-webapp' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен');
+      }
+      const initData = body && (body.initData || body.init_data);
+      if (!initData || typeof initData !== 'string') {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
+      }
+      const validation = logic.validateTelegramWebAppData(initData, botToken);
+      if (!validation.valid || !validation.user?.id) {
+        return sendError(res, 401, 'INVALID_TELEGRAM_DATA', 'Ошибка валидации Telegram WebApp');
+      }
+      db.bindUserTelegram(req.user.id, validation.user.id, validation.user.username || '');
+      const updatedUser = (typeof db.getUserById === 'function') ? db.getUserById(req.user.id) : req.user;
+      return sendJson(res, 200, { success: true, user: updatedUser });
+    }
+
     if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
       if (!authenticate(req)) {
         return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');

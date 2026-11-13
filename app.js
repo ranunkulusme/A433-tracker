@@ -1266,6 +1266,10 @@ async function logout() {
     toast('Вы вышли из системы', 'info');
     renderTopbarProfile();
     renderSidebarNav();
+    if (typeof isTmaMode === 'function' && isTmaMode()) {
+      renderTmaUnboundScreen();
+      return;
+    }
     openAuthModal('login');
   }
 }
@@ -1351,6 +1355,18 @@ async function submitChangePassword(e) {
 }
 
 async function checkAuth() {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    enableTmaView();
+    setupTmaEnvironment();
+    const tmaAuthed = await initTmaAuth();
+    if (tmaAuthed) {
+      closeAllModals();
+      return true;
+    }
+    closeAllModals();
+    return false;
+  }
+
   const token = localStorage.getItem('kow_token');
   if (!token) {
     currentUser = null;
@@ -6217,6 +6233,10 @@ function handleHashRoute() {
 }
 
 function navigateInitialOrHash() {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    renderTmaApp();
+    return;
+  }
   const parseFn = typeof parseRouteFromHash === 'function'
     ? parseRouteFromHash
     : (typeof window !== 'undefined' && window.logic?.parseRouteFromHash ? window.logic.parseRouteFromHash : null);
@@ -12754,6 +12774,10 @@ async function fetchAndApplyAppVersion() {
 }
 
 async function initApp() {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    enableTmaView();
+    setupTmaEnvironment();
+  }
   load();
   if (typeof initI18n === 'function') {
     try {
@@ -12876,6 +12900,10 @@ async function handleGlobalSync() {
 }
 
 function refreshCurrentPage() {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    refreshTmaCurrentTab();
+    return;
+  }
   if (currentPage === 'users') {
     renderUsers();
   } else if (currentPage === 'my_cabinet') {
@@ -12996,6 +13024,1001 @@ if (typeof window !== 'undefined') {
       flushOutboxQueue();
     }
   }, 30000);
+}
+
+// ─── TELEGRAM MINI APP (TMA) CONTROLLER ──────────────────────────
+let activeTmaTab = 'cabinet';
+let tmaEventsSubTab = 'upcoming';
+
+function isTmaMode() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tma') === '1' || params.has('tma')) return true;
+  } catch (_) {}
+  const tg = window.Telegram?.WebApp;
+  if (tg && (tg.initData || (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id)))) {
+    return true;
+  }
+  return false;
+}
+
+function enableTmaView() {
+  if (typeof document === 'undefined') return;
+  document.body.classList.add('tma-mode');
+  const tmaEl = document.getElementById('tma-app');
+  if (tmaEl) {
+    tmaEl.style.display = 'flex';
+  }
+  const appEl = document.getElementById('app');
+  if (appEl) {
+    appEl.style.display = 'none';
+  }
+}
+
+function setupTmaEnvironment() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) return;
+  try {
+    if (typeof tg.ready === 'function') tg.ready();
+    if (typeof tg.expand === 'function') tg.expand();
+    if (typeof tg.setHeaderColor === 'function') tg.setHeaderColor('#171b22');
+    if (typeof tg.setBackgroundColor === 'function') tg.setBackgroundColor('#090a0f');
+    if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
+  } catch (err) {
+    console.warn('TMA SDK init error:', err);
+  }
+}
+
+function tmaHaptic(type = 'light') {
+  try {
+    const hf = window.Telegram?.WebApp?.HapticFeedback;
+    if (!hf) return;
+    if (type === 'success' || type === 'error' || type === 'warning') {
+      hf.notificationOccurred(type);
+    } else {
+      hf.impactOccurred(type);
+    }
+  } catch (_) {}
+}
+
+async function initTmaAuth() {
+  const tg = window.Telegram?.WebApp;
+  const initData = tg?.initData;
+
+  // 1. If Telegram initData is present, attempt WebApp auto-auth
+  if (initData) {
+    try {
+      const res = await apiFetch('/api/auth/telegram-webapp', {
+        method: 'POST',
+        body: { initData }
+      });
+      if (res && res.token && res.user) {
+        localStorage.setItem('kow_token', res.token);
+        currentUser = res.user;
+        if (res.player) {
+          currentUser.player = res.player;
+          currentUser.playerName = res.player.name;
+        }
+        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+        await loadDataFromServer().catch(() => {});
+        renderTmaApp();
+        return true;
+      }
+    } catch (err) {
+      console.warn('TMA telegram-webapp auth failed:', err);
+      renderTmaUnboundScreen(err);
+      return false;
+    }
+  }
+
+  // 2. If no initData (e.g. running in browser with ?tma=1 for debug / preview)
+  const existingToken = localStorage.getItem('kow_token');
+  if (existingToken) {
+    try {
+      const data = await apiFetch('/api/auth/me');
+      if (data && data.user) {
+        currentUser = data.user;
+        if (data.player) {
+          currentUser.player = data.player;
+          currentUser.playerName = data.player.name;
+        }
+        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+        await loadDataFromServer().catch(() => {});
+        renderTmaApp();
+        return true;
+      }
+    } catch (err) {
+      console.warn('TMA session check failed:', err);
+    }
+  }
+
+  // 3. Fallback: Show unbound screen inside TMA
+  renderTmaUnboundScreen();
+  return false;
+}
+
+function renderTmaUnboundScreen(err = null) {
+  const unboundEl = document.getElementById('tma-unbound-screen');
+  if (!unboundEl) return;
+
+  // Hide tabs and action bar
+  const tabs = ['cabinet', 'events', 'matrix'];
+  tabs.forEach(t => {
+    const el = document.getElementById('tma-tab-' + t);
+    if (el) el.style.display = 'none';
+  });
+  const actBar = document.getElementById('tma-action-bar');
+  if (actBar) actBar.style.display = 'none';
+  const botNav = document.getElementById('tma-bottom-nav');
+  if (botNav) botNav.style.display = 'none';
+
+  unboundEl.style.display = 'block';
+
+  const tg = window.Telegram?.WebApp;
+  const tgUser = tg?.initDataUnsafe?.user;
+
+  if (err && (err.error === 'PENDING_APPROVAL' || err.status === 403)) {
+    unboundEl.innerHTML = `
+      <div class="tma-card tma-card-gold" style="text-align:center;padding:28px 16px">
+        <div style="font-size:44px;margin-bottom:12px">⏳</div>
+        <h3 style="font-size:16px;font-weight:700;color:#fff;margin-bottom:8px">Аккаунт ожидает подтверждения</h3>
+        <p style="font-size:13px;color:#9ca3af;line-height:1.5;margin-bottom:20px">
+          Ваша заявка зарегистрирована и находится на рассмотрении офицеров штаба (Р4/Р5). Пожалуйста, свяжитесь с руководством альянса.
+        </p>
+        <button class="tma-main-btn" onclick="initTmaAuth()" type="button" style="margin-bottom:8px">
+          🔄 Проверить статус
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  unboundEl.innerHTML = `
+    <div class="tma-card tma-card-gold" style="padding:20px 16px;position:relative">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div class="tma-gold-gradient" style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#000;box-shadow:0 4px 12px rgba(245,158,11,0.3)">
+          🔗
+        </div>
+        <div>
+          <h3 style="font-size:15px;font-weight:700;color:#fff;margin:0">Привязка Telegram</h3>
+          <p style="font-size:11.5px;color:#9ca3af;margin:2px 0 0 0">
+            ${tgUser ? `Вы: ${escapeHtml(tgUser.first_name || '')} (@${escapeHtml(tgUser.username || String(tgUser.id))})` : 'Войдите для доступа к KoW Tracker'}
+          </p>
+        </div>
+      </div>
+
+      <p style="font-size:12.5px;color:#d1d5db;margin-bottom:14px;line-height:1.45">
+        Ваш аккаунт Telegram еще не привязан к профилю в <strong>KoW Tracker</strong>. Войдите в существующий аккаунт для быстрой привязки или зарегистрируйтесь.
+      </p>
+
+      <div id="tma-auth-alert" style="display:none;padding:10px 12px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;font-size:12px;border-radius:10px;margin-bottom:12px"></div>
+
+      <!-- Quick Login Form -->
+      <form id="tma-login-form" onsubmit="handleTmaLoginSubmit(event)" style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЛОГИН</label>
+          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="Ваш логин в KoW" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
+          <input type="password" id="tma-login-pass" required autocomplete="current-password" placeholder="Пароль" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+        </div>
+        <button type="submit" id="tma-login-btn" class="tma-main-btn" style="margin-top:4px">
+          🔑 Войти и привязать Telegram
+        </button>
+      </form>
+
+      <!-- Toggle registration -->
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08);text-align:center">
+        <button type="button" onclick="toggleTmaRegisterSection()" style="background:none;border:none;color:#fbbf24;font-size:12px;font-weight:600;cursor:pointer">
+          ✨ Новый игрок? Создать аккаунт
+        </button>
+      </div>
+
+      <!-- Registration Form (Hidden by default) -->
+      <form id="tma-register-form" onsubmit="handleTmaRegisterSubmit(event)" style="display:none;flex-direction:column;gap:10px;margin-top:12px">
+        <div>
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЖЕЛАЕМЫЙ ЛОГИН</label>
+          <input type="text" id="tma-reg-user" required placeholder="Например, Commander7" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
+          <input type="password" id="tma-reg-pass" required placeholder="Придумайте пароль" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ИМЯ ПЕРСОНАЖА / СЕКТОРА</label>
+          <input type="text" id="tma-reg-player" required placeholder="Например, Sector 7" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+        </div>
+        <button type="submit" id="tma-reg-btn" class="tma-main-btn" style="margin-top:4px">
+          📝 Зарегистрироваться
+        </button>
+      </form>
+    </div>
+
+    <!-- Bot instruction hint -->
+    <div class="tma-card" style="font-size:12px;color:#9ca3af;line-height:1.45">
+      💡 <strong>Совет:</strong> Вы также можете привязать аккаунт прямо в чате с ботом, отправив команду:<br>
+      <code style="display:inline-block;margin-top:6px;padding:4px 8px;background:#1f242e;border-radius:6px;color:#fbbf24;font-family:monospace;font-size:12px">/bind ваш_логин</code>
+    </div>
+  `;
+}
+
+function toggleTmaRegisterSection() {
+  const form = document.getElementById('tma-register-form');
+  if (form) {
+    const isHidden = form.style.display === 'none';
+    form.style.display = isHidden ? 'flex' : 'none';
+  }
+}
+
+async function handleTmaLoginSubmit(event) {
+  if (event) event.preventDefault();
+  const alertEl = document.getElementById('tma-auth-alert');
+  const userInp = document.getElementById('tma-login-user');
+  const passInp = document.getElementById('tma-login-pass');
+  const btn = document.getElementById('tma-login-btn');
+
+  if (!userInp || !passInp) return;
+  const username = userInp.value.trim();
+  const password = passInp.value;
+  if (!username || !password) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Вход...'; }
+  if (alertEl) alertEl.style.display = 'none';
+
+  try {
+    const res = await apiFetch('/api/auth/login', {
+      method: 'POST',
+      body: { username, password }
+    });
+
+    if (res && res.token && res.user) {
+      localStorage.setItem('kow_token', res.token);
+      currentUser = res.user;
+      if (res.player) {
+        currentUser.player = res.player;
+        currentUser.playerName = res.player.name;
+      }
+      try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+      state.currentRole = currentUser.rank;
+      state.currentPlayerId = currentUser.playerId || null;
+
+      // Auto-bind Telegram if WebApp initData is present!
+      const tg = window.Telegram?.WebApp;
+      if (tg && tg.initData) {
+        try {
+          await apiFetch('/api/telegram/bind-webapp', {
+            method: 'POST',
+            body: { initData: tg.initData }
+          });
+        } catch (bindErr) {
+          console.warn('Auto bind Telegram failed:', bindErr);
+        }
+      }
+
+      await loadDataFromServer().catch(() => {});
+      tmaHaptic('success');
+      toast('Вход успешно выполнен!', 'success');
+      renderTmaApp();
+    } else {
+      throw new Error(res?.message || 'Неверный логин или пароль');
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    if (alertEl) {
+      alertEl.textContent = err.message || 'Ошибка входа в систему';
+      alertEl.style.display = 'block';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔑 Войти и привязать Telegram'; }
+  }
+}
+
+async function handleTmaRegisterSubmit(event) {
+  if (event) event.preventDefault();
+  const alertEl = document.getElementById('tma-auth-alert');
+  const userInp = document.getElementById('tma-reg-user');
+  const passInp = document.getElementById('tma-reg-pass');
+  const playerInp = document.getElementById('tma-reg-player');
+  const btn = document.getElementById('tma-reg-btn');
+
+  if (!userInp || !passInp || !playerInp) return;
+  const username = userInp.value.trim();
+  const password = passInp.value;
+  const playerName = playerInp.value.trim();
+  if (!username || !password || !playerName) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Регистрация...'; }
+  if (alertEl) alertEl.style.display = 'none';
+
+  try {
+    const regRes = await apiFetch('/api/auth/register', {
+      method: 'POST',
+      body: { username, password, playerName }
+    });
+
+    if (regRes.pendingApproval || !regRes.is_approved) {
+      renderTmaUnboundScreen({ error: 'PENDING_APPROVAL' });
+      tmaHaptic('warning');
+      return;
+    }
+
+    // Auto login
+    const loginRes = await apiFetch('/api/auth/login', {
+      method: 'POST',
+      body: { username, password }
+    });
+
+    if (loginRes && loginRes.token && loginRes.user) {
+      localStorage.setItem('kow_token', loginRes.token);
+      currentUser = loginRes.user;
+      if (loginRes.player) {
+        currentUser.player = loginRes.player;
+        currentUser.playerName = loginRes.player.name;
+      }
+      try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+      state.currentRole = currentUser.rank;
+      state.currentPlayerId = currentUser.playerId || null;
+
+      // Auto bind telegram if WebApp initData is present
+      const tg = window.Telegram?.WebApp;
+      if (tg && tg.initData) {
+        try {
+          await apiFetch('/api/telegram/bind-webapp', {
+            method: 'POST',
+            body: { initData: tg.initData }
+          });
+        } catch (_) {}
+      }
+
+      await loadDataFromServer().catch(() => {});
+      tmaHaptic('success');
+      toast('Регистрация завершена!', 'success');
+      renderTmaApp();
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    if (alertEl) {
+      alertEl.textContent = err.message || 'Ошибка регистрации';
+      alertEl.style.display = 'block';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📝 Зарегистрироваться'; }
+  }
+}
+
+function renderTmaApp() {
+  const unboundEl = document.getElementById('tma-unbound-screen');
+  if (unboundEl) unboundEl.style.display = 'none';
+
+  const actBar = document.getElementById('tma-action-bar');
+  if (actBar) actBar.style.display = 'block';
+  const botNav = document.getElementById('tma-bottom-nav');
+  if (botNav) botNav.style.display = 'flex';
+
+  // Update Role badge in header
+  const roleBadge = document.getElementById('tma-user-role-badge');
+  if (roleBadge) {
+    const role = (currentUser?.rank || 'r3').toUpperCase();
+    roleBadge.textContent = role;
+    roleBadge.className = role === 'R5' ? 'badge badge-danger' : (role === 'R4' ? 'badge badge-primary' : 'badge badge-warning');
+  }
+
+  switchTmaTab(activeTmaTab || 'cabinet');
+}
+
+function switchTmaTab(tab) {
+  activeTmaTab = tab || 'cabinet';
+  tmaHaptic('light');
+
+  const tabs = ['cabinet', 'events', 'matrix'];
+  tabs.forEach(t => {
+    const pane = document.getElementById('tma-tab-' + t);
+    if (pane) pane.style.display = (t === activeTmaTab) ? 'block' : 'none';
+
+    const btn = document.getElementById('tma-tab-btn-' + t);
+    if (btn) {
+      if (t === activeTmaTab) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+  });
+
+  const mainBtnText = document.getElementById('tma-main-btn-text');
+  if (mainBtnText) {
+    if (activeTmaTab === 'cabinet') {
+      mainBtnText.textContent = '📷 Сканировать склад (OCR)';
+    } else if (activeTmaTab === 'events') {
+      mainBtnText.textContent = (tmaEventsSubTab === 'upcoming')
+        ? '📝 Подать заявку на событие'
+        : '📊 Посмотреть сетку результатов';
+    } else if (activeTmaTab === 'matrix') {
+      mainBtnText.textContent = '🔄 Обновить сводку гильдии';
+    }
+  }
+
+  if (activeTmaTab === 'cabinet') {
+    renderTmaCabinet();
+  } else if (activeTmaTab === 'events') {
+    renderTmaEvents();
+  } else if (activeTmaTab === 'matrix') {
+    renderTmaMatrix();
+  }
+}
+
+function switchTmaEventsSubTab(subTab) {
+  tmaEventsSubTab = subTab;
+  tmaHaptic('light');
+
+  const isUp = subTab === 'upcoming';
+  const listUp = document.getElementById('tma-events-list-upcoming');
+  const listPast = document.getElementById('tma-events-list-past');
+  if (listUp) listUp.style.display = isUp ? 'block' : 'none';
+  if (listPast) listPast.style.display = isUp ? 'none' : 'block';
+
+  const btnUp = document.getElementById('tma-events-subtab-upcoming');
+  const btnPast = document.getElementById('tma-events-subtab-past');
+  if (btnUp && btnPast) {
+    if (isUp) {
+      btnUp.style.backgroundColor = 'rgba(245, 158, 11, 0.2)';
+      btnUp.style.color = '#fbbf24';
+      btnUp.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+      btnPast.style.backgroundColor = 'transparent';
+      btnPast.style.color = '#9ca3af';
+      btnPast.style.borderColor = 'transparent';
+    } else {
+      btnPast.style.backgroundColor = 'rgba(245, 158, 11, 0.2)';
+      btnPast.style.color = '#fbbf24';
+      btnPast.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+      btnUp.style.backgroundColor = 'transparent';
+      btnUp.style.color = '#9ca3af';
+      btnUp.style.borderColor = 'transparent';
+    }
+  }
+
+  const mainBtnText = document.getElementById('tma-main-btn-text');
+  if (mainBtnText && activeTmaTab === 'events') {
+    mainBtnText.textContent = isUp ? '📝 Подать заявку на событие' : '📊 Посмотреть сетку результатов';
+  }
+}
+
+function renderTmaCabinet() {
+  const container = document.getElementById('tma-tab-cabinet');
+  if (!container) return;
+
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+
+  const sector = player.sector || {};
+  const stock = player.stock || {};
+  const role = (player.rank || currentUser?.rank || 'r3').toUpperCase();
+  const playerName = player.name || currentUser?.username || 'Sector 7';
+
+  // Freshness calculation
+  const updatedAt = stock.updatedAt || player.updatedAt || player.created_at;
+  let daysAgo = 0;
+  if (updatedAt) {
+    daysAgo = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+  }
+  const isFresh = daysAgo <= 3;
+
+  // Target Officer & Progression calculation
+  const officers = player.officers || [];
+  let targetOfficer = officers.find(o => !o.isMaxed && (o.isTarget || o.priority)) || officers[0] || null;
+  let officerName = 'Элизабет';
+  let skillsStr = '5-4-3-2';
+  let progressPct = 78;
+  let remainingCoupons = 4200;
+  let remainingDays = 14;
+
+  if (targetOfficer) {
+    officerName = targetOfficer.name || officerName;
+    if (targetOfficer.skills && Array.isArray(targetOfficer.skills)) {
+      skillsStr = targetOfficer.skills.join('-');
+      const sumSkills = targetOfficer.skills.reduce((a, b) => a + Number(b || 0), 0);
+      progressPct = Math.min(100, Math.max(10, Math.round((sumSkills / 20) * 100)));
+    }
+    const def = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit)
+      ? logic.calculateOfficerDeficit(targetOfficer, stock, sector.vipLevel || 0)
+      : null;
+    if (def) {
+      if (def.remainingCoupons !== undefined) remainingCoupons = def.remainingCoupons;
+      if (def.estimatedDays !== undefined) remainingDays = def.estimatedDays;
+    }
+  }
+
+  // Next Upcoming Event
+  const now = new Date();
+  const upcomingEvents = (state.events || [])
+    .filter(e => !e.isCompleted && e.status !== 'completed')
+    .sort((a, b) => new Date(a.startDate || a.dateStart || 0) - new Date(b.startDate || b.dateStart || 0));
+  const nextEvent = upcomingEvents[0] || null;
+
+  let nextEventHtml = '';
+  if (nextEvent) {
+    const evDateStr = (nextEvent.startDate || nextEvent.dateStart)
+      ? new Date(nextEvent.startDate || nextEvent.dateStart).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ', 00:00 UTC'
+      : 'Скоро';
+    const myReg = (nextEvent.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(player.id || currentUser?.playerId));
+
+    let regStatusSnippet = '';
+    if (myReg) {
+      const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+      regStatusSnippet = `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:16px">🥇</span>
+            <span style="font-size:12px;font-weight:700;color:#fde68a">Вам назначено Место ${placeText}</span>
+          </div>
+          <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">+50к куп.</span>
+        </div>
+      `;
+    } else {
+      regStatusSnippet = `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
+          <span style="font-size:12px;color:#9ca3af">Регистрация открыта</span>
+          <button type="button" onclick="switchTmaTab('events')" class="tma-event-reg-btn" style="padding:4px 12px;font-size:11.5px">
+            Записаться
+          </button>
+        </div>
+      `;
+    }
+
+    nextEventHtml = `
+      <!-- Next Event Quick Card -->
+      <div class="tma-card" style="background:linear-gradient(135deg,#17202e 0%,#161a22 100%);border-color:rgba(14,165,233,0.3)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="padding:2px 8px;font-size:10px;font-weight:700;background:rgba(14,165,233,0.2);color:#38bdf8;border-radius:6px;border:1px solid rgba(14,165,233,0.3)">
+            Ближайший ивент
+          </span>
+          <span style="font-size:11.5px;color:#9ca3af">${escapeHtml(evDateStr)}</span>
+        </div>
+        <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">
+          ${escapeHtml(nextEvent.title || nextEvent.name || 'Битва за трон')}
+        </div>
+        ${regStatusSnippet}
+      </div>
+    `;
+  } else {
+    nextEventHtml = `
+      <div class="tma-card" style="font-size:12.5px;color:#9ca3af;text-align:center;padding:16px">
+        Нет запланированных событий в ближайшие дни
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    <!-- Player Badge Card -->
+    <div class="tma-card tma-card-gold" style="position:relative;overflow:hidden">
+      <div style="position:absolute;right:-20px;bottom:-20px;width:100px;height:100px;background:rgba(245,158,11,0.1);border-radius:999px;filter:blur(24px);pointer-events:none"></div>
+      
+      <div style="display:flex;align-items:flex-start;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="tma-gold-gradient" style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#000;font-weight:900;font-size:15px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">
+            KOW
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <h2 style="font-size:14.5px;font-weight:700;color:#fff;margin:0">${escapeHtml(playerName)}</h2>
+              <span class="badge badge-warning" style="font-size:10px;font-weight:700;padding:2px 6px">${escapeHtml(role)}</span>
+            </div>
+            <p style="font-size:12px;color:#9ca3af;margin:2px 0 0 0">
+              Сила: <strong style="color:#fff">${fmtNum(sector.power || 48200000)}</strong> • VIP: <strong style="color:#fbbf24">${sector.vipLevel || 14}</strong>
+            </p>
+          </div>
+        </div>
+
+        <span style="padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;display:inline-flex;align-items:center;gap:4px;border:1px solid;${isFresh ? 'background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3)' : 'background:rgba(239,68,68,0.15);color:#f87171;border-color:rgba(239,68,68,0.3)'}">
+          <span style="width:6px;height:6px;border-radius:999px;background:currentColor"></span>
+          ${isFresh ? (daysAgo === 0 ? 'Свежий' : `${daysAgo}д назад`) : `Устарел (${daysAgo}д)`}
+        </span>
+      </div>
+
+      <!-- Stock Grid -->
+      <div class="tma-stock-grid">
+        <div class="tma-stock-cell">
+          <div class="tma-stock-label">Купоны 🎟️</div>
+          <div class="tma-stock-val" style="color:#fbbf24">${fmtNum(stock.coupons || 0)}</div>
+        </div>
+        <div class="tma-stock-cell">
+          <div class="tma-stock-label">Пазлы 🧩</div>
+          <div class="tma-stock-val" style="color:#38bdf8">${fmtNum(stock.puzzles || 0)}</div>
+        </div>
+        <div class="tma-stock-cell">
+          <div class="tma-stock-label">Звезды ⭐</div>
+          <div class="tma-stock-val" style="color:#c084fc">
+            ${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Target Officer Progression Simulator -->
+    <div class="tma-card" style="border-color:rgba(255,255,255,0.08)">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:8px">
+        <span style="color:#9ca3af;font-weight:600">Цель прокачки:</span>
+        <span style="color:#fbbf24;font-weight:700">
+          ${escapeHtml(officerName)} <span style="color:#fde68a">(${escapeHtml(skillsStr)})</span>
+        </span>
+      </div>
+
+      <!-- Progress Track -->
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+          <span style="color:#9ca3af">Прогресс до 5-5-5-5</span>
+          <span style="color:#fff;font-weight:700">${progressPct}%</span>
+        </div>
+        <div class="tma-progress-track">
+          <div class="tma-progress-fill" style="width:${progressPct}%"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;background:#1f242e;padding:10px 12px;border-radius:12px;margin-top:10px">
+        <div>
+          <div style="font-size:10px;color:#9ca3af">Остаточный дефицит:</div>
+          <div style="font-weight:700;color:#fbbf24;font-size:12.5px">${fmtNum(remainingCoupons)} купонов</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;color:#9ca3af">Срок (с VIP ${sector.vipLevel || 14}):</div>
+          <div style="font-weight:700;color:#34d399;font-size:12.5px">~${remainingDays} дней</div>
+        </div>
+      </div>
+    </div>
+
+    ${nextEventHtml}
+  `;
+}
+
+function renderTmaEvents() {
+  const container = document.getElementById('tma-tab-events');
+  if (!container) return;
+
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+
+  const myPlayerId = player.id || currentUser?.playerId;
+
+  // Sort upcoming and past events
+  const upcomingEvents = (state.events || [])
+    .filter(e => !e.isCompleted && e.status !== 'completed')
+    .sort((a, b) => new Date(a.startDate || a.dateStart || 0) - new Date(b.startDate || b.dateStart || 0));
+
+  const pastEvents = (state.events || [])
+    .filter(e => e.isCompleted || e.status === 'completed')
+    .sort((a, b) => new Date(b.startDate || b.dateStart || 0) - new Date(a.startDate || a.dateStart || 0));
+
+  // Upcoming HTML
+  let upcomingHtml = '';
+  if (upcomingEvents.length === 0) {
+    upcomingHtml = `
+      <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
+        <div style="font-size:32px;margin-bottom:8px">📅</div>
+        Нет активных предстоящих событий
+      </div>
+    `;
+  } else {
+    upcomingHtml = upcomingEvents.map(ev => {
+      const myReg = (ev.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
+      const evDate = (ev.startDate || ev.dateStart)
+        ? new Date(ev.startDate || ev.dateStart).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })
+        : 'Дата уточняется';
+      const maxPlaces = ev.placesCount || ev.maxPlaces || (ev.rewards ? ev.rewards.length : 5);
+
+      let actionBlock = '';
+      if (myReg) {
+        const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+        actionBlock = `
+          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:16px">🎯</span>
+              <span style="font-size:12px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeStr}</span>
+            </div>
+            <button type="button" onclick="handleTmaUnregisterEvent(${ev.id})" style="background:none;border:none;color:#ef4444;font-size:11px;font-weight:700;cursor:pointer;padding:4px 6px">
+              ✕ Отменить
+            </button>
+          </div>
+        `;
+      } else {
+        actionBlock = `
+          <p style="font-size:12px;color:#d1d5db;margin:8px 0 6px 0">Подайте заявку на желаемое призовое место:</p>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+            <button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 1)" class="tma-event-reg-btn">#1 (50к)</button>
+            <button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 2)" class="tma-event-reg-btn">#2 (40к)</button>
+            <button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 3)" class="tma-event-reg-btn">#3 (30к)</button>
+            <button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 0)" class="tma-event-reg-btn">Любое</button>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="tma-card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <h3 style="font-size:14px;font-weight:700;color:#fff;margin:0">${escapeHtml(ev.title || ev.name)}</h3>
+              <p style="font-size:11.5px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDate)} • ${maxPlaces} мест</p>
+            </div>
+            <span style="padding:2px 8px;font-size:10px;font-weight:700;background:rgba(245,158,11,0.2);color:#fbbf24;border-radius:6px;border:1px solid rgba(245,158,11,0.3)">
+              Открыта запись
+            </span>
+          </div>
+          ${actionBlock}
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Past HTML
+  let pastHtml = '';
+  if (pastEvents.length === 0) {
+    pastHtml = `
+      <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
+        <div style="font-size:32px;margin-bottom:8px">📜</div>
+        Нет завершенных событий
+      </div>
+    `;
+  } else {
+    pastHtml = pastEvents.map(ev => {
+      const evDate = (ev.startDate || ev.dateStart)
+        ? new Date(ev.startDate || ev.dateStart).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+        : '';
+      const myRes = (ev.results || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
+
+      let myResBlock = '';
+      if (myRes) {
+        myResBlock = `
+          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;margin:8px 0">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:18px">🎯</span>
+              <div>
+                <div style="font-size:12px;font-weight:700;color:#fde68a">Ваш результат: Место #${myRes.place || myRes.actualPlace || 1}</div>
+                <div style="font-size:10px;color:#9ca3af">Заявка выполнена на 100%</div>
+              </div>
+            </div>
+            <span style="font-size:12px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.2);padding:4px 8px;border-radius:8px;border:1px solid rgba(245,158,11,0.3)">
+              +${fmtNum(myRes.couponsWon || myRes.prizeCoupons || 40000)} 🎟️
+            </span>
+          </div>
+        `;
+      }
+
+      // Winners snippet
+      let winnersSnippet = '';
+      if (ev.results && ev.results.length > 0) {
+        const top3 = ev.results.slice(0, 3);
+        winnersSnippet = `
+          <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);font-size:11.5px">
+            <div style="color:#9ca3af;font-size:10.5px;font-weight:600;margin-bottom:4px">Призёры альянса:</div>
+            ${top3.map((w, idx) => {
+              const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : '🥉');
+              const isMe = Number(w.playerId || w.sectorId) === Number(myPlayerId);
+              const pName = w.playerName || w.sectorName || `Sector ${w.playerId || w.sectorId}`;
+              return `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;${isMe ? 'color:#fbbf24;font-weight:700' : 'color:#d1d5db'}">
+                  <span>${medal} #${w.place || (idx + 1)} ${escapeHtml(pName)}${isMe ? ' [Вы]' : ''}</span>
+                  <span style="color:#fbbf24;font-family:monospace">+${fmtNum(w.couponsWon || 30000)} 🎟️</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+
+      return `
+        <div class="tma-card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <h3 style="font-size:14px;font-weight:700;color:#fff;margin:0">${escapeHtml(ev.title || ev.name)}</h3>
+              <p style="font-size:11.5px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDate)}</p>
+            </div>
+            <span style="padding:2px 8px;font-size:10px;font-weight:600;background:#1f242e;color:#9ca3af;border-radius:6px">
+              ◌ Завершён
+            </span>
+          </div>
+          ${myResBlock}
+          ${winnersSnippet}
+        </div>
+      `;
+    }).join('');
+  }
+
+  const isUp = tmaEventsSubTab === 'upcoming';
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
+      <div style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
+        Календарь событий
+      </div>
+      <div style="display:inline-flex;padding:2px;background:#161a22;border:1px solid rgba(255,255,255,0.08);border-radius:10px">
+        <button id="tma-events-subtab-upcoming" onclick="switchTmaEventsSubTab('upcoming')" type="button" style="padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isUp ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
+          ◎ Предстоящие (${upcomingEvents.length})
+        </button>
+        <button id="tma-events-subtab-past" onclick="switchTmaEventsSubTab('past')" type="button" style="padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${!isUp ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
+          ◌ Прошедшие (${pastEvents.length})
+        </button>
+      </div>
+    </div>
+
+    <div id="tma-events-list-upcoming" style="display:${isUp ? 'block' : 'none'}">
+      ${upcomingHtml}
+    </div>
+
+    <div id="tma-events-list-past" style="display:${isUp ? 'none' : 'block'}">
+      ${pastHtml}
+    </div>
+  `;
+}
+
+function renderTmaMatrix() {
+  const container = document.getElementById('tma-tab-matrix');
+  if (!container) return;
+
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+
+  const myPlayerId = player.id || currentUser?.playerId;
+  const sorted = [...(state.players || [])].sort((a, b) => {
+    return (b.sector?.power || 0) - (a.sector?.power || 0);
+  });
+
+  const rowsHtml = sorted.map((p, idx) => {
+    const isMe = Number(p.id) === Number(myPlayerId) || Number(p.userId) === Number(currentUser?.id);
+    const sec = p.sector || {};
+    const stock = p.stock || {};
+    const updatedAt = stock.updatedAt || p.updatedAt;
+    let daysAgo = 0;
+    if (updatedAt) {
+      daysAgo = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+    }
+    const isFresh = daysAgo <= 3;
+
+    return `
+      <div class="tma-card" style="padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;${isMe ? 'border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.06)' : ''}">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:12px;font-weight:800;color:${idx === 0 ? '#fbbf24' : (idx === 1 ? '#d1d5db' : (idx === 2 ? '#b45309' : '#6b7280'))};width:18px;text-align:center">
+            ${idx + 1}
+          </span>
+          <div>
+            <div style="font-size:12.5px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px">
+              ${escapeHtml(p.name || 'Сектор')}
+              ${isMe ? '<span style="font-size:9px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.25);padding:1px 5px;border-radius:4px">Вы</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:#9ca3af">
+              Сила: ${fmtNum(sec.power || 0)} • VIP ${sec.vipLevel || 0}
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align:right">
+          <div style="font-size:12.5px;font-weight:700;color:#fbbf24">
+            ${fmtNum(stock.coupons || 0)} 🎟️
+          </div>
+          <div style="font-size:10px;color:${isFresh ? '#34d399' : '#f87171'}">
+            ${isFresh ? '🟢 ' + (daysAgo === 0 ? 'сегодня' : daysAgo + 'д назад') : '🔴 ' + daysAgo + 'д назад'}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 2px">
+      <span style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
+        Сводка гильдии (Рейтинг)
+      </span>
+      <span style="font-size:11.5px;color:#fbbf24;font-weight:600">
+        ${sorted.length} секторов
+      </span>
+    </div>
+
+    <div>
+      ${rowsHtml || '<div class="tma-card" style="text-align:center;color:#9ca3af">Нет данных о секторах</div>'}
+    </div>
+  `;
+}
+
+async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
+  tmaHaptic('medium');
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0];
+
+  const sectorId = player ? player.id : currentUser?.playerId;
+  try {
+    await apiFetch(`/api/events/${eventId}/register`, {
+      method: 'POST',
+      body: { desiredPlace, sectorId }
+    });
+    tmaHaptic('success');
+    toast('Заявка на ивент успешно принята!', 'success');
+    await loadDataFromServer().catch(() => {});
+    renderTmaEvents();
+    if (activeTmaTab === 'cabinet') renderTmaCabinet();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка регистрации: ' + (err.message || 'попробуйте позже'), 'error');
+  }
+}
+
+async function handleTmaUnregisterEvent(eventId) {
+  tmaHaptic('medium');
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0];
+
+  const sectorId = player ? player.id : currentUser?.playerId;
+  try {
+    const url = sectorId
+      ? `/api/events/${eventId}/register?sectorId=${sectorId}`
+      : `/api/events/${eventId}/register`;
+    await apiFetch(url, { method: 'DELETE' });
+    tmaHaptic('success');
+    toast('Заявка отменена', 'info');
+    await loadDataFromServer().catch(() => {});
+    renderTmaEvents();
+    if (activeTmaTab === 'cabinet') renderTmaCabinet();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка отмены: ' + (err.message || 'попробуйте позже'), 'error');
+  }
+}
+
+function handleTmaMainAction() {
+  tmaHaptic('light');
+  if (activeTmaTab === 'cabinet') {
+    const fileInput = document.getElementById('tma-ocr-input');
+    if (fileInput) {
+      fileInput.click();
+    } else {
+      openSmartScannerModal('my_cabinet');
+    }
+  } else if (activeTmaTab === 'events') {
+    if (tmaEventsSubTab !== 'upcoming') {
+      switchTmaEventsSubTab('upcoming');
+    }
+    const container = document.getElementById('tma-scrollable-content');
+    if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
+  } else if (activeTmaTab === 'matrix') {
+    refreshTmaCurrentTab();
+  }
+}
+
+function handleTmaOcrFileInput(event) {
+  const files = event.target.files;
+  if (!files || !files.length) return;
+  openSmartScannerModal('my_cabinet');
+  if (typeof handleScannerFiles === 'function') {
+    handleScannerFiles(files);
+  }
+}
+
+async function refreshTmaCurrentTab() {
+  tmaHaptic('light');
+  try {
+    await loadDataFromServer().catch(() => {});
+    if (activeTmaTab === 'cabinet') renderTmaCabinet();
+    else if (activeTmaTab === 'events') renderTmaEvents();
+    else if (activeTmaTab === 'matrix') renderTmaMatrix();
+    toast('Данные обновлены', 'success');
+  } catch (err) {
+    toast('Ошибка обновления: ' + err.message, 'error');
+  }
 }
 
 // ─── INIT ────────────────────────────────────────────────────
@@ -13162,4 +14185,22 @@ if (typeof window !== 'undefined') {
   window.selectMatrixOfficer = selectMatrixOfficer;
   window.clearMatrixOfficerFilter = clearMatrixOfficerFilter;
   window.onMatrixOfficerKeydown = onMatrixOfficerKeydown;
+
+  window.isTmaMode = isTmaMode;
+  window.enableTmaView = enableTmaView;
+  window.setupTmaEnvironment = setupTmaEnvironment;
+  window.initTmaAuth = initTmaAuth;
+  window.renderTmaApp = renderTmaApp;
+  window.renderTmaUnboundScreen = renderTmaUnboundScreen;
+  window.switchTmaTab = switchTmaTab;
+  window.switchTmaEventsSubTab = switchTmaEventsSubTab;
+  window.handleTmaMainAction = handleTmaMainAction;
+  window.handleTmaOcrFileInput = handleTmaOcrFileInput;
+  window.handleTmaRegisterEvent = handleTmaRegisterEvent;
+  window.handleTmaUnregisterEvent = handleTmaUnregisterEvent;
+  window.handleTmaLoginSubmit = handleTmaLoginSubmit;
+  window.handleTmaRegisterSubmit = handleTmaRegisterSubmit;
+  window.toggleTmaRegisterSection = toggleTmaRegisterSection;
+  window.refreshTmaCurrentTab = refreshTmaCurrentTab;
+  window.tmaHaptic = tmaHaptic;
 }

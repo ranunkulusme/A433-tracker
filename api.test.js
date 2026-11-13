@@ -6098,6 +6098,107 @@ test('Telegram bot auto-matching by username, /bind credentials command, and del
   }
 });
 
+test('Telegram Mini App dedicated UI, auto-auth, and bind-webapp endpoint', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const crypto = require('node:crypto');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const botToken = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+    db.setAppSetting('telegram_bot_token', botToken);
+
+    // 1. Static asset verification for TMA
+    const htmlRes = await fetch(`${baseUrl}/index.html`);
+    const htmlText = await htmlRes.text();
+    assert.ok(htmlText.includes('telegram-web-app.js'), 'index.html contains Telegram WebApp SDK script');
+    assert.ok(htmlText.includes('id="tma-app"'), 'index.html contains dedicated TMA container');
+    assert.ok(htmlText.includes('id="tma-tab-cabinet"'), 'index.html contains TMA cabinet tab');
+    assert.ok(htmlText.includes('id="tma-tab-events"'), 'index.html contains TMA events tab');
+    assert.ok(htmlText.includes('id="tma-tab-matrix"'), 'index.html contains TMA matrix tab');
+    assert.ok(htmlText.includes('id="tma-main-btn"'), 'index.html contains TMA sticky MainButton');
+
+    const cssRes = await fetch(`${baseUrl}/style.css`);
+    const cssText = await cssRes.text();
+    assert.ok(cssText.includes('.tma-mode'), 'style.css contains .tma-mode styles');
+    assert.ok(cssText.includes('.tma-card'), 'style.css contains .tma-card styles');
+    assert.ok(cssText.includes('.tma-bottom-nav'), 'style.css contains .tma-bottom-nav styles');
+
+    const jsRes = await fetch(`${baseUrl}/app.js`);
+    const jsText = await jsRes.text();
+    assert.ok(jsText.includes('isTmaMode'), 'app.js contains isTmaMode');
+    assert.ok(jsText.includes('renderTmaCabinet'), 'app.js contains renderTmaCabinet');
+    assert.ok(jsText.includes('renderTmaEvents'), 'app.js contains renderTmaEvents');
+    assert.ok(jsText.includes('renderTmaMatrix'), 'app.js contains renderTmaMatrix');
+
+    // 2. Test POST /api/telegram/bind-webapp with authenticated user
+    const reg = db.registerUser({ username: 'tma_auto_binder', password: 'password123', playerName: 'Сектор TMA' });
+    db.approveUser(reg.userId, 'r3');
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'tma_auto_binder', password: 'password123' })
+    });
+    const loginData = await loginRes.json();
+    const token = loginData.token;
+
+    function createInitData(userObj) {
+      const uStr = JSON.stringify(userObj);
+      const authDate = Math.floor(Date.now() / 1000);
+      const dataCheckString = `auth_date=${authDate}\nquery_id=AAH777\nuser=${uStr}`;
+      const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+      const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+      const params = new URLSearchParams();
+      params.set('query_id', 'AAH777');
+      params.set('user', uStr);
+      params.set('auth_date', String(authDate));
+      params.set('hash', hash);
+      return params.toString();
+    }
+
+    const tmaInitData = createInitData({ id: 777888111, username: 'tma_hero', first_name: 'Hero' });
+
+    // Unauthorized call fails
+    const unauthBind = await fetch(`${baseUrl}/api/telegram/bind-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tmaInitData })
+    });
+    assert.equal(unauthBind.status, 401);
+
+    // Authorized call binds Telegram
+    const authBind = await fetch(`${baseUrl}/api/telegram/bind-webapp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ initData: tmaInitData })
+    });
+    assert.equal(authBind.status, 200);
+    const bindResult = await authBind.json();
+    assert.equal(bindResult.success, true);
+
+    const updatedUser = db.findUserById(reg.userId);
+    assert.equal(updatedUser.telegram_chat_id, 777888111);
+    assert.equal(updatedUser.telegram_username, 'tma_hero');
+
+    // Subsequent TMA WebApp auto-auth now succeeds immediately without passwords
+    const autoAuthRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tmaInitData })
+    });
+    assert.equal(autoAuthRes.status, 200);
+    const autoAuthData = await autoAuthRes.json();
+    assert.equal(autoAuthData.success, true);
+    assert.equal(autoAuthData.user.username, 'tma_auto_binder');
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 

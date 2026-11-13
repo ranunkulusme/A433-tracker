@@ -16,6 +16,7 @@
 <title>KoW Officer Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="vendor/i18next.min.js"></script>
 <script src="i18n.js"></script>
@@ -435,6 +436,71 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- ─── TELEGRAM MINI APP (TMA) CONTAINER ─── -->
+<div id="tma-app" class="tma-app" style="display:none">
+  <!-- Native TMA Header -->
+  <header class="tma-header" id="tma-header">
+    <div class="tma-header-title">
+      <div class="tma-header-logo">
+        <span class="tma-pulse-dot"></span>
+        <span style="font-weight:800;letter-spacing:0.3px;color:#fff;font-size:14px">KoW Tracker</span>
+      </div>
+      <p id="tma-header-subtitle" style="font-size:11px;color:#9ca3af;margin:0">bot • Kingdom of Winners</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="tma-icon-btn" onclick="refreshTmaCurrentTab()" title="Обновить" type="button">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      </button>
+      <span id="tma-user-role-badge" class="badge badge-warning" style="font-size:10px;font-weight:700">Р3</span>
+    </div>
+  </header>
+
+  <!-- Scrollable TMA Content Container -->
+  <main class="tma-content" id="tma-scrollable-content">
+    <!-- Unbound State Screen (if user not authenticated/bound) -->
+    <div id="tma-unbound-screen" style="display:none"></div>
+
+    <!-- TAB 1: CABINET / PROFILE (DEFAULT) -->
+    <div id="tma-tab-cabinet" class="tma-tab-pane"></div>
+
+    <!-- TAB 2: EVENTS -->
+    <div id="tma-tab-events" class="tma-tab-pane" style="display:none"></div>
+
+    <!-- TAB 3: MATRIX / ROSTER -->
+    <div id="tma-tab-matrix" class="tma-tab-pane" style="display:none"></div>
+  </main>
+
+  <!-- Sticky Bottom Main Action Button -->
+  <div class="tma-action-bar" id="tma-action-bar">
+    <button id="tma-main-btn" class="tma-main-btn" onclick="handleTmaMainAction()" type="button">
+      <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      <span id="tma-main-btn-text">📷 Сканировать склад (OCR)</span>
+    </button>
+  </div>
+
+  <!-- TMA Bottom Navigation Bar -->
+  <nav class="tma-bottom-nav" id="tma-bottom-nav">
+    <button onclick="switchTmaTab('cabinet')" id="tma-tab-btn-cabinet" class="tma-nav-btn active" type="button">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      <span>Кабинет</span>
+    </button>
+    <button onclick="switchTmaTab('events')" id="tma-tab-btn-events" class="tma-nav-btn" type="button">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      <span>События</span>
+    </button>
+    <button onclick="switchTmaTab('matrix')" id="tma-tab-btn-matrix" class="tma-nav-btn" type="button">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <span>Матрица</span>
+    </button>
+  </nav>
+
+  <!-- Hidden OCR input for TMA -->
+  <input type="file" id="tma-ocr-input" accept="image/*" style="display:none" onchange="handleTmaOcrFileInput(event)">
 </div>
 
 <!-- Overlay -->
