@@ -579,6 +579,28 @@ async function checkScheduledEventMorningReminders(req = null, options = {}) {
   }
 }
 
+function getPlayerTargetOfficerDeficit(player) {
+  if (!player) return { targetOfficer: null, targetDeficit: 0, deficitDetails: null };
+  const pOfficers = Array.isArray(player.officers) ? player.officers : [];
+  if (!pOfficers.length) return { targetOfficer: null, targetDeficit: 0, deficitDetails: null };
+
+  const catalog = db.getCatalog ? db.getCatalog() : [];
+  let target = pOfficers.find(o => {
+    const skillsSum = Array.isArray(o.skills) ? o.skills.reduce((a, b) => a + Number(b), 0) : 4;
+    return skillsSum < 20 || Number(o.stars || 0) < 5;
+  }) || pOfficers[0];
+
+  const catEntry = catalog.find(c => c.id === (target.catalogId || target.officerId || target.id)) || { name: target.name || 'Офицер', coupon_cost: 50 };
+  const targetName = catEntry.name || target.name || 'Офицер';
+
+  const defRes = logic.calculateOfficerDeficit(target, player.stock || {}, catEntry, true);
+  return {
+    targetOfficer: targetName,
+    targetDeficit: defRes ? defRes.coupons : 0,
+    deficitDetails: defRes
+  };
+}
+
 // ─── TELEGRAM BOT MESSAGE & UPDATE PROCESSOR ─────────────────────────
 
 async function handleTelegramUpdate(update) {
@@ -668,23 +690,174 @@ async function handleTelegramUpdate(update) {
     // D) /start or /help (without bind token)
     if (/^\/(?:start|help)(?:@\w+)?(?:\s|$)/i.test(text)) {
       if (token && msg.chat?.type === 'private') {
+        const fromId = msg.from?.id;
+        const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+        const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
+        const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
         await telegram.sendTelegramMessage({
           token,
           chatId,
           text: '👋 <b>Здравствуйте! Я официальный Telegram-бот KoW Tracker.</b>\n\n' +
-                '📱 <b>Подключение персональных уведомлений:</b>\n' +
-                '1. Откройте KoW Tracker ➔ <b>Личный кабинет</b>\n' +
-                '2. Нажмите <b>«Подключить Telegram»</b>\n' +
-                '3. Бот автоматически привяжет ваш игровой профиль.\n\n' +
-                '📦 <b>Управление складом:</b>\n' +
-                'Отправьте команду <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> или пришлите скриншот инвентаря.\n\n' +
+                '📱 <b>Команды бойца:</b>\n' +
+                '• <code>/me</code> — профиль, склад и прогресс офицера\n' +
+                '• <code>/deficit</code> — расчет дефицита до максимума прокачки\n' +
+                '• <code>/events</code> — ваши места и ближайшие события альянса\n' +
+                '• <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> — быстрое обновление склада\n' +
+                '• <code>/menu</code> — интерактивное меню кнопок\n\n' +
+                '📦 <b>Скриншоты склада:</b>\n' +
+                'Просто отправьте фото инвентаря для сохранения в журнале аудита.\n\n' +
                 '🛡️ <b>Подключение чата штаба:</b>\n' +
-                'Добавьте бота в группу офицеров и выполните команду:\n' +
-                '<code>/connect_staff &lt;PIN&gt;</code>\n' +
-                '(PIN генерируется в разделе Настройки ➔ Уведомления).'
+                '<code>/connect_staff &lt;PIN&gt;</code> (PIN генерируется в Настройках).',
+          replyMarkup: keyboard
         });
       }
       return { ok: true, command: 'help', chatId };
+    }
+
+    // D1) /me or /профиль
+    if (/^\/(?:me|профиль|profile)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\n\nОткройте <b>Личный кабинет</b> в трекере и нажмите кнопку <b>«📱 Подключить Telegram»</b>, чтобы просматривать сектор и управлять складом.'
+          });
+        }
+        return { ok: true, command: 'me', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
+      const { targetOfficer, targetDeficit } = getPlayerTargetOfficerDeficit(player);
+
+      const replyText = logic.formatTelegramMeMessage({
+        user,
+        player,
+        freshness,
+        targetOfficer,
+        targetDeficit
+      });
+
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+
+      if (token) {
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: replyText,
+          replyMarkup: keyboard
+        });
+      }
+      return { ok: true, command: 'me', userId: user.id, playerId: player?.id };
+    }
+
+    // D2) /deficit or /дефицит
+    if (/^\/(?:deficit|дефицит)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете трекера.'
+          });
+        }
+        return { ok: true, command: 'deficit', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      const { targetOfficer, targetDeficit, deficitDetails } = getPlayerTargetOfficerDeficit(player);
+
+      const vip = player?.vip !== undefined ? Number(player.vip) : (user.vip !== undefined ? Number(user.vip) : 10);
+      const daily = logic.dailyRewards(vip, Number(player?.confidentiality || 0));
+      const dailyCoupons = (daily?.coupons || 0) + ((daily?.puzzles || 0) * 50);
+      const daysEstimate = (targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null);
+
+      const replyText = logic.formatTelegramDeficitMessage({
+        player,
+        targetOfficer: targetOfficer || 'Офицер',
+        deficit: deficitDetails,
+        dailyRewards: daily,
+        daysEstimate
+      });
+
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+
+      if (token) {
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: replyText,
+          replyMarkup: keyboard
+        });
+      }
+      return { ok: true, command: 'deficit', userId: user.id, playerId: player?.id };
+    }
+
+    // D3) /events or /ивенты
+    if (/^\/(?:events|ивенты|события)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете трекера.'
+          });
+        }
+        return { ok: true, command: 'events', error: 'user_not_bound' };
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+
+      const allEvents = db.getEvents ? db.getEvents() : [];
+      const nowIso = new Date().toISOString();
+      const upcomingEvents = (allEvents || [])
+        .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
+        .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
+
+      const replyText = logic.formatTelegramEventsListMessage({
+        events: upcomingEvents,
+        playerId: player?.id
+      });
+
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+
+      if (token) {
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: replyText,
+          replyMarkup: keyboard
+        });
+      }
+      return { ok: true, command: 'events', userId: user.id, playerId: player?.id };
+    }
+
+    // D4) /menu
+    if (/^\/(?:menu|меню)(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fromId = msg.from?.id;
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
+
+      if (token) {
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: '📱 <b>Главное меню KoW Tracker:</b>\nВыберите необходимое действие:',
+          replyMarkup: keyboard
+        });
+      }
+      return { ok: true, command: 'menu', chatId };
     }
 
     // E) /stock or /склад text command
@@ -903,6 +1076,79 @@ async function handleTelegramUpdate(update) {
     const data = cq.data || '';
     const fromId = cq.from?.id;
     const chatMsg = cq.message;
+
+    // A) Main Menu callbacks
+    if (data === 'cmd_me' || data === 'cmd_deficit' || data === 'cmd_events' || data === 'cmd_stock_help') {
+      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      if (!user) {
+        if (token) {
+          await telegram.answerTelegramCallback({
+            token,
+            callbackQueryId: cqId,
+            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker.',
+            showAlert: true
+          });
+        }
+        return { ok: true, action: data, error: 'user_not_bound' };
+      }
+
+      if (token) {
+        await telegram.answerTelegramCallback({ token, callbackQueryId: cqId });
+      }
+
+      const sectors = db.getPlayersByUserId(user.id);
+      const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
+      const isStaff = user.rank === 'r4' || user.rank === 'r5';
+      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff });
+      const targetChatId = chatMsg?.chat?.id || fromId;
+
+      if (data === 'cmd_me') {
+        const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
+        const { targetOfficer, targetDeficit } = getPlayerTargetOfficerDeficit(player);
+        const replyText = logic.formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit });
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
+        }
+        return { ok: true, action: 'cmd_me', userId: user.id };
+      }
+
+      if (data === 'cmd_deficit') {
+        const { targetOfficer, targetDeficit, deficitDetails } = getPlayerTargetOfficerDeficit(player);
+        const vip = player?.vip !== undefined ? Number(player.vip) : (user.vip !== undefined ? Number(user.vip) : 10);
+        const daily = logic.dailyRewards(vip, Number(player?.confidentiality || 0));
+        const dailyCoupons = (daily?.coupons || 0) + ((daily?.puzzles || 0) * 50);
+        const daysEstimate = (targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null);
+        const replyText = logic.formatTelegramDeficitMessage({ player, targetOfficer: targetOfficer || 'Офицер', deficit: deficitDetails, dailyRewards: daily, daysEstimate });
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
+        }
+        return { ok: true, action: 'cmd_deficit', userId: user.id };
+      }
+
+      if (data === 'cmd_events') {
+        const allEvents = db.getEvents ? db.getEvents() : [];
+        const nowIso = new Date().toISOString();
+        const upcomingEvents = (allEvents || [])
+          .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
+          .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
+        const replyText = logic.formatTelegramEventsListMessage({ events: upcomingEvents, playerId: player?.id });
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
+        }
+        return { ok: true, action: 'cmd_events', userId: user.id };
+      }
+
+      if (data === 'cmd_stock_help') {
+        const helpText = '📦 <b>Как обновить склад через Telegram:</b>\n\n' +
+          '1. Отправьте команду: <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code>\n' +
+          '<i>(Пример: <code>/stock 15000 350</code> или <code>/stock 15k 350</code>)</i>\n\n' +
+          '2. Или просто пришлите в чат <b>скриншот инвентаря</b> — он сохранится в журнале аудита.';
+        if (token) {
+          await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: helpText, replyMarkup: keyboard });
+        }
+        return { ok: true, action: 'cmd_stock_help', userId: user.id };
+      }
+    }
 
     const approveMatch = data.match(/^approve_user:(\d+)$/);
     const rejectMatch = data.match(/^reject_user:(\d+)$/);

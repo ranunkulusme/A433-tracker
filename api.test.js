@@ -5331,6 +5331,117 @@ test('API POST /api/events/:id/share-grid enforces RBAC and sends poster to staf
   }
 });
 
+test('Telegram bot fighter suite commands: /me, /deficit, /events, /menu', async () => {
+  const { startServer, handleTelegramUpdate } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  db.setAppSetting('telegram_bot_token', 'test_fighter_bot_token');
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, init) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(init.body);
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 1234 } }) };
+    }
+    if (url.includes('/answerCallbackQuery')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create and bind user
+    await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'fighter1', password: 'password123', playerName: 'Sector 7' })
+    });
+    const user = db.findUserByUsername('fighter1');
+    assert.ok(user);
+    db.approveUser(user.id, 'r3');
+    db.bindUserTelegram(user.id, 999111, 'fighter_tg');
+
+    // 2. Test /me command
+    sentMessages.length = 0;
+    const meRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/me'
+      }
+    });
+    assert.equal(meRes.ok, true);
+    assert.equal(meRes.command, 'me');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes('Sector 7'));
+    assert.ok(sentMessages[0].text.includes('Купоны'));
+    assert.ok(sentMessages[0].reply_markup && sentMessages[0].reply_markup.inline_keyboard);
+
+    // 3. Test /deficit command
+    sentMessages.length = 0;
+    const defRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/deficit'
+      }
+    });
+    assert.equal(defRes.ok, true);
+    assert.equal(defRes.command, 'deficit');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes('дефицита') || sentMessages[0].text.includes('дефицит'));
+
+    // 4. Test /events command
+    sentMessages.length = 0;
+    const evRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/events'
+      }
+    });
+    assert.equal(evRes.ok, true);
+    assert.equal(evRes.command, 'events');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes('Ближайшие события'));
+
+    // 5. Test /menu command
+    sentMessages.length = 0;
+    const menuRes = await handleTelegramUpdate({
+      message: {
+        chat: { id: 999111, type: 'private' },
+        from: { id: 999111, username: 'fighter_tg' },
+        text: '/menu'
+      }
+    });
+    assert.equal(menuRes.ok, true);
+    assert.equal(menuRes.command, 'menu');
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].reply_markup && sentMessages[0].reply_markup.inline_keyboard);
+
+    // 6. Test callback queries for menu buttons (cmd_me, cmd_deficit, cmd_events, cmd_stock_help)
+    sentMessages.length = 0;
+    const cbMeRes = await handleTelegramUpdate({
+      callback_query: {
+        id: 'cq_me_1',
+        from: { id: 999111 },
+        data: 'cmd_me',
+        message: { chat: { id: 999111 }, message_id: 1234 }
+      }
+    });
+    assert.equal(cbMeRes.ok, true);
+    assert.equal(cbMeRes.action, 'cmd_me');
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
 
 
 
