@@ -343,7 +343,16 @@ const I18N_RESOURCES = {
         "available_in_stock": "Доступно на складе для Ген. {{gen}}:",
         "btn_confirm_stock": "Данные актуальны",
         "btn_confirm_stock_title": "Подтвердить, что запасы на складе верны без изменений",
-        "stock_confirmed_toast": "Данные склада успешно подтверждены"
+        "stock_confirmed_toast": "Данные склада успешно подтверждены",
+        "timezone_card_title": "Часовой пояс и утренние напоминания",
+        "timezone_desc": "Все ивенты стартуют в 00:00 UTC (глубокой ночью). Бот отправляет утренний брифинг в 09:00 по вашему местному времени, чтобы не беспокоить вас ночью.",
+        "timezone_select_label": "Ваш часовой пояс",
+        "timezone_offset_label": "Смещение (UTC)",
+        "btn_save_timezone": "💾 Сохранить часовой пояс",
+        "btn_autodetect_tz": "🔄 Автоопределить по браузеру",
+        "timezone_saved": "Часовой пояс успешно сохранён",
+        "timezone_detected": "Часовой пояс определён: {{tz}} (UTC{{offset}})",
+        "current_time": "Текущее время:"
       },
       "events": {
         "title": "Ивенты",
@@ -381,7 +390,12 @@ const I18N_RESOURCES = {
         "result_submitted_toast": "Результат зафиксирован",
         "coupons_accrued_toast": "Купоны успешно зачислены на склад: +{{count}}",
         "results_prompt_sent_toast": "Запросы итогов отправлены участникам в Telegram",
-        "staff_summary_sent_toast": "Сводка события отправлена в чат штаба"
+        "staff_summary_sent_toast": "Сводка события отправлена в чат штаба",
+        "btn_download_poster": "🖼 Скачать сетку (PNG)",
+        "btn_share_poster": "📤 Отправить сетку в Telegram",
+        "poster_generating": "Генерация инфографики...",
+        "poster_sent_success": "Инфографика сетки успешно отправлена в чат штаба",
+        "poster_downloaded": "Инфографика сетки сохранена"
       },
       "sectors": {
         "title": "Секторы альянса",
@@ -828,7 +842,16 @@ const I18N_RESOURCES = {
         "available_in_stock": "Available in stock for Gen. {{gen}}:",
         "btn_confirm_stock": "Data is current",
         "btn_confirm_stock_title": "Confirm that warehouse stocks are accurate without changes",
-        "stock_confirmed_toast": "Stock data successfully confirmed"
+        "stock_confirmed_toast": "Stock data successfully confirmed",
+        "timezone_card_title": "Time Zone & Morning Briefings",
+        "timezone_desc": "All events start at 00:00 UTC (middle of the night). The bot delivers morning briefings at 09:00 AM your local time so your sleep is never disturbed.",
+        "timezone_select_label": "Your Time Zone",
+        "timezone_offset_label": "Offset (UTC)",
+        "btn_save_timezone": "💾 Save Time Zone",
+        "btn_autodetect_tz": "🔄 Detect from Browser",
+        "timezone_saved": "Time zone saved successfully",
+        "timezone_detected": "Time zone detected: {{tz}} (UTC{{offset}})",
+        "current_time": "Current time:"
       },
       "events": {
         "title": "Events",
@@ -866,7 +889,12 @@ const I18N_RESOURCES = {
         "result_submitted_toast": "Result recorded",
         "coupons_accrued_toast": "Coupons credited to warehouse: +{{count}}",
         "results_prompt_sent_toast": "Result prompts sent to participants in Telegram",
-        "staff_summary_sent_toast": "Event summary sent to staff chat"
+        "staff_summary_sent_toast": "Event summary sent to staff chat",
+        "btn_download_poster": "🖼 Download Grid Poster (PNG)",
+        "btn_share_poster": "📤 Send Grid to Telegram",
+        "poster_generating": "Generating infographic...",
+        "poster_sent_success": "Grid infographic successfully sent to staff chat",
+        "poster_downloaded": "Grid infographic downloaded"
       },
       "sectors": {
         "title": "Alliance Sectors",
@@ -1313,7 +1341,16 @@ const I18N_RESOURCES = {
         "available_in_stock": "Auf Lager verfügbar für Gen. {{gen}}:",
         "btn_confirm_stock": "Daten sind aktuell",
         "btn_confirm_stock_title": "Bestätigen, dass Lagerbestände unverändert korrekt sind",
-        "stock_confirmed_toast": "Lagerdaten erfolgreich bestätigt"
+        "stock_confirmed_toast": "Lagerdaten erfolgreich bestätigt",
+        "timezone_card_title": "Zeitzone & Morgen-Briefings",
+        "timezone_desc": "Alle Events starten um 00:00 UTC (mitten in der Nacht). Der Bot sendet das Morgen-Briefing um 09:00 Uhr Ortszeit, um Ihre Nachtruhe nicht zu stören.",
+        "timezone_select_label": "Ihre Zeitzone",
+        "timezone_offset_label": "Versatz (UTC)",
+        "btn_save_timezone": "💾 Zeitzone speichern",
+        "btn_autodetect_tz": "🔄 Aus Browser ermitteln",
+        "timezone_saved": "Zeitzone erfolgreich gespeichert",
+        "timezone_detected": "Zeitzone ermittelt: {{tz}} (UTC{{offset}})",
+        "current_time": "Aktuelle Zeit:"
       },
       "events": {
         "title": "Events",
@@ -1351,7 +1388,12 @@ const I18N_RESOURCES = {
         "result_submitted_toast": "Ergebnis erfasst",
         "coupons_accrued_toast": "Gutscheine dem Lager gutgeschrieben: +{{count}}",
         "results_prompt_sent_toast": "Ergebnisabfragen an Teilnehmer in Telegram gesendet",
-        "staff_summary_sent_toast": "Ereigniszusammenfassung an den Stabschat gesendet"
+        "staff_summary_sent_toast": "Ereigniszusammenfassung an den Stabschat gesendet",
+        "btn_download_poster": "🖼 Raster-Poster herunterladen (PNG)",
+        "btn_share_poster": "📤 Raster an Telegram senden",
+        "poster_generating": "Infografik wird erstellt...",
+        "poster_sent_success": "Raster-Infografik erfolgreich an den Stabschat gesendet",
+        "poster_downloaded": "Raster-Infografik heruntergeladen"
       },
       "sectors": {
         "title": "Allianz-Sektoren",

@@ -1693,9 +1693,9 @@ test('app_settings and notification_templates initialized and seeded on initDb',
   dbModule.setAppSetting('telegram_bot_token', '999999:UPDATED');
   assert.equal(dbModule.getAppSetting('telegram_bot_token'), '999999:UPDATED');
 
-  // notification_templates seeded with 9 baseline items
+  // notification_templates seeded with 10 baseline items
   const templates = dbModule.getNotificationTemplates();
-  assert.equal(templates.length, 9);
+  assert.equal(templates.length, 10);
 
   const t1 = dbModule.getNotificationTemplate('event_place_assigned');
   assert.ok(t1);
@@ -2201,6 +2201,42 @@ test('stale stock alert schedule and player reminder timestamp persistence in db
   const playersList = dbModule.getPlayers();
   const pInList = playersList.find(p => p.id === player.id);
   assert.strictEqual(pInList.lastStockReminderSentAt, reminderIso);
+});
+
+test('user timezone management and event morning reminder logging in db', () => {
+  const dbModule = require('./db.js');
+  const db = dbModule.initDb(':memory:');
+
+  // 1. Column presence and defaults in users table
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+  assert.ok(userCols.includes('timezone'), 'users table must have timezone column');
+  assert.ok(userCols.includes('timezone_offset'), 'users table must have timezone_offset column');
+
+  const admin = dbModule.findUserByUsername('admin');
+  assert.equal(admin.timezone, 'Europe/Moscow');
+  assert.equal(admin.timezoneOffset, 3);
+
+  // 2. Update timezone
+  const updated = dbModule.updateUserTimezone(admin.id, {
+    timezone: 'Asia/Yekaterinburg',
+    timezoneOffset: 5
+  });
+  assert.equal(updated, true);
+
+  const adminAfter = dbModule.findUserById(admin.id);
+  assert.equal(adminAfter.timezone, 'Asia/Yekaterinburg');
+  assert.equal(adminAfter.timezoneOffset, 5);
+
+  // 3. event_reminders_log table presence & logging methods
+  const logTables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='event_reminders_log'").all();
+  assert.equal(logTables.length, 1, 'event_reminders_log table must exist');
+
+  assert.equal(dbModule.hasEventReminderBeenSent(10, 1, admin.id, '2026-11-16'), false);
+  dbModule.recordEventReminderSent(10, 1, admin.id, '2026-11-16');
+  assert.equal(dbModule.hasEventReminderBeenSent(10, 1, admin.id, '2026-11-16'), true);
+  // Different place or date should return false
+  assert.equal(dbModule.hasEventReminderBeenSent(10, 2, admin.id, '2026-11-16'), false);
+  assert.equal(dbModule.hasEventReminderBeenSent(10, 1, admin.id, '2026-11-17'), false);
 });
 
 

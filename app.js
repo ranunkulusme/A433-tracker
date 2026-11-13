@@ -1744,6 +1744,8 @@ async function renderMyCabinet() {
   const isTgConnected = Boolean(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id || currentUser?.telegramChatId);
   const rawNotif = profileUser.telegramNotificationsEnabled ?? profileUser.telegram_notifications_enabled ?? currentUser?.telegramNotificationsEnabled ?? currentUser?.telegram_notifications_enabled;
   const isTgNotificationsEnabled = rawNotif !== false && rawNotif !== 0;
+  const userTimezone = profileUser.timezone || currentUser?.timezone || 'Europe/Moscow';
+  const userTimezoneOffset = profileUser.timezoneOffset ?? profileUser.timezone_offset ?? currentUser?.timezoneOffset ?? currentUser?.timezone_offset ?? 3;
 
   const statsLine = typeof t === 'function'
     ? t('cabinet.stats_line', { vip: profile.sector.vipLevel, conf: profile.sector.confidentialityLevel, power: fmtNum(profile.sector.power), kills: fmtNum(profile.sector.kills), points: fmtOne(profile.sector.killPoints) })
@@ -1875,49 +1877,90 @@ async function renderMyCabinet() {
       </div>
     </div>
 
-    <!-- TELEGRAM INTEGRATION CARD -->
-    <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
-      <div class="cabinet-card-title">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span>📱 ${typeof t === 'function' ? t('telegram.card_title') : 'Интеграция с Telegram'}</span>
-          <span id="tg-status-badge" class="badge ${isTgConnected ? 'badge-success tg-badge-connected' : 'badge-none tg-badge-disconnected'}">
-            ${isTgConnected ? '🟢 ' + (typeof t === 'function' ? t('telegram.status_connected') : 'Подключен') : '⚪ ' + (typeof t === 'function' ? t('telegram.status_not_connected') : 'Не привязан')}
-          </span>
+    <!-- CABINET BOTTOM GRID: TELEGRAM & TIMEZONE -->
+    <div class="cabinet-bottom-grid">
+      <!-- TELEGRAM INTEGRATION CARD -->
+      <div class="cabinet-card tg-cabinet-card" id="cabinet-telegram-card">
+        <div class="cabinet-card-title">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>📱 ${typeof t === 'function' ? t('telegram.card_title') : 'Интеграция с Telegram'}</span>
+            <span id="tg-status-badge" class="badge ${isTgConnected ? 'badge-success tg-badge-connected' : 'badge-none tg-badge-disconnected'}">
+              ${isTgConnected ? '🟢 ' + (typeof t === 'function' ? t('telegram.status_connected') : 'Подключен') : '⚪ ' + (typeof t === 'function' ? t('telegram.status_not_connected') : 'Не привязан')}
+            </span>
+          </div>
+        </div>
+        <div class="tg-cabinet-content">
+          ${isTgConnected ? `
+            <div class="tg-connected-info">
+              <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+                ${(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)
+                  ? (typeof t === 'function' ? t('telegram.connected_as', { username: (profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username) }) : `Привязан как @${escapeHtml(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)}`)
+                  : (typeof t === 'function' ? t('telegram.connected_id', { chatId: (profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id) }) : `Chat ID: ${(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id)}`)}
+              </p>
+              <div class="tg-toggle-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                <label class="switch-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                  <input type="checkbox" id="tg-notifications-toggle" ${isTgNotificationsEnabled ? 'checked' : ''} onchange="toggleTelegramNotifications(this.checked)">
+                  <span style="font-size:13px">${typeof t === 'function' ? t('telegram.notifications_enabled') : 'Уведомления в Telegram'}</span>
+                </label>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()">
+                ${typeof t === 'function' ? t('telegram.btn_disconnect') : 'Отключить'}
+              </button>
+            </div>
+          ` : `
+            <div class="tg-disconnected-info">
+              <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+                Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
+              </p>
+              <div class="tg-btn-group">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
+                  ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-check-tg" onclick="checkTelegramBindStatus()">
+                  ${typeof t === 'function' ? t('telegram.btn_check_status') : '🔄 Проверить статус'}
+                </button>
+              </div>
+            </div>
+          `}
         </div>
       </div>
-      <div class="tg-cabinet-content">
-        ${isTgConnected ? `
-          <div class="tg-connected-info">
-            <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
-              ${(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)
-                ? (typeof t === 'function' ? t('telegram.connected_as', { username: (profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username) }) : `Привязан как @${escapeHtml(profileUser.telegramUsername || profileUser.telegram_username || currentUser?.telegram_username)}`)
-                : (typeof t === 'function' ? t('telegram.connected_id', { chatId: (profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id) }) : `Chat ID: ${(profileUser.telegramChatId || profileUser.telegram_chat_id || currentUser?.telegram_chat_id)}`)}
-            </p>
-            <div class="tg-toggle-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-              <label class="switch-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" id="tg-notifications-toggle" ${isTgNotificationsEnabled ? 'checked' : ''} onchange="toggleTelegramNotifications(this.checked)">
-                <span style="font-size:13px">${typeof t === 'function' ? t('telegram.notifications_enabled') : 'Уведомления в Telegram'}</span>
-              </label>
+
+      <!-- TIMEZONE & MORNING BRIEFINGS CARD -->
+      <div class="cabinet-card tz-cabinet-card" id="cabinet-timezone-card">
+        <div class="cabinet-card-title">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>⏰ ${typeof t === 'function' ? t('cabinet.timezone_card_title') : 'Часовой пояс и утренние напоминания'}</span>
+            <span id="tz-current-time-badge" class="badge badge-info" style="font-weight:600">
+              ${(typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:')} ${escapeHtml(formatLocalTime(userTimezoneOffset, userTimezone))}
+            </span>
+          </div>
+        </div>
+        <div class="tz-cabinet-content">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+            ${typeof t === 'function' ? t('cabinet.timezone_desc') : 'Все ивенты стартуют в 00:00 UTC (глубокой ночью). Бот отправляет утренний брифинг в 09:00 по вашему местному времени, чтобы не беспокоить вас ночью.'}
+          </p>
+          <div class="form-row form-row-2" style="align-items:flex-end;margin-bottom:12px">
+            <div class="form-group" style="margin-bottom:0">
+              <label for="cabinet-timezone-select">${typeof t === 'function' ? t('cabinet.timezone_select_label') : 'Ваш часовой пояс'}</label>
+              <select id="cabinet-timezone-select" class="form-control" onchange="onCabinetTimezoneChange(this.value)">
+                ${renderTimezoneSelectOptions(userTimezone, userTimezoneOffset)}
+              </select>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-disconnect-tg" onclick="disconnectUserTelegram()">
-              ${typeof t === 'function' ? t('telegram.btn_disconnect') : 'Отключить'}
+            <div class="form-group" style="margin-bottom:0">
+              <label for="cabinet-timezone-offset">${typeof t === 'function' ? t('cabinet.timezone_offset_label') : 'Смещение (UTC)'}</label>
+              <input type="number" id="cabinet-timezone-offset" step="0.5" min="-12" max="14" class="form-control" value="${userTimezoneOffset}">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-save-tz" onclick="saveUserTimezone()">
+              ${typeof t === 'function' ? t('cabinet.btn_save_timezone') : '💾 Сохранить часовой пояс'}
             </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-autodetect-tz" onclick="autoDetectUserTimezone()">
+              ${typeof t === 'function' ? t('cabinet.btn_autodetect_tz') : '🔄 Автоопределить по браузеру'}
+            </button>
+            <span id="tz-save-status" style="font-size:12px;color:var(--text3)"></span>
           </div>
-        ` : `
-          <div class="tg-disconnected-info">
-            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
-              Подключите Telegram, чтобы получать персональные оповещения о назначении мест в календаре и напоминания об актуализации склада.
-            </p>
-            <div class="tg-btn-group">
-              <button type="button" class="btn btn-primary btn-sm" id="btn-connect-tg" onclick="connectUserTelegram()">
-                ${typeof t === 'function' ? t('telegram.btn_connect') : '📱 Подключить Telegram'}
-              </button>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-check-tg" onclick="checkTelegramBindStatus()">
-                ${typeof t === 'function' ? t('telegram.btn_check_status') : '🔄 Проверить статус'}
-              </button>
-            </div>
-          </div>
-        `}
+        </div>
       </div>
     </div>
 
@@ -2074,6 +2117,194 @@ async function toggleTelegramNotifications(enabled) {
     showToast(typeof t === 'function' ? t('toasts.saved_success') : 'Настройки уведомлений сохранены', 'success');
   } catch (err) {
     showToast(err.message || 'Ошибка обновления настроек', 'error');
+  }
+}
+
+const POPULAR_TIMEZONES = [
+  { id: 'Europe/Kaliningrad', label: 'Калининград (UTC+2)', offset: 2 },
+  { id: 'Europe/Moscow', label: 'Москва, Минск, СПб (UTC+3)', offset: 3 },
+  { id: 'Europe/Samara', label: 'Самара, Ижевск, Баку (UTC+4)', offset: 4 },
+  { id: 'Asia/Yekaterinburg', label: 'Екатеринбург, Уфа, Тюмень (UTC+5)', offset: 5 },
+  { id: 'Asia/Omsk', label: 'Омск, Астана (UTC+6)', offset: 6 },
+  { id: 'Asia/Novosibirsk', label: 'Новосибирск, Томск, Барнаул (UTC+7)', offset: 7 },
+  { id: 'Asia/Krasnoyarsk', label: 'Красноярск (UTC+7)', offset: 7 },
+  { id: 'Asia/Irkutsk', label: 'Иркутск, Улан-Удэ (UTC+8)', offset: 8 },
+  { id: 'Asia/Yakutsk', label: 'Якутск, Чита (UTC+9)', offset: 9 },
+  { id: 'Asia/Vladivostok', label: 'Владивосток, Хабаровск (UTC+10)', offset: 10 },
+  { id: 'Asia/Magadan', label: 'Магадан, Сахалин (UTC+11)', offset: 11 },
+  { id: 'Asia/Kamchatka', label: 'Камчатка, Анадырь (UTC+12)', offset: 12 },
+  { id: 'UTC', label: 'UTC / GMT (UTC+0)', offset: 0 },
+  { id: 'Europe/London', label: 'Лондон, Дублин (UTC+0/+1)', offset: 0 },
+  { id: 'Europe/Berlin', label: 'Берлин, Париж, Рим (UTC+1/+2)', offset: 1 },
+  { id: 'Europe/Kyiv', label: 'Киев, Кишинёв (UTC+2/+3)', offset: 2 },
+  { id: 'America/New_York', label: 'Нью-Йорк, Торонто (UTC-5/-4)', offset: -5 },
+  { id: 'America/Chicago', label: 'Чикаго (UTC-6/-5)', offset: -6 },
+  { id: 'America/Denver', label: 'Денвер (UTC-7/-6)', offset: -7 },
+  { id: 'America/Los_Angeles', label: 'Лос-Анджелес, Сиэтл (UTC-8/-7)', offset: -8 }
+];
+
+function formatLocalTime(offsetHours, timeZoneName) {
+  try {
+    if (timeZoneName && typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      return new Intl.DateTimeFormat('ru-RU', {
+        timeZone: timeZoneName,
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(new Date());
+    }
+  } catch (_) {}
+  const now = new Date();
+  const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const target = new Date(utcMs + (Number(offsetHours || 0) * 3600000));
+  return `${String(target.getHours()).padStart(2, '0')}:${String(target.getMinutes()).padStart(2, '0')}`;
+}
+
+function calculateOffsetForTimezone(timeZoneName) {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZoneName,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(now);
+    const d = {};
+    for (const p of parts) d[p.type] = p.value;
+    const targetDate = new Date(Date.UTC(Number(d.year), Number(d.month) - 1, Number(d.day), Number(d.hour === '24' ? 0 : d.hour), Number(d.minute), Number(d.second)));
+    const offsetMs = targetDate.getTime() - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds());
+    return Math.round((offsetMs / 3600000) * 10) / 10;
+  } catch (_) {
+    const found = POPULAR_TIMEZONES.find(t => t.id === timeZoneName);
+    return found ? found.offset : 3;
+  }
+}
+
+function renderTimezoneSelectOptions(currentTimezone, currentOffset) {
+  const isCustom = !POPULAR_TIMEZONES.some(t => t.id === currentTimezone);
+  let html = '';
+  if (isCustom && currentTimezone) {
+    const sign = currentOffset >= 0 ? '+' : '';
+    html += `<option value="${escapeHtml(currentTimezone)}" selected>${escapeHtml(currentTimezone)} (UTC${sign}${currentOffset})</option>`;
+  }
+  html += POPULAR_TIMEZONES.map(t => {
+    const isSelected = !isCustom && t.id === currentTimezone;
+    return `<option value="${escapeHtml(t.id)}" ${isSelected ? 'selected' : ''}>${escapeHtml(t.label)}</option>`;
+  }).join('');
+  return html;
+}
+
+function onCabinetTimezoneChange(tzValue) {
+  const offsetInput = document.getElementById('cabinet-timezone-offset');
+  const badge = document.getElementById('tz-current-time-badge');
+  const offset = calculateOffsetForTimezone(tzValue);
+  if (offsetInput) offsetInput.value = offset;
+  if (badge) {
+    const timePrefix = typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:';
+    badge.textContent = `${timePrefix} ${formatLocalTime(offset, tzValue)}`;
+  }
+}
+
+function autoDetectUserTimezone() {
+  const select = document.getElementById('cabinet-timezone-select');
+  const offsetInput = document.getElementById('cabinet-timezone-offset');
+  const badge = document.getElementById('tz-current-time-badge');
+  const statusEl = document.getElementById('tz-save-status');
+
+  const tzInfo = (typeof logic !== 'undefined' && logic.getUserTimezoneInfo)
+    ? logic.getUserTimezoneInfo()
+    : { timeZone: 'Europe/Moscow', offsetHours: 3 };
+
+  if (select) {
+    let opt = select.querySelector(`option[value="${tzInfo.timeZone}"]`);
+    if (!opt) {
+      opt = document.createElement('option');
+      opt.value = tzInfo.timeZone;
+      const sign = tzInfo.offsetHours >= 0 ? '+' : '';
+      opt.textContent = `${tzInfo.timeZone} (UTC${sign}${tzInfo.offsetHours})`;
+      select.insertBefore(opt, select.firstChild);
+    }
+    select.value = tzInfo.timeZone;
+  }
+  if (offsetInput) {
+    offsetInput.value = tzInfo.offsetHours;
+  }
+  if (badge) {
+    const timePrefix = typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:';
+    badge.textContent = `${timePrefix} ${formatLocalTime(tzInfo.offsetHours, tzInfo.timeZone)}`;
+  }
+  const sign = tzInfo.offsetHours >= 0 ? '+' : '';
+  const detectMsg = typeof t === 'function'
+    ? t('cabinet.timezone_detected', { tz: tzInfo.timeZone, offset: `${sign}${tzInfo.offsetHours}` })
+    : `Часовой пояс определён: ${tzInfo.timeZone} (UTC${sign}${tzInfo.offsetHours})`;
+  if (statusEl) {
+    statusEl.textContent = detectMsg;
+    statusEl.style.color = 'var(--accent)';
+  }
+  showToast(detectMsg, 'info');
+}
+
+async function saveUserTimezone() {
+  const select = document.getElementById('cabinet-timezone-select');
+  const offsetInput = document.getElementById('cabinet-timezone-offset');
+  const btn = document.getElementById('btn-save-tz');
+  const statusEl = document.getElementById('tz-save-status');
+
+  const timezone = select ? select.value : 'Europe/Moscow';
+  const timezoneOffset = offsetInput ? Number(offsetInput.value) : 3;
+
+  if (isNaN(timezoneOffset) || timezoneOffset < -12 || timezoneOffset > 14) {
+    showToast('Смещение часового пояса должно быть от -12 до +14', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Сохранение...';
+  }
+
+  try {
+    const res = await apiFetch('/api/my-profile/timezone', {
+      method: 'PUT',
+      body: JSON.stringify({ timezone, timezoneOffset })
+    });
+    if (currentUser) {
+      currentUser.timezone = res.timezone || timezone;
+      currentUser.timezoneOffset = res.timezoneOffset ?? timezoneOffset;
+      currentUser.timezone_offset = currentUser.timezoneOffset;
+      try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+    }
+    if (myCabinetProfile && myCabinetProfile.user) {
+      myCabinetProfile.user.timezone = res.timezone || timezone;
+      myCabinetProfile.user.timezoneOffset = res.timezoneOffset ?? timezoneOffset;
+      myCabinetProfile.user.timezone_offset = myCabinetProfile.user.timezoneOffset;
+    }
+    const successMsg = typeof t === 'function' ? t('cabinet.timezone_saved') : 'Часовой пояс успешно сохранён';
+    showToast(successMsg, 'success');
+    if (statusEl) {
+      statusEl.textContent = '✓ ' + successMsg;
+      statusEl.style.color = '#3fb950';
+    }
+    const badge = document.getElementById('tz-current-time-badge');
+    if (badge) {
+      const timePrefix = typeof t === 'function' ? t('cabinet.current_time') : 'Текущее время:';
+      badge.textContent = `${timePrefix} ${formatLocalTime(timezoneOffset, timezone)}`;
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка сохранения часового пояса', 'error');
+    if (statusEl) {
+      statusEl.textContent = '✕ Ошибка';
+      statusEl.style.color = 'var(--red)';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = typeof t === 'function' ? t('cabinet.btn_save_timezone') : '💾 Сохранить часовой пояс';
+    }
   }
 }
 
@@ -12438,6 +12669,10 @@ if (typeof window !== 'undefined') {
   window.connectUserTelegram = connectUserTelegram;
   window.disconnectUserTelegram = disconnectUserTelegram;
   window.toggleTelegramNotifications = toggleTelegramNotifications;
+  window.onCabinetTimezoneChange = onCabinetTimezoneChange;
+  window.autoDetectUserTimezone = autoDetectUserTimezone;
+  window.saveUserTimezone = saveUserTimezone;
+  window.renderTimezoneSelectOptions = renderTimezoneSelectOptions;
   window.renderNotificationsPage = renderNotificationsPage;
   window.onSelectNotificationTemplate = onSelectNotificationTemplate;
   window.insertTemplateTag = insertTemplateTag;

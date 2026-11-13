@@ -65,6 +65,7 @@ const {
   parseRouteFromHash,
   parseTelegramStockCommand,
   formatStockUpdateSuccessMessage,
+  shouldSendMorningEventReminder,
 } = require('./logic.js');
 
 function test(name, fn) {
@@ -3398,6 +3399,86 @@ test('formatStockUpdateSuccessMessage formats message with stocks, diff and defi
   assert.ok(msg.includes('+5 000 куп., +50 пазл.'));
   assert.ok(msg.includes('Элизабет'));
   assert.ok(msg.includes('8 000'));
+});
+
+test('shouldSendMorningEventReminder accurately triggers at 09:00 AM local player time on event day', () => {
+  // Event starts on 2026-11-16 (game start 00:00 UTC)
+  const eventDate = '2026-11-16';
+
+  // 1. At 00:00 UTC (03:00 MSK / UTC+3) -> Must NOT send (Sleep protection!)
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T00:00:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), false, '03:00 local time must not trigger reminder');
+
+  // 2. At 06:05 UTC (09:05 MSK / UTC+3) -> Must trigger!
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T06:05:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), true, '09:05 local time must trigger morning reminder');
+
+  // 3. Already sent today -> Must NOT send duplicate
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T06:05:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9,
+    lastSentDate: '2026-11-16'
+  }), false, 'Already sent today must be deduplicated');
+
+  // 4. Multi-timezone staggered test at 04:00 UTC:
+  // - Yekaterinburg (UTC+5): local time is 09:00 -> triggers!
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T04:00:00.000Z',
+    timezoneOffset: 5,
+    targetHour: 9
+  }), true, 'UTC+5 player receives reminder at 04:00 UTC (09:00 local)');
+
+  // - Moscow (UTC+3): local time is 07:00 -> not yet!
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T04:00:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), false, 'UTC+3 player does not receive reminder at 07:00 local');
+
+  // - Vladivostok (UTC+10): local time is 14:00 -> triggers if not yet sent
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-16T04:00:00.000Z',
+    timezoneOffset: 10,
+    targetHour: 9
+  }), true, 'UTC+10 player receives reminder during day if not yet sent');
+
+  // 5. Wrong date (e.g. day before or day after)
+  assert.strictEqual(shouldSendMorningEventReminder({
+    eventDateFrom: eventDate,
+    now: '2026-11-15T06:00:00.000Z',
+    timezoneOffset: 3,
+    targetHour: 9
+  }), false, 'Day before event must not trigger');
+});
+
+test('DEFAULT_NOTIFICATION_TEMPLATES contains event_morning_briefing template', () => {
+  const briefing = DEFAULT_NOTIFICATION_TEMPLATES.event_morning_briefing;
+  assert.ok(briefing, 'event_morning_briefing must be defined');
+  assert.equal(briefing.channel, 'personal');
+  assert.ok(briefing.template.includes('Доброе утро'));
+  assert.ok(briefing.template.includes('{eventName}'));
+  assert.ok(briefing.template.includes('{place}'));
+  assert.ok(briefing.template.includes('{officerName}'));
+
+  const sample = NOTIFICATION_TEMPLATE_SAMPLE_DATA.event_morning_briefing;
+  assert.ok(sample, 'event_morning_briefing sample data must exist');
+  const rendered = renderTemplate(briefing.template, sample);
+  assert.ok(rendered.includes('Мощные силы'));
+  assert.ok(rendered.includes('#1'));
+  assert.ok(rendered.includes('Элизабет'));
 });
 
 

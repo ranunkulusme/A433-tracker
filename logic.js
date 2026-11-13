@@ -3301,10 +3301,26 @@
       parseMode: 'HTML',
       placeholders: Object.freeze(['eventName', 'totalAssigned', 'confirmedCount', 'unconfirmedCount', 'totalCoupons', 'link']),
       template: `🏆 <b>Итоги события: {eventName}</b>\n\nВсего участников: <b>{totalAssigned}</b>\n✅ Подтвердили результат: <b>{confirmedCount}</b>\n⏳ Ожидают подтверждения: <b>{unconfirmedCount}</b>\n🎟️ Всего добыто купонов альянсом: <b>+{totalCoupons}</b>\n\n🔗 <a href="{link}">Просмотреть итоговую сетку в трекере</a>`
+    }),
+    event_morning_briefing: Object.freeze({
+      key: 'event_morning_briefing',
+      title: 'Утренний брифинг в день события (09:00)',
+      channel: 'personal',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['sectorName', 'eventName', 'place', 'coupons', 'officerName', 'link']),
+      template: `☀️ <b>Доброе утро, {sectorName}!</b>\n\n📅 Сегодня стартует событие: <b>{eventName}</b>\n🎯 Ваше назначенное место: <b>#{place}</b> ({coupons} куп.)\n🎖 Офицер: <b>{officerName}</b>\n\n<i>Событие уже активно на игровом сервере (старт в 00:00 UTC). Желаем побед!</i>\n\n🔗 <a href="{link}">Открыть событие в трекере</a>`
     })
   });
 
   const NOTIFICATION_TEMPLATE_SAMPLE_DATA = Object.freeze({
+    event_morning_briefing: Object.freeze({
+      sectorName: 'Sector 7 (Рейнджер)',
+      eventName: 'Мощные силы (Mighty Forces)',
+      place: '1',
+      coupons: '50',
+      officerName: 'Элизабет',
+      link: 'https://kow.example.com/#event/1'
+    }),
     event_place_assigned: Object.freeze({
       eventName: 'Битва за трон (King of War)',
       eventDate: '2026-11-10 12:00 UTC',
@@ -3541,6 +3557,36 @@
     return null;
   }
 
+  function shouldSendMorningEventReminder({
+    eventDateFrom,
+    now = null,
+    timezoneOffset = 3,
+    targetHour = 9,
+    lastSentDate = null
+  } = {}) {
+    if (!eventDateFrom) return false;
+    const currentZoned = getZonedDateParts(now || new Date(), timezoneOffset);
+    if (!currentZoned) return false;
+
+    const eventStartDate = String(eventDateFrom).slice(0, 10);
+    if (currentZoned.dateString !== eventStartDate) {
+      return false;
+    }
+
+    if (currentZoned.hour < targetHour) {
+      return false; // Sleep protection: do not send morning briefings before 9 AM
+    }
+
+    if (lastSentDate) {
+      const lastZonedDate = String(lastSentDate).slice(0, 10);
+      if (lastZonedDate === currentZoned.dateString) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   function formatTimezoneOffsetLabel(offsetHours, timeZoneName = null) {
     const num = Number(offsetHours || 0);
     const sign = num >= 0 ? '+' : '-';
@@ -3685,6 +3731,7 @@
     getZonedDateParts,
     shouldRunStaleStockAlert,
     calculateNextStaleRun,
+    shouldSendMorningEventReminder,
     formatTimezoneOffsetLabel,
     getUserTimezoneInfo,
     convertTimeBetweenTimezones,

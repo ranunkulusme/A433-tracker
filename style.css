@@ -2826,14 +2826,41 @@ tr.row-blocked:hover {
    TELEGRAM INTEGRATION & NOTIFICATION TEMPLATE EDITOR STYLES
    ───────────────────────────────────────────────────────── */
 
-/* Cabinet Telegram Card */
-.tg-cabinet-card {
+/* Cabinet Telegram & Timezone Cards */
+.cabinet-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.cabinet-bottom-grid .tg-cabinet-card,
+.cabinet-bottom-grid .tz-cabinet-card {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cabinet-bottom-grid .tg-cabinet-content,
+.cabinet-bottom-grid .tz-cabinet-content {
+  flex: 1;
+}
+@media (max-width: 900px) {
+  .cabinet-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tg-cabinet-card,
+.tz-cabinet-card {
   position: relative;
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
   margin-top: 16px;
+}
+
+.tz-cabinet-content {
+  margin-top: 12px;
 }
 
 .tg-badge-connected {

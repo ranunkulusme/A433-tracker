@@ -327,14 +327,15 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
         return { sent: true, sentCount, totalTargets: targets.length };
       }
 
-      if (options.chatId) {
+      const directChatId = options.chatId || options.recipientChatId;
+      if (directChatId) {
         const res = await telegram.sendTelegramMessage({
           token,
-          chatId: options.chatId,
+          chatId: directChatId,
           text: renderedText,
           parseMode,
           replyMarkup
-        });
+        }, sendOpts);
         return { sent: res.ok, result: res };
       }
 
@@ -486,6 +487,86 @@ async function checkScheduledStaleStockReminders() {
     }
   } catch (err) {
     console.error('[Reminders] Error in checkScheduledStaleStockReminders:', err);
+  }
+}
+
+async function checkScheduledEventMorningReminders(req = null, options = {}) {
+  try {
+    const events = db.getEvents();
+    if (!events || !events.length) {
+      return { eventsChecked: 0, remindersSent: 0 };
+    }
+
+    const eventTypes = db.getEventTypes();
+    const now = options.now ? new Date(options.now) : new Date();
+    const baseUrl = getAppBaseUrl(req);
+    let sentCount = 0;
+
+    for (const ev of events) {
+      const assignments = ev.assignments || [];
+      if (!assignments.length) continue;
+
+      const et = eventTypes.find(t => t.id === ev.typeId);
+      const effectivePlaces = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
+
+      for (const a of assignments) {
+        if (!a.playerId || !a.place) continue;
+        const player = db.getPlayerById(a.playerId);
+        if (!player || !player.userId) continue;
+
+        const user = db.findUserById(player.userId);
+        if (!user || !user.telegramChatId || user.telegramNotificationsEnabled === false) continue;
+
+        const timezoneOffset = user.timezoneOffset !== undefined ? user.timezoneOffset : 3;
+        const targetHour = options.targetHour !== undefined ? options.targetHour : 9;
+
+        const shouldSend = logic.shouldSendMorningEventReminder({
+          eventDateFrom: ev.dateFrom,
+          now,
+          timezoneOffset,
+          targetHour
+        });
+
+        if (!shouldSend && !options.force) continue;
+
+        const zonedParts = logic.getZonedDateParts(now, timezoneOffset);
+        const reminderDate = zonedParts ? zonedParts.dateString : String(ev.dateFrom).slice(0, 10);
+
+        if (!options.force && db.hasEventReminderBeenSent(ev.id, a.place, user.id, reminderDate)) {
+          continue;
+        }
+
+        const placeInfo = (effectivePlaces || []).find(p => Number(p.place) === Number(a.place));
+        const coupons = placeInfo ? (placeInfo.coupons || 0) : 0;
+
+        let officerName = 'Любой';
+        if (a.officerId) {
+          const off = (player.officers || []).find(o => o.id === a.officerId || o.catalogId === a.officerId);
+          if (off) officerName = off.name;
+        }
+
+        const link = `${baseUrl}/#event/${ev.id}`;
+        await dispatchNotification('event_morning_briefing', {
+          sectorName: player.name,
+          eventName: et ? et.name : 'Событие альянса',
+          place: String(a.place),
+          coupons: String(coupons),
+          officerName,
+          link
+        }, {
+          userId: user.id,
+          chatId: user.telegramChatId
+        });
+
+        db.recordEventReminderSent(ev.id, a.place, user.id, reminderDate);
+        sentCount++;
+      }
+    }
+
+    return { eventsChecked: events.length, remindersSent: sentCount };
+  } catch (err) {
+    console.warn('[MorningReminders] Error in checkScheduledEventMorningReminders:', err.message);
+    return { eventsChecked: 0, remindersSent: 0, error: err.message };
   }
 }
 
@@ -1528,13 +1609,36 @@ function createRequestHandler(staticDir, s3Manager = null) {
           telegram_notifications_enabled: req.user.telegram_notifications_enabled !== 0,
           telegramChatId: req.user.telegram_chat_id,
           telegramUsername: req.user.telegram_username,
-          telegramNotificationsEnabled: req.user.telegram_notifications_enabled !== 0
+          telegramNotificationsEnabled: req.user.telegram_notifications_enabled !== 0,
+          timezone: req.user.timezone || 'Europe/Moscow',
+          timezoneOffset: (req.user.timezoneOffset !== undefined && req.user.timezoneOffset !== null) ? Number(req.user.timezoneOffset) : 3
         },
         sectors,
         activeSectorId: activeSector ? activeSector.id : null,
         sector: activeSector ? activeSector.sector : null,
         stock: activeSector ? activeSector.stock : null,
         officers: activeSector ? (activeSector.officers || []) : []
+      });
+    }
+
+    if (pathname === '/api/my-profile/timezone' && req.method === 'PUT') {
+      if (!requireAuth(req, res)) return;
+      const timezone = body.timezone ? String(body.timezone).trim() : 'Europe/Moscow';
+      const timezoneOffset = body.timezoneOffset !== undefined && body.timezoneOffset !== null
+        ? Number(body.timezoneOffset)
+        : (body.timezone_offset !== undefined && body.timezone_offset !== null ? Number(body.timezone_offset) : 3);
+
+      if (isNaN(timezoneOffset) || timezoneOffset < -12 || timezoneOffset > 14) {
+        return sendError(res, 400, 'INVALID_TIMEZONE_OFFSET', 'Смещение часового пояса должно быть от -12 до +14');
+      }
+
+      db.updateUserTimezone(req.user.id, { timezone, timezoneOffset });
+      req.user.timezone = timezone;
+      req.user.timezoneOffset = timezoneOffset;
+      return sendJson(res, 200, {
+        success: true,
+        timezone,
+        timezoneOffset
       });
     }
 
@@ -3258,6 +3362,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, { success: true, ...result });
     }
 
+    if (pathname === '/api/telegram/check-morning-reminders' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
+        return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
+      }
+
+      const force = Boolean(body && body.force);
+      const now = body && body.now ? body.now : null;
+      const targetHour = body && body.targetHour !== undefined ? Number(body.targetHour) : 9;
+      const result = await checkScheduledEventMorningReminders(req, { force, now, targetHour });
+      return sendJson(res, 200, { success: true, ...result });
+    }
+
     // ─────────────────────────────────────────────────────────
     // NOTIFICATION TEMPLATES ENDPOINTS
     // ─────────────────────────────────────────────────────────
@@ -3427,6 +3546,14 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   }, 60 * 1000);
   if (staleReminderInterval.unref) staleReminderInterval.unref();
 
+  // Schedule minute ticker for morning event briefings at 09:00 local time
+  const morningReminderInterval = setInterval(() => {
+    checkScheduledEventMorningReminders().catch(err => {
+      console.error('[MorningReminders] Error in scheduled morning ticker:', err);
+    });
+  }, 60 * 1000);
+  if (morningReminderInterval.unref) morningReminderInterval.unref();
+
   // Auto-start Mieru tunnel client if enabled
   try {
     const mieruSettings = db.getMieruSettings();
@@ -3458,6 +3585,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
   server.close = function (callback) {
     clearInterval(retentionInterval);
     clearInterval(staleReminderInterval);
+    clearInterval(morningReminderInterval);
     mieru.stopMieruProcess();
     telegram.stopTelegramPolling();
     telegram.setDefaultProxyUrl(null);
@@ -3545,6 +3673,7 @@ module.exports = {
   MIME_TYPES,
   dispatchNotification,
   checkStaleStockReminders,
+  checkScheduledEventMorningReminders,
   handleTelegramUpdate,
   syncTelegramBotInfoAndPolling
 };

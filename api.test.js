@@ -3639,13 +3639,13 @@ test('API Notification Templates CRUD, reset, and test send', async () => {
       body: JSON.stringify({ username: 'admin', password: 'admin123' })
     })).json();
 
-    // 1. GET /api/notification-templates (9 default templates)
+    // 1. GET /api/notification-templates (10 default templates)
     const listRes = await fetch(`${baseUrl}/api/notification-templates`, {
       headers: { Authorization: `Bearer ${adminLogin.token}` }
     });
     assert.equal(listRes.status, 200);
     const templates = await listRes.json();
-    assert.equal(templates.length, 9);
+    assert.equal(templates.length, 10);
 
     // 2. PUT /api/notification-templates/:key
     const putRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned`, {
@@ -5035,6 +5035,150 @@ test('API Event RSVP, Post-Event Results submission, and stock rewards accrual',
     const place1Coupons = et.places.find(p => p.place === 1)?.coupons || 0;
     const place2Coupons = et.places.find(p => p.place === 2)?.coupons || 0;
     assert.equal(afterCorrectionCoupons, beforeCorrectionCoupons + (place2Coupons - place1Coupons));
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('Player timezone management and 09:00 AM local morning event briefings', async () => {
+  const { startServer, checkScheduledEventMorningReminders } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  db.setAppSetting('telegram_bot_token', 'test_morning_token_999');
+
+  const sentMessages = [];
+  telegram.setTelegramFetch(async (url, options) => {
+    if (url.includes('/sendMessage')) {
+      const payload = JSON.parse(options.body);
+      sentMessages.push(payload);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: { message_id: 888, chat: { id: payload.chat_id } } })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create soldier with Moscow timezone (UTC+3)
+    const mskSoldier = db.registerUser({ username: 'msk_warrior', password: 'password', playerName: 'База Москва' });
+    db.approveUser(mskSoldier.userId, 'r3');
+    db.bindUserTelegram(mskSoldier.userId, 10101, 'msk_tg');
+
+    // 2. Create soldier with Yekaterinburg timezone (UTC+5)
+    const yekatSoldier = db.registerUser({ username: 'ural_warrior', password: 'password', playerName: 'База Урал' });
+    db.approveUser(yekatSoldier.userId, 'r3');
+    db.bindUserTelegram(yekatSoldier.userId, 20202, 'ural_tg');
+
+    // Login as ural_warrior and set timezone via PUT /api/my-profile/timezone
+    const uralLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'ural_warrior', password: 'password' })
+    })).json();
+
+    const tzUpdateRes = await fetch(`${baseUrl}/api/my-profile/timezone`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${uralLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        timezone: 'Asia/Yekaterinburg',
+        timezoneOffset: 5
+      })
+    });
+    assert.equal(tzUpdateRes.status, 200);
+    const tzData = await tzUpdateRes.json();
+    assert.equal(tzData.success, true);
+    assert.equal(tzData.timezone, 'Asia/Yekaterinburg');
+    assert.equal(tzData.timezoneOffset, 5);
+
+    // Verify GET /api/my-profile reflects timezone
+    const profileRes = await fetch(`${baseUrl}/api/my-profile`, {
+      headers: { 'Authorization': `Bearer ${uralLogin.token}` }
+    });
+    assert.equal(profileRes.status, 200);
+    const profile = await profileRes.json();
+    assert.equal(profile.user.timezone, 'Asia/Yekaterinburg');
+    assert.equal(profile.user.timezoneOffset, 5);
+
+    // 3. Create Event starting on 2026-11-16
+    const eventTypes = db.getEventTypes();
+    const et = eventTypes[0]; // King of War
+    const mskUser = db.findUserById(mskSoldier.userId);
+    const uralUser = db.findUserById(yekatSoldier.userId);
+
+    const ev = db.saveEvent({
+      typeId: et.id,
+      dateFrom: '2026-11-16',
+      dateTo: '2026-11-18',
+      note: 'Большая битва',
+      assignments: [
+        { place: 1, playerId: mskUser.player_id, rsvpStatus: 'confirmed' },
+        { place: 2, playerId: uralUser.player_id, rsvpStatus: 'confirmed' }
+      ]
+    });
+
+    // 4. Test Night Protection: At 00:00 UTC (03:00 MSK / 05:00 Yekaterinburg)
+    // Game event starts on game server, but players are asleep! Must NOT send.
+    sentMessages.length = 0;
+    const nightResult = await checkScheduledEventMorningReminders(null, {
+      now: '2026-11-16T00:00:00.000Z'
+    });
+    assert.equal(nightResult.remindersSent, 0, 'No morning reminders sent at 00:00 UTC');
+    assert.equal(sentMessages.length, 0);
+
+    // 5. At 04:00 UTC:
+    // - Ural player (UTC+5): local time is 09:00 AM -> Must trigger!
+    // - Moscow player (UTC+3): local time is 07:00 AM -> Must NOT trigger yet!
+    sentMessages.length = 0;
+    const morningUralResult = await checkScheduledEventMorningReminders(null, {
+      now: '2026-11-16T04:00:00.000Z'
+    });
+    assert.equal(morningUralResult.remindersSent, 1, 'Only Ural player receives reminder at 04:00 UTC (09:00 local)');
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].chat_id, 20202);
+    assert.ok(sentMessages[0].text.includes('Доброе утро, База Урал'));
+    assert.ok(sentMessages[0].text.includes('#2'));
+    assert.ok(sentMessages[0].text.includes('00:00 UTC'));
+
+    // 6. At 06:00 UTC:
+    // - Moscow player (UTC+3): local time is 09:00 AM -> Must trigger!
+    // - Ural player (UTC+5): already sent -> Deduplicated!
+    sentMessages.length = 0;
+    const morningMskResult = await checkScheduledEventMorningReminders(null, {
+      now: '2026-11-16T06:00:00.000Z'
+    });
+    assert.equal(morningMskResult.remindersSent, 1, 'Moscow player receives reminder at 06:00 UTC (09:00 local)');
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].chat_id, 10101);
+    assert.ok(sentMessages[0].text.includes('Доброе утро, База Москва'));
+    assert.ok(sentMessages[0].text.includes('#1'));
+
+    // 7. Test manual trigger endpoint POST /api/telegram/check-morning-reminders
+    const adminLogin = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    })).json();
+
+    const triggerRes = await fetch(`${baseUrl}/api/telegram/check-morning-reminders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminLogin.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ force: false })
+    });
+    assert.equal(triggerRes.status, 200);
+    const triggerData = await triggerRes.json();
+    assert.equal(triggerData.success, true);
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();
