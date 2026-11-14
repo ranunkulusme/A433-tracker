@@ -116,7 +116,7 @@ fi
 
 echo -e "${BOLD}"
 echo "╔════════════════════════════════════════════════════════════════════╗"
-echo "║           Kingdom of Winners (KoW) Tracker Deployment              ║"
+echo "║              Kiss of War (KoW) Tracker Deployment                  ║"
 echo "║          Автоматический мастер развертывания на сервере            ║"
 echo "╚════════════════════════════════════════════════════════════════════╝"
 echo -e "${RESET}"

@@ -1693,9 +1693,9 @@ test('app_settings and notification_templates initialized and seeded on initDb',
   dbModule.setAppSetting('telegram_bot_token', '999999:UPDATED');
   assert.equal(dbModule.getAppSetting('telegram_bot_token'), '999999:UPDATED');
 
-  // notification_templates seeded with 10 baseline items
+  // notification_templates seeded with 11 baseline items
   const templates = dbModule.getNotificationTemplates();
-  assert.equal(templates.length, 10);
+  assert.equal(templates.length, 11);
 
   const t1 = dbModule.getNotificationTemplate('event_place_assigned');
   assert.ok(t1);

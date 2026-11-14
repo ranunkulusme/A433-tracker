@@ -62,7 +62,7 @@ test('PWA endpoints serve manifest.json, sw.js with Service-Worker-Allowed heade
       `Expected manifest content-type to include manifest+json, got: ${manifestContentType}`
     );
     const manifestJson = await resManifest.json();
-    assert.equal(manifestJson.name, 'KoW Tracker - Kingdom of Winners');
+    assert.equal(manifestJson.name, 'KoW Tracker - Kiss of War');
     assert.equal(manifestJson.start_url, '/');
 
     // 2. GET /sw.js -> 200, Service-Worker-Allowed: /, Cache-Control no-cache, Content-Type javascript
@@ -3639,13 +3639,13 @@ test('API Notification Templates CRUD, reset, and test send', async () => {
       body: JSON.stringify({ username: 'admin', password: 'admin123' })
     })).json();
 
-    // 1. GET /api/notification-templates (10 default templates)
+    // 1. GET /api/notification-templates (11 default templates)
     const listRes = await fetch(`${baseUrl}/api/notification-templates`, {
       headers: { Authorization: `Bearer ${adminLogin.token}` }
     });
     assert.equal(listRes.status, 200);
     const templates = await listRes.json();
-    assert.equal(templates.length, 10);
+    assert.equal(templates.length, 11);
 
     // 2. PUT /api/notification-templates/:key
     const putRes = await fetch(`${baseUrl}/api/notification-templates/event_place_assigned`, {

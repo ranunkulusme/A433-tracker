@@ -653,7 +653,7 @@ test('PWA manifest and mobile app icons exist and are valid', () => {
   assert.ok(fs.existsSync(manifestPath), 'manifest.json must exist');
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-  assert.strictEqual(manifest.name, 'KoW Tracker - Kingdom of Winners');
+  assert.strictEqual(manifest.name, 'KoW Tracker - Kiss of War');
   assert.strictEqual(manifest.short_name, 'KoW Tracker');
   assert.strictEqual(manifest.display, 'standalone');
   assert.strictEqual(manifest.theme_color, '#0f172a');

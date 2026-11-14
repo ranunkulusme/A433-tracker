@@ -1695,14 +1695,22 @@ async function handleTelegramUpdate(update) {
       }
 
       if (data === 'cmd_stock_help') {
-        const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : { label: 'нет данных' };
-        const couponsStr = (player?.coupons || 0).toLocaleString('ru-RU');
-        const puzzlesStr = (player?.puzzles || 0).toLocaleString('ru-RU');
-        const starCouponsStr = (player?.starCoupons || 0).toLocaleString('ru-RU');
+        const stock = player?.stock || {};
+        const freshness = (stock.updatedAt || player?.stockUpdatedAt || player?.updatedAt)
+          ? logic.getStockFreshness(stock.updatedAt || player.stockUpdatedAt || player.updatedAt)
+          : { label: 'нет данных' };
+        const couponsStr = (stock.coupons ?? player?.coupons ?? 0).toLocaleString('ru-RU');
+        const puzzlesStr = (stock.puzzles ?? player?.puzzles ?? 0).toLocaleString('ru-RU');
+        const starCouponsStr = (stock.starCoupons ?? player?.starCoupons ?? 0).toLocaleString('ru-RU');
+        let starsLine = '';
+        if (stock.legendaryStars1 || stock.legendaryStars2 || stock.legendaryStars3) {
+          starsLine = `• Звёзды (I/II/III): <b>${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}</b> ✨\n`;
+        }
         const helpText = `📦 <b>Склад сектора [${logic.escapeHtml(player?.name || '—')}]:</b>\n\n` +
           `• Универсальные купоны: <b>${couponsStr} 🎟️</b>\n` +
           `• Фрагменты офицеров: <b>${puzzlesStr} 🧩</b>\n` +
           `• Звёздные купоны: <b>${starCouponsStr} ⭐</b>\n` +
+          starsLine +
           `• Давность обновления: <i>${freshness.label}</i>\n\n` +
           `<b>Как обновить остатки склада:</b>\n` +
           `1. 📷 <b>Скриншот склада:</b> просто отправьте фото инвентаря в этот диалог — бот распознает остатки через OCR.\n` +
@@ -1918,6 +1926,20 @@ async function handleTelegramUpdate(update) {
         officerId,
         desiredPlace
       });
+
+      try {
+        const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
+        const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'Любое';
+        const baseUrl = getAppBaseUrl(req);
+        dispatchNotification('staff_event_registration', {
+          eventName: et?.name || `Событие #${eventId}`,
+          sectorName: player.name || `Сектор #${player.id}`,
+          desiredPlace: placeStr,
+          link: `${baseUrl}/#events`
+        }).catch(err => {
+          console.warn('[Notification] Error dispatching staff_event_registration from bot callback:', err.message);
+        });
+      } catch (_) {}
 
       if (token) {
         const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'любое подходящее';
@@ -3590,6 +3612,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/events' && req.method === 'GET') {
       const events = db.getEvents();
+      const eventTypes = db.getEventTypes();
+      const etMap = new Map(eventTypes.map(t => [t.id, t]));
       const canManageEvents = Boolean(req.user && logic.hasUserPermission(req.user, 'manage_events'));
       const userSectors = req.user ? db.getPlayersByUserId(req.user.id) : [];
       const userSectorIds = new Set(userSectors.map(s => s.id));
@@ -3597,6 +3621,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const enriched = events.map(ev => {
         const item = { ...ev };
+        const et = etMap.get(ev.typeId);
+        item.title = et ? et.name : (ev.title || `Событие #${ev.id}`);
+        item.name = item.title;
+        item.eventType = et || null;
+        item.places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
+        item.startDate = ev.dateFrom;
+        item.endDate = ev.dateTo;
+        item.dateStart = ev.dateFrom;
+        item.dateEnd = ev.dateTo;
+
         const eventRegs = (canManageEvents || userSectors.length > 0) ? db.getRegistrationsByEventId(ev.id) : [];
         if (canManageEvents) {
           item.registrations = eventRegs;
@@ -3891,6 +3925,24 @@ function createRequestHandler(staticDir, s3Manager = null) {
         officerId: officerId || '',
         desiredPlace: desiredPlace !== undefined ? Number(desiredPlace) : 0
       });
+
+      try {
+        const ev = db.getEventById(eventId);
+        const et = ev ? (db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null) : null;
+        const placeStr = (desiredPlace === undefined || Number(desiredPlace) === 0) ? 'Любое' : `#${desiredPlace}`;
+        const baseUrl = getAppBaseUrl(req);
+        dispatchNotification('staff_event_registration', {
+          eventName: et?.name || `Событие #${eventId}`,
+          sectorName: player.name || `Сектор #${player.id}`,
+          desiredPlace: placeStr,
+          link: `${baseUrl}/#events`
+        }).catch(err => {
+          console.warn('[Notification] Error dispatching staff_event_registration:', err.message);
+        });
+      } catch (notifErr) {
+        console.warn('[Notification] Failed to prepare staff_event_registration:', notifErr.message);
+      }
+
       return sendJson(res, 200, { success: true, registration: reg });
     }
 
@@ -3958,6 +4010,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (eventMatch && req.method === 'GET') {
       const ev = db.getEventById(Number(eventMatch[1]));
       if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND');
+      const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
+      ev.title = et ? et.name : (ev.title || `Событие #${ev.id}`);
+      ev.name = ev.title;
+      ev.eventType = et || null;
+      ev.places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
+      ev.startDate = ev.dateFrom;
+      ev.endDate = ev.dateTo;
+      ev.dateStart = ev.dateFrom;
+      ev.dateEnd = ev.dateTo;
+
       const canManageEvents = Boolean(req.user && logic.hasUserPermission(req.user, 'manage_events'));
       const userSectors = req.user ? db.getPlayersByUserId(req.user.id) : [];
       const userSectorIds = new Set(userSectors.map(s => s.id));

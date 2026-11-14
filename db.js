@@ -1171,6 +1171,25 @@ function getEventTypes() {
   }));
 }
 
+function getEventTypeById(id) {
+  if (!id) return null;
+  const db = getDb();
+  const r = db.prepare('SELECT * FROM event_types WHERE id = ?').get(Number(id));
+  if (!r) return null;
+  return {
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    isPeriodic: r.is_periodic !== undefined && r.is_periodic !== null ? Number(r.is_periodic) : 1,
+    startDayOfWeek: r.start_day_of_week !== undefined && r.start_day_of_week !== null ? Number(r.start_day_of_week) : 2,
+    endDayOfWeek: r.end_day_of_week !== undefined && r.end_day_of_week !== null ? Number(r.end_day_of_week) : 3,
+    activeWeeks: r.active_weeks !== undefined && r.active_weeks !== null ? Number(r.active_weeks) : 1,
+    breakWeeks: r.break_weeks !== undefined && r.break_weeks !== null ? Number(r.break_weeks) : 1,
+    weekOffset: r.week_offset !== undefined && r.week_offset !== null ? Number(r.week_offset) : 0,
+    places: JSON.parse(r.places_json || '[]')
+  };
+}
+
 function saveEventType(data) {
   const db = getDb();
   const placesJson = JSON.stringify(data.places || []);
@@ -2790,6 +2809,7 @@ module.exports = {
   getVipTiers,
   setVipTiers,
   getEventTypes,
+  getEventTypeById,
   saveEventType,
   deleteEventType,
   updateBulkEventTypeRewards,
