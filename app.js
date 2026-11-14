@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.46.0';
+const APP_VERSION = 'v3.47.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -13976,8 +13976,20 @@ function renderTmaEvents() {
     }).join('');
   }
 
+  const isStaff = currentUser?.rank === 'r4' || currentUser?.rank === 'r5' || (typeof logic !== 'undefined' && logic.hasUserPermission(currentUser, 'manage_events'));
   const isUp = tmaEventsSubTab === 'upcoming';
   container.innerHTML = `
+    ${isStaff ? `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
+        <span style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
+          Управление событиями (Р4/Р5)
+        </span>
+        <button type="button" class="btn-primary btn-sm" onclick="openTmaEventEditor(null)" style="font-size:11.5px;padding:5px 12px;font-weight:700;display:flex;align-items:center;gap:4px">
+          <span>+</span> <span>Создать событие</span>
+        </button>
+      </div>
+    ` : ''}
+
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
       <div style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
         Календарь событий
@@ -14029,7 +14041,7 @@ function renderTmaMatrix() {
     const isFresh = daysAgo <= 3;
 
     return `
-      <div class="tma-card" style="padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;${isMe ? 'border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.06)' : ''}">
+      <div class="tma-card" onclick="openTmaSectorDetail(${p.id})" style="padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;${isMe ? 'border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.06)' : ''}">
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:12px;font-weight:800;color:${idx === 0 ? '#fbbf24' : (idx === 1 ? '#d1d5db' : (idx === 2 ? '#b45309' : '#6b7280'))};width:18px;text-align:center">
             ${idx + 1}
@@ -14342,6 +14354,19 @@ async function openTmaEventDetail(eventId) {
       <button type="button" onclick="closeTmaEventModal()" class="tma-icon-btn" style="font-size:14px;border-radius:999px">✕</button>
     </div>
     <div class="tma-modal-body">
+      ${isStaff ? `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08)">
+          <button type="button" onclick="openTmaEventEditor(${ev.id})" style="flex:1;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);color:#fbbf24;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+            ✏️ Редактировать
+          </button>
+          <button type="button" onclick="handleTmaRunAutopick(${ev.id})" style="flex:1;background:rgba(56,189,248,0.15);border:1px solid rgba(56,189,248,0.35);color:#38bdf8;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+            ⚡ Автоподбор
+          </button>
+          <button type="button" onclick="handleTmaDeleteEvent(${ev.id})" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);color:#ef4444;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;cursor:pointer" title="Удалить событие">
+            🗑️
+          </button>
+        </div>
+      ` : ''}
       <div style="font-size:11.5px;color:#9ca3af;margin-bottom:12px">
         📅 ${escapeHtml(evDateStr)} • Мест: <strong style="color:#fff">${places.length || 5}</strong>
       </div>
@@ -14359,7 +14384,7 @@ async function openTmaEventDetail(eventId) {
 }
 
 function closeTmaModals() {
-  const ids = ['tma-sector-modal', 'tma-stock-modal', 'tma-event-modal', 'tma-officers-picker-modal', 'tma-officer-modal'];
+  const ids = ['tma-sector-modal', 'tma-stock-modal', 'tma-event-modal', 'tma-officers-picker-modal', 'tma-officer-modal', 'tma-event-editor-modal', 'tma-sector-detail-modal'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -14368,6 +14393,490 @@ function closeTmaModals() {
 
 function closeTmaEventModal() {
   closeTmaModals();
+}
+
+// ─── TMA EVENTS CRUD & AUTOPICK (R4/R5) ─────────────────────────
+let tmaEditEventId = null;
+let tmaEventEditorPlaces = [];
+
+function openTmaEventEditor(eventId = null) {
+  tmaHaptic('light');
+  tmaEditEventId = eventId ? Number(eventId) : null;
+  const modal = document.getElementById('tma-event-editor-modal');
+  const title = document.getElementById('tma-event-editor-title');
+  const typeSelect = document.getElementById('tma-ee-type');
+  const dateFromInput = document.getElementById('tma-ee-date-from');
+  const dateToInput = document.getElementById('tma-ee-date-to');
+  const noteInput = document.getElementById('tma-ee-note');
+  const deleteBtn = document.getElementById('tma-ee-delete-btn');
+  if (!modal) return;
+
+  const types = state.eventTypes || [];
+  typeSelect.innerHTML = types.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+
+  if (tmaEditEventId) {
+    const ev = (state.events || []).find(e => Number(e.id) === tmaEditEventId);
+    if (!ev) { toast('Событие не найдено', 'error'); return; }
+    title.textContent = '✏️ Редактировать событие';
+    typeSelect.value = ev.typeId || (types[0]?.id || 1);
+
+    const fromDate = ev.startDate || ev.dateStart || ev.dateFrom;
+    const toDate = ev.endDate || ev.dateEnd || ev.dateTo;
+    dateFromInput.value = fromDate ? new Date(fromDate).toISOString().slice(0, 16) : '';
+    dateToInput.value = toDate ? new Date(toDate).toISOString().slice(0, 16) : '';
+    noteInput.value = ev.note || '';
+    if (deleteBtn) deleteBtn.style.display = 'block';
+
+    const evPlaces = (ev.places && ev.places.length > 0) ? ev.places : (ev.eventType?.places || []);
+    const assignments = ev.assignments || [];
+    tmaEventEditorPlaces = evPlaces.map(p => {
+      const assign = assignments.find(a => Number(a.place) === Number(p.place));
+      return {
+        place: p.place,
+        coupons: p.coupons || 0,
+        playerId: assign ? assign.playerId : null
+      };
+    });
+  } else {
+    title.textContent = '✨ Создать событие';
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+    const dayAfter = new Date(tomorrow.getTime() + 48 * 3600 * 1000);
+    dateFromInput.value = tomorrow.toISOString().slice(0, 16);
+    dateToInput.value = dayAfter.toISOString().slice(0, 16);
+    noteInput.value = '';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+
+    const et = types[0];
+    const defPlaces = (et?.places && et.places.length > 0) ? et.places : [
+      { place: 1, coupons: 30000 },
+      { place: 2, coupons: 20000 },
+      { place: 3, coupons: 10000 }
+    ];
+    tmaEventEditorPlaces = defPlaces.map(p => ({
+      place: p.place,
+      coupons: p.coupons || 0,
+      playerId: null
+    }));
+  }
+
+  renderTmaEventEditorPlaces();
+  modal.style.display = 'flex';
+}
+
+function onTmaEventTypeChange() {
+  const typeId = Number(document.getElementById('tma-ee-type').value);
+  const et = (state.eventTypes || []).find(t => t.id === typeId);
+  if (!et) return;
+  const defPlaces = (et.places && et.places.length > 0) ? et.places : [
+    { place: 1, coupons: 30000 },
+    { place: 2, coupons: 20000 },
+    { place: 3, coupons: 10000 }
+  ];
+  tmaEventEditorPlaces = defPlaces.map(p => ({
+    place: p.place,
+    coupons: p.coupons || 0,
+    playerId: null
+  }));
+  renderTmaEventEditorPlaces();
+}
+
+function renderTmaEventEditorPlaces() {
+  const list = document.getElementById('tma-ee-places-list');
+  const countBadge = document.getElementById('tma-ee-places-count');
+  if (!list) return;
+  if (countBadge) countBadge.textContent = tmaEventEditorPlaces.length;
+
+  list.innerHTML = tmaEventEditorPlaces.map((p, idx) => {
+    return `
+      <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:12px;font-weight:800;color:#fbbf24">Место #${p.place}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;color:#9ca3af">Купоны:</span>
+            <input type="number" min="0" value="${p.coupons || 0}" onchange="tmaEventEditorPlaces[${idx}].coupons = Number(this.value)" style="width:75px;background:#161a22;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;color:#fff;font-size:11.5px;font-weight:700;text-align:right">
+            ${tmaEventEditorPlaces.length > 1 ? `
+              <button type="button" onclick="removeTmaEventPlaceRow(${idx})" style="background:none;border:none;color:#ef4444;font-size:13px;cursor:pointer;padding:2px 4px">✕</button>
+            ` : ''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:10.5px;color:#9ca3af;white-space:nowrap">Назначен:</label>
+          <select onchange="tmaEventEditorPlaces[${idx}].playerId = this.value ? Number(this.value) : null" style="flex:1;background:#161a22;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 6px;color:#fff;font-size:11px">
+            <option value="" ${!p.playerId ? 'selected' : ''}>— Не назначен —</option>
+            ${(state.players || []).map(pl => {
+              const sel = Number(pl.id) === Number(p.playerId) ? 'selected' : '';
+              return `<option value="${pl.id}" ${sel}>${escapeHtml(pl.name || 'Сектор #' + pl.id)} (VIP ${pl.sector?.vipLevel || pl.vip || 0})</option>`;
+            }).join('')}
+          </select>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function addTmaEventPlaceRow() {
+  const nextNum = tmaEventEditorPlaces.length > 0
+    ? Math.max(...tmaEventEditorPlaces.map(p => p.place)) + 1
+    : 1;
+  tmaEventEditorPlaces.push({
+    place: nextNum,
+    coupons: 10000,
+    playerId: null
+  });
+  renderTmaEventEditorPlaces();
+}
+
+function removeTmaEventPlaceRow(index) {
+  if (tmaEventEditorPlaces.length <= 1) return;
+  tmaEventEditorPlaces.splice(index, 1);
+  renderTmaEventEditorPlaces();
+}
+
+async function runTmaEventAutopick() {
+  tmaHaptic('medium');
+  if (tmaEditEventId) {
+    try {
+      const res = await apiFetch(`/api/events/${tmaEditEventId}/autopick`, { method: 'POST' });
+      if (res && res.assignments) {
+        for (const a of res.assignments) {
+          const p = tmaEventEditorPlaces.find(pl => Number(pl.place) === Number(a.place));
+          if (p) p.playerId = a.playerId;
+        }
+        renderTmaEventEditorPlaces();
+        tmaHaptic('success');
+        toast('⚡ Автоподбор успешно выполнен!', 'success');
+        return;
+      }
+    } catch (_) {}
+  }
+
+  try {
+    const typeId = Number(document.getElementById('tma-ee-type').value);
+    const dateFrom = document.getElementById('tma-ee-date-from').value;
+    const et = (state.eventTypes || []).find(t => t.id === typeId);
+    const mockEvent = {
+      id: tmaEditEventId || 0,
+      typeId,
+      places: tmaEventEditorPlaces,
+      eventType: et
+    };
+    if (typeof logic !== 'undefined' && typeof logic.smartAutoPickWithRegistrations === 'function') {
+      const res = logic.smartAutoPickWithRegistrations({
+        event: mockEvent,
+        players: state.players || [],
+        registrations: (tmaEditEventId ? ((state.events || []).find(e => e.id === tmaEditEventId)?.registrations) : []) || [],
+        officerCatalog: state.officerCatalog || [],
+        eventDate: dateFrom || new Date().toISOString()
+      });
+      if (res && res.assignments) {
+        for (const a of res.assignments) {
+          const p = tmaEventEditorPlaces.find(pl => Number(pl.place) === Number(a.place));
+          if (p) p.playerId = a.playerId;
+        }
+        renderTmaEventEditorPlaces();
+        tmaHaptic('success');
+        toast('⚡ Автоподбор успешно рассчитан!', 'success');
+        return;
+      }
+    }
+  } catch (err) {
+    toast('Ошибка автоподбора: ' + err.message, 'error');
+  }
+}
+
+async function submitTmaEventEditor() {
+  tmaHaptic('medium');
+  const typeId = Number(document.getElementById('tma-ee-type').value);
+  const dateFrom = document.getElementById('tma-ee-date-from').value;
+  const dateTo = document.getElementById('tma-ee-date-to').value;
+  const note = document.getElementById('tma-ee-note').value.trim();
+
+  if (!typeId) { toast('Выберите тип события', 'error'); return; }
+  if (!dateFrom || !dateTo) { toast('Укажите даты начала и окончания', 'error'); return; }
+
+  const saveBtn = document.getElementById('tma-ee-save-btn');
+  if (saveBtn) saveBtn.disabled = true;
+
+  const assignments = tmaEventEditorPlaces
+    .filter(p => p.playerId)
+    .map(p => ({
+      place: p.place,
+      playerId: Number(p.playerId),
+      actualCoupons: p.coupons || 0
+    }));
+
+  const payload = {
+    ...(tmaEditEventId ? { id: tmaEditEventId } : {}),
+    typeId,
+    dateFrom,
+    dateTo,
+    note,
+    places: tmaEventEditorPlaces.map(p => ({ place: p.place, coupons: p.coupons })),
+    assignments
+  };
+
+  try {
+    await apiFetch('/api/events', { method: 'POST', body: payload });
+    tmaHaptic('success');
+    toast(tmaEditEventId ? '✅ Событие обновлено' : '✅ Событие создано', 'success');
+    closeTmaModals();
+    await loadDataFromServer().catch(() => {});
+    renderTmaEvents();
+    if (activeTmaTab === 'cabinet') renderTmaCabinet();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка сохранения: ' + (err.message || 'попробуйте позже'), 'error');
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function handleTmaDeleteEvent(eventId) {
+  if (!confirm('Удалить это событие альянса?')) return;
+  tmaHaptic('medium');
+  try {
+    await apiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
+    tmaHaptic('success');
+    toast('🗑️ Событие удалено', 'info');
+    closeTmaModals();
+    await loadDataFromServer().catch(() => {});
+    renderTmaEvents();
+    if (activeTmaTab === 'cabinet') renderTmaCabinet();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка удаления: ' + (err.message || 'попробуйте позже'), 'error');
+  }
+}
+
+async function handleTmaRunAutopick(eventId) {
+  tmaHaptic('medium');
+  try {
+    await apiFetch(`/api/events/${eventId}/autopick`, { method: 'POST' });
+    tmaHaptic('success');
+    toast('⚡ Автоподбор выполнен штабом!', 'success');
+    await loadDataFromServer().catch(() => {});
+    renderTmaEvents();
+    openTmaEventDetail(eventId);
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка автоподбора: ' + (err.message || 'попробуйте позже'), 'error');
+  }
+}
+
+function deleteTmaCurrentEvent() {
+  if (tmaEditEventId) handleTmaDeleteEvent(tmaEditEventId);
+}
+
+// ─── TMA SECTOR DOSSIER (Matrix Sector Detail) ──────────────────
+async function openTmaSectorDetail(playerId) {
+  tmaHaptic('light');
+  const modal = document.getElementById('tma-sector-detail-modal');
+  const nameEl = document.getElementById('tma-sd-name');
+  const content = document.getElementById('tma-sd-content');
+  if (!modal || !content) return;
+
+  const p = (state.players || []).find(pl => Number(pl.id) === Number(playerId));
+  if (!p) { toast('Сектор не найден', 'error'); return; }
+
+  if (nameEl) nameEl.textContent = p.name || `Сектор #${p.id}`;
+
+  const sec = p.sector || {};
+  const stock = p.stock || {};
+  const isStaff = currentUser?.rank === 'r4' || currentUser?.rank === 'r5' || (typeof logic !== 'undefined' && logic.hasUserPermission(currentUser, 'manage_events'));
+  const isSelf = Number(p.id) === Number(currentUser?.playerId) || (p.userId && Number(p.userId) === Number(currentUser?.id));
+  const canViewStock = isStaff || isSelf || (typeof canSeeStock === 'function' ? canSeeStock(p.id) : false);
+
+  const power = sec.power || p.power || 0;
+  const vip = (sec.vipLevel !== undefined && sec.vipLevel !== null) ? sec.vipLevel : (p.vip || 0);
+  const hq = sec.hqLevel || p.hq || '—';
+  const kp = sec.killPoints || p.killPoints || 0;
+  const ownerStr = p.username ? `@${escapeHtml(p.username)}` : 'Без владельца';
+  const rankStr = p.rank || 'Р3';
+
+  // Stock Freshness
+  const updatedAt = stock.updatedAt || p.updatedAt;
+  let daysAgo = 0;
+  if (updatedAt) {
+    daysAgo = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+  }
+  const isFresh = daysAgo <= 3;
+  const freshnessText = isFresh
+    ? `🟢 Свежий (${daysAgo === 0 ? 'сегодня' : daysAgo + 'д назад'})`
+    : `🔴 Устарел (${daysAgo}д назад)`;
+
+  // Officers list in dossier
+  const officers = p.officers || [];
+  const today = new Date().toISOString().slice(0, 10);
+  let officersListHtml = '';
+  if (!officers.length) {
+    officersListHtml = `
+      <div style="text-align:center;padding:12px;color:#9ca3af;font-size:11.5px;background:#161a22;border-radius:10px">
+        Офицеры не добавлены
+      </div>
+    `;
+  } else {
+    officersListHtml = officers.map(off => {
+      const cat = getCatalogOfficer(off.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
+      const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
+      const offSkills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
+      const offName = off.name || cat?.name || 'Офицер #' + off.id;
+      const offType = cat?.type || 'Пехота';
+      const offGen = cat?.generation ? `G${cat.generation}` : '';
+
+      let deficitStr = '0 куп.';
+      let forecastStr = '✓ Фулл';
+      let isFull = true;
+      try {
+        if (typeof calculateOfficerDeficit === 'function') {
+          const def = calculateOfficerDeficit({ officer: off, catalogItem: cat, player: p, targetLevel: 180, today });
+          if (def.isOnlyPersonalPuzzles) {
+            deficitStr = '0 куп.';
+            forecastStr = '🧩 Личные';
+            isFull = false;
+          } else if (def.deficitCoupons > 0) {
+            deficitStr = `${fmtNum(def.deficitCoupons)}`;
+            isFull = false;
+            if (def.forecastDate) {
+              const d = new Date(def.forecastDate);
+              forecastStr = `📅 ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`;
+            } else {
+              forecastStr = '📅 —';
+            }
+          }
+        }
+      } catch (_) {}
+
+      return `
+        <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 10px;margin-bottom:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="width:30px;height:30px;border-radius:8px;background:#262626;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-weight:900;color:#fbbf24;font-size:11px">
+                ${offGen || escapeHtml(offName.charAt(0))}
+              </div>
+              <div>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <span style="font-size:12.5px;font-weight:700;color:#fff">${escapeHtml(offName)}</span>
+                  <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(56,189,248,0.2);color:#7dd3fc">${escapeHtml(offType)}</span>
+                </div>
+                <div style="font-size:10.5px;color:#9ca3af;margin-top:1px">
+                  Ур. ${off.level || 0} • ${'★'.repeat(offStars)}${'☆'.repeat(5 - offStars)}
+                </div>
+              </div>
+            </div>
+            <div style="text-align:right">
+              <span style="padding:1px 5px;border-radius:4px;background:rgba(16,185,129,0.2);color:#34d399;font-family:var(--mono, monospace);font-weight:800;font-size:10.5px">
+                [${offSkills.join('-')}]
+              </span>
+              <div style="font-size:10px;color:#9ca3af;margin-top:2px">
+                Дефицит: <strong style="color:${isFull ? '#34d399' : '#fbbf24'}">${deficitStr}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  let stockSectionHtml = '';
+  if (canViewStock) {
+    stockSectionHtml = `
+      <div class="tma-stock-edit-card" style="padding:10px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:12px;font-weight:700;color:#fbbf24">📦 Складские запасы</span>
+          <span style="font-size:10px;font-weight:700;color:${isFresh ? '#34d399' : '#f87171'}">${freshnessText}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
+            <div style="font-size:9.5px;color:#9ca3af">Купоны офицера</div>
+            <div style="font-size:12.5px;font-weight:800;color:#fbbf24;margin-top:1px">${fmtNum(stock.coupons || 0)} 🎟️</div>
+          </div>
+          <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
+            <div style="font-size:9.5px;color:#9ca3af">Медали офицера</div>
+            <div style="font-size:12.5px;font-weight:800;color:#38bdf8;margin-top:1px">${fmtNum(stock.puzzles || 0)} 🧩</div>
+          </div>
+          <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
+            <div style="font-size:9.5px;color:#9ca3af">Сундуки выбора</div>
+            <div style="font-size:12.5px;font-weight:800;color:#fde68a;margin-top:1px">${fmtNum(stock.chests || 0)} 📦</div>
+          </div>
+          <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
+            <div style="font-size:9.5px;color:#9ca3af">Купоны звезды</div>
+            <div style="font-size:12.5px;font-weight:800;color:#fbbf24;margin-top:1px">${fmtNum(stock.starCoupons || 0)} 🎟️⭐</div>
+          </div>
+          <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
+            <div style="font-size:9.5px;color:#9ca3af">Звезды I / II / III</div>
+            <div style="font-size:11.5px;font-weight:800;color:#c084fc;margin-top:1px">${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}</div>
+          </div>
+          <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
+            <div style="font-size:9.5px;color:#9ca3af">Очки звезд</div>
+            <div style="font-size:12.5px;font-weight:800;color:#c084fc;margin-top:1px">${fmtNum(stock.starPoints || 0)} ✨</div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    stockSectionHtml = `
+      <div style="text-align:center;padding:16px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.1);border-radius:12px;color:#9ca3af;font-size:11.5px">
+        🔒 Запасы склада скрыты настройками приватности альянса
+      </div>
+    `;
+  }
+
+  content.innerHTML = `
+    <!-- Top Metadata Card -->
+    <div class="tma-stock-edit-card" style="padding:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;font-weight:800;background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.3);padding:2px 8px;border-radius:6px">
+            ${escapeHtml(rankStr)}
+          </span>
+          <span style="font-size:12px;color:#9ca3af">
+            👤 Владелец: <strong style="color:#fff">${ownerStr}</strong>
+          </span>
+        </div>
+        ${(isStaff || isSelf) ? `
+          <button type="button" onclick="closeTmaModals();openTmaSectorEditModal(${p.id})" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-size:11px;color:#fff;cursor:pointer">
+            ✏️ Изменить
+          </button>
+        ` : ''}
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;text-align:center">
+        <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
+          <div style="font-size:9.5px;color:#9ca3af">Мощь</div>
+          <div style="font-size:11.5px;font-weight:800;color:#fff;margin-top:2px">${fmtNum(power)}</div>
+        </div>
+        <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
+          <div style="font-size:9.5px;color:#9ca3af">VIP</div>
+          <div style="font-size:11.5px;font-weight:800;color:#fbbf24;margin-top:2px">${vip}</div>
+        </div>
+        <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
+          <div style="font-size:9.5px;color:#9ca3af">Штаб</div>
+          <div style="font-size:11.5px;font-weight:800;color:#38bdf8;margin-top:2px">${hq}</div>
+        </div>
+        <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
+          <div style="font-size:9.5px;color:#9ca3af">Очки за уб.</div>
+          <div style="font-size:11.5px;font-weight:800;color:#c084fc;margin-top:2px">${fmtNum(kp)}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stock Section (with RBAC) -->
+    ${stockSectionHtml}
+
+    <!-- Officers Section -->
+    <div class="tma-stock-edit-card" style="padding:10px 12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700;color:#fbbf24">🎖️ Офицеры сектора (${officers.length})</span>
+      </div>
+      <div>
+        ${officersListHtml}
+      </div>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
 }
 
 async function handleTmaSwitchSector(sectorId) {
@@ -14399,9 +14908,13 @@ async function handleTmaSwitchSector(sectorId) {
   }
 }
 
-function openTmaSectorEditModal() {
+let tmaEditingSectorId = null;
+
+function openTmaSectorEditModal(playerId = null) {
   tmaHaptic('light');
-  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+  tmaEditingSectorId = playerId ? Number(playerId) : Number(currentUser?.playerId || myCabinetProfile?.id);
+  const player = (tmaEditingSectorId ? state.players.find(p => Number(p.id) === tmaEditingSectorId) : null)
+    || state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
     || myCabinetProfile
     || (currentUser?.player ? currentUser.player : null)
     || state.players[0]
@@ -14456,8 +14969,12 @@ async function submitTmaSectorEdit() {
     return;
   }
 
+  const isSelf = !tmaEditingSectorId || Number(tmaEditingSectorId) === Number(currentUser?.playerId || myCabinetProfile?.id);
+  const endpoint = isSelf ? '/api/my-profile' : `/api/players/${tmaEditingSectorId}`;
+  const targetId = tmaEditingSectorId || Number(currentUser?.playerId || myCabinetProfile?.id);
+
   try {
-    await apiFetch('/api/my-profile', {
+    await apiFetch(endpoint, {
       method: 'PUT',
       body: {
         name,
@@ -14465,15 +14982,14 @@ async function submitTmaSectorEdit() {
       }
     });
 
-    const activePlayerId = Number(currentUser?.playerId || myCabinetProfile?.id);
-    const p = state.players.find(x => Number(x.id) === activePlayerId);
+    const p = state.players.find(x => Number(x.id) === targetId);
     if (p) {
       p.name = name;
       p.power = power;
       p.vip = vipLevel;
       p.sector = { ...(p.sector || {}), vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints };
     }
-    if (myCabinetProfile && Number(myCabinetProfile.id) === activePlayerId) {
+    if (isSelf && myCabinetProfile && Number(myCabinetProfile.id) === targetId) {
       myCabinetProfile.name = name;
       myCabinetProfile.sector = { ...(myCabinetProfile.sector || {}), vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints };
     }
@@ -14482,6 +14998,7 @@ async function submitTmaSectorEdit() {
     closeTmaModals();
     toast('Параметры сектора сохранены', 'success');
     renderTmaCabinet();
+    if (activeTmaTab === 'matrix') renderTmaMatrix();
     if (typeof renderMyCabinet === 'function') {
       renderMyCabinet().catch(() => {});
     }
@@ -14620,9 +15137,21 @@ let tmaOfficerModalSkills = [1, 1, 1, 1];
 let tmaOfficerModalStars = 0;
 let tmaOfficerModalMode = 'retro';
 
+let isTmaOfficersCollapsed = true;
+
+function toggleTmaOfficersAccordion() {
+  tmaHaptic('selection');
+  isTmaOfficersCollapsed = !isTmaOfficersCollapsed;
+  const content = document.getElementById('tma-officers-accordion-content');
+  const arrow = document.getElementById('tma-officers-arrow');
+  if (content) content.style.display = isTmaOfficersCollapsed ? 'none' : 'block';
+  if (arrow) arrow.textContent = isTmaOfficersCollapsed ? '▶' : '▼';
+}
+
 function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
   const count = (officers || []).length;
   const isTargetId = (offId) => targetOfficer && String(targetOfficer.id) === String(offId);
+  const today = new Date().toISOString().slice(0, 10);
 
   let cardsHtml = '';
   if (!officers || officers.length === 0) {
@@ -14639,7 +15168,7 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
   } else {
     cardsHtml = officers.map(off => {
       const isTarget = isTargetId(off.id);
-      const cat = getCatalogOfficer(off.catalogId);
+      const cat = getCatalogOfficer(off.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
       const offMode = getOfficerMode(off.id);
       const isRetro = offMode === 'retro';
       const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
@@ -14648,74 +15177,95 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
       const offType = cat?.type || 'Пехота';
       const offGen = cat?.generation ? `G${cat.generation}` : '';
 
+      let deficitStr = '0 куп.';
+      let forecastStr = '✓ Фулл';
+      let isFull = true;
+      try {
+        if (typeof calculateOfficerDeficit === 'function') {
+          const def = calculateOfficerDeficit({ officer: off, catalogItem: cat, player, targetLevel: 180, today });
+          if (def.isOnlyPersonalPuzzles) {
+            deficitStr = '0 куп.';
+            forecastStr = '🧩 Личные';
+            isFull = false;
+          } else if (def.deficitCoupons > 0) {
+            deficitStr = `${fmtNum(def.deficitCoupons)}`;
+            isFull = false;
+            if (def.forecastDate) {
+              const d = new Date(def.forecastDate);
+              forecastStr = `📅 ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`;
+            } else {
+              forecastStr = '📅 —';
+            }
+          }
+        }
+      } catch (_) {}
+
+      const starsGold = '★'.repeat(offStars);
+      const starsGray = '☆'.repeat(5 - offStars);
+
       return `
-        <div class="tma-officer-card" id="tma-officer-card-${off.id}" style="${isTarget ? 'border-color:rgba(245,158,11,0.5);box-shadow:0 0 12px rgba(245,158,11,0.1)' : ''}">
-          <!-- Card Header -->
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="tma-officer-card-compact" id="tma-officer-card-${off.id}" onclick="openTmaEditOfficerModal('${off.id}')" style="cursor:pointer;background:#1f242e;border:1px solid ${
+          isTarget ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.08)'
+        };border-radius:14px;padding:10px 12px;margin-bottom:8px;${
+          isTarget ? 'box-shadow:0 2px 10px rgba(245,158,11,0.15);' : ''
+        }">
+          <!-- Top Row -->
+          <div style="display:flex;align-items:center;justify-content:space-between">
             <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;${
-                isTarget ? 'background:#fbbf24;color:#000;box-shadow:0 2px 8px rgba(245,158,11,0.3)' : 'background:#1f242e;color:#fff;border:1px solid rgba(255,255,255,0.1)'
+              <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;${
+                isTarget
+                  ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.4)'
+                  : 'background:#262626;color:#d1d5db;border:1px solid rgba(255,255,255,0.1)'
               }">
-                ${escapeHtml(offName.charAt(0))}
+                ${offGen || escapeHtml(offName.charAt(0))}
               </div>
               <div>
                 <div style="display:flex;align-items:center;gap:6px">
-                  <span style="font-size:13.5px;font-weight:700;color:#fff">${escapeHtml(offName)}</span>
-                  <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.06);color:#9ca3af;font-weight:600">
-                    ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''}
+                  <span style="font-size:13.5px;font-weight:800;color:#fff">${escapeHtml(offName)}</span>
+                  <span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:rgba(56,189,248,0.2);color:#7dd3fc;font-weight:700">
+                    ${escapeHtml(offType)}
                   </span>
+                  ${(off.personalPuzzles || off.personal_puzzles) ? `<span style="font-size:9.5px;color:#fde68a;background:rgba(245,158,11,0.1);padding:1px 4px;border-radius:4px">🧩 ${off.personalPuzzles || off.personal_puzzles}</span>` : ''}
                 </div>
-                <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
-                  <span style="font-size:11px;color:#38bdf8;font-weight:600">Ур. ${off.level || 0}</span>
-                  ${(off.personalPuzzles || off.personal_puzzles) ? `<span style="font-size:10.5px;color:#fde68a">🧩 Личные: ${off.personalPuzzles || off.personal_puzzles}</span>` : ''}
+                <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+                  <span style="font-size:11px;color:#38bdf8;font-weight:700">Ур. ${off.level || 0}</span>
+                  <span style="color:#6b7280;font-size:10px">•</span>
+                  <span style="color:#fbbf24;font-size:11px;letter-spacing:1px">${starsGold}${starsGray}</span>
+                  <span style="font-size:10px;color:#9ca3af;font-weight:700">${offStars}★</span>
                 </div>
               </div>
             </div>
 
-            <!-- Header Actions: Target Star, Mode Badge, Edit -->
+            <!-- Controls: Mode, Target Star, Edit -->
             <div style="display:flex;align-items:center;gap:6px">
-              <!-- Mode badge / toggle -->
-              <button type="button" onclick="toggleTmaOfficerMode('${off.id}')" class="tma-quick-btn" style="font-size:10px;padding:2px 6px;${
-                isRetro ? 'background:rgba(156,163,175,0.15);color:#9ca3af;border-color:rgba(156,163,175,0.25)' : 'background:rgba(245,158,11,0.15);color:#fbbf24;border-color:rgba(245,158,11,0.3)'
-              }" title="Нажмите для переключения режима (Ретро / Списание со склада)">
+              <button type="button" onclick="event.stopPropagation();toggleTmaOfficerMode('${off.id}')" style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:800;cursor:pointer;${
+                isRetro ? 'background:rgba(156,163,175,0.15);color:#9ca3af;border:1px solid rgba(156,163,175,0.25)' : 'background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)'
+              }" title="Режим: ${isRetro ? 'Ретро (без списания)' : 'Списание со склада'}">
                 ${isRetro ? '📜 Ретро' : '⚡ Склад'}
               </button>
 
-              <!-- Star Target button for calculator -->
-              <button type="button" onclick="selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
+              <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" style="background:none;border:none;font-size:15px;cursor:pointer;color:${isTarget ? '#fbbf24' : '#9ca3af'};padding:0 2px" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
                 ${isTarget ? '⭐' : '☆'}
               </button>
 
-              <!-- Edit button -->
-              <button type="button" onclick="openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:12px" title="Редактировать параметры офицера">
+              <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-size:11px;cursor:pointer" title="Редактировать параметры офицера">
                 ✏️
               </button>
             </div>
           </div>
 
-          <!-- Interactive Stars (0-5★) -->
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:#13161c;border-radius:8px;margin-bottom:8px">
-            <span style="font-size:11px;color:#9ca3af;font-weight:600">Звёзды:</span>
-            <div style="display:flex;gap:4px">
-              ${[1, 2, 3, 4, 5].map(s => `
-                <span class="tma-star-clickable" onclick="handleTmaStarClick('${off.id}', ${s})" style="color:${s <= offStars ? '#fbbf24' : 'rgba(255,255,255,0.18)'}">★</span>
-              `).join('')}
-              <button type="button" onclick="handleTmaStarClick('${off.id}', 0)" style="background:none;border:none;color:#9ca3af;font-size:10px;cursor:pointer;padding-left:4px" title="Сбросить звёзды">0★</button>
+          <!-- Bottom Row: Skills, Deficit, Forecast -->
+          <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:space-between;font-size:11px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:9.5px;color:#9ca3af;font-weight:600">Навыки:</span>
+              <span style="padding:1px 6px;border-radius:4px;background:rgba(16,185,129,0.2);color:#34d399;font-family:var(--mono, monospace);font-weight:800;font-size:11px">
+                [${offSkills.join('-')}]
+              </span>
             </div>
-          </div>
-
-          <!-- Interactive Skills (Н1, Н2, Н3, Н4) -->
-          <div style="display:flex;flex-direction:column;gap:5px">
-            ${[0, 1, 2, 3].map(sIdx => `
-              <div class="tma-skill-row">
-                <span class="tma-skill-name">Н${sIdx + 1}</span>
-                <div class="tma-skill-btn-group">
-                  ${[1, 2, 3, 4, 5].map(lvl => `
-                    <button type="button" class="tma-skill-btn ${offSkills[sIdx] === lvl ? 'active' : ''}" onclick="handleTmaSkillClick('${off.id}', ${sIdx}, ${lvl})">${lvl}</button>
-                  `).join('')}
-                </div>
-              </div>
-            `).join('')}
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="color:#9ca3af;font-size:10.5px">Дефицит: <strong style="color:${isFull ? '#34d399' : '#fbbf24'}">${deficitStr}</strong></span>
+              <span style="color:#34d399;font-weight:700;font-size:10.5px">${forecastStr}</span>
+            </div>
           </div>
         </div>
       `;
@@ -14723,17 +15273,27 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
   }
 
   return `
-    <div style="margin-top:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div class="tma-card" style="margin-top:14px;padding:0;overflow:hidden">
+      <!-- Accordion Header -->
+      <div onclick="toggleTmaOfficersAccordion()" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer;user-select:none">
         <div style="font-size:13.5px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px">
           <span>🎖️ Офицеры сектора</span>
-          <span style="font-size:11px;color:#9ca3af;background:#1f242e;padding:1px 6px;border-radius:6px;font-weight:600">${count}</span>
+          <span style="font-size:11px;color:#fbbf24;background:rgba(245,158,11,0.2);padding:1px 7px;border-radius:6px;font-weight:700">${count}</span>
         </div>
-        <button type="button" class="btn-primary btn-sm" onclick="openTmaAddOfficerModal()" style="font-size:11.5px;padding:4px 12px;font-weight:700">
-          + Добавить
-        </button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" class="btn-primary btn-sm" onclick="event.stopPropagation();openTmaAddOfficerModal()" style="font-size:11px;padding:3px 9px;font-weight:700">
+            + Добавить
+          </button>
+          <span id="tma-officers-arrow" style="font-size:12px;color:#fbbf24;font-weight:800;transition:transform 0.2s">
+            ${isTmaOfficersCollapsed ? '▶' : '▼'}
+          </span>
+        </div>
       </div>
-      ${cardsHtml}
+
+      <!-- Accordion Body -->
+      <div id="tma-officers-accordion-content" style="display:${isTmaOfficersCollapsed ? 'none' : 'block'};padding:0 14px 14px 14px">
+        ${cardsHtml}
+      </div>
     </div>
   `;
 }
@@ -15650,4 +16210,17 @@ if (typeof window !== 'undefined') {
   window.setTmaOfficerModalSkill = setTmaOfficerModalSkill;
   window.deleteTmaCurrentOfficer = deleteTmaCurrentOfficer;
   window.submitTmaOfficerEdit = submitTmaOfficerEdit;
+
+  window.toggleTmaOfficersAccordion = toggleTmaOfficersAccordion;
+  window.openTmaEventEditor = openTmaEventEditor;
+  window.onTmaEventTypeChange = onTmaEventTypeChange;
+  window.renderTmaEventEditorPlaces = renderTmaEventEditorPlaces;
+  window.addTmaEventPlaceRow = addTmaEventPlaceRow;
+  window.removeTmaEventPlaceRow = removeTmaEventPlaceRow;
+  window.runTmaEventAutopick = runTmaEventAutopick;
+  window.submitTmaEventEditor = submitTmaEventEditor;
+  window.handleTmaDeleteEvent = handleTmaDeleteEvent;
+  window.handleTmaRunAutopick = handleTmaRunAutopick;
+  window.deleteTmaCurrentEvent = deleteTmaCurrentEvent;
+  window.openTmaSectorDetail = openTmaSectorDetail;
 }

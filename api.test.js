@@ -6475,6 +6475,154 @@ test('Telegram Mini App sector officers management, calculator target picker, st
   }
 });
 
+test('TMA R4/R5 events CRUD, smart autopick, sector dossier viewing and compact officer card parity', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // 1. Login as admin (R5)
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    assert.equal(loginRes.status, 200);
+    const { token } = await loginRes.json();
+
+    // 2. Create Event as R5 via POST /api/events
+    const eventPayload = {
+      typeId: 1,
+      dateFrom: '2026-11-20T00:00:00.000Z',
+      dateTo: '2026-11-22T00:00:00.000Z',
+      note: 'TMA R4/R5 Test Event',
+      places: [
+        { place: 1, coupons: 30000 },
+        { place: 2, coupons: 20000 }
+      ],
+      assignments: []
+    };
+    const createEvRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(eventPayload)
+    });
+    assert.equal(createEvRes.status, 200);
+    const createdEv = await createEvRes.json();
+    assert.ok(createdEv.id);
+    const eventId = createdEv.id;
+
+    // 3. Register to event
+    const regRes = await fetch(`${baseUrl}/api/events/${eventId}/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ desiredPlace: 1, sectorId: 1 })
+    });
+    assert.equal(regRes.status, 200);
+
+    // 4. Run autopick as R5 via POST /api/events/:id/autopick
+    const autopickRes = await fetch(`${baseUrl}/api/events/${eventId}/autopick`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    assert.equal(autopickRes.status, 200);
+    const autopickData = await autopickRes.json();
+    assert.ok(Array.isArray(autopickData.assignments));
+
+    // 5. Verify R3 user cannot create or delete events
+    // Register temporary R3 user
+    const r3Reg = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'test_r3_events', password: 'password123' })
+    });
+    assert.equal(r3Reg.status, 200);
+    // Approve R3 as admin
+    const pendingRes = await fetch(`${baseUrl}/api/users/pending`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const pendingUsers = await pendingRes.json();
+    const r3Pending = pendingUsers.find(u => u.username === 'test_r3_events');
+    assert.ok(r3Pending);
+    await fetch(`${baseUrl}/api/users/${r3Pending.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+
+    const r3LoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'test_r3_events', password: 'password123' })
+    });
+    const { token: r3Token } = await r3LoginRes.json();
+
+    // R3 tries to create event -> 403 Forbidden
+    const r3CreateRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${r3Token}`
+      },
+      body: JSON.stringify(eventPayload)
+    });
+    assert.equal(r3CreateRes.status, 403);
+
+    // R3 tries to delete event -> 403 Forbidden
+    const r3DeleteRes = await fetch(`${baseUrl}/api/events/${eventId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${r3Token}`
+      }
+    });
+    assert.equal(r3DeleteRes.status, 403);
+
+    // 6. Delete event as R5
+    const deleteRes = await fetch(`${baseUrl}/api/events/${eventId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    assert.equal(deleteRes.status, 200);
+
+    // 7. Verify index.html contains TMA Event Editor & Sector Dossier modals
+    const indexRes = await fetch(`${baseUrl}/index.html`);
+    const indexHtml = await indexRes.text();
+    assert.ok(indexHtml.includes('id="tma-event-editor-modal"'));
+    assert.ok(indexHtml.includes('id="tma-sector-detail-modal"'));
+    assert.ok(indexHtml.includes('id="tma-ee-type"'));
+    assert.ok(indexHtml.includes('id="tma-ee-date-from"'));
+    assert.ok(indexHtml.includes('id="tma-ee-places-list"'));
+    assert.ok(indexHtml.includes('id="tma-sd-name"'));
+    assert.ok(indexHtml.includes('id="tma-sd-content"'));
+
+    // 8. Verify style.css contains compact officer card
+    const cssRes = await fetch(`${baseUrl}/style.css`);
+    const cssText = await cssRes.text();
+    assert.ok(cssText.includes('.tma-officer-card-compact'));
+
+    // 9. Verify app.js exports new TMA functions
+    const appRes = await fetch(`${baseUrl}/app.js`);
+    const appText = await appRes.text();
+    assert.ok(appText.includes('window.toggleTmaOfficersAccordion = toggleTmaOfficersAccordion;'));
+    assert.ok(appText.includes('window.openTmaEventEditor = openTmaEventEditor;'));
+    assert.ok(appText.includes('window.runTmaEventAutopick = runTmaEventAutopick;'));
+    assert.ok(appText.includes('window.submitTmaEventEditor = submitTmaEventEditor;'));
+    assert.ok(appText.includes('window.handleTmaDeleteEvent = handleTmaDeleteEvent;'));
+    assert.ok(appText.includes('window.openTmaSectorDetail = openTmaSectorDetail;'));
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 
