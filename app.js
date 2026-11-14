@@ -3075,6 +3075,15 @@ async function saveMyCabinetProfile() {
   }
 }
 
+function renderStarCouponIconHtml(size = 16, extraClass = '') {
+  if (typeof logic !== 'undefined' && typeof logic.renderStarCouponIconHtml === 'function') {
+    return logic.renderStarCouponIconHtml(size, extraClass);
+  }
+  const s = Number(size) || 16;
+  const cls = extraClass ? ` ${extraClass}` : '';
+  return `<svg class="star-coupon-icon${cls}" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0" aria-label="Купон звезды"><defs><linearGradient id="starCouponGrad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#fde047"/><stop offset="50%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#d97706"/></linearGradient></defs><g transform="rotate(-24 12 12)"><path d="M4 6.5C3.45 6.5 3 6.95 3 7.5V10.2C4.1 10.2 5 11 5 12C5 13 4.1 13.8 3 13.8V16.5C3 17.05 3.45 17.5 4 17.5H20C20.55 17.5 21 17.05 21 16.5V13.8C19.9 13.8 19 13 19 12C19 11 19.9 10.2 21 10.2V7.5C21 6.95 20.55 6.5 20 6.5H4Z" fill="url(#starCouponGrad)" stroke="#78350f" stroke-width="1.1" stroke-linejoin="round"/><line x1="7.5" y1="7.5" x2="7.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/><line x1="16.5" y1="7.5" x2="16.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/><path d="M12 8.5L13.1 10.7L15.5 11L13.8 12.7L14.2 15.1L12 13.9L9.8 15.1L10.2 12.7L8.5 11L10.9 10.7L12 8.5Z" fill="#ffffff" stroke="#78350f" stroke-width="0.75" stroke-linejoin="round"/></g></svg>`;
+}
+
 let cabinetInlineEditingKey = null;
 
 function renderCabinetStockGridHtml(profile, totalStarPoints) {
@@ -3169,7 +3178,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   if (cabinetInlineEditingKey === 'starCoupons') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-star-coupons" onclick="event.stopPropagation()">
-        <div class="label">⭐ ${starCouponLabel}</div>
+        <div class="label">${renderStarCouponIconHtml(16)} ${starCouponLabel}</div>
         <div class="stock-inline-edit-wrap">
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" class="stock-inline-input" id="input-cabinet-star-coupons" value="${formatInputNumber(st.starCoupons || 0)}" onkeydown="handleCabinetInlineKey(event, 'starCoupons')">
           <div class="stock-inline-actions">
@@ -3183,7 +3192,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-star-coupons" onclick="openCabinetInline('starCoupons')" title="Нажмите, чтобы изменить купоны звезды">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">⭐ ${starCouponLabel}</div>
+        <div class="label">${renderStarCouponIconHtml(16)} ${starCouponLabel}</div>
         <div class="value" style="font-size:17px">${fmtNum(st.starCoupons || 0)}</div>
       </div>
     `);
@@ -3822,7 +3831,7 @@ function openResetMyOfficerModal(officerId) {
   const chips = [];
   if (d.coupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🏷️ Купоны: <strong>+${fmtNum(d.coupons)}</strong></span>`);
   if (d.puzzles > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🧩 Медали: <strong>+${fmtNum(d.puzzles)}</strong></span>`);
-  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
+  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px">${renderStarCouponIconHtml(14)} Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
   if (d.legendaryStars3 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды III: <strong>+${d.legendaryStars3}</strong></span>`);
   if (d.legendaryStars2 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды II: <strong>+${d.legendaryStars2}</strong></span>`);
   if (d.legendaryStars1 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды I: <strong>+${d.legendaryStars1}</strong></span>`);
@@ -7834,7 +7843,7 @@ function renderSectorStockGridHtml(p, canEditSector) {
   if (isEditing('starCoupons')) {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-sector-star-coupons-${pid}" onclick="event.stopPropagation()">
-        <div class="label">⭐ Купон звезды</div>
+        <div class="label">${renderStarCouponIconHtml(16)} Купон звезды</div>
         <div class="stock-inline-edit-wrap">
           <input type="number" class="stock-inline-input" id="input-sector-star-coupons-${pid}" min="0" value="${st.starCoupons || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'starCoupons')">
           <div class="stock-inline-actions">
@@ -7848,7 +7857,7 @@ function renderSectorStockGridHtml(p, canEditSector) {
     cards.push(`
       <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-star-coupons-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'starCoupons')" title="Нажмите для изменения купонов звезды"` : ''}>
         ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-        <div class="label">⭐ Купон звезды</div>
+        <div class="label">${renderStarCouponIconHtml(16)} Купон звезды</div>
         <div class="value">${fmtNum(st.starCoupons || 0)}</div>
       </div>
     `);
@@ -8478,7 +8487,7 @@ function openResetSectorOfficerModal(playerId, officerId) {
   const chips = [];
   if (d.coupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🏷️ Купоны: <strong>+${fmtNum(d.coupons)}</strong></span>`);
   if (d.puzzles > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🧩 Медали: <strong>+${fmtNum(d.puzzles)}</strong></span>`);
-  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
+  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px">${renderStarCouponIconHtml(14)} Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
   if (d.legendaryStars3 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды III: <strong>+${d.legendaryStars3}</strong></span>`);
   if (d.legendaryStars2 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды II: <strong>+${d.legendaryStars2}</strong></span>`);
   if (d.legendaryStars1 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды I: <strong>+${d.legendaryStars1}</strong></span>`);
@@ -13625,12 +13634,37 @@ function renderTmaCabinet() {
     `;
   }
 
+  const userSectors = getUserSectors();
+  let sectorSwitcherHtml = '';
+  if (userSectors.length > 1) {
+    const activeId = Number(player.id || currentUser?.playerId);
+    sectorSwitcherHtml = `
+      <div class="tma-sector-chips" id="tma-sector-switcher">
+        ${userSectors.map(s => {
+          const sId = Number(s.id);
+          const isActive = sId === activeId;
+          const sVip = s.sector?.vipLevel ?? s.vip ?? 0;
+          return `
+            <button type="button" class="tma-sector-chip ${isActive ? 'active' : ''}" onclick="handleTmaSwitchSector(${sId})">
+              <span>👑</span>
+              <span>${escapeHtml(s.name || 'Сектор #' + sId)}</span>
+              <span style="opacity:0.75;font-size:10px">(VIP ${sVip})</span>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
   container.innerHTML = `
+    ${sectorSwitcherHtml}
+
     <!-- Player Badge Card -->
     <div class="tma-card tma-card-gold" style="position:relative;overflow:hidden">
       <div style="position:absolute;right:-20px;bottom:-20px;width:100px;height:100px;background:rgba(245,158,11,0.1);border-radius:999px;filter:blur(24px);pointer-events:none"></div>
       
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <!-- Upper part: click to edit sector parameters -->
+      <div class="tma-card-clickable" onclick="openTmaSectorEditModal()" title="Нажмите для редактирования параметров сектора" style="display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08)">
         <div style="display:flex;align-items:center;gap:12px">
           <div class="tma-gold-gradient" style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#000;font-weight:900;font-size:15px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">
             KOW
@@ -13639,6 +13673,7 @@ function renderTmaCabinet() {
             <div style="display:flex;align-items:center;gap:8px">
               <h2 style="font-size:14.5px;font-weight:700;color:#fff;margin:0">${escapeHtml(playerName)}</h2>
               <span class="badge badge-warning" style="font-size:10px;font-weight:700;padding:2px 6px">${escapeHtml(role)}</span>
+              <span style="font-size:11px;opacity:0.75" title="Редактировать параметры сектора">✏️</span>
             </div>
             <p style="font-size:12px;color:#9ca3af;margin:2px 0 0 0">
               Сила: <strong style="color:#fff">${fmtNum(playerPower)}</strong> • VIP: <strong style="color:#fbbf24">${playerVip}</strong>
@@ -13652,20 +13687,26 @@ function renderTmaCabinet() {
         </span>
       </div>
 
-      <!-- Stock Grid -->
-      <div class="tma-stock-grid">
-        <div class="tma-stock-cell">
-          <div class="tma-stock-label">Купоны 🎟️</div>
-          <div class="tma-stock-val" style="color:#fbbf24">${fmtNum(stock.coupons || 0)}</div>
+      <!-- Stock Grid: click to edit stock reserves -->
+      <div class="tma-card-clickable" onclick="openTmaStockEditModal()" title="Нажмите для изменения запасов склада" style="padding-top:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:10.5px;color:#9ca3af;font-weight:600">Складские запасы</span>
+          <span style="font-size:10.5px;color:#fbbf24;font-weight:600">✏️ Изменить</span>
         </div>
-        <div class="tma-stock-cell">
-          <div class="tma-stock-label">Пазлы 🧩</div>
-          <div class="tma-stock-val" style="color:#38bdf8">${fmtNum(stock.puzzles || 0)}</div>
-        </div>
-        <div class="tma-stock-cell">
-          <div class="tma-stock-label">Звезды ⭐</div>
-          <div class="tma-stock-val" style="color:#c084fc">
-            ${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}
+        <div class="tma-stock-grid">
+          <div class="tma-stock-cell">
+            <div class="tma-stock-label">🎟️ Купон офицера</div>
+            <div class="tma-stock-val" style="color:#fbbf24">${fmtNum(stock.coupons || 0)}</div>
+          </div>
+          <div class="tma-stock-cell">
+            <div class="tma-stock-label">🧩 Медаль офицера</div>
+            <div class="tma-stock-val" style="color:#38bdf8">${fmtNum(stock.puzzles || 0)}</div>
+          </div>
+          <div class="tma-stock-cell">
+            <div class="tma-stock-label">🌟 Звезды I / II / III</div>
+            <div class="tma-stock-val" style="color:#c084fc">
+              ${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}
+            </div>
           </div>
         </div>
       </div>
@@ -14259,6 +14300,263 @@ async function openTmaEventDetail(eventId) {
   `;
 
   modal.style.display = 'flex';
+}
+
+function closeTmaModals() {
+  const m1 = document.getElementById('tma-sector-modal');
+  if (m1) m1.style.display = 'none';
+  const m2 = document.getElementById('tma-stock-modal');
+  if (m2) m2.style.display = 'none';
+  const m3 = document.getElementById('tma-event-modal');
+  if (m3) m3.style.display = 'none';
+}
+
+function closeTmaEventModal() {
+  closeTmaModals();
+}
+
+async function handleTmaSwitchSector(sectorId) {
+  tmaHaptic('selection');
+  try {
+    const sId = Number(sectorId);
+    if (!sId) return;
+    await apiFetch('/api/my-profile/active-sector', {
+      method: 'POST',
+      body: { sectorId: sId }
+    });
+    if (currentUser) {
+      currentUser.playerId = sId;
+    }
+    state.currentPlayerId = sId;
+    const nextSector = (state.players || []).find(p => Number(p.id) === sId);
+    if (nextSector) {
+      myCabinetProfile = nextSector;
+    }
+    tmaHaptic('success');
+    toast('Сектор переключен', 'success');
+    renderTmaCabinet();
+    if (typeof renderMyCabinet === 'function') {
+      renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка переключения сектора: ' + (err.message || err), 'error');
+  }
+}
+
+function openTmaSectorEditModal() {
+  tmaHaptic('light');
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+  const sec = player.sector || {};
+
+  const nameEl = document.getElementById('tma-sec-name');
+  if (nameEl) nameEl.value = player.name || '';
+
+  const vipEl = document.getElementById('tma-sec-vip');
+  if (vipEl) vipEl.value = (sec.vipLevel !== undefined && sec.vipLevel !== null) ? sec.vipLevel : (player.vip || 0);
+
+  const vipPtsEl = document.getElementById('tma-sec-vip-points');
+  if (vipPtsEl) vipPtsEl.value = formatInputNumber(sec.vipPoints || 0);
+
+  const hqEl = document.getElementById('tma-sec-hq');
+  if (hqEl) hqEl.value = sec.hqLevel || '';
+
+  const confEl = document.getElementById('tma-sec-conf');
+  if (confEl) confEl.value = sec.confidentialityLevel || 0;
+
+  const powerEl = document.getElementById('tma-sec-power');
+  if (powerEl) powerEl.value = formatInputNumber(sec.power || player.power || 0);
+
+  const killsEl = document.getElementById('tma-sec-kills');
+  if (killsEl) killsEl.value = formatInputNumber(sec.kills || player.kills || 0);
+
+  const killPtsEl = document.getElementById('tma-sec-kill-points');
+  if (killPtsEl) killPtsEl.value = formatInputNumber(sec.killPoints || player.killPoints || 0);
+
+  const modal = document.getElementById('tma-sector-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    bindAllNumericInputs(modal);
+  }
+}
+
+async function submitTmaSectorEdit() {
+  tmaHaptic('medium');
+  const name = document.getElementById('tma-sec-name')?.value?.trim();
+  const vipLevel = Math.max(0, Math.min(17, parseInt(document.getElementById('tma-sec-vip')?.value, 10) || 0));
+  const vipPoints = Math.max(0, parseInputNumber(document.getElementById('tma-sec-vip-points')?.value));
+  const hqVal = document.getElementById('tma-sec-hq')?.value;
+  const hqLevel = (hqVal !== undefined && hqVal !== '' && !isNaN(parseInt(hqVal, 10))) ? Math.max(1, parseInt(hqVal, 10)) : null;
+  const confidentialityLevel = Math.max(0, parseInt(document.getElementById('tma-sec-conf')?.value, 10) || 0);
+  const power = Math.max(0, parseInputNumber(document.getElementById('tma-sec-power')?.value));
+  const kills = Math.max(0, parseInputNumber(document.getElementById('tma-sec-kills')?.value));
+  const killPoints = Math.max(0, parseInputNumber(document.getElementById('tma-sec-kill-points')?.value, true));
+
+  if (!name) {
+    toast('Укажите ник в игре', 'error');
+    return;
+  }
+
+  try {
+    await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: {
+        name,
+        sector: { vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
+      }
+    });
+
+    const activePlayerId = Number(currentUser?.playerId || myCabinetProfile?.id);
+    const p = state.players.find(x => Number(x.id) === activePlayerId);
+    if (p) {
+      p.name = name;
+      p.power = power;
+      p.vip = vipLevel;
+      p.sector = { ...(p.sector || {}), vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints };
+    }
+    if (myCabinetProfile && Number(myCabinetProfile.id) === activePlayerId) {
+      myCabinetProfile.name = name;
+      myCabinetProfile.sector = { ...(myCabinetProfile.sector || {}), vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints };
+    }
+
+    tmaHaptic('success');
+    closeTmaModals();
+    toast('Параметры сектора сохранены', 'success');
+    renderTmaCabinet();
+    if (typeof renderMyCabinet === 'function') {
+      renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка сохранения параметров: ' + (err.message || err), 'error');
+  }
+}
+
+function openTmaStockEditModal() {
+  tmaHaptic('light');
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+  const stock = player.stock || {};
+
+  const coupEl = document.getElementById('tma-stock-coupons');
+  if (coupEl) coupEl.value = formatInputNumber(stock.coupons || 0);
+
+  const puzEl = document.getElementById('tma-stock-puzzles');
+  if (puzEl) puzEl.value = formatInputNumber(stock.puzzles || 0);
+
+  const chEl = document.getElementById('tma-stock-chests');
+  if (chEl) chEl.value = formatInputNumber(stock.chests || 0);
+
+  const starCoupEl = document.getElementById('tma-stock-star-coupons');
+  if (starCoupEl) starCoupEl.value = formatInputNumber(stock.starCoupons || 0);
+
+  const s1El = document.getElementById('tma-stock-stars-1');
+  if (s1El) s1El.value = formatInputNumber(stock.legendaryStars1 || 0);
+
+  const s2El = document.getElementById('tma-stock-stars-2');
+  if (s2El) s2El.value = formatInputNumber(stock.legendaryStars2 || 0);
+
+  const s3El = document.getElementById('tma-stock-stars-3');
+  if (s3El) s3El.value = formatInputNumber(stock.legendaryStars3 || 0);
+
+  const lblEl = document.getElementById('tma-stock-star-coupon-label');
+  if (lblEl) {
+    lblEl.innerHTML = `${renderStarCouponIconHtml(16)} Купон звезды`;
+  }
+
+  updateTmaLiveStarPoints();
+
+  const modal = document.getElementById('tma-stock-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    bindAllNumericInputs(modal);
+  }
+}
+
+function adjustTmaStockValue(field, delta) {
+  tmaHaptic('selection');
+  let elId = 'tma-stock-' + field;
+  if (field === 'starCoupons') elId = 'tma-stock-star-coupons';
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const current = parseInputNumber(el.value);
+  const next = Math.max(0, current + Number(delta || 0));
+  el.value = formatInputNumber(next);
+  if (field.startsWith('stars')) {
+    updateTmaLiveStarPoints();
+  }
+}
+
+function updateTmaLiveStarPoints() {
+  const s1 = parseInputNumber(document.getElementById('tma-stock-stars-1')?.value);
+  const s2 = parseInputNumber(document.getElementById('tma-stock-stars-2')?.value);
+  const s3 = parseInputNumber(document.getElementById('tma-stock-stars-3')?.value);
+  const calcFn = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints : null;
+  const total = calcFn ? calcFn({ legendaryStars1: s1, legendaryStars2: s2, legendaryStars3: s3 }) : ((s1 * 110) + (s2 * 420) + (s3 * 960));
+  const badge = document.getElementById('tma-stock-star-points-badge');
+  if (badge) {
+    badge.textContent = `✨ Итого очков звезд: ${fmtNum(total)}`;
+  }
+}
+
+async function confirmTmaStockFreshness() {
+  tmaHaptic('medium');
+  try {
+    await confirmMyStock();
+    tmaHaptic('success');
+    closeTmaModals();
+    renderTmaCabinet();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка подтверждения: ' + (err.message || err), 'error');
+  }
+}
+
+async function submitTmaStockEdit() {
+  tmaHaptic('medium');
+  const coupons = Math.max(0, parseInputNumber(document.getElementById('tma-stock-coupons')?.value));
+  const puzzles = Math.max(0, parseInputNumber(document.getElementById('tma-stock-puzzles')?.value));
+  const chests = Math.max(0, parseInputNumber(document.getElementById('tma-stock-chests')?.value));
+  const starCoupons = Math.max(0, parseInputNumber(document.getElementById('tma-stock-star-coupons')?.value));
+  const legendaryStars1 = Math.max(0, parseInputNumber(document.getElementById('tma-stock-stars-1')?.value));
+  const legendaryStars2 = Math.max(0, parseInputNumber(document.getElementById('tma-stock-stars-2')?.value));
+  const legendaryStars3 = Math.max(0, parseInputNumber(document.getElementById('tma-stock-stars-3')?.value));
+
+  const stock = { coupons, puzzles, chests, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3 };
+
+  try {
+    await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: { stock }
+    });
+
+    const activePlayerId = Number(currentUser?.playerId || myCabinetProfile?.id);
+    const p = state.players.find(x => Number(x.id) === activePlayerId);
+    if (p) {
+      p.stock = { ...(p.stock || {}), ...stock, updatedAt: new Date().toISOString() };
+    }
+    if (myCabinetProfile && Number(myCabinetProfile.id) === activePlayerId) {
+      myCabinetProfile.stock = { ...(myCabinetProfile.stock || {}), ...stock, updatedAt: new Date().toISOString() };
+    }
+
+    tmaHaptic('success');
+    closeTmaModals();
+    toast('Запасы склада успешно обновлены', 'success');
+    renderTmaCabinet();
+    if (typeof renderMyCabinet === 'function') {
+      renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка сохранения запасов: ' + (err.message || err), 'error');
+  }
 }
 
 function closeTmaEventModal() {

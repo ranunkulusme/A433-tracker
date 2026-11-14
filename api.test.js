@@ -6199,6 +6199,127 @@ test('Telegram Mini App dedicated UI, auto-auth, and bind-webapp endpoint', asyn
   }
 });
 
+test('Telegram Mini App sector and stock modal profile updates, active sector switching, and stock confirmation', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // Login as admin
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    const loginData = await loginRes.json();
+    const token = loginData.token;
+
+    // Create a new sector for this user
+    const createSecRes = await fetch(`${baseUrl}/api/my-sectors`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Bravo Outpost',
+        sector: { power: 12000000, vipLevel: 6 }
+      })
+    });
+    assert.equal(createSecRes.status, 201);
+    const sec2 = await createSecRes.json();
+
+    // 1. Switch active sector to sec2
+    const switchRes = await fetch(`${baseUrl}/api/my-profile/active-sector`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ sectorId: sec2.id })
+    });
+    assert.equal(switchRes.status, 200);
+    const switchData = await switchRes.json();
+    assert.equal(switchData.success, true);
+    assert.equal(switchData.activeSectorId, sec2.id);
+
+    // 2. TMA Sector Edit Modal submit
+    const sectorEditRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        name: 'Bravo Commander',
+        sector: {
+          vipLevel: 14,
+          vipPoints: 850000,
+          hqLevel: 35,
+          confidentialityLevel: 2,
+          power: 175000000,
+          kills: 3500000,
+          killPoints: 12000000
+        }
+      })
+    });
+    assert.equal(sectorEditRes.status, 200);
+    const secUpdated = await sectorEditRes.json();
+    assert.equal(secUpdated.name, 'Bravo Commander');
+    assert.equal(secUpdated.sector.vipLevel, 14);
+    assert.equal(secUpdated.sector.hqLevel, 35);
+    assert.equal(secUpdated.sector.power, 175000000);
+
+    // 3. TMA Stock Edit Modal submit
+    const stockEditRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        stock: {
+          coupons: 450000,
+          puzzles: 1800,
+          chests: 350,
+          starCoupons: 4200,
+          legendaryStars1: 850,
+          legendaryStars2: 95,
+          legendaryStars3: 18
+        }
+      })
+    });
+    assert.equal(stockEditRes.status, 200);
+    const stockUpdated = await stockEditRes.json();
+    assert.equal(stockUpdated.stock.coupons, 450000);
+    assert.equal(stockUpdated.stock.starCoupons, 4200);
+    assert.equal(stockUpdated.stock.chests, 350);
+
+    // 4. Confirm stock freshness
+    const confirmRes = await fetch(`${baseUrl}/api/my-profile/confirm-stock`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    assert.equal(confirmRes.status, 200);
+    const confirmData = await confirmRes.json();
+    assert.equal(confirmData.success, true);
+    assert.ok(confirmData.stockUpdatedAt);
+
+    // 5. Verify index.html and style.css contain TMA sector & stock modal elements
+    const indexRes = await fetch(`${baseUrl}/index.html`);
+    const indexHtml = await indexRes.text();
+    assert.ok(indexHtml.includes('id="tma-sector-modal"'));
+    assert.ok(indexHtml.includes('id="tma-stock-modal"'));
+    assert.ok(indexHtml.includes('id="tma-stock-star-coupons"'));
+
+    const cssRes = await fetch(`${baseUrl}/style.css`);
+    const cssText = await cssRes.text();
+    assert.ok(cssText.includes('.star-coupon-icon'));
+    assert.ok(cssText.includes('.tma-sector-chips'));
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 

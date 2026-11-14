@@ -4281,6 +4281,26 @@
     }
   }
 
+  function renderStarCouponIconHtml(size = 16, extraClass = '') {
+    const s = Number(size) || 16;
+    const cls = extraClass ? ` ${extraClass}` : '';
+    return `<svg class="star-coupon-icon${cls}" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0" aria-label="Купон звезды">` +
+      `<defs>` +
+        `<linearGradient id="starCouponGrad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">` +
+          `<stop offset="0%" stop-color="#fde047"/>` +
+          `<stop offset="50%" stop-color="#fbbf24"/>` +
+          `<stop offset="100%" stop-color="#d97706"/>` +
+        `</linearGradient>` +
+      `</defs>` +
+      `<g transform="rotate(-24 12 12)">` +
+        `<path d="M4 6.5C3.45 6.5 3 6.95 3 7.5V10.2C4.1 10.2 5 11 5 12C5 13 4.1 13.8 3 13.8V16.5C3 17.05 3.45 17.5 4 17.5H20C20.55 17.5 21 17.05 21 16.5V13.8C19.9 13.8 19 13 19 12C19 11 19.9 10.2 21 10.2V7.5C21 6.95 20.55 6.5 20 6.5H4Z" fill="url(#starCouponGrad)" stroke="#78350f" stroke-width="1.1" stroke-linejoin="round"/>` +
+        `<line x1="7.5" y1="7.5" x2="7.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/>` +
+        `<line x1="16.5" y1="7.5" x2="16.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/>` +
+        `<path d="M12 8.5L13.1 10.7L15.5 11L13.8 12.7L14.2 15.1L12 13.9L9.8 15.1L10.2 12.7L8.5 11L10.9 10.7L12 8.5Z" fill="#ffffff" stroke="#78350f" stroke-width="0.75" stroke-linejoin="round"/>` +
+      `</g>` +
+    `</svg>`;
+  }
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -4396,6 +4416,7 @@
     getTelegramOcrConfirmationKeyboard,
     getTelegramStockFallbackKeyboard,
     validateTelegramWebAppData,
+    renderStarCouponIconHtml,
     escapeHtml,
   };
 });

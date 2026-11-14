@@ -3857,5 +3857,18 @@ test('validateTelegramWebAppData HMAC validation and expiration', () => {
   assert.equal(res4.error, 'missing_hash');
 });
 
+test('renderStarCouponIconHtml generates tilted ticket SVG with star', () => {
+  const logic = require('./logic.js');
+  assert.equal(typeof logic.renderStarCouponIconHtml, 'function');
+  const svgDefault = logic.renderStarCouponIconHtml();
+  assert.ok(svgDefault.includes('<svg class="star-coupon-icon" width="16" height="16"'));
+  assert.ok(svgDefault.includes('transform="rotate(-24 12 12)"'));
+  assert.ok(svgDefault.includes('linearGradient id="starCouponGrad"'));
+  assert.ok(svgDefault.includes('aria-label="Купон звезды"'));
+
+  const svgCustom = logic.renderStarCouponIconHtml(24, 'custom-class');
+  assert.ok(svgCustom.includes('<svg class="star-coupon-icon custom-class" width="24" height="24"'));
+});
+
 
 

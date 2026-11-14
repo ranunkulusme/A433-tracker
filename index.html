@@ -505,6 +505,163 @@
       <!-- Populated dynamically by openTmaEventDetail -->
     </div>
   </div>
+
+  <!-- TMA Sector Edit Modal / Bottom Sheet -->
+  <div id="tma-sector-modal" class="tma-modal" style="display:none" onclick="closeTmaModals()">
+    <div class="tma-modal-sheet" id="tma-sector-modal-sheet" onclick="event.stopPropagation()">
+      <div class="tma-modal-header">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Личный кабинет</div>
+          <h3 style="font-size:15px;font-weight:700;color:#fff;margin:2px 0 0 0">👑 Параметры сектора</h3>
+        </div>
+        <button type="button" class="modal-close" onclick="closeTmaModals()" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px">
+        <div class="form-group" style="margin-bottom:0">
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Ник в игре (Название сектора) *</label>
+          <input type="text" id="tma-sec-name" class="tma-input" placeholder="Никнейм в игре">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Уровень VIP (0-17)</label>
+            <input type="number" id="tma-sec-vip" min="0" max="17" class="tma-input" placeholder="13">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Очки VIP</label>
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-sec-vip-points" class="tma-input" placeholder="0">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Ур. штаба (1-50)</label>
+            <input type="number" id="tma-sec-hq" min="1" max="50" class="tma-input" placeholder="не указан">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Конфиденциальность</label>
+            <input type="number" id="tma-sec-conf" min="0" class="tma-input" placeholder="0">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Мощь / Сила</label>
+          <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-sec-power" class="tma-input" style="font-family:var(--mono);font-weight:700" placeholder="0">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Убито</label>
+            <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-sec-kills" class="tma-input" style="font-family:var(--mono)" placeholder="0">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Очки за убийство</label>
+            <input type="text" inputmode="decimal" autocomplete="off" id="tma-sec-kill-points" class="tma-input" style="font-family:var(--mono)" placeholder="0">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;padding-top:8px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08)">
+          <button type="button" class="btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
+          <button type="button" class="btn-primary" onclick="submitTmaSectorEdit()" style="flex:2;padding:10px;font-size:12.5px;font-weight:700">💾 Сохранить параметры</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TMA Stock Edit Modal / Bottom Sheet -->
+  <div id="tma-stock-modal" class="tma-modal" style="display:none" onclick="closeTmaModals()">
+    <div class="tma-modal-sheet" id="tma-stock-modal-sheet" onclick="event.stopPropagation()">
+      <div class="tma-modal-header">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Личный кабинет</div>
+          <h3 style="font-size:15px;font-weight:700;color:#fff;margin:2px 0 0 0">📦 Запасы гильдейца</h3>
+        </div>
+        <button type="button" class="modal-close" onclick="closeTmaModals()" style="background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px">
+        <!-- Freshness confirmation button -->
+        <button type="button" onclick="confirmTmaStockFreshness()" class="tma-stock-confirm-btn" style="width:100%;padding:10px 14px;border-radius:12px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">
+          <span>✅</span>
+          <span>Данные актуальны (подтвердить свежесть на сегодня)</span>
+        </button>
+
+        <!-- 1. Купон офицера -->
+        <div class="tma-stock-edit-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:700;color:#fbbf24">🎟️ Купон офицера</span>
+            <div style="display:flex;gap:4px">
+              <button type="button" onclick="adjustTmaStockValue('coupons', 1000)" class="tma-quick-btn">+1к</button>
+              <button type="button" onclick="adjustTmaStockValue('coupons', 10000)" class="tma-quick-btn">+10к</button>
+              <button type="button" onclick="adjustTmaStockValue('coupons', 50000)" class="tma-quick-btn">+50к</button>
+            </div>
+          </div>
+          <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-coupons" class="tma-input" style="font-family:var(--mono);font-weight:700">
+        </div>
+
+        <!-- 2. Медаль офицера -->
+        <div class="tma-stock-edit-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:700;color:#38bdf8">🧩 Медаль офицера</span>
+            <div style="display:flex;gap:4px">
+              <button type="button" onclick="adjustTmaStockValue('puzzles', 100)" class="tma-quick-btn">+100</button>
+              <button type="button" onclick="adjustTmaStockValue('puzzles', 500)" class="tma-quick-btn">+500</button>
+            </div>
+          </div>
+          <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-puzzles" class="tma-input" style="font-family:var(--mono);font-weight:700">
+        </div>
+
+        <!-- 3. Сундук выбора -->
+        <div class="tma-stock-edit-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:700;color:#fde68a">📦 Сундук выбора</span>
+            <div style="display:flex;gap:4px">
+              <button type="button" onclick="adjustTmaStockValue('chests', 50)" class="tma-quick-btn">+50</button>
+              <button type="button" onclick="adjustTmaStockValue('chests', 200)" class="tma-quick-btn">+200</button>
+            </div>
+          </div>
+          <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-chests" class="tma-input" style="font-family:var(--mono);font-weight:700">
+        </div>
+
+        <!-- 4. Купон звезды -->
+        <div class="tma-stock-edit-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span id="tma-stock-star-coupon-label" style="font-size:12px;font-weight:700;color:#fbbf24;display:inline-flex;align-items:center;gap:4px">
+              Купон звезды
+            </span>
+            <div style="display:flex;gap:4px">
+              <button type="button" onclick="adjustTmaStockValue('starCoupons', 100)" class="tma-quick-btn">+100</button>
+              <button type="button" onclick="adjustTmaStockValue('starCoupons', 500)" class="tma-quick-btn">+500</button>
+            </div>
+          </div>
+          <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-star-coupons" class="tma-input" style="font-family:var(--mono);font-weight:700">
+        </div>
+
+        <!-- 5. Звезды I / II / III -->
+        <div class="tma-stock-edit-card">
+          <div style="font-size:12px;font-weight:700;color:#c084fc;margin-bottom:6px">
+            🌟 Звезды I (110) / II (420) / III (960)
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:10px;color:#9ca3af;display:block;margin-bottom:2px">I (110)</label>
+              <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-stars-1" class="tma-input" style="font-family:var(--mono);font-weight:700" oninput="updateTmaLiveStarPoints()">
+            </div>
+            <div>
+              <label style="font-size:10px;color:#9ca3af;display:block;margin-bottom:2px">II (420)</label>
+              <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-stars-2" class="tma-input" style="font-family:var(--mono);font-weight:700" oninput="updateTmaLiveStarPoints()">
+            </div>
+            <div>
+              <label style="font-size:10px;color:#9ca3af;display:block;margin-bottom:2px">III (960)</label>
+              <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-stock-stars-3" class="tma-input" style="font-family:var(--mono);font-weight:700" oninput="updateTmaLiveStarPoints()">
+            </div>
+          </div>
+          <div id="tma-stock-star-points-badge" style="margin-top:8px;padding:6px 10px;border-radius:8px;background:rgba(192,132,252,0.1);border:1px solid rgba(192,132,252,0.25);color:#c084fc;font-size:11.5px;font-weight:700;text-align:center">
+            ✨ Итого очков звезд: 0
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;padding-top:8px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08)">
+          <button type="button" class="btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
+          <button type="button" class="btn-primary" onclick="submitTmaStockEdit()" style="flex:2;padding:10px;font-size:12.5px;font-weight:700">💾 Сохранить запасы</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Overlay -->
@@ -1476,7 +1633,24 @@
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-puzzles" value="0">
           </div>
           <div class="form-group">
-            <label for="scanner-preview-star-coupons">Купон готовности звезды</label>
+            <label for="scanner-preview-star-coupons" style="display:flex;align-items:center;gap:4px">
+              <svg class="star-coupon-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0" aria-label="Купон звезды">
+                <defs>
+                  <linearGradient id="starCouponGradScanner" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="#fde047"/>
+                    <stop offset="50%" stop-color="#fbbf24"/>
+                    <stop offset="100%" stop-color="#d97706"/>
+                  </linearGradient>
+                </defs>
+                <g transform="rotate(-24 12 12)">
+                  <path d="M4 6.5C3.45 6.5 3 6.95 3 7.5V10.2C4.1 10.2 5 11 5 12C5 13 4.1 13.8 3 13.8V16.5C3 17.05 3.45 17.5 4 17.5H20C20.55 17.5 21 17.05 21 16.5V13.8C19.9 13.8 19 13 19 12C19 11 19.9 10.2 21 10.2V7.5C21 6.95 20.55 6.5 20 6.5H4Z" fill="url(#starCouponGradScanner)" stroke="#78350f" stroke-width="1.1" stroke-linejoin="round"/>
+                  <line x1="7.5" y1="7.5" x2="7.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/>
+                  <line x1="16.5" y1="7.5" x2="16.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/>
+                  <path d="M12 8.5L13.1 10.7L15.5 11L13.8 12.7L14.2 15.1L12 13.9L9.8 15.1L10.2 12.7L8.5 11L10.9 10.7L12 8.5Z" fill="#ffffff" stroke="#78350f" stroke-width="0.75" stroke-linejoin="round"/>
+                </g>
+              </svg>
+              <span>Купон готовности звезды</span>
+            </label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="scanner-preview-star-coupons" value="0">
           </div>
         </div>
