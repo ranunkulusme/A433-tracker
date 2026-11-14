@@ -6320,6 +6320,161 @@ test('Telegram Mini App sector and stock modal profile updates, active sector sw
   }
 });
 
+test('Telegram Mini App sector officers management, calculator target picker, stock deduction and parity', async () => {
+  const { startServer } = require('./server.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Login as admin
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    assert.equal(loginRes.status, 200);
+    const { token } = await loginRes.json();
+
+    // 2. Fetch catalog to get available catalog officers
+    const catRes = await fetch(`${baseUrl}/api/catalog`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    assert.equal(catRes.status, 200);
+    const catalog = await catRes.json();
+    assert.ok(catalog.length > 0);
+    const testCat = catalog[0];
+
+    // 3. Set starting warehouse stock
+    const initStockRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        stock: {
+          coupons: 500000,
+          puzzles: 1000,
+          chests: 100,
+          starCoupons: 2500,
+          legendaryStars1: 500,
+          legendaryStars2: 50,
+          legendaryStars3: 10
+        }
+      })
+    });
+    assert.equal(initStockRes.status, 200);
+
+    // 4. Add new officer via TMA officer form
+    const addOffRes = await fetch(`${baseUrl}/api/my-profile/officers`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        catalogId: testCat.id,
+        name: testCat.name,
+        level: 60,
+        stars: 3,
+        skills: [2, 1, 1, 1],
+        personalPuzzles: 50,
+        onlyPersonalPuzzles: false
+      })
+    });
+    assert.equal(addOffRes.status, 200);
+    const createdOff = await addOffRes.json();
+    assert.equal(createdOff.name, testCat.name);
+    assert.equal(createdOff.level, 60);
+    assert.equal(createdOff.stars, 3);
+    assert.deepEqual(createdOff.skills, [2, 1, 1, 1]);
+    assert.equal(createdOff.personalPuzzles, 50);
+
+    // 5. Update officer parameters with warehouse stock deduction
+    const deductCoupons = 10000;
+    const deductStars = 250;
+    const updateOffRes = await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        level: 120,
+        stars: 4,
+        skills: [5, 4, 3, 2],
+        personalPuzzles: 20,
+        onlyPersonalPuzzles: true
+      })
+    });
+    assert.equal(updateOffRes.status, 200);
+
+    const updateStockRes = await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        stock: {
+          coupons: 500000 - deductCoupons,
+          puzzles: 950,
+          chests: 100,
+          starCoupons: 2500 - deductStars,
+          legendaryStars1: 500,
+          legendaryStars2: 50,
+          legendaryStars3: 10
+        }
+      })
+    });
+    assert.equal(updateStockRes.status, 200);
+    const updatedProfile = await updateStockRes.json();
+    assert.equal(updatedProfile.stock.coupons, 490000);
+    assert.equal(updatedProfile.stock.starCoupons, 2250);
+
+    // 6. Delete officer
+    const delRes = await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    assert.equal(delRes.status, 200);
+
+    // 7. Verify index.html contains TMA officer picker and modal elements
+    const indexRes = await fetch(`${baseUrl}/index.html`);
+    const indexHtml = await indexRes.text();
+    assert.ok(indexHtml.includes('id="tma-officers-picker-modal"'));
+    assert.ok(indexHtml.includes('id="tma-officer-modal"'));
+    assert.ok(indexHtml.includes('id="tma-off-catalog-select"'));
+    assert.ok(indexHtml.includes('id="tma-off-mode-retro"'));
+    assert.ok(indexHtml.includes('id="tma-off-mode-normal"'));
+    assert.ok(indexHtml.includes('id="tma-off-level"'));
+    assert.ok(indexHtml.includes('id="tma-off-personal-puzzles"'));
+    assert.ok(indexHtml.includes('id="tma-off-only-personal"'));
+
+    // 8. Verify style.css contains TMA officer styles
+    const cssRes = await fetch(`${baseUrl}/style.css`);
+    const cssText = await cssRes.text();
+    assert.ok(cssText.includes('.tma-officer-card'));
+    assert.ok(cssText.includes('.tma-skill-btn'));
+    assert.ok(cssText.includes('.tma-star-btn'));
+    assert.ok(cssText.includes('.tma-target-star-btn'));
+
+    // 9. Verify app.js exports TMA officer functions
+    const appRes = await fetch(`${baseUrl}/app.js`);
+    const appText = await appRes.text();
+    assert.ok(appText.includes('window.openTmaOfficersPickerModal = openTmaOfficersPickerModal;'));
+    assert.ok(appText.includes('window.selectTmaTargetOfficer = selectTmaTargetOfficer;'));
+    assert.ok(appText.includes('window.openTmaAddOfficerModal = openTmaAddOfficerModal;'));
+    assert.ok(appText.includes('window.openTmaEditOfficerModal = openTmaEditOfficerModal;'));
+    assert.ok(appText.includes('window.submitTmaOfficerEdit = submitTmaOfficerEdit;'));
+    assert.ok(appText.includes('window.deleteTmaCurrentOfficer = deleteTmaCurrentOfficer;'));
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 
