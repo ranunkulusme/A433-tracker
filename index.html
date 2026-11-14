@@ -844,13 +844,13 @@
             <!-- Places rows rendered dynamically -->
           </div>
         </div>
+      </div>
 
-        <!-- Actions -->
-        <div style="display:flex;gap:8px;padding-top:8px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08)">
-          <button type="button" id="tma-ee-delete-btn" class="btn-danger" onclick="deleteTmaCurrentEvent()" style="padding:10px;font-size:12px;font-weight:700;display:none">🗑️</button>
-          <button type="button" class="btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
-          <button type="button" class="btn-primary" onclick="submitTmaEventEditor()" style="flex:2;padding:10px;font-size:12.5px;font-weight:700" id="tma-ee-save-btn">💾 Опубликовать</button>
-        </div>
+      <!-- Pinned Footer Actions -->
+      <div class="tma-modal-footer">
+        <button type="button" id="tma-ee-delete-btn" class="btn-danger" onclick="deleteTmaCurrentEvent()" style="padding:10px 14px;font-size:12px;font-weight:700;display:none;border-radius:10px">🗑️</button>
+        <button type="button" class="btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px;border-radius:10px">Отмена</button>
+        <button type="button" onclick="submitTmaEventEditor()" style="flex:2;padding:10px;font-size:12.5px;font-weight:800;border-radius:10px;background:#fbbf24;color:#000;border:none;cursor:pointer" id="tma-ee-save-btn">💾 Опубликовать</button>
       </div>
     </div>
   </div>

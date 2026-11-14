@@ -13764,14 +13764,16 @@ function renderTmaCabinet() {
 
     <!-- Target Officer Progression Simulator -->
     <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer" title="Нажмите, чтобы выбрать офицера в калькулятор">
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:8px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="color:#9ca3af;font-weight:600">🎯 Калькулятор прокачки:</span>
-          <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3)">Сменить ⭐</span>
         </div>
-        <span style="color:#fbbf24;font-weight:700">
-          ${escapeHtml(officerName)} <span style="color:#fde68a">(${escapeHtml(skillsStr)})</span>
-        </span>
+        <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <span style="color:#fbbf24;font-weight:700">
+            ${escapeHtml(officerName)} <span style="color:#fde68a">(${escapeHtml(skillsStr)})</span>
+          </span>
+          <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3);white-space:nowrap">Сменить ⭐</span>
+        </div>
       </div>
 
       <!-- Progress Track -->
@@ -13808,6 +13810,15 @@ function renderTmaCabinet() {
   `;
 }
 
+function getTmaEventIcon(title = '') {
+  const low = (title || '').toLowerCase();
+  if (low.includes('сил') || low.includes('войн') || low.includes('битв') || low.includes('war')) return '⚔️';
+  if (low.includes('врем') || low.includes('time')) return '⏳';
+  if (low.includes('огн') || low.includes('fire')) return '🔥';
+  if (low.includes('звезд') || low.includes('star')) return '⭐';
+  return '🏆';
+}
+
 function renderTmaEvents() {
   const container = document.getElementById('tma-tab-events');
   if (!container) return;
@@ -13819,6 +13830,7 @@ function renderTmaEvents() {
     || {};
 
   const myPlayerId = player.id || currentUser?.playerId;
+  const isStaff = currentUser?.rank === 'r4' || currentUser?.rank === 'r5' || (typeof logic !== 'undefined' && logic.hasUserPermission(currentUser, 'manage_events'));
 
   // Sort upcoming and past events
   const upcomingEvents = (state.events || [])
@@ -13841,62 +13853,110 @@ function renderTmaEvents() {
   } else {
     upcomingHtml = upcomingEvents.map(ev => {
       const myReg = (ev.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
-      const evDate = (ev.startDate || ev.dateStart || ev.dateFrom)
-        ? new Date(ev.startDate || ev.dateStart || ev.dateFrom).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })
-        : 'Дата уточняется';
+      const evTitle = ev.title || ev.name || ('Событие #' + ev.id);
+      const evIcon = getTmaEventIcon(evTitle);
+
+      const dStart = ev.startDate || ev.dateStart || ev.dateFrom;
+      const dEnd = ev.endDate || ev.dateEnd || ev.dateTo;
+      let evDateRange = '';
+      if (dStart) {
+        const sStr = new Date(dStart).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+        if (dEnd) {
+          const eStr = new Date(dEnd).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+          evDateRange = `${sStr} — ${eStr}`;
+        } else {
+          evDateRange = sStr;
+        }
+      } else {
+        evDateRange = 'Дата уточняется';
+      }
+
       const maxPlaces = (ev.places && ev.places.length) || ev.placesCount || ev.maxPlaces || 5;
 
-      let actionBlock = '';
+      // Status badge
+      let statusBadgeHtml = '';
       if (myReg) {
         const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
-        actionBlock = `
-          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:16px">🎯</span>
-              <span style="font-size:12px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeStr}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              <button type="button" onclick="event.stopPropagation();openTmaEventDetail(${ev.id})" style="background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.4);color:#fbbf24;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;padding:4px 8px">
-                Участники ↗
-              </button>
-              <button type="button" onclick="event.stopPropagation();handleTmaUnregisterEvent(${ev.id})" style="background:none;border:none;color:#ef4444;font-size:11px;font-weight:700;cursor:pointer;padding:4px 6px">
-                ✕ Отменить
-              </button>
-            </div>
-          </div>
+        statusBadgeHtml = `
+          <span style="padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">
+            Вы записаны (${placeStr})
+          </span>
         `;
       } else {
-        const placesArr = (ev.places && ev.places.length > 0) ? ev.places : [
-          { place: 1, coupons: 0 },
-          { place: 2, coupons: 0 },
-          { place: 3, coupons: 0 }
-        ];
-        const buttons = placesArr.map(p => {
-          const couponStr = p.coupons ? ` (${formatTmaCouponsShort(p.coupons)})` : '';
-          return `<button type="button" onclick="event.stopPropagation();handleTmaRegisterEvent(${ev.id}, ${p.place})" class="tma-event-reg-btn">#${p.place}${couponStr}</button>`;
-        });
-        buttons.push(`<button type="button" onclick="event.stopPropagation();handleTmaRegisterEvent(${ev.id}, 0)" class="tma-event-reg-btn">Любое</button>`);
+        statusBadgeHtml = `
+          <span style="padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.25)">
+            Запись
+          </span>
+        `;
+      }
 
-        actionBlock = `
-          <p style="font-size:12px;color:#d1d5db;margin:8px 0 6px 0">Подайте заявку на желаемое призовое место:</p>
-          <div style="display:grid;grid-template-columns:repeat(${Math.min(4, buttons.length)}, 1fr);gap:6px">
-            ${buttons.join('')}
+      const staffPencilHtml = isStaff ? `
+        <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" style="padding:3px 7px;border-radius:6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#d1d5db;font-size:11px;cursor:pointer" title="Редактировать событие">
+          ✏️
+        </button>
+      ` : '';
+
+      // Top-3 prizes snippet
+      const placesArr = (ev.places && ev.places.length > 0) ? ev.places : (ev.eventType?.places || []);
+      const top3 = placesArr.slice(0, 3);
+      let prizesSnippetHtml = '';
+      if (top3.length > 0) {
+        prizesSnippetHtml = `
+          <div style="display:grid;grid-template-columns:repeat(${Math.min(3, top3.length)}, 1fr);gap:6px;margin:10px 0">
+            ${top3.map(p => `
+              <div style="background:#1f242e;padding:6px;border-radius:8px;text-align:center;border:1px solid rgba(255,255,255,0.04)">
+                <span style="font-size:9.5px;color:#9ca3af;display:block">#${p.place} место</span>
+                <span style="font-size:11.5px;font-weight:800;color:#fbbf24">${fmtNum(p.coupons || 0)} 🎟️</span>
+              </div>
+            `).join('')}
           </div>
         `;
       }
 
-      return `
-        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="margin-bottom:12px;cursor:pointer">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div>
-              <h3 style="font-size:14px;font-weight:700;color:#fff;margin:0">${escapeHtml(ev.title || ev.name || 'Событие #' + ev.id)}</h3>
-              <p style="font-size:11.5px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDate)} • ${maxPlaces} мест</p>
+      // My registration row if registered
+      let myRegBanner = '';
+      if (myReg) {
+        const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+        myRegBanner = `
+          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:6px 10px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:13px">🎯</span>
+              <span style="font-size:11px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeStr}</span>
             </div>
-            <span style="padding:2px 8px;font-size:10px;font-weight:700;background:rgba(245,158,11,0.2);color:#fbbf24;border-radius:6px;border:1px solid rgba(245,158,11,0.3)">
-              Открыта запись • Инфо ↗
+            <button type="button" onclick="event.stopPropagation();handleTmaUnregisterEvent(${ev.id})" style="background:none;border:none;color:#ef4444;font-size:10.5px;font-weight:700;cursor:pointer;padding:2px 4px">
+              ✕ Отменить
+            </button>
+          </div>
+        `;
+      }
+
+      const regCount = (ev.registrations || []).length;
+
+      return `
+        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#161a22;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between">
+            <div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:14px">${evIcon}</span>
+                <h3 style="font-size:13px;font-weight:800;color:#fff;margin:0">${escapeHtml(evTitle)}</h3>
+              </div>
+              <p style="font-size:11px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDateRange)} • ${maxPlaces} призовых мест</p>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              ${staffPencilHtml}
+              ${statusBadgeHtml}
+            </div>
+          </div>
+
+          ${prizesSnippetHtml}
+          ${myRegBanner}
+
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9ca3af;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
+            <span>Заявок бойцов: <strong style="color:#fff">${regCount}</strong></span>
+            <span style="color:#fbbf24;font-weight:700;display:flex;align-items:center;gap:2px">
+              Участники и назначения ↗
             </span>
           </div>
-          ${actionBlock}
         </div>
       `;
     }).join('');
@@ -13913,6 +13973,8 @@ function renderTmaEvents() {
     `;
   } else {
     pastHtml = pastEvents.map(ev => {
+      const evTitle = ev.title || ev.name || ('Событие #' + ev.id);
+      const evIcon = getTmaEventIcon(evTitle);
       const evDate = (ev.startDate || ev.dateStart || ev.dateFrom)
         ? new Date(ev.startDate || ev.dateStart || ev.dateFrom).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
         : '';
@@ -13921,71 +13983,64 @@ function renderTmaEvents() {
       let myResBlock = '';
       if (myRes) {
         myResBlock = `
-          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;margin:8px 0">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:18px">🎯</span>
+          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;margin:8px 0">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:15px">🎯</span>
               <div>
-                <div style="font-size:12px;font-weight:700;color:#fde68a">Ваш результат: Место #${myRes.place || myRes.actualPlace || 1}</div>
-                <div style="font-size:10px;color:#9ca3af">Заявка выполнена на 100%</div>
+                <div style="font-size:11.5px;font-weight:700;color:#fde68a">Ваш результат: Место #${myRes.place || myRes.actualPlace || 1}</div>
               </div>
             </div>
-            <span style="font-size:12px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.2);padding:4px 8px;border-radius:8px;border:1px solid rgba(245,158,11,0.3)">
+            <span style="font-size:11.5px;font-weight:800;color:#fbbf24">
               +${fmtNum(myRes.couponsWon || myRes.prizeCoupons || 40000)} 🎟️
             </span>
           </div>
         `;
       }
 
-      // Winners snippet
-      let winnersSnippet = '';
+      let winnerHtml = '';
       if (ev.results && ev.results.length > 0) {
-        const top3 = ev.results.slice(0, 3);
-        winnersSnippet = `
-          <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);font-size:11.5px">
-            <div style="color:#9ca3af;font-size:10.5px;font-weight:600;margin-bottom:4px">Призёры альянса:</div>
-            ${top3.map((w, idx) => {
-              const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : '🥉');
-              const isMe = Number(w.playerId || w.sectorId) === Number(myPlayerId);
-              const pName = w.playerName || w.sectorName || `Sector ${w.playerId || w.sectorId}`;
-              return `
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;${isMe ? 'color:#fbbf24;font-weight:700' : 'color:#d1d5db'}">
-                  <span>${medal} #${w.place || (idx + 1)} ${escapeHtml(pName)}${isMe ? ' [Вы]' : ''}</span>
-                  <span style="color:#fbbf24;font-family:monospace">+${fmtNum(w.couponsWon || 30000)} 🎟️</span>
-                </div>
-              `;
-            }).join('')}
+        const first = ev.results[0];
+        const pName = first.playerName || first.sectorName || `Sector ${first.playerId || first.sectorId}`;
+        winnerHtml = `
+          <div style="margin-top:6px;font-size:11.5px;color:#fbbf24;font-weight:700">
+            🏆 Победитель: ${escapeHtml(pName)} (+${fmtNum(first.couponsWon || 30000)} 🎟️)
           </div>
         `;
       }
 
       return `
-        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="margin-bottom:12px;cursor:pointer">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div>
-              <h3 style="font-size:14px;font-weight:700;color:#fff;margin:0">${escapeHtml(ev.title || ev.name || 'Событие #' + ev.id)}</h3>
-              <p style="font-size:11.5px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDate)}</p>
+        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#161a22;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:14px">${evIcon}</span>
+              <div>
+                <h3 style="font-size:13px;font-weight:800;color:#d1d5db;margin:0">${escapeHtml(evTitle)}</h3>
+                <p style="font-size:10.5px;color:#6b7280;margin:2px 0 0 0">${escapeHtml(evDate)}</p>
+              </div>
             </div>
-            <span style="padding:2px 8px;font-size:10px;font-weight:600;background:#1f242e;color:#9ca3af;border-radius:6px">
-              ◌ Завершён • Детали ↗
+            <span style="font-size:10px;padding:2px 6px;background:#1f242e;color:#9ca3af;border-radius:4px;border:1px solid rgba(255,255,255,0.04)">
+              Архив
             </span>
           </div>
+          ${winnerHtml}
           ${myResBlock}
-          ${winnersSnippet}
+          <div style="display:flex;align-items:center;justify-content:flex-end;font-size:11px;color:#fbbf24;font-weight:700;padding-top:6px;margin-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
+            <span>Результаты и участники ↗</span>
+          </div>
         </div>
       `;
     }).join('');
   }
 
-  const isStaff = currentUser?.rank === 'r4' || currentUser?.rank === 'r5' || (typeof logic !== 'undefined' && logic.hasUserPermission(currentUser, 'manage_events'));
   const isUp = tmaEventsSubTab === 'upcoming';
   container.innerHTML = `
     ${isStaff ? `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
-        <span style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
+        <span style="font-size:11px;font-weight:800;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
           Управление событиями (Р4/Р5)
         </span>
-        <button type="button" class="btn-primary btn-sm" onclick="openTmaEventEditor(null)" style="font-size:11.5px;padding:5px 12px;font-weight:700;display:flex;align-items:center;gap:4px">
-          <span>+</span> <span>Создать событие</span>
+        <button type="button" onclick="openTmaEventEditor(null)" style="padding:5px 12px;border-radius:8px;background:#fbbf24;color:#000;font-weight:800;font-size:11.5px;border:none;cursor:pointer;display:flex;align-items:center;gap:4px;box-shadow:0 2px 10px rgba(245,158,11,0.25)">
+          <span style="font-size:13px;font-weight:900;line-height:1">+</span> Создать событие
         </button>
       </div>
     ` : ''}
@@ -14462,6 +14517,8 @@ function openTmaEventEditor(eventId = null) {
   }
 
   renderTmaEventEditorPlaces();
+  const modalBody = modal.querySelector('.tma-modal-body');
+  if (modalBody) modalBody.scrollTop = 0;
   modal.style.display = 'flex';
 }
 
