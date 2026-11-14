@@ -675,8 +675,8 @@
   }
 
   function dailyRewards(sector, vipTiers) {
-    const vip = Number(sector?.vipLevel) || 0;
-    const confidentiality = Number(sector?.confidentialityLevel) || 0;
+    const vip = Number(sector?.vipLevel ?? sector?.vip ?? sector?.vip_level) || 0;
+    const confidentiality = Number(sector?.confidentialityLevel ?? sector?.confidentiality ?? sector?.confidentiality_level) || 0;
     let vipPuzzles = 0;
     if (Array.isArray(vipTiers) && vipTiers.length > 0) {
       const tier = vipTiers.find(t => t.level === vip);
@@ -1073,7 +1073,7 @@
     const deficitPuzzles = Math.max(0, targetPuzzles - currentPuzzles - stockPuzzles);
     const deficitCoupons = costPerPuzzle > 0 ? deficitPuzzles * costPerPuzzle : 0;
 
-    const daily = dailyRewards(player?.sector);
+    const daily = dailyRewards(player?.sector || player);
     const dailyIncome = isOnlyPersonalPuzzles ? 0 : daily.puzzlesPerDay;
 
     const daysWithoutEvents = isOnlyPersonalPuzzles
@@ -1105,6 +1105,7 @@
       daysWithoutEvents,
       estimatedDays: daysWithoutEvents,
       dateWithoutEvents,
+      forecastDate: dateWithoutEvents,
       isOnlyPersonalPuzzles,
       starRequirement: {
         currentStars,

@@ -13640,19 +13640,21 @@ function renderTmaCabinet() {
       if (def.isOnlyPersonalPuzzles) {
         remainingCoupons = 0;
         remainingDays = 0;
-        isFull = skillsFull;
-        progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((sumSkills / 20) * 100)));
+        isFull = (def.deficitPuzzles === 0);
+        const currentPuz = (def.currentPuzzles || 0);
+        const targetPuz = def.targetPuzzles || 900;
+        progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((currentPuz / Math.max(1, targetPuz)) * 100)));
       } else {
         remainingCoupons = def.deficitCoupons || 0;
         remainingDays = def.daysWithoutEvents !== null ? def.daysWithoutEvents : 0;
-        isFull = (def.deficitPuzzles === 0 && def.deficitCoupons === 0) || skillsFull;
+        isFull = (def.deficitPuzzles === 0 && remainingCoupons === 0);
         const currentPuz = (def.currentPuzzles || 0) + (def.stockPuzzles || 0);
         const targetPuz = def.targetPuzzles || 900;
         progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((currentPuz / Math.max(1, targetPuz)) * 100)));
       }
     } else {
-      isFull = skillsFull;
-      progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((sumSkills / 20) * 100)));
+      isFull = (offLevel >= 180 && skillsFull);
+      progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((offLevel / 180) * 100)));
     }
   }
 
@@ -13817,7 +13819,7 @@ function renderTmaCabinet() {
       <!-- Progress Track -->
       <div style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-          <span style="color:#9ca3af;font-weight:600">Прогресс до 5-5-5-5</span>
+          <span style="color:#9ca3af;font-weight:600">Прогресс прокачки (Ур. ${offLevel}/180)</span>
           <span style="color:#fff;font-weight:800">${progressPct}%</span>
         </div>
         <div class="tma-progress-track">
@@ -13835,7 +13837,7 @@ function renderTmaCabinet() {
         <div style="text-align:right">
           <div style="font-size:10px;color:#9ca3af">${isFull ? 'Статус:' : `Срок (с VIP ${playerVip}):`}</div>
           <div style="font-weight:800;color:#34d399;font-size:13px;margin-top:1px">
-            ${isFull ? 'Фулл прокачка! 🎉' : `~${remainingDays} дней`}
+            ${isFull ? 'Фулл прокачка! 🎉' : (remainingDays !== null && remainingDays !== undefined ? `~${remainingDays} дней` : '—')}
           </div>
         </div>
       </div>
@@ -14835,12 +14837,13 @@ async function openTmaSectorDetail(playerId) {
       let forecastStr = '✓ Фулл';
       let isFull = true;
       try {
-        if (typeof calculateOfficerDeficit === 'function') {
-          const def = calculateOfficerDeficit({ officer: off, catalogItem: cat, player: p, targetLevel: 180, today });
+        const calcDefFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
+        if (calcDefFn) {
+          const def = calcDefFn({ officer: off, catalogItem: cat, player: p, targetLevel: 180, today });
           if (def.isOnlyPersonalPuzzles) {
             deficitStr = '0 куп.';
-            forecastStr = '🧩 Личные';
-            isFull = false;
+            forecastStr = def.deficitPuzzles === 0 ? '✓ Фулл' : '🧩 Личные';
+            isFull = def.deficitPuzzles === 0;
           } else if (def.deficitCoupons > 0) {
             deficitStr = `${fmtNum(def.deficitCoupons)}`;
             isFull = false;
@@ -15287,12 +15290,13 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
       let forecastStr = '✓ Фулл';
       let isFull = true;
       try {
-        if (typeof calculateOfficerDeficit === 'function') {
-          const def = calculateOfficerDeficit({ officer: off, catalogItem: cat, player, targetLevel: 180, today });
+        const calcDefFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
+        if (calcDefFn) {
+          const def = calcDefFn({ officer: off, catalogItem: cat, player, targetLevel: 180, today });
           if (def.isOnlyPersonalPuzzles) {
             deficitStr = '0 куп.';
-            forecastStr = '🧩 Личные';
-            isFull = false;
+            forecastStr = def.deficitPuzzles === 0 ? '✓ Фулл' : '🧩 Личные';
+            isFull = def.deficitPuzzles === 0;
           } else if (def.deficitCoupons > 0) {
             deficitStr = `${fmtNum(def.deficitCoupons)}`;
             isFull = false;
@@ -15474,7 +15478,9 @@ function renderTmaOfficersPickerList() {
           today
         })
       : null;
-    const isFull = skills.every(s => Number(s) >= 5) || (def && def.deficitPuzzles === 0);
+    const isFull = def
+      ? (def.deficitPuzzles === 0 && (def.deficitCoupons || 0) === 0)
+      : ((off.level || 0) >= 180 && skills.every(s => Number(s) >= 5));
     const remCoupons = isFull ? 0 : (def?.deficitCoupons ?? def?.remainingCoupons ?? 0);
 
     return `

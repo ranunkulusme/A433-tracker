@@ -2513,8 +2513,14 @@ function serveStaticFile(req, res, staticDir, pathname) {
       headers['Content-Type'] = 'application/javascript; charset=UTF-8';
       headers['Service-Worker-Allowed'] = '/';
       headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      headers['Pragma'] = 'no-cache';
+      headers['Expires'] = '0';
     } else if (pathname === '/manifest.json') {
       headers['Content-Type'] = 'application/manifest+json; charset=UTF-8';
+    } else if (ext === '.html' || ext === '.js' || ext === '.css') {
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      headers['Pragma'] = 'no-cache';
+      headers['Expires'] = '0';
     }
 
     res.writeHead(200, headers);
