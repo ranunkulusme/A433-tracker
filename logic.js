@@ -4016,7 +4016,7 @@
   function getTelegramMainMenuKeyboard({ isStaff = false, webAppUrl = null } = {}) {
     const keyboard = [];
 
-    if (webAppUrl) {
+    if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
       keyboard.push([
         { text: '🚀 Открыть KoW Mini App', web_app: { url: webAppUrl } }
       ]);

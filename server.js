@@ -1718,7 +1718,7 @@ async function handleTelegramUpdate(update) {
           (webAppUrl ? `3. 🚀 <b>В приложении:</b> нажмите кнопку ниже для ввода через Mini App.` : '');
 
         const stockKb = [];
-        if (webAppUrl) {
+        if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
           stockKb.push([{ text: '🚀 Открыть склад в Mini App', web_app: { url: webAppUrl } }]);
         }
         stockKb.push([{ text: '◀️ Главное меню', callback_data: 'cmd_menu' }]);
@@ -2425,7 +2425,7 @@ async function syncTelegramBotInfoAndPolling() {
     }
 
     const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-    if (webAppUrl) {
+    if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
       telegram.setTelegramChatMenuButton(token, {
         text: 'KoW Tracker',
         url: webAppUrl
@@ -4537,7 +4537,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         const rawWebAppUrl = String(body.webAppUrl !== undefined ? body.webAppUrl : body.telegram_webapp_url).trim();
         db.setAppSetting('telegram_webapp_url', rawWebAppUrl);
         const liveToken = db.getAppSetting('telegram_bot_token');
-        if (liveToken && rawWebAppUrl) {
+        if (liveToken && rawWebAppUrl && /^https:\/\//i.test(rawWebAppUrl)) {
           telegram.setTelegramChatMenuButton(liveToken, {
             text: '🚀 KoW Tracker',
             url: rawWebAppUrl

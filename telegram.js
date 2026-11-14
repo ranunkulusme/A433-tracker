@@ -36,18 +36,41 @@ function requestViaProxy({
   body = null,
   proxyUrl,
   timeoutMs = 10000,
-  skipTls = false
+  skipTls = false,
+  signal = null
 }) {
   return new Promise((resolve, reject) => {
     let timer = null;
     let settled = false;
+    let socket = null;
+    let activeSocket = null;
 
     function cleanup(err, res) {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (abortHandler && signal) {
+        try { signal.removeEventListener('abort', abortHandler); } catch (_) {}
+      }
+      try {
+        if (activeSocket && !activeSocket.destroyed) activeSocket.destroy();
+      } catch (_) {}
+      try {
+        if (socket && !socket.destroyed) socket.destroy();
+      } catch (_) {}
       if (err) reject(err);
       else resolve(res);
+    }
+
+    let abortHandler = null;
+    if (signal) {
+      if (signal.aborted) {
+        return cleanup(new Error('Request aborted'));
+      }
+      abortHandler = () => cleanup(new Error('Request aborted'));
+      try {
+        signal.addEventListener('abort', abortHandler, { once: true });
+      } catch (_) {}
     }
 
     timer = setTimeout(() => {
@@ -74,7 +97,7 @@ function requestViaProxy({
     const targetHost = tUrl.hostname;
     const targetPath = `${tUrl.pathname || '/'}${tUrl.search || ''}`;
 
-    const socket = net.connect({
+    socket = net.connect({
       host: pUrl.hostname,
       port: proxyPort
     });
@@ -231,12 +254,57 @@ function requestViaProxy({
         }
 
         let respRaw = Buffer.alloc(0);
+        let headerParsed = false;
+        let expectedLength = -1;
+        let isChunked = false;
+
+        function checkComplete() {
+          if (settled) return;
+          if (!headerParsed) {
+            const headerEndIdx = respRaw.indexOf(Buffer.from('\r\n\r\n'));
+            if (headerEndIdx === -1) return;
+            headerParsed = true;
+            const headPart = respRaw.slice(0, headerEndIdx).toString('utf8');
+            const lines = headPart.split('\r\n');
+            for (const line of lines) {
+              const colonIdx = line.indexOf(':');
+              if (colonIdx > 0) {
+                const k = line.slice(0, colonIdx).trim().toLowerCase();
+                const v = line.slice(colonIdx + 1).trim();
+                if (k === 'content-length') {
+                  expectedLength = parseInt(v, 10);
+                } else if (k === 'transfer-encoding' && v.toLowerCase().includes('chunked')) {
+                  isChunked = true;
+                }
+              }
+            }
+          }
+
+          if (headerParsed) {
+            const headerEndIdx = respRaw.indexOf(Buffer.from('\r\n\r\n'));
+            const bodyLength = respRaw.length - (headerEndIdx + 4);
+            if (expectedLength >= 0 && bodyLength >= expectedLength) {
+              parseHttpResponse(respRaw);
+              return;
+            }
+            if (isChunked) {
+              const bodyPart = respRaw.slice(headerEndIdx + 4);
+              const decoded = decodeChunked(bodyPart);
+              if (decoded !== null) {
+                parseHttpResponse(respRaw);
+                return;
+              }
+            }
+          }
+        }
+
         activeSocket.on('data', chunk => {
           respRaw = Buffer.concat([respRaw, chunk]);
+          checkComplete();
         });
 
         activeSocket.on('end', () => {
-          parseHttpResponse(respRaw);
+          if (!settled) parseHttpResponse(respRaw);
         });
 
         activeSocket.on('close', () => {
@@ -279,7 +347,8 @@ function requestViaProxy({
       // Check Transfer-Encoding: chunked
       let finalBody = bodyPart;
       if (respHeaders['transfer-encoding'] === 'chunked') {
-        finalBody = decodeChunked(bodyPart);
+        const decoded = decodeChunked(bodyPart);
+        if (decoded !== null) finalBody = decoded;
       }
 
       const textBody = finalBody.toString('utf8');
@@ -308,18 +377,27 @@ function requestViaProxy({
     function decodeChunked(buf) {
       const chunks = [];
       let idx = 0;
+      let complete = false;
       while (idx < buf.length) {
         const lineEnd = buf.indexOf(Buffer.from('\r\n'), idx);
-        if (lineEnd === -1) break;
+        if (lineEnd === -1) return null;
         const lenHex = buf.slice(idx, lineEnd).toString('utf8').trim();
         const chunkSize = parseInt(lenHex, 16);
-        if (isNaN(chunkSize) || chunkSize === 0) break;
+        if (isNaN(chunkSize)) return null;
+        if (chunkSize === 0) {
+          complete = true;
+          break;
+        }
         const dataStart = lineEnd + 2;
         const dataEnd = dataStart + chunkSize;
+        if (buf.length < dataEnd + 2) {
+          // Incomplete chunk
+          return null;
+        }
         chunks.push(buf.slice(dataStart, dataEnd));
         idx = dataEnd + 2; // skip trailing \r\n
       }
-      return Buffer.concat(chunks);
+      return complete ? Buffer.concat(chunks) : null;
     }
   });
 }
@@ -365,7 +443,8 @@ async function callTelegramApi(token, method, payload = null, options = {}) {
         body: reqBody,
         proxyUrl,
         timeoutMs: options.timeoutMs || 10000,
-        skipTls: Boolean(options.skipTls)
+        skipTls: Boolean(options.skipTls),
+        signal: options.signal
       });
     } else {
       const fetchFn = options.fetchFn || customTelegramFetch || globalThis.fetch;
