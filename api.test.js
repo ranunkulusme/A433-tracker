@@ -5983,6 +5983,222 @@ test('API /api/my-profile auto-heals desynced sector and prevents empty cabinet 
   }
 });
 
+test('Telegram bot auto-matching by username, /bind credentials command, and deleted password message', async () => {
+  const { startServer } = require('./server.js');
+  const telegram = require('./telegram.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const botToken = '12345:TEST_BOT_TOKEN_AUTO_MATCH';
+  db.setAppSetting('telegram_bot_token', botToken);
+
+  const sentMessages = [];
+  const deletedMessages = [];
+
+  telegram.setTelegramFetch(async (url, options) => {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url.includes('/sendMessage')) {
+      sentMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 200 + sentMessages.length, chat: { id: payload.chat_id } } }) };
+    }
+    if (url.includes('/deleteMessage')) {
+      deletedMessages.push(payload);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  try {
+    // 1. Create a user with matching username but no telegram_chat_id bound yet
+    const reg1 = db.registerUser({ username: 'tg_matching_user', password: 'secretpassword123', playerName: 'Сектор 1' });
+    db.approveUser(reg1.userId, 'r3');
+
+    // User sends /start from Telegram with username "tg_matching_user"
+    const startRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 501,
+        message: {
+          chat: { id: 333444, type: 'private' },
+          from: { id: 333444, username: 'tg_matching_user' },
+          text: '/start'
+        }
+      })
+    });
+    assert.equal(startRes.status, 200);
+
+    // Verify user was automatically bound to chat_id 333444
+    const boundUser = db.findUserById(reg1.userId);
+    assert.equal(boundUser.telegram_chat_id, 333444);
+    assert.ok(sentMessages.some(m => m.chat_id === 333444 && m.text.includes('tg_matching_user')));
+
+    // 2. Test /bind <login> <password> from another chat/user
+    const reg2 = db.registerUser({ username: 'direct_bind_soldier', password: 'mysecretpass', playerName: 'Сектор 2' });
+    db.approveUser(reg2.userId, 'r3');
+
+    // Wrong password fails
+    const badBindRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 502,
+        message: {
+          message_id: 701,
+          chat: { id: 555666, type: 'private' },
+          from: { id: 555666, username: 'some_other_tg' },
+          text: '/bind direct_bind_soldier wrongpass'
+        }
+      })
+    });
+    assert.equal(badBindRes.status, 200);
+    assert.ok(deletedMessages.some(d => d.chat_id === 555666 && d.message_id === 701));
+    assert.ok(sentMessages.some(m => m.chat_id === 555666 && m.text.includes('Неверный логин или пароль')));
+    assert.equal(db.findUserById(reg2.userId).telegram_chat_id, null);
+
+    // Correct password binds and deletes password message
+    const goodBindRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 503,
+        message: {
+          message_id: 702,
+          chat: { id: 555666, type: 'private' },
+          from: { id: 555666, username: 'some_other_tg' },
+          text: '/bind direct_bind_soldier mysecretpass'
+        }
+      })
+    });
+    assert.equal(goodBindRes.status, 200);
+    assert.ok(deletedMessages.some(d => d.chat_id === 555666 && d.message_id === 702));
+    assert.equal(db.findUserById(reg2.userId).telegram_chat_id, 555666);
+    assert.ok(sentMessages.some(m => m.chat_id === 555666 && m.text.includes('успешно привязан')));
+
+    // 3. Unbound user receiving /start gets helpful instructions
+    const strangerRes = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        update_id: 504,
+        message: {
+          chat: { id: 999888, type: 'private' },
+          from: { id: 999888, username: 'unregistered_stranger' },
+          text: '/start'
+        }
+      })
+    });
+    assert.equal(strangerRes.status, 200);
+    assert.ok(sentMessages.some(m => m.chat_id === 999888 && m.text.includes('/bind') && m.text.includes('ваш_логин')));
+
+  } finally {
+    telegram.setTelegramFetch(null);
+    await server.close();
+  }
+});
+
+test('Telegram Mini App dedicated UI, auto-auth, and bind-webapp endpoint', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const crypto = require('node:crypto');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const botToken = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+    db.setAppSetting('telegram_bot_token', botToken);
+
+    // 1. Static asset verification for TMA
+    const htmlRes = await fetch(`${baseUrl}/index.html`);
+    const htmlText = await htmlRes.text();
+    assert.ok(htmlText.includes('telegram-web-app.js'), 'index.html contains Telegram WebApp SDK script');
+    assert.ok(htmlText.includes('id="tma-app"'), 'index.html contains dedicated TMA container');
+    assert.ok(htmlText.includes('id="tma-tab-cabinet"'), 'index.html contains TMA cabinet tab');
+    assert.ok(htmlText.includes('id="tma-tab-events"'), 'index.html contains TMA events tab');
+    assert.ok(htmlText.includes('id="tma-tab-matrix"'), 'index.html contains TMA matrix tab');
+    assert.ok(htmlText.includes('id="tma-main-btn"'), 'index.html contains TMA sticky MainButton');
+
+    const cssRes = await fetch(`${baseUrl}/style.css`);
+    const cssText = await cssRes.text();
+    assert.ok(cssText.includes('.tma-mode'), 'style.css contains .tma-mode styles');
+    assert.ok(cssText.includes('.tma-card'), 'style.css contains .tma-card styles');
+    assert.ok(cssText.includes('.tma-bottom-nav'), 'style.css contains .tma-bottom-nav styles');
+
+    const jsRes = await fetch(`${baseUrl}/app.js`);
+    const jsText = await jsRes.text();
+    assert.ok(jsText.includes('isTmaMode'), 'app.js contains isTmaMode');
+    assert.ok(jsText.includes('renderTmaCabinet'), 'app.js contains renderTmaCabinet');
+    assert.ok(jsText.includes('renderTmaEvents'), 'app.js contains renderTmaEvents');
+    assert.ok(jsText.includes('renderTmaMatrix'), 'app.js contains renderTmaMatrix');
+
+    // 2. Test POST /api/telegram/bind-webapp with authenticated user
+    const reg = db.registerUser({ username: 'tma_auto_binder', password: 'password123', playerName: 'Сектор TMA' });
+    db.approveUser(reg.userId, 'r3');
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'tma_auto_binder', password: 'password123' })
+    });
+    const loginData = await loginRes.json();
+    const token = loginData.token;
+
+    function createInitData(userObj) {
+      const uStr = JSON.stringify(userObj);
+      const authDate = Math.floor(Date.now() / 1000);
+      const dataCheckString = `auth_date=${authDate}\nquery_id=AAH777\nuser=${uStr}`;
+      const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+      const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+      const params = new URLSearchParams();
+      params.set('query_id', 'AAH777');
+      params.set('user', uStr);
+      params.set('auth_date', String(authDate));
+      params.set('hash', hash);
+      return params.toString();
+    }
+
+    const tmaInitData = createInitData({ id: 777888111, username: 'tma_hero', first_name: 'Hero' });
+
+    // Unauthorized call fails
+    const unauthBind = await fetch(`${baseUrl}/api/telegram/bind-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tmaInitData })
+    });
+    assert.equal(unauthBind.status, 401);
+
+    // Authorized call binds Telegram
+    const authBind = await fetch(`${baseUrl}/api/telegram/bind-webapp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ initData: tmaInitData })
+    });
+    assert.equal(authBind.status, 200);
+    const bindResult = await authBind.json();
+    assert.equal(bindResult.success, true);
+
+    const updatedUser = db.findUserById(reg.userId);
+    assert.equal(updatedUser.telegram_chat_id, 777888111);
+    assert.equal(updatedUser.telegram_username, 'tma_hero');
+
+    // Subsequent TMA WebApp auto-auth now succeeds immediately without passwords
+    const autoAuthRes = await fetch(`${baseUrl}/api/auth/telegram-webapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tmaInitData })
+    });
+    assert.equal(autoAuthRes.status, 200);
+    const autoAuthData = await autoAuthRes.json();
+    assert.equal(autoAuthData.success, true);
+    assert.equal(autoAuthData.user.username, 'tma_auto_binder');
+  } finally {
+    await server.close();
+  }
+});
+
 
 
 

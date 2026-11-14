@@ -2633,6 +2633,23 @@ function findUserByTelegramChatId(chatId) {
   };
 }
 
+function findUserByTelegramUsername(tgUsername) {
+  if (!tgUsername) return null;
+  const clean = String(tgUsername).replace(/^@+/, '').trim();
+  if (!clean) return null;
+  const row = getDb().prepare(`
+    SELECT * FROM users
+    WHERE (LOWER(telegram_username) = LOWER(?) OR LOWER(username) = LOWER(?))
+    ORDER BY CASE WHEN LOWER(telegram_username) = LOWER(?) THEN 0 ELSE 1 END, id ASC
+    LIMIT 1
+  `).get(clean, clean, clean);
+  if (!row) return null;
+  return {
+    ...row,
+    permissions: parsePermissions(row.permissions)
+  };
+}
+
 function toggleTelegramNotifications(userId, enabled) {
   if (!userId) return false;
   const val = enabled ? 1 : 0;
@@ -2806,6 +2823,7 @@ module.exports = {
   bindUserTelegram,
   unbindUserTelegram,
   findUserByTelegramChatId,
+  findUserByTelegramUsername,
   toggleTelegramNotifications,
   createStaffBindToken,
   verifyAndBindStaffChat,

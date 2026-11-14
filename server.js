@@ -666,6 +666,19 @@ async function handleTelegramUpdate(update) {
 
   const token = db.getAppSetting('telegram_bot_token');
 
+  const resolveTelegramUser = (fromId, tgUsername) => {
+    if (!fromId) return null;
+    let user = db.findUserByTelegramChatId(fromId);
+    if (!user && tgUsername) {
+      const matched = db.findUserByTelegramUsername(tgUsername);
+      if (matched && (!matched.telegram_chat_id || String(matched.telegram_chat_id) !== String(fromId))) {
+        db.bindUserTelegram(matched.id, fromId, tgUsername);
+        user = (typeof db.getUserById === 'function') ? db.getUserById(matched.id) : matched;
+      }
+    }
+    return user;
+  };
+
   // 1. Message update
   if (update.message) {
     const msg = update.message;
@@ -700,6 +713,68 @@ async function handleTelegramUpdate(update) {
         }
         return { ok: true, bound: false, reason: 'token_expired_or_invalid' };
       }
+    }
+
+    // A2) /bind <login> <password> or /login <login> <password>
+    const directBindMatch = text.match(/^\/(?:bind|login)(?:@\w+)?\s+(\S+)\s+(\S+)/i);
+    if (directBindMatch && msg.chat?.type === 'private') {
+      const login = directBindMatch[1].trim();
+      const password = directBindMatch[2].trim();
+
+      // Delete message with password for security
+      if (token && msg.message_id) {
+        try {
+          await telegram.deleteTelegramMessage({ token, chatId, messageId: msg.message_id });
+        } catch (_) {}
+      }
+
+      const authRes = db.loginUser(login, password);
+      if (authRes && authRes.user && !authRes.error) {
+        const username = msg.from?.username || msg.from?.first_name || '';
+        db.bindUserTelegram(authRes.user.id, chatId, username);
+        if (token) {
+          const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
+          const isStaff = authRes.user.rank === 'r4' || authRes.user.rank === 'r5';
+          const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: `✅ <b>Аккаунт «${authRes.user.username}» успешно привязан к вашему Telegram!</b>\n` +
+                  `Роль: <b>${(authRes.user.rank || 'r3').toUpperCase()}</b>\n\n` +
+                  `Теперь вы будете получать персональные уведомления, сможете просматривать свой сектор и обновлять склад.\n` +
+                  `<i>(Сообщение с паролем удалено в целях безопасности).</i>`,
+            replyMarkup: keyboard
+          });
+        }
+        return { ok: true, bound: true, userId: authRes.user.id, directBind: true };
+      } else {
+        if (token) {
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: '❌ <b>Неверный логин или пароль.</b>\n' +
+                  'Проверьте правильность введенных данных учетной записи KoW Tracker и повторите попытку:\n' +
+                  '<code>/bind &lt;ваш_логин&gt; &lt;ваш_пароль&gt;</code>'
+          });
+        }
+        return { ok: true, bound: false, reason: 'invalid_credentials' };
+      }
+    }
+
+    // A3) /bind or /login without parameters
+    const bindHelpMatch = text.match(/^\/(?:bind|login)(?:@\w+)?(?:\s|$)/i);
+    if (bindHelpMatch && msg.chat?.type === 'private') {
+      if (token) {
+        await telegram.sendTelegramMessage({
+          token,
+          chatId,
+          text: 'ℹ️ <b>Привязка аккаунта KoW Tracker:</b>\n\n' +
+                'Отправьте команду с вашим логином и паролем в трекере:\n' +
+                '<code>/bind &lt;логин&gt; &lt;пароль&gt;</code>\n\n' +
+                '<i>(Бот сразу удалит сообщение с паролем для вашей безопасности).</i>'
+        });
+      }
+      return { ok: true, command: 'bind_help' };
     }
 
     // B) /connect_staff <PIN> (also supports /connect_staff@bot <PIN>)
@@ -773,26 +848,43 @@ async function handleTelegramUpdate(update) {
     if (/^\/(?:start|help)(?:@\w+)?(?:\s|$)/i.test(text)) {
       if (token && msg.chat?.type === 'private') {
         const fromId = msg.from?.id;
-        const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
-        const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
-        const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
-        const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+        const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
+        if (user) {
+          const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
+          const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
+          const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+          await telegram.sendTelegramMessage({
+            token,
+            chatId,
+            text: `👋 <b>Здравствуйте, ${user.username}! Я официальный Telegram-бот KoW Tracker.</b>\n` +
+                  `✅ Ваш аккаунт KoW Tracker подключен.\n\n` +
+                  '📱 <b>Команды бойца:</b>\n' +
+                  '• <code>/me</code> — профиль, склад и прогресс офицера\n' +
+                  '• <code>/deficit</code> — расчет дефицита до максимума прокачки\n' +
+                  '• <code>/events</code> — ваши места и ближайшие события альянса\n' +
+                  '• <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> — быстрое обновление склада\n' +
+                  '• <code>/menu</code> — интерактивное меню кнопок\n\n' +
+                  '📦 <b>Скриншоты склада:</b>\n' +
+                  'Просто отправьте фото инвентаря для сохранения в журнале аудита.' +
+                  (isStaff ? '\n\n🛡️ <b>Подключение чата штаба:</b>\n<code>/connect_staff &lt;PIN&gt;</code>' : ''),
+            replyMarkup: keyboard
+          });
+          return { ok: true, command: 'start', userId: user.id, autoMatched: true, chatId };
+        }
+
+        const firstName = msg.from?.first_name || 'боец';
         await telegram.sendTelegramMessage({
           token,
           chatId,
-          text: '👋 <b>Здравствуйте! Я официальный Telegram-бот KoW Tracker.</b>\n\n' +
-                '📱 <b>Команды бойца:</b>\n' +
-                '• <code>/me</code> — профиль, склад и прогресс офицера\n' +
-                '• <code>/deficit</code> — расчет дефицита до максимума прокачки\n' +
-                '• <code>/events</code> — ваши места и ближайшие события альянса\n' +
-                '• <code>/stock &lt;купоны&gt; &lt;пазлы&gt;</code> — быстрое обновление склада\n' +
-                '• <code>/menu</code> — интерактивное меню кнопок\n\n' +
-                '📦 <b>Скриншоты склада:</b>\n' +
-                'Просто отправьте фото инвентаря для сохранения в журнале аудита.\n\n' +
-                '🛡️ <b>Подключение чата штаба:</b>\n' +
-                '<code>/connect_staff &lt;PIN&gt;</code> (PIN генерируется в Настройках).',
-          replyMarkup: keyboard
+          text: `👋 <b>Здравствуйте, ${firstName}! Я официальный Telegram-бот KoW Tracker.</b>\n\n` +
+                '⚠️ <b>Ваш Telegram пока не привязан к аккаунту в KoW Tracker.</b>\n\n' +
+                '🔗 <b>Как подключить аккаунт:</b>\n' +
+                '1️⃣ <b>В Личном кабинете:</b> откройте трекер, перейдите в Личный кабинет и нажмите кнопку <b>«📱 Подключить Telegram»</b>.\n' +
+                '2️⃣ <b>Прямо в этом чате:</b> отправьте команду с логином и паролем:\n' +
+                '<code>/bind &lt;ваш_логин&gt; &lt;ваш_пароль&gt;</code>\n' +
+                '<i>(Бот сразу удалит сообщение с паролем в целях безопасности).</i>'
         });
+        return { ok: true, command: 'help', unbound: true, chatId };
       }
       return { ok: true, command: 'help', chatId };
     }
@@ -800,13 +892,15 @@ async function handleTelegramUpdate(update) {
     // D1) /me or /профиль
     if (/^\/(?:me|профиль|profile)(?:@\w+)?(?:\s|$)/i.test(text)) {
       const fromId = msg.from?.id;
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.sendTelegramMessage({
             token,
             chatId,
-            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\n\nОткройте <b>Личный кабинет</b> в трекере и нажмите кнопку <b>«📱 Подключить Telegram»</b>, чтобы просматривать сектор и управлять складом.'
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\n\n' +
+                  'Откройте <b>Личный кабинет</b> в трекере и нажмите кнопку <b>«📱 Подключить Telegram»</b>, ' +
+                  'либо отправьте команду:\n<code>/bind &lt;логин&gt; &lt;пароль&gt;</code>'
           });
         }
         return { ok: true, command: 'me', error: 'user_not_bound' };
@@ -841,13 +935,13 @@ async function handleTelegramUpdate(update) {
     // D2) /deficit or /дефицит
     if (/^\/(?:deficit|дефицит)(?:@\w+)?(?:\s|$)/i.test(text)) {
       const fromId = msg.from?.id;
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.sendTelegramMessage({
             token,
             chatId,
-            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете трекера.'
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете трекера или отправьте боту: <code>/bind &lt;логин&gt; &lt;пароль&gt;</code>'
           });
         }
         return { ok: true, command: 'deficit', error: 'user_not_bound' };
@@ -886,13 +980,13 @@ async function handleTelegramUpdate(update) {
     // D3) /events or /ивенты
     if (/^\/(?:events|ивенты|события)(?:@\w+)?(?:\s|$)/i.test(text)) {
       const fromId = msg.from?.id;
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.sendTelegramMessage({
             token,
             chatId,
-            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете трекера.'
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете трекера или отправьте боту: <code>/bind &lt;логин&gt; &lt;пароль&gt;</code>'
           });
         }
         return { ok: true, command: 'events', error: 'user_not_bound' };
@@ -955,7 +1049,7 @@ async function handleTelegramUpdate(update) {
     // D4) /menu
     if (/^\/(?:menu|меню)(?:@\w+)?(?:\s|$)/i.test(text)) {
       const fromId = msg.from?.id;
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
       const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
       const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
@@ -977,7 +1071,7 @@ async function handleTelegramUpdate(update) {
       if (staffChatId && String(staffChatId) === String(currentChatId)) {
         return true;
       }
-      const user = senderId ? db.findUserByTelegramChatId(senderId) : null;
+      const user = senderId ? resolveTelegramUser(senderId, msg.from?.username) : null;
       if (!user) return false;
       return user.rank === 'r5' || user.rank === 'r4' || logic.hasUserPermission(user, 'view_sectors');
     }
@@ -1191,13 +1285,13 @@ async function handleTelegramUpdate(update) {
     const stockParsed = logic.parseTelegramStockCommand(text);
     if (stockParsed) {
       const fromId = msg.from?.id;
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.sendTelegramMessage({
             token,
             chatId,
-            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите ваш Telegram-аккаунт в Личном кабинете трекера, чтобы управлять складом через бота.'
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите ваш Telegram-аккаунт в Личном кабинете трекера или отправьте: <code>/bind &lt;логин&gt; &lt;пароль&gt;</code>'
           });
         }
         return { ok: true, command: 'stock', error: 'user_not_bound' };
@@ -1265,13 +1359,13 @@ async function handleTelegramUpdate(update) {
 
     if (hasPhoto || hasDocImage) {
       const fromId = msg.from?.id;
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.sendTelegramMessage({
             token,
             chatId,
-            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПожалуйста, привяжите Telegram в Личном кабинете, чтобы отправлять скриншоты склада.'
+            text: '⚠️ <b>Ваш Telegram не привязан к аккаунту в KoW Tracker.</b>\nПривяжите Telegram в Личном кабинете или отправьте боту: <code>/bind &lt;логин&gt; &lt;пароль&gt;</code>'
           });
         }
         return { ok: true, photo: true, error: 'user_not_bound' };
@@ -1465,13 +1559,13 @@ async function handleTelegramUpdate(update) {
 
     // A) Main Menu callbacks
     if (data === 'cmd_me' || data === 'cmd_deficit' || data === 'cmd_events' || data === 'cmd_events_upcoming' || data === 'cmd_events_past' || data === 'cmd_menu' || data === 'cmd_stock_help' || data === 'cmd_digest' || data === 'cmd_stale' || data.startsWith('cmd_ev_view:')) {
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, cq.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
             token,
             callbackQueryId: cqId,
-            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker.',
+            text: '⚠️ Ваш Telegram не привязан к аккаунту в KoW Tracker. Отправьте боту: /bind <логин> <пароль>',
             showAlert: true
           });
         }
@@ -1708,7 +1802,7 @@ async function handleTelegramUpdate(update) {
       const targetUserId = Number((approveMatch || rejectMatch)[1]);
       const isApprove = Boolean(approveMatch);
 
-      const officer = db.findUserByTelegramChatId(fromId);
+      const officer = resolveTelegramUser(fromId, cq.from?.username);
       const isStaff = officer && (officer.rank === 'r5' || officer.rank === 'r4' || logic.hasUserPermission(officer, 'approve_users'));
 
       if (!isStaff) {
@@ -1774,7 +1868,7 @@ async function handleTelegramUpdate(update) {
       const eventId = Number(regMatch[1]);
       const desiredPlace = Number(regMatch[2]);
 
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, cq.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
@@ -1855,7 +1949,7 @@ async function handleTelegramUpdate(update) {
     const unregMatch = data.match(/^unreg_event:(\d+)$/);
     if (unregMatch) {
       const eventId = Number(unregMatch[1]);
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, cq.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
@@ -1918,7 +2012,7 @@ async function handleTelegramUpdate(update) {
       const eventId = Number(rsvpMatch[2]);
       const placeNum = Number(rsvpMatch[3]);
 
-      const user = db.findUserByTelegramChatId(fromId);
+      const user = resolveTelegramUser(fromId, cq.from?.username);
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
@@ -2023,7 +2117,7 @@ async function handleTelegramUpdate(update) {
       const eventId = Number(resultMatch[1]);
       const actualPlace = Number(resultMatch[2]);
 
-      const user = db.findUserByTelegramChatId(fromId);
+      const user = resolveTelegramUser(fromId, cq.from?.username);
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
@@ -2140,7 +2234,7 @@ async function handleTelegramUpdate(update) {
     const confirmOcrMatch = data.match(/^confirm_ocr_stock:(\d+)$/);
     if (confirmOcrMatch) {
       const historyId = Number(confirmOcrMatch[1]);
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, cq.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
@@ -2231,7 +2325,7 @@ async function handleTelegramUpdate(update) {
     }
 
     if (data === 'confirm_current_stock') {
-      const user = fromId ? db.findUserByTelegramChatId(fromId) : null;
+      const user = fromId ? resolveTelegramUser(fromId, cq.from?.username) : null;
       if (!user) {
         if (token) {
           await telegram.answerTelegramCallback({
@@ -2587,7 +2681,14 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 400, 'MISSING_TELEGRAM_USER', 'Не найден объект пользователя Telegram в initData');
       }
 
-      const user = db.findUserByTelegramChatId(tgUserId);
+      let user = db.findUserByTelegramChatId(tgUserId);
+      if (!user && validation.user?.username) {
+        const matched = db.findUserByTelegramUsername(validation.user.username);
+        if (matched && (!matched.telegram_chat_id || String(matched.telegram_chat_id) !== String(tgUserId))) {
+          db.bindUserTelegram(matched.id, tgUserId, validation.user.username);
+          user = (typeof db.getUserById === 'function') ? db.getUserById(matched.id) : matched;
+        }
+      }
       if (!user) {
         return sendError(res, 404, 'USER_NOT_BOUND', 'Пользователь с данным Telegram ID не найден в KoW Tracker. Привяжите Telegram в личном кабинете.');
       }
@@ -4540,6 +4641,27 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, testResult);
     }
 
+    if (pathname === '/api/telegram/bind-webapp' && req.method === 'POST') {
+      if (!authenticate(req)) {
+        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+      }
+      const botToken = db.getAppSetting('telegram_bot_token');
+      if (!botToken) {
+        return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен');
+      }
+      const initData = body && (body.initData || body.init_data);
+      if (!initData || typeof initData !== 'string') {
+        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
+      }
+      const validation = logic.validateTelegramWebAppData(initData, botToken);
+      if (!validation.valid || !validation.user?.id) {
+        return sendError(res, 401, 'INVALID_TELEGRAM_DATA', 'Ошибка валидации Telegram WebApp');
+      }
+      db.bindUserTelegram(req.user.id, validation.user.id, validation.user.username || '');
+      const updatedUser = (typeof db.getUserById === 'function') ? db.getUserById(req.user.id) : req.user;
+      return sendJson(res, 200, { success: true, user: updatedUser });
+    }
+
     if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
       if (!authenticate(req)) {
         return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
@@ -4555,7 +4677,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         const botToken = db.getAppSetting('telegram_bot_token');
         if (botToken) {
           try {
-            const me = await telegram.getTelegramMe(botToken);
+            const me = await telegram.getTelegramMe(botToken, { timeoutMs: 2500 });
             if (me.ok && me.result && me.result.username) {
               botUsername = me.result.username.replace(/^@+/, '');
               db.setAppSetting('telegram_bot_username', botUsername);

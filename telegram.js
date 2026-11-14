@@ -650,6 +650,22 @@ async function answerTelegramCallback({
 }
 
 /**
+ * Delete a message in a Telegram chat.
+ */
+async function deleteTelegramMessage({
+  token,
+  chatId,
+  messageId
+}, options = {}) {
+  if (!chatId) return { ok: false, error: 'MISSING_CHAT_ID' };
+  if (!messageId) return { ok: false, error: 'MISSING_MESSAGE_ID' };
+  return callTelegramApi(token, 'deleteMessage', {
+    chat_id: chatId,
+    message_id: messageId
+  }, options);
+}
+
+/**
  * Configure chat menu button (e.g. for opening Telegram Mini App WebApp).
  */
 async function setTelegramChatMenuButton(token, { text = 'KoW Tracker', url = null, chatId = null } = {}, options = {}) {
@@ -909,6 +925,7 @@ module.exports = {
   getTelegramFile,
   downloadTelegramFile,
   editTelegramMessageText,
+  deleteTelegramMessage,
   answerTelegramCallback,
   setTelegramChatMenuButton,
   getTelegramUpdates,
