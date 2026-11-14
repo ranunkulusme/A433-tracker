@@ -8,6 +8,7 @@ const logic = require('./logic.js');
 const s3 = require('./s3.js');
 const telegram = require('./telegram.js');
 const mieru = require('./mieru.js');
+const { createEventOperations } = require('./event-ops.js');
 
 let APP_VERSION = '3.21.0';
 try {
@@ -404,6 +405,14 @@ async function dispatchNotification(eventKey, data = {}, options = {}) {
     return { sent: false, error: err.message };
   }
 }
+
+const eventOps = createEventOperations({
+  db,
+  logic,
+  dispatchNotification,
+  telegram,
+  getAppBaseUrl
+});
 
 async function checkStaleStockReminders(req = null, options = {}) {
   try {
@@ -4111,114 +4120,43 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (rsvpEventMatch && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
       const eventId = Number(rsvpEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
       const placeNum = Number(body && body.place);
       const status = String(body && body.status); // 'confirmed' | 'declined'
-      if (!['confirmed', 'declined'].includes(status)) {
-        return sendError(res, 400, 'VALIDATION_ERROR', 'Статус должен быть confirmed или declined');
+
+      const opRes = await eventOps.rsvpEvent({
+        eventId,
+        place: placeNum,
+        status,
+        user: req.user,
+        req
+      });
+
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      const assignment = (ev.assignments || []).find(a => Number(a.place) === placeNum);
-      if (!assignment) {
-        return sendError(res, 404, 'ASSIGNMENT_NOT_FOUND', 'Назначение на это место не найдено');
-      }
-
-      const player = db.getPlayerById(assignment.playerId);
-      const isOwner = player && player.userId === req.user.id;
-      const isStaff = logic.hasUserPermission(req.user, 'manage_events');
-
-      if (!isOwner && !isStaff) {
-        return sendError(res, 403, 'FORBIDDEN', 'Вы не назначены на это призовое место');
-      }
-
-      assignment.rsvpStatus = status;
-      assignment.rsvpAt = new Date().toISOString();
-      const saved = db.saveEvent(ev);
-
-      if (status === 'declined') {
-        const et = db.getEventTypes().find(t => t.id === ev.typeId);
-        const token = db.getAppSetting('telegram_bot_token');
-        let staffChatId = db.getAppSetting('telegram_staff_chat_id');
-        if (staffChatId && token) {
-          if (!isNaN(Number(staffChatId))) staffChatId = Number(staffChatId);
-          const staffAlertText = `⚠️ <b>Отказ от участия в событии!</b>\n\nБоец: <b>@${req.user.username || 'боец'}</b>\nСектор: <b>${player?.name || 'Сектор'}</b>\nСобытие: <b>${et?.name || 'Событие'}</b>\nОсвобождено место: <b>#${placeNum}</b>\n\n<i>Место свободно для повторного распределения или резервиста!</i>`;
-          telegram.sendTelegramMessage({
-            token,
-            chatId: staffChatId,
-            text: staffAlertText,
-            parseMode: 'HTML'
-          }).catch(() => {});
-        }
-      }
-
-      return sendJson(res, 200, { success: true, event: saved });
+      return sendJson(res, 200, { success: true, event: opRes.event });
     }
 
     const submitResultMatch = pathname.match(/^\/api\/events\/(\d+)\/submit-result$/);
     if (submitResultMatch && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
       const eventId = Number(submitResultMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
       const placeNum = Number(body && body.place);
       const actualPlace = Number(body && body.actualPlace);
 
-      const assignment = (ev.assignments || []).find(a => Number(a.place) === placeNum);
-      if (!assignment) {
-        return sendError(res, 404, 'ASSIGNMENT_NOT_FOUND', 'Назначение на это место не найдено');
+      const opRes = await eventOps.submitEventResult({
+        eventId,
+        place: placeNum,
+        actualPlace,
+        user: req.user,
+        req,
+        submittedBy: 'web'
+      });
+
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      const player = db.getPlayerById(assignment.playerId);
-      const isOwner = player && player.userId === req.user.id;
-      const isStaff = logic.hasUserPermission(req.user, 'manage_events');
-
-      if (!isOwner && !isStaff) {
-        return sendError(res, 403, 'FORBIDDEN', 'Вы не назначены на это место');
-      }
-
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
-      const placeInfo = actualPlace > 0 ? places.find(p => Number(p.place) === actualPlace) : null;
-      const prizeCoupons = placeInfo ? (Number(placeInfo.coupons) || 0) : 0;
-
-      const previousCoupons = (assignment.accrued && assignment.actualCoupons !== undefined)
-        ? (Number(assignment.actualCoupons) || 0)
-        : 0;
-      const couponDiff = assignment.accrued
-        ? (prizeCoupons - previousCoupons)
-        : prizeCoupons;
-
-      if (player && couponDiff !== 0) {
-        const curStock = player.stock || {};
-        const oldCoupons = Number(curStock.coupons) || 0;
-        const newStock = { ...curStock, coupons: Math.max(0, oldCoupons + couponDiff) };
-        db.updatePlayer(player.id, { stock: newStock });
-        db.recordStockHistory({
-          playerId: player.id,
-          userId: req.user.id,
-          source: 'event_reward',
-          snapshotBefore: curStock,
-          snapshotAfter: newStock,
-          diffSummary: assignment.accrued
-            ? `Корректировка награды за ${et?.name || 'ивент'}: ${couponDiff > 0 ? '+' : ''}${couponDiff} куп. (место #${actualPlace})`
-            : `Награда за событие ${et?.name || 'ивент'}: +${prizeCoupons} купонов (место #${actualPlace})`,
-          screenshotPath: null,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      assignment.actualPlace = actualPlace;
-      assignment.actualCoupons = prizeCoupons;
-      assignment.resultStatus = 'confirmed';
-      assignment.accrued = true;
-      assignment.resultSubmittedAt = new Date().toISOString();
-      assignment.submittedBy = isOwner ? 'owner' : (isStaff ? 'staff' : 'user');
-
-      const saved = db.saveEvent(ev);
-      return sendJson(res, 200, { success: true, event: saved, accruedCoupons: prizeCoupons });
+      return sendJson(res, 200, { success: true, event: opRes.event, accruedCoupons: opRes.prizeCoupons });
     }
 
     const finishEventMatch = pathname.match(/^\/api\/events\/(\d+)\/finish$/);
