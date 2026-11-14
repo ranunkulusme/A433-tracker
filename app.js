@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.45.0';
+const APP_VERSION = 'v3.46.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -2840,6 +2840,10 @@ function renderCabinetOfficerSkills(o) {
 }
 
 async function setMyOfficerSkill(officerId, skillIndex, level) {
+  if (!myCabinetProfile || !myCabinetProfile.officers) {
+    const foundPlayer = (state.players || []).find(p => (p.officers || []).some(x => String(x.id) === String(officerId)));
+    if (foundPlayer) myCabinetProfile = foundPlayer;
+  }
   const off = myCabinetProfile?.officers?.find(x => String(x.id) === String(officerId));
   if (!off) return;
   const currentSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
@@ -2871,6 +2875,9 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
         cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
       } else {
         await renderMyCabinet();
+      }
+      if (typeof renderTmaCabinet === 'function') {
+        renderTmaCabinet();
       }
       toast(typeof t === 'function' ? t('officers.toast_retro_skills_updated') : '🎯 Навык обновлен (Ретро: без списания со склада)');
       return;
@@ -2958,6 +2965,9 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
     if (stockGridWrap && myCabinetProfile) {
       stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
     }
+    if (typeof renderTmaCabinet === 'function') {
+      renderTmaCabinet();
+    }
 
     const actionText = stockDelta && stockDelta.delta.coupons < 0
       ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.coupons))} куп.`
@@ -2991,6 +3001,9 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
         const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
         if (stockGridWrap && myCabinetProfile) {
           stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+        }
+        if (typeof renderTmaCabinet === 'function') {
+          renderTmaCabinet();
         }
         toast('Действие отменено, ресурсы и навыки восстановлены');
       } catch (err) {
@@ -3073,6 +3086,15 @@ async function saveMyCabinetProfile() {
     toast('Ошибка сохранения профиля: ' + err.message, 'error');
     throw err;
   }
+}
+
+function renderStarCouponIconHtml(size = 16, extraClass = '') {
+  if (typeof logic !== 'undefined' && typeof logic.renderStarCouponIconHtml === 'function') {
+    return logic.renderStarCouponIconHtml(size, extraClass);
+  }
+  const s = Number(size) || 16;
+  const cls = extraClass ? ` ${extraClass}` : '';
+  return `<svg class="star-coupon-icon${cls}" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0" aria-label="Купон звезды"><defs><linearGradient id="starCouponGrad" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#fde047"/><stop offset="50%" stop-color="#fbbf24"/><stop offset="100%" stop-color="#d97706"/></linearGradient></defs><g transform="rotate(-24 12 12)"><path d="M4 6.5C3.45 6.5 3 6.95 3 7.5V10.2C4.1 10.2 5 11 5 12C5 13 4.1 13.8 3 13.8V16.5C3 17.05 3.45 17.5 4 17.5H20C20.55 17.5 21 17.05 21 16.5V13.8C19.9 13.8 19 13 19 12C19 11 19.9 10.2 21 10.2V7.5C21 6.95 20.55 6.5 20 6.5H4Z" fill="url(#starCouponGrad)" stroke="#78350f" stroke-width="1.1" stroke-linejoin="round"/><line x1="7.5" y1="7.5" x2="7.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/><line x1="16.5" y1="7.5" x2="16.5" y2="16.5" stroke="#78350f" stroke-width="1" stroke-dasharray="1.5 1.5" stroke-linecap="round" opacity="0.6"/><path d="M12 8.5L13.1 10.7L15.5 11L13.8 12.7L14.2 15.1L12 13.9L9.8 15.1L10.2 12.7L8.5 11L10.9 10.7L12 8.5Z" fill="#ffffff" stroke="#78350f" stroke-width="0.75" stroke-linejoin="round"/></g></svg>`;
 }
 
 let cabinetInlineEditingKey = null;
@@ -3169,7 +3191,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
   if (cabinetInlineEditingKey === 'starCoupons') {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-cabinet-star-coupons" onclick="event.stopPropagation()">
-        <div class="label">⭐ ${starCouponLabel}</div>
+        <div class="label">${renderStarCouponIconHtml(16)} ${starCouponLabel}</div>
         <div class="stock-inline-edit-wrap">
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" class="stock-inline-input" id="input-cabinet-star-coupons" value="${formatInputNumber(st.starCoupons || 0)}" onkeydown="handleCabinetInlineKey(event, 'starCoupons')">
           <div class="stock-inline-actions">
@@ -3183,7 +3205,7 @@ function renderCabinetStockGridHtml(profile, totalStarPoints) {
     cards.push(`
       <div class="stock-card stock-card-clickable" id="card-cabinet-star-coupons" onclick="openCabinetInline('starCoupons')" title="Нажмите, чтобы изменить купоны звезды">
         <span class="stock-card-edit-hint">✏️</span>
-        <div class="label">⭐ ${starCouponLabel}</div>
+        <div class="label">${renderStarCouponIconHtml(16)} ${starCouponLabel}</div>
         <div class="value" style="font-size:17px">${fmtNum(st.starCoupons || 0)}</div>
       </div>
     `);
@@ -3314,6 +3336,9 @@ async function saveCabinetInline(key) {
     const simEl = document.getElementById('cabinet-sim-container');
     if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
       simEl.innerHTML = renderCabinetSimulatorHtml();
+    }
+    if (typeof renderTmaCabinet === 'function') {
+      renderTmaCabinet();
     }
   } catch (err) {
     toast('Ошибка сохранения: ' + err.message, 'error');
@@ -3822,7 +3847,7 @@ function openResetMyOfficerModal(officerId) {
   const chips = [];
   if (d.coupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🏷️ Купоны: <strong>+${fmtNum(d.coupons)}</strong></span>`);
   if (d.puzzles > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🧩 Медали: <strong>+${fmtNum(d.puzzles)}</strong></span>`);
-  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
+  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px">${renderStarCouponIconHtml(14)} Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
   if (d.legendaryStars3 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды III: <strong>+${d.legendaryStars3}</strong></span>`);
   if (d.legendaryStars2 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды II: <strong>+${d.legendaryStars2}</strong></span>`);
   if (d.legendaryStars1 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды I: <strong>+${d.legendaryStars1}</strong></span>`);
@@ -4047,6 +4072,9 @@ async function saveMyOfficerSubmit() {
       if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
         simEl.innerHTML = renderCabinetSimulatorHtml();
       }
+      if (typeof renderTmaCabinet === 'function') {
+        renderTmaCabinet();
+      }
     } else {
       const catalogId = document.getElementById('my-officer-catalog-select').value;
       if (!catalogId) {
@@ -4110,6 +4138,9 @@ async function saveMyOfficerSubmit() {
       closeAllModals();
       toast('Офицер добавлен в профиль' + (initialStockDeduction?.deductStock ? ' (ресурсы списаны со склада)' : ''));
       await renderMyCabinet();
+      if (typeof renderTmaCabinet === 'function') {
+        renderTmaCabinet();
+      }
     }
   } catch (err) {
     toast('Ошибка сохранения офицера: ' + err.message, 'error');
@@ -4142,12 +4173,19 @@ async function deleteMyOfficer(officerId, officerName) {
     if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
       simEl.innerHTML = renderCabinetSimulatorHtml();
     }
+    if (typeof renderTmaCabinet === 'function') {
+      renderTmaCabinet();
+    }
   } catch (err) {
     toast('Ошибка удаления офицера: ' + err.message, 'error');
   }
 }
 
 async function setMyOfficerStars(officerId, stars) {
+  if (!myCabinetProfile || !myCabinetProfile.officers) {
+    const foundPlayer = (state.players || []).find(p => (p.officers || []).some(x => String(x.id) === String(officerId)));
+    if (foundPlayer) myCabinetProfile = foundPlayer;
+  }
   const count = Math.max(0, Math.min(5, Number(stars) || 0));
   const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(officerId));
   if (!off) return;
@@ -4176,6 +4214,9 @@ async function setMyOfficerStars(officerId, stars) {
         cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
       } else {
         await renderMyCabinet();
+      }
+      if (typeof renderTmaCabinet === 'function') {
+        renderTmaCabinet();
       }
       toast(typeof t === 'function' ? t('officers.toast_retro_stars_updated') : '⭐ Звёзды обновлены (Ретро: без списания со склада)');
       return;
@@ -4259,6 +4300,9 @@ async function setMyOfficerStars(officerId, stars) {
     if (stockGridWrap && myCabinetProfile) {
       stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
     }
+    if (typeof renderTmaCabinet === 'function') {
+      renderTmaCabinet();
+    }
 
     const actionText = stockDelta && stockDelta.delta.starCoupons < 0
       ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.starCoupons))} купонов звезды`
@@ -4292,6 +4336,9 @@ async function setMyOfficerStars(officerId, stars) {
         const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
         if (stockGridWrap && myCabinetProfile) {
           stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
+        }
+        if (typeof renderTmaCabinet === 'function') {
+          renderTmaCabinet();
         }
         toast('Действие отменено, ресурсы и звёзды восстановлены');
       } catch (err) {
@@ -7834,7 +7881,7 @@ function renderSectorStockGridHtml(p, canEditSector) {
   if (isEditing('starCoupons')) {
     cards.push(`
       <div class="stock-card stock-card-editing" id="card-sector-star-coupons-${pid}" onclick="event.stopPropagation()">
-        <div class="label">⭐ Купон звезды</div>
+        <div class="label">${renderStarCouponIconHtml(16)} Купон звезды</div>
         <div class="stock-inline-edit-wrap">
           <input type="number" class="stock-inline-input" id="input-sector-star-coupons-${pid}" min="0" value="${st.starCoupons || 0}" onkeydown="handleSectorInlineKey(event, ${pid}, 'starCoupons')">
           <div class="stock-inline-actions">
@@ -7848,7 +7895,7 @@ function renderSectorStockGridHtml(p, canEditSector) {
     cards.push(`
       <div class="stock-card ${canEditSector ? 'stock-card-clickable' : ''}" id="card-sector-star-coupons-${pid}" ${canEditSector ? `onclick="openSectorInline(${pid}, 'starCoupons')" title="Нажмите для изменения купонов звезды"` : ''}>
         ${canEditSector ? '<span class="stock-card-edit-hint">✏️</span>' : ''}
-        <div class="label">⭐ Купон звезды</div>
+        <div class="label">${renderStarCouponIconHtml(16)} Купон звезды</div>
         <div class="value">${fmtNum(st.starCoupons || 0)}</div>
       </div>
     `);
@@ -8478,7 +8525,7 @@ function openResetSectorOfficerModal(playerId, officerId) {
   const chips = [];
   if (d.coupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🏷️ Купоны: <strong>+${fmtNum(d.coupons)}</strong></span>`);
   if (d.puzzles > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">🧩 Медали: <strong>+${fmtNum(d.puzzles)}</strong></span>`);
-  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
+  if (d.starCoupons > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px">${renderStarCouponIconHtml(14)} Купоны звёзд: <strong>+${fmtNum(d.starCoupons)}</strong></span>`);
   if (d.legendaryStars3 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды III: <strong>+${d.legendaryStars3}</strong></span>`);
   if (d.legendaryStars2 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды II: <strong>+${d.legendaryStars2}</strong></span>`);
   if (d.legendaryStars1 > 0) chips.push(`<span class="badge" style="background:var(--bg3);border:1px solid var(--border);padding:4px 8px;font-size:12px">⭐ Звёзды I: <strong>+${d.legendaryStars1}</strong></span>`);
@@ -13531,12 +13578,24 @@ function renderTmaCabinet() {
   }
   const isFresh = daysAgo <= 3;
 
+  // Ensure myCabinetProfile points to active player
+  if (!myCabinetProfile || Number(myCabinetProfile.id) !== Number(player.id)) {
+    myCabinetProfile = player;
+  }
+
   // Target Officer & Progression calculation
   const officers = player.officers || [];
-  let targetOfficer = officers.find(o => !o.isMaxed && (o.isTarget || o.priority))
-    || officers.find(o => o.isTarget)
-    || officers[0]
-    || null;
+  const customTargetId = state.tmaTargetOfficerId || (typeof localStorage !== 'undefined' ? localStorage.getItem('kow_tma_target_' + (player.id || currentUser?.playerId)) : null);
+  let targetOfficer = null;
+  if (customTargetId) {
+    targetOfficer = officers.find(o => String(o.id) === String(customTargetId));
+  }
+  if (!targetOfficer) {
+    targetOfficer = officers.find(o => !o.isMaxed && (o.isTarget || o.priority))
+      || officers.find(o => o.isTarget)
+      || officers[0]
+      || null;
+  }
   let officerName = 'Офицер';
   let skillsStr = '5-5-5-5';
   let progressPct = 100;
@@ -13625,12 +13684,37 @@ function renderTmaCabinet() {
     `;
   }
 
+  const userSectors = getUserSectors();
+  let sectorSwitcherHtml = '';
+  if (userSectors.length > 1) {
+    const activeId = Number(player.id || currentUser?.playerId);
+    sectorSwitcherHtml = `
+      <div class="tma-sector-chips" id="tma-sector-switcher">
+        ${userSectors.map(s => {
+          const sId = Number(s.id);
+          const isActive = sId === activeId;
+          const sVip = s.sector?.vipLevel ?? s.vip ?? 0;
+          return `
+            <button type="button" class="tma-sector-chip ${isActive ? 'active' : ''}" onclick="handleTmaSwitchSector(${sId})">
+              <span>👑</span>
+              <span>${escapeHtml(s.name || 'Сектор #' + sId)}</span>
+              <span style="opacity:0.75;font-size:10px">(VIP ${sVip})</span>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
   container.innerHTML = `
+    ${sectorSwitcherHtml}
+
     <!-- Player Badge Card -->
     <div class="tma-card tma-card-gold" style="position:relative;overflow:hidden">
       <div style="position:absolute;right:-20px;bottom:-20px;width:100px;height:100px;background:rgba(245,158,11,0.1);border-radius:999px;filter:blur(24px);pointer-events:none"></div>
       
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <!-- Upper part: click to edit sector parameters -->
+      <div class="tma-card-clickable" onclick="openTmaSectorEditModal()" title="Нажмите для редактирования параметров сектора" style="display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08)">
         <div style="display:flex;align-items:center;gap:12px">
           <div class="tma-gold-gradient" style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#000;font-weight:900;font-size:15px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">
             KOW
@@ -13639,6 +13723,7 @@ function renderTmaCabinet() {
             <div style="display:flex;align-items:center;gap:8px">
               <h2 style="font-size:14.5px;font-weight:700;color:#fff;margin:0">${escapeHtml(playerName)}</h2>
               <span class="badge badge-warning" style="font-size:10px;font-weight:700;padding:2px 6px">${escapeHtml(role)}</span>
+              <span style="font-size:11px;opacity:0.75" title="Редактировать параметры сектора">✏️</span>
             </div>
             <p style="font-size:12px;color:#9ca3af;margin:2px 0 0 0">
               Сила: <strong style="color:#fff">${fmtNum(playerPower)}</strong> • VIP: <strong style="color:#fbbf24">${playerVip}</strong>
@@ -13652,29 +13737,38 @@ function renderTmaCabinet() {
         </span>
       </div>
 
-      <!-- Stock Grid -->
-      <div class="tma-stock-grid">
-        <div class="tma-stock-cell">
-          <div class="tma-stock-label">Купоны 🎟️</div>
-          <div class="tma-stock-val" style="color:#fbbf24">${fmtNum(stock.coupons || 0)}</div>
+      <!-- Stock Grid: click to edit stock reserves -->
+      <div class="tma-card-clickable" onclick="openTmaStockEditModal()" title="Нажмите для изменения запасов склада" style="padding-top:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:10.5px;color:#9ca3af;font-weight:600">Складские запасы</span>
+          <span style="font-size:10.5px;color:#fbbf24;font-weight:600">✏️ Изменить</span>
         </div>
-        <div class="tma-stock-cell">
-          <div class="tma-stock-label">Пазлы 🧩</div>
-          <div class="tma-stock-val" style="color:#38bdf8">${fmtNum(stock.puzzles || 0)}</div>
-        </div>
-        <div class="tma-stock-cell">
-          <div class="tma-stock-label">Звезды ⭐</div>
-          <div class="tma-stock-val" style="color:#c084fc">
-            ${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}
+        <div class="tma-stock-grid">
+          <div class="tma-stock-cell">
+            <div class="tma-stock-label">🎟️ Купон офицера</div>
+            <div class="tma-stock-val" style="color:#fbbf24">${fmtNum(stock.coupons || 0)}</div>
+          </div>
+          <div class="tma-stock-cell">
+            <div class="tma-stock-label">🧩 Медаль офицера</div>
+            <div class="tma-stock-val" style="color:#38bdf8">${fmtNum(stock.puzzles || 0)}</div>
+          </div>
+          <div class="tma-stock-cell">
+            <div class="tma-stock-label">🌟 Звезды I / II / III</div>
+            <div class="tma-stock-val" style="color:#c084fc">
+              ${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Target Officer Progression Simulator -->
-    <div class="tma-card" style="border-color:rgba(255,255,255,0.08)">
+    <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer" title="Нажмите, чтобы выбрать офицера в калькулятор">
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:8px">
-        <span style="color:#9ca3af;font-weight:600">Цель прокачки:</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="color:#9ca3af;font-weight:600">🎯 Калькулятор прокачки:</span>
+          <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3)">Сменить ⭐</span>
+        </div>
         <span style="color:#fbbf24;font-weight:700">
           ${escapeHtml(officerName)} <span style="color:#fde68a">(${escapeHtml(skillsStr)})</span>
         </span>
@@ -13706,6 +13800,9 @@ function renderTmaCabinet() {
         </div>
       </div>
     </div>
+
+    <!-- Sector Officers Section -->
+    ${renderTmaOfficersSectionHtml(officers, targetOfficer, player)}
 
     ${nextEventHtml}
   `;
@@ -14261,6 +14358,942 @@ async function openTmaEventDetail(eventId) {
   modal.style.display = 'flex';
 }
 
+function closeTmaModals() {
+  const ids = ['tma-sector-modal', 'tma-stock-modal', 'tma-event-modal', 'tma-officers-picker-modal', 'tma-officer-modal'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function closeTmaEventModal() {
+  closeTmaModals();
+}
+
+async function handleTmaSwitchSector(sectorId) {
+  tmaHaptic('selection');
+  try {
+    const sId = Number(sectorId);
+    if (!sId) return;
+    await apiFetch('/api/my-profile/active-sector', {
+      method: 'POST',
+      body: { sectorId: sId }
+    });
+    if (currentUser) {
+      currentUser.playerId = sId;
+    }
+    state.currentPlayerId = sId;
+    const nextSector = (state.players || []).find(p => Number(p.id) === sId);
+    if (nextSector) {
+      myCabinetProfile = nextSector;
+    }
+    tmaHaptic('success');
+    toast('Сектор переключен', 'success');
+    renderTmaCabinet();
+    if (typeof renderMyCabinet === 'function') {
+      renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка переключения сектора: ' + (err.message || err), 'error');
+  }
+}
+
+function openTmaSectorEditModal() {
+  tmaHaptic('light');
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+  const sec = player.sector || {};
+
+  const nameEl = document.getElementById('tma-sec-name');
+  if (nameEl) nameEl.value = player.name || '';
+
+  const vipEl = document.getElementById('tma-sec-vip');
+  if (vipEl) vipEl.value = (sec.vipLevel !== undefined && sec.vipLevel !== null) ? sec.vipLevel : (player.vip || 0);
+
+  const vipPtsEl = document.getElementById('tma-sec-vip-points');
+  if (vipPtsEl) vipPtsEl.value = formatInputNumber(sec.vipPoints || 0);
+
+  const hqEl = document.getElementById('tma-sec-hq');
+  if (hqEl) hqEl.value = sec.hqLevel || '';
+
+  const confEl = document.getElementById('tma-sec-conf');
+  if (confEl) confEl.value = sec.confidentialityLevel || 0;
+
+  const powerEl = document.getElementById('tma-sec-power');
+  if (powerEl) powerEl.value = formatInputNumber(sec.power || player.power || 0);
+
+  const killsEl = document.getElementById('tma-sec-kills');
+  if (killsEl) killsEl.value = formatInputNumber(sec.kills || player.kills || 0);
+
+  const killPtsEl = document.getElementById('tma-sec-kill-points');
+  if (killPtsEl) killPtsEl.value = formatInputNumber(sec.killPoints || player.killPoints || 0);
+
+  const modal = document.getElementById('tma-sector-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    bindAllNumericInputs(modal);
+  }
+}
+
+async function submitTmaSectorEdit() {
+  tmaHaptic('medium');
+  const name = document.getElementById('tma-sec-name')?.value?.trim();
+  const vipLevel = Math.max(0, Math.min(17, parseInt(document.getElementById('tma-sec-vip')?.value, 10) || 0));
+  const vipPoints = Math.max(0, parseInputNumber(document.getElementById('tma-sec-vip-points')?.value));
+  const hqVal = document.getElementById('tma-sec-hq')?.value;
+  const hqLevel = (hqVal !== undefined && hqVal !== '' && !isNaN(parseInt(hqVal, 10))) ? Math.max(1, parseInt(hqVal, 10)) : null;
+  const confidentialityLevel = Math.max(0, parseInt(document.getElementById('tma-sec-conf')?.value, 10) || 0);
+  const power = Math.max(0, parseInputNumber(document.getElementById('tma-sec-power')?.value));
+  const kills = Math.max(0, parseInputNumber(document.getElementById('tma-sec-kills')?.value));
+  const killPoints = Math.max(0, parseInputNumber(document.getElementById('tma-sec-kill-points')?.value, true));
+
+  if (!name) {
+    toast('Укажите ник в игре', 'error');
+    return;
+  }
+
+  try {
+    await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: {
+        name,
+        sector: { vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints }
+      }
+    });
+
+    const activePlayerId = Number(currentUser?.playerId || myCabinetProfile?.id);
+    const p = state.players.find(x => Number(x.id) === activePlayerId);
+    if (p) {
+      p.name = name;
+      p.power = power;
+      p.vip = vipLevel;
+      p.sector = { ...(p.sector || {}), vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints };
+    }
+    if (myCabinetProfile && Number(myCabinetProfile.id) === activePlayerId) {
+      myCabinetProfile.name = name;
+      myCabinetProfile.sector = { ...(myCabinetProfile.sector || {}), vipLevel, hqLevel, vipPoints, confidentialityLevel, power, kills, killPoints };
+    }
+
+    tmaHaptic('success');
+    closeTmaModals();
+    toast('Параметры сектора сохранены', 'success');
+    renderTmaCabinet();
+    if (typeof renderMyCabinet === 'function') {
+      renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка сохранения параметров: ' + (err.message || err), 'error');
+  }
+}
+
+function openTmaStockEditModal() {
+  tmaHaptic('light');
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+  const stock = player.stock || {};
+
+  const coupEl = document.getElementById('tma-stock-coupons');
+  if (coupEl) coupEl.value = formatInputNumber(stock.coupons || 0);
+
+  const puzEl = document.getElementById('tma-stock-puzzles');
+  if (puzEl) puzEl.value = formatInputNumber(stock.puzzles || 0);
+
+  const chEl = document.getElementById('tma-stock-chests');
+  if (chEl) chEl.value = formatInputNumber(stock.chests || 0);
+
+  const starCoupEl = document.getElementById('tma-stock-star-coupons');
+  if (starCoupEl) starCoupEl.value = formatInputNumber(stock.starCoupons || 0);
+
+  const s1El = document.getElementById('tma-stock-stars-1');
+  if (s1El) s1El.value = formatInputNumber(stock.legendaryStars1 || 0);
+
+  const s2El = document.getElementById('tma-stock-stars-2');
+  if (s2El) s2El.value = formatInputNumber(stock.legendaryStars2 || 0);
+
+  const s3El = document.getElementById('tma-stock-stars-3');
+  if (s3El) s3El.value = formatInputNumber(stock.legendaryStars3 || 0);
+
+  const lblEl = document.getElementById('tma-stock-star-coupon-label');
+  if (lblEl) {
+    lblEl.innerHTML = `${renderStarCouponIconHtml(16)} Купон звезды`;
+  }
+
+  updateTmaLiveStarPoints();
+
+  const modal = document.getElementById('tma-stock-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    bindAllNumericInputs(modal);
+  }
+}
+
+function adjustTmaStockValue(field, delta) {
+  tmaHaptic('selection');
+  let elId = 'tma-stock-' + field;
+  if (field === 'starCoupons') elId = 'tma-stock-star-coupons';
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const current = parseInputNumber(el.value);
+  const next = Math.max(0, current + Number(delta || 0));
+  el.value = formatInputNumber(next);
+  if (field.startsWith('stars')) {
+    updateTmaLiveStarPoints();
+  }
+}
+
+function updateTmaLiveStarPoints() {
+  const s1 = parseInputNumber(document.getElementById('tma-stock-stars-1')?.value);
+  const s2 = parseInputNumber(document.getElementById('tma-stock-stars-2')?.value);
+  const s3 = parseInputNumber(document.getElementById('tma-stock-stars-3')?.value);
+  const calcFn = (typeof logic !== 'undefined' && logic.calculateTotalStarPoints) ? logic.calculateTotalStarPoints : null;
+  const total = calcFn ? calcFn({ legendaryStars1: s1, legendaryStars2: s2, legendaryStars3: s3 }) : ((s1 * 110) + (s2 * 420) + (s3 * 960));
+  const badge = document.getElementById('tma-stock-star-points-badge');
+  if (badge) {
+    badge.textContent = `✨ Итого очков звезд: ${fmtNum(total)}`;
+  }
+}
+
+async function confirmTmaStockFreshness() {
+  tmaHaptic('medium');
+  try {
+    await confirmMyStock();
+    tmaHaptic('success');
+    closeTmaModals();
+    renderTmaCabinet();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка подтверждения: ' + (err.message || err), 'error');
+  }
+}
+
+async function submitTmaStockEdit() {
+  tmaHaptic('medium');
+  const coupons = Math.max(0, parseInputNumber(document.getElementById('tma-stock-coupons')?.value));
+  const puzzles = Math.max(0, parseInputNumber(document.getElementById('tma-stock-puzzles')?.value));
+  const chests = Math.max(0, parseInputNumber(document.getElementById('tma-stock-chests')?.value));
+  const starCoupons = Math.max(0, parseInputNumber(document.getElementById('tma-stock-star-coupons')?.value));
+  const legendaryStars1 = Math.max(0, parseInputNumber(document.getElementById('tma-stock-stars-1')?.value));
+  const legendaryStars2 = Math.max(0, parseInputNumber(document.getElementById('tma-stock-stars-2')?.value));
+  const legendaryStars3 = Math.max(0, parseInputNumber(document.getElementById('tma-stock-stars-3')?.value));
+
+  const stock = { coupons, puzzles, chests, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3 };
+
+  try {
+    await apiFetch('/api/my-profile', {
+      method: 'PUT',
+      body: { stock }
+    });
+
+    const activePlayerId = Number(currentUser?.playerId || myCabinetProfile?.id);
+    const p = state.players.find(x => Number(x.id) === activePlayerId);
+    if (p) {
+      p.stock = { ...(p.stock || {}), ...stock, updatedAt: new Date().toISOString() };
+    }
+    if (myCabinetProfile && Number(myCabinetProfile.id) === activePlayerId) {
+      myCabinetProfile.stock = { ...(myCabinetProfile.stock || {}), ...stock, updatedAt: new Date().toISOString() };
+    }
+
+    tmaHaptic('success');
+    closeTmaModals();
+    toast('Запасы склада успешно обновлены', 'success');
+    renderTmaCabinet();
+    if (typeof renderMyCabinet === 'function') {
+      renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка сохранения запасов: ' + (err.message || err), 'error');
+  }
+}
+
+// ─── TMA OFFICERS MANAGEMENT & CALCULATOR TARGET SELECTION ───────
+let tmaOfficerModalEditId = null;
+let tmaOfficerModalSkills = [1, 1, 1, 1];
+let tmaOfficerModalStars = 0;
+let tmaOfficerModalMode = 'retro';
+
+function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
+  const count = (officers || []).length;
+  const isTargetId = (offId) => targetOfficer && String(targetOfficer.id) === String(offId);
+
+  let cardsHtml = '';
+  if (!officers || officers.length === 0) {
+    cardsHtml = `
+      <div style="background:#161a22;border:1px dashed rgba(255,255,255,0.15);border-radius:14px;padding:20px;text-align:center;color:#9ca3af">
+        <div style="font-size:28px;margin-bottom:6px">🎖️</div>
+        <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">Нет офицеров в секторе</div>
+        <div style="font-size:11.5px;margin-bottom:12px">Добавьте офицеров для отслеживания прокачки и расчета дефицита</div>
+        <button type="button" class="btn-primary btn-sm" onclick="openTmaAddOfficerModal()" style="font-size:11.5px;padding:6px 14px">
+          + Добавить первого офицера
+        </button>
+      </div>
+    `;
+  } else {
+    cardsHtml = officers.map(off => {
+      const isTarget = isTargetId(off.id);
+      const cat = getCatalogOfficer(off.catalogId);
+      const offMode = getOfficerMode(off.id);
+      const isRetro = offMode === 'retro';
+      const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
+      const offSkills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
+      const offName = off.name || cat?.name || 'Офицер #' + off.id;
+      const offType = cat?.type || 'Пехота';
+      const offGen = cat?.generation ? `G${cat.generation}` : '';
+
+      return `
+        <div class="tma-officer-card" id="tma-officer-card-${off.id}" style="${isTarget ? 'border-color:rgba(245,158,11,0.5);box-shadow:0 0 12px rgba(245,158,11,0.1)' : ''}">
+          <!-- Card Header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;${
+                isTarget ? 'background:#fbbf24;color:#000;box-shadow:0 2px 8px rgba(245,158,11,0.3)' : 'background:#1f242e;color:#fff;border:1px solid rgba(255,255,255,0.1)'
+              }">
+                ${escapeHtml(offName.charAt(0))}
+              </div>
+              <div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:13.5px;font-weight:700;color:#fff">${escapeHtml(offName)}</span>
+                  <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.06);color:#9ca3af;font-weight:600">
+                    ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''}
+                  </span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+                  <span style="font-size:11px;color:#38bdf8;font-weight:600">Ур. ${off.level || 0}</span>
+                  ${(off.personalPuzzles || off.personal_puzzles) ? `<span style="font-size:10.5px;color:#fde68a">🧩 Личные: ${off.personalPuzzles || off.personal_puzzles}</span>` : ''}
+                </div>
+              </div>
+            </div>
+
+            <!-- Header Actions: Target Star, Mode Badge, Edit -->
+            <div style="display:flex;align-items:center;gap:6px">
+              <!-- Mode badge / toggle -->
+              <button type="button" onclick="toggleTmaOfficerMode('${off.id}')" class="tma-quick-btn" style="font-size:10px;padding:2px 6px;${
+                isRetro ? 'background:rgba(156,163,175,0.15);color:#9ca3af;border-color:rgba(156,163,175,0.25)' : 'background:rgba(245,158,11,0.15);color:#fbbf24;border-color:rgba(245,158,11,0.3)'
+              }" title="Нажмите для переключения режима (Ретро / Списание со склада)">
+                ${isRetro ? '📜 Ретро' : '⚡ Склад'}
+              </button>
+
+              <!-- Star Target button for calculator -->
+              <button type="button" onclick="selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
+                ${isTarget ? '⭐' : '☆'}
+              </button>
+
+              <!-- Edit button -->
+              <button type="button" onclick="openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:12px" title="Редактировать параметры офицера">
+                ✏️
+              </button>
+            </div>
+          </div>
+
+          <!-- Interactive Stars (0-5★) -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:#13161c;border-radius:8px;margin-bottom:8px">
+            <span style="font-size:11px;color:#9ca3af;font-weight:600">Звёзды:</span>
+            <div style="display:flex;gap:4px">
+              ${[1, 2, 3, 4, 5].map(s => `
+                <span class="tma-star-clickable" onclick="handleTmaStarClick('${off.id}', ${s})" style="color:${s <= offStars ? '#fbbf24' : 'rgba(255,255,255,0.18)'}">★</span>
+              `).join('')}
+              <button type="button" onclick="handleTmaStarClick('${off.id}', 0)" style="background:none;border:none;color:#9ca3af;font-size:10px;cursor:pointer;padding-left:4px" title="Сбросить звёзды">0★</button>
+            </div>
+          </div>
+
+          <!-- Interactive Skills (Н1, Н2, Н3, Н4) -->
+          <div style="display:flex;flex-direction:column;gap:5px">
+            ${[0, 1, 2, 3].map(sIdx => `
+              <div class="tma-skill-row">
+                <span class="tma-skill-name">Н${sIdx + 1}</span>
+                <div class="tma-skill-btn-group">
+                  ${[1, 2, 3, 4, 5].map(lvl => `
+                    <button type="button" class="tma-skill-btn ${offSkills[sIdx] === lvl ? 'active' : ''}" onclick="handleTmaSkillClick('${off.id}', ${sIdx}, ${lvl})">${lvl}</button>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  return `
+    <div style="margin-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:13.5px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px">
+          <span>🎖️ Офицеры сектора</span>
+          <span style="font-size:11px;color:#9ca3af;background:#1f242e;padding:1px 6px;border-radius:6px;font-weight:600">${count}</span>
+        </div>
+        <button type="button" class="btn-primary btn-sm" onclick="openTmaAddOfficerModal()" style="font-size:11.5px;padding:4px 12px;font-weight:700">
+          + Добавить
+        </button>
+      </div>
+      ${cardsHtml}
+    </div>
+  `;
+}
+
+function openTmaOfficersPickerModal() {
+  tmaHaptic('light');
+  renderTmaOfficersPickerList();
+  const modal = document.getElementById('tma-officers-picker-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function renderTmaOfficersPickerList() {
+  const container = document.getElementById('tma-officers-picker-list');
+  if (!container) return;
+
+  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || state.players[0]
+    || {};
+
+  const officers = player.officers || [];
+  const customTargetId = state.tmaTargetOfficerId || (typeof localStorage !== 'undefined' ? localStorage.getItem('kow_tma_target_' + (player.id || currentUser?.playerId)) : null);
+  let targetOfficer = null;
+  if (customTargetId) {
+    targetOfficer = officers.find(o => String(o.id) === String(customTargetId));
+  }
+  if (!targetOfficer) {
+    targetOfficer = officers.find(o => !o.isMaxed && (o.isTarget || o.priority))
+      || officers.find(o => o.isTarget)
+      || officers[0]
+      || null;
+  }
+
+  if (officers.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:12.5px">
+        <div style="font-size:28px;margin-bottom:6px">🎖️</div>
+        <p style="font-weight:700;color:#fff;margin:0 0 4px 0">Нет офицеров в секторе</p>
+        <p style="font-size:11.5px;color:#9ca3af;margin:0 0 12px 0">Нажмите «+ Добавить», чтобы добавить первого офицера</p>
+        <button type="button" class="btn-primary btn-sm" onclick="openTmaAddOfficerModal()" style="padding:6px 14px">
+          + Добавить офицера
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = officers.map(off => {
+    const isTarget = targetOfficer && String(targetOfficer.id) === String(off.id);
+    const cat = getCatalogOfficer(off.catalogId);
+    const offName = off.name || cat?.name || 'Офицер #' + off.id;
+    const offType = cat?.type || 'Пехота';
+    const offGen = cat?.generation ? `G${cat.generation}` : '';
+    const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
+    const starsStr = '★'.repeat(offStars) + '☆'.repeat(5 - offStars);
+    const skills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
+    const skillsStr = skills.join('-');
+
+    const def = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit)
+      ? logic.calculateOfficerDeficit(off, player.stock || {}, player.sector?.vipLevel || 0)
+      : null;
+    const isFull = skills.every(s => Number(s) >= 5);
+    const remCoupons = isFull ? 0 : (def?.remainingCoupons || 0);
+
+    return `
+      <div class="tma-card tma-card-clickable" onclick="selectTmaTargetOfficer('${off.id}')" style="margin-bottom:0;padding:10px 12px;background:#181c24;border-color:${isTarget ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.08)'};box-shadow:${isTarget ? '0 0 10px rgba(245,158,11,0.15)' : 'none'}">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;${
+              isTarget ? 'background:#fbbf24;color:#000' : 'background:#1f242e;color:#fff;border:1px solid rgba(255,255,255,0.1)'
+            }">
+              ${escapeHtml(offName.charAt(0))}
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:13px;font-weight:700;color:#fff">${escapeHtml(offName)}</span>
+                <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.06);color:#9ca3af;font-weight:600">
+                  ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''}
+                </span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:2px;font-size:11px">
+                <span style="color:#fbbf24;font-family:var(--mono);font-weight:700">${skillsStr}</span>
+                <span style="color:#c084fc;letter-spacing:-1px">${starsStr}</span>
+                <span style="color:#38bdf8">Ур. ${off.level || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="text-align:right">
+              <div style="font-size:11.5px;font-weight:700;color:${isFull ? '#34d399' : '#fbbf24'}">
+                ${isFull ? 'Фулл (0)' : fmtNum(remCoupons) + ' куп.'}
+              </div>
+              <div style="font-size:10px;color:#9ca3af">дефицит</div>
+            </div>
+
+            <!-- Target Star toggle button -->
+            <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
+              ${isTarget ? '⭐' : '☆'}
+            </button>
+
+            <!-- Edit button -->
+            <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать">
+              ✏️
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function selectTmaTargetOfficer(officerId) {
+  tmaHaptic('selection');
+  state.tmaTargetOfficerId = officerId;
+  const pId = currentUser?.playerId || myCabinetProfile?.id;
+  if (pId && typeof localStorage !== 'undefined') {
+    localStorage.setItem('kow_tma_target_' + pId, String(officerId));
+  }
+  if (typeof myCabinetSim !== 'undefined') {
+    myCabinetSim.officerId = officerId;
+  }
+  const off = (myCabinetProfile?.officers || []).find(o => String(o.id) === String(officerId));
+  const offName = off?.name || 'Офицер';
+
+  renderTmaCabinet();
+  renderTmaOfficersPickerList();
+  closeTmaModals();
+  tmaHaptic('success');
+  toast(`Офицер «${offName}» выбран целью калькулятора ⭐`, 'success');
+}
+
+function toggleTmaOfficerMode(officerId) {
+  tmaHaptic('selection');
+  const current = getOfficerMode(officerId);
+  const next = (current === 'normal') ? 'retro' : 'normal';
+  setOfficerMode(officerId, next);
+  renderTmaCabinet();
+}
+
+async function handleTmaStarClick(officerId, stars) {
+  tmaHaptic('selection');
+  await setMyOfficerStars(officerId, stars);
+  renderTmaCabinet();
+}
+
+async function handleTmaSkillClick(officerId, skillIdx, level) {
+  tmaHaptic('selection');
+  await setMyOfficerSkill(officerId, skillIdx, level);
+  renderTmaCabinet();
+}
+
+function onTmaOfficerModeChange(mode) {
+  tmaOfficerModalMode = (mode === 'normal') ? 'normal' : 'retro';
+  const lblRetro = document.getElementById('tma-off-lbl-retro');
+  const lblNormal = document.getElementById('tma-off-lbl-normal');
+  const hint = document.getElementById('tma-off-mode-hint');
+  if (lblRetro) lblRetro.classList.toggle('active', tmaOfficerModalMode === 'retro');
+  if (lblNormal) lblNormal.classList.toggle('active', tmaOfficerModalMode === 'normal');
+  if (hint) hint.textContent = (tmaOfficerModalMode === 'retro') ? 'Без списания ресурсов' : 'Списание со склада трекера';
+  tmaHaptic('selection');
+}
+
+function setTmaOfficerModalLevel(lvl) {
+  const el = document.getElementById('tma-off-level');
+  if (el) el.value = Math.max(0, Math.min(180, Number(lvl) || 0));
+  tmaHaptic('selection');
+}
+
+function setTmaOfficerModalStar(stars) {
+  tmaOfficerModalStars = Math.max(0, Math.min(5, Number(stars) || 0));
+  renderTmaOfficerModalStars();
+  tmaHaptic('selection');
+}
+
+function renderTmaOfficerModalStars() {
+  const container = document.getElementById('tma-off-stars-container');
+  const label = document.getElementById('tma-off-stars-label');
+  if (label) label.textContent = `${tmaOfficerModalStars}★`;
+  if (!container) return;
+  container.innerHTML = [0, 1, 2, 3, 4, 5].map(s => `
+    <button type="button" class="tma-star-btn ${tmaOfficerModalStars === s ? 'active' : ''}" onclick="setTmaOfficerModalStar(${s})">
+      ${s === 0 ? '0★' : `${s}★`}
+    </button>
+  `).join('');
+}
+
+function setTmaOfficerModalSkill(skillIdx, lvl) {
+  tmaOfficerModalSkills[skillIdx] = Math.max(1, Math.min(5, Number(lvl) || 1));
+  renderTmaOfficerModalSkills();
+  tmaHaptic('selection');
+}
+
+function renderTmaOfficerModalSkills() {
+  const container = document.getElementById('tma-off-skills-container');
+  const medalsBadge = document.getElementById('tma-off-skills-medals');
+  if (medalsBadge) {
+    const calcFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress) ? logic.calculateSkillMedalsProgress : null;
+    const spent = calcFn ? calcFn(tmaOfficerModalSkills) : 0;
+    medalsBadge.textContent = `${fmtNum(spent)} / 690 медалей`;
+  }
+  if (!container) return;
+  container.innerHTML = [0, 1, 2, 3].map(sIdx => `
+    <div class="tma-skill-row">
+      <span class="tma-skill-name">Н${sIdx + 1}</span>
+      <div class="tma-skill-btn-group">
+        ${[1, 2, 3, 4, 5].map(lvl => `
+          <button type="button" class="tma-skill-btn ${tmaOfficerModalSkills[sIdx] === lvl ? 'active' : ''}" onclick="setTmaOfficerModalSkill(${sIdx}, ${lvl})">${lvl}</button>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function onTmaOfficerCatalogChange() {
+  const select = document.getElementById('tma-off-catalog-select');
+  if (!select) return;
+  const cat = getCatalogOfficer(select.value);
+  if (cat) {
+    const medalsBadge = document.getElementById('tma-off-skills-medals');
+    const maxMedals = cat.medalsBeforeTraining || cat.medals_before_training || 690;
+    const calcFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress) ? logic.calculateSkillMedalsProgress : null;
+    const spent = calcFn ? calcFn(tmaOfficerModalSkills) : 0;
+    if (medalsBadge) medalsBadge.textContent = `${fmtNum(spent)} / ${maxMedals} медалей`;
+  }
+}
+
+function openTmaAddOfficerModal() {
+  tmaHaptic('light');
+  tmaOfficerModalEditId = null;
+  tmaOfficerModalSkills = [1, 1, 1, 1];
+  tmaOfficerModalStars = 0;
+  tmaOfficerModalMode = getOfficerStockMode() || 'retro';
+
+  const titleEl = document.getElementById('tma-officer-modal-title');
+  if (titleEl) titleEl.textContent = '🎖️ Добавить офицера';
+  const subtitleEl = document.getElementById('tma-officer-modal-subtitle');
+  if (subtitleEl) subtitleEl.textContent = 'Новый офицер сектора';
+
+  const catGroup = document.getElementById('tma-off-catalog-group');
+  if (catGroup) catGroup.style.display = 'block';
+
+  const select = document.getElementById('tma-off-catalog-select');
+  if (select) {
+    const existingCatalogIds = new Set((myCabinetProfile?.officers || []).map(o => o.catalogId));
+    select.innerHTML = (state.officerCatalog || []).map(cat => {
+      const already = existingCatalogIds.has(cat.id);
+      return `<option value="${cat.id}" ${already ? 'disabled' : ''}>${escapeHtml(cat.name)} (${cat.type || 'Пехота'}, Ген. ${cat.generation || 1})${already ? ' — уже добавлен' : ''}</option>`;
+    }).join('');
+  }
+
+  const lvlEl = document.getElementById('tma-off-level');
+  if (lvlEl) lvlEl.value = 0;
+  const puzEl = document.getElementById('tma-off-personal-puzzles');
+  if (puzEl) puzEl.value = 0;
+  const onlyEl = document.getElementById('tma-off-only-personal');
+  if (onlyEl) onlyEl.checked = false;
+
+  const delBtn = document.getElementById('tma-off-delete-btn');
+  if (delBtn) delBtn.style.display = 'none';
+
+  onTmaOfficerModeChange(tmaOfficerModalMode);
+  renderTmaOfficerModalStars();
+  renderTmaOfficerModalSkills();
+
+  const modal = document.getElementById('tma-officer-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function openTmaEditOfficerModal(officerId) {
+  tmaHaptic('light');
+  tmaOfficerModalEditId = officerId;
+  const off = (myCabinetProfile?.officers || []).find(o => String(o.id) === String(officerId));
+  if (!off) return;
+
+  const cat = getCatalogOfficer(off.catalogId);
+  const titleEl = document.getElementById('tma-officer-modal-title');
+  if (titleEl) titleEl.textContent = `🎖️ Редактировать: ${escapeHtml(off.name || cat?.name || '')}`;
+  const subtitleEl = document.getElementById('tma-officer-modal-subtitle');
+  if (subtitleEl) subtitleEl.textContent = `${cat?.type || 'Офицер'} • Ген. ${cat?.generation || 1}`;
+
+  const catGroup = document.getElementById('tma-off-catalog-group');
+  if (catGroup) catGroup.style.display = 'none';
+
+  tmaOfficerModalSkills = Array.isArray(off.skills) && off.skills.length === 4 ? [...off.skills] : [1, 1, 1, 1];
+  tmaOfficerModalStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
+  tmaOfficerModalMode = getOfficerMode(officerId);
+
+  const lvlEl = document.getElementById('tma-off-level');
+  if (lvlEl) lvlEl.value = off.level || 0;
+  const puzEl = document.getElementById('tma-off-personal-puzzles');
+  if (puzEl) puzEl.value = off.personalPuzzles || off.personal_puzzles || 0;
+  const onlyEl = document.getElementById('tma-off-only-personal');
+  if (onlyEl) onlyEl.checked = Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
+
+  const delBtn = document.getElementById('tma-off-delete-btn');
+  if (delBtn) delBtn.style.display = 'block';
+
+  onTmaOfficerModeChange(tmaOfficerModalMode);
+  renderTmaOfficerModalStars();
+  renderTmaOfficerModalSkills();
+
+  const modal = document.getElementById('tma-officer-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+async function deleteTmaCurrentOfficer() {
+  if (!tmaOfficerModalEditId) return;
+  const off = (myCabinetProfile?.officers || []).find(o => String(o.id) === String(tmaOfficerModalEditId));
+  const offName = off?.name || 'офицера';
+  if (!confirm(`Удалить офицера «${offName}» из сектора?`)) return;
+
+  tmaHaptic('medium');
+  try {
+    await deleteMyOfficer(tmaOfficerModalEditId, offName);
+    tmaHaptic('success');
+    closeTmaModals();
+    renderTmaCabinet();
+    renderTmaOfficersPickerList();
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка удаления: ' + (err.message || err), 'error');
+  }
+}
+
+async function submitTmaOfficerEdit() {
+  tmaHaptic('medium');
+  const level = Math.max(0, Math.min(180, parseInt(document.getElementById('tma-off-level')?.value) || 0));
+  const personalPuzzles = Math.max(0, parseInt(document.getElementById('tma-off-personal-puzzles')?.value) || 0);
+  const onlyPersonalPuzzles = Boolean(document.getElementById('tma-off-only-personal')?.checked);
+  const stars = tmaOfficerModalStars;
+  const skills = Array.isArray(tmaOfficerModalSkills) && tmaOfficerModalSkills.length === 4
+    ? tmaOfficerModalSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
+    : [1, 1, 1, 1];
+  const isRetro = (tmaOfficerModalMode === 'retro');
+
+  let newStock = null;
+  let newInvested = null;
+
+  if (!isRetro && myCabinetProfile?.stock) {
+    if (tmaOfficerModalEditId) {
+      const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(tmaOfficerModalEditId));
+      if (oldOff) {
+        const cat = getCatalogOfficer(oldOff.catalogId);
+        const rawCost = Number(cat?.couponPerPuzzle);
+        const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
+        const upgradeType = cat?.upgradeType || 'standard';
+        const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
+        const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
+
+        let curStock = { ...myCabinetProfile.stock };
+        const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
+        let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
+        let hasChanges = false;
+
+        // 1. Level
+        if (oldOff.level !== level) {
+          const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
+          const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
+          if (!levelStockDelta.canAfford) {
+            tmaHaptic('error');
+            toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
+            return;
+          }
+          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
+          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
+          if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
+          hasChanges = true;
+        }
+
+        // 2. Stars
+        const oldStars = Number(oldOff.stars) || 0;
+        if (oldStars !== stars) {
+          const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
+          const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
+          if (!starRes.canAfford) {
+            tmaHaptic('error');
+            toast(`❌ Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.`, 'error');
+            return;
+          }
+          curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
+          curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
+          curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
+          curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
+          if (starRes.newInvested) curInv = starRes.newInvested;
+          hasChanges = true;
+        }
+
+        // 3. Skills
+        const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
+        const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
+        if (hasSkillDiff) {
+          const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
+          const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
+          if (!skillRes.canAfford) {
+            tmaHaptic('error');
+            toast(`❌ Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`, 'error');
+            return;
+          }
+          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
+          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
+          if (skillRes.newInvested) curInv = skillRes.newInvested;
+          hasChanges = true;
+        }
+
+        if (hasChanges) {
+          newStock = curStock;
+          newInvested = curInv;
+        }
+      }
+    }
+  }
+
+  try {
+    if (tmaOfficerModalEditId) {
+      const updatedOffData = await apiFetch(`/api/my-profile/officers/${tmaOfficerModalEditId}`, {
+        method: 'PUT',
+        body: {
+          level,
+          stars,
+          skills,
+          personalPuzzles,
+          onlyPersonalPuzzles,
+          ...(newInvested ? { invested: newInvested } : {})
+        }
+      });
+
+      if (newStock) {
+        await apiFetch('/api/my-profile', {
+          method: 'PUT',
+          body: { stock: newStock }
+        });
+        myCabinetProfile.stock = newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = newStock;
+        }
+      }
+
+      const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(tmaOfficerModalEditId));
+      if (off) {
+        if (updatedOffData && updatedOffData.id) Object.assign(off, updatedOffData);
+        else {
+          off.level = level;
+          off.stars = stars;
+          off.skills = skills;
+          off.personalPuzzles = personalPuzzles;
+          off.onlyPersonalPuzzles = onlyPersonalPuzzles;
+        }
+        if (newInvested) off.invested = newInvested;
+      }
+      if (state.players) {
+        for (const p of state.players) {
+          if (p.id === myCabinetProfile?.id && p.officers) {
+            const po = p.officers.find(o => String(o.id) === String(tmaOfficerModalEditId));
+            if (po) {
+              if (updatedOffData && updatedOffData.id) Object.assign(po, updatedOffData);
+              else {
+                po.level = level;
+                po.stars = stars;
+                po.skills = skills;
+                po.personalPuzzles = personalPuzzles;
+                po.onlyPersonalPuzzles = onlyPersonalPuzzles;
+              }
+              if (newInvested) po.invested = newInvested;
+            }
+          }
+        }
+      }
+
+      setOfficerMode(tmaOfficerModalEditId, isRetro ? 'retro' : 'normal', { silent: true });
+      tmaHaptic('success');
+      closeTmaModals();
+      toast('Офицер обновлен', 'success');
+      renderTmaCabinet();
+      renderTmaOfficersPickerList();
+      if (typeof renderMyCabinet === 'function') renderMyCabinet().catch(() => {});
+    } else {
+      const catalogId = document.getElementById('tma-off-catalog-select')?.value;
+      if (!catalogId) {
+        tmaHaptic('error');
+        toast('Выберите офицера из каталога', 'error');
+        return;
+      }
+      const cat = getCatalogOfficer(catalogId);
+
+      let initialStockDeduction = null;
+      if (!isRetro && myCabinetProfile?.stock) {
+        const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
+          ? logic.calculateInitialOfficerStockDeduction
+          : calculateInitialOfficerStockDeduction;
+        if (initialFn) {
+          initialStockDeduction = initialFn({
+            officer: { level, stars, skills },
+            stock: myCabinetProfile.stock,
+            catalogOfficer: cat,
+            isRetrospective: false
+          });
+          if (!initialStockDeduction.canAfford) {
+            tmaHaptic('error');
+            toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
+            return;
+          }
+        }
+      }
+
+      const payload = {
+        catalogId,
+        name: cat?.name || '',
+        level,
+        coupons: 0,
+        stars,
+        skills,
+        personalPuzzles,
+        onlyPersonalPuzzles,
+        ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
+      };
+
+      const createdOff = await apiFetch('/api/my-profile/officers', {
+        method: 'POST',
+        body: payload
+      });
+
+      if (createdOff && createdOff.id) {
+        setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
+      }
+
+      if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
+        await apiFetch('/api/my-profile', {
+          method: 'PUT',
+          body: { stock: initialStockDeduction.newStock }
+        });
+        myCabinetProfile.stock = initialStockDeduction.newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = initialStockDeduction.newStock;
+        }
+      }
+
+      if (myCabinetProfile) {
+        myCabinetProfile.officers = myCabinetProfile.officers || [];
+        if (createdOff && createdOff.id && !myCabinetProfile.officers.some(o => String(o.id) === String(createdOff.id))) {
+          myCabinetProfile.officers.push(createdOff);
+        }
+      }
+
+      tmaHaptic('success');
+      closeTmaModals();
+      toast('Офицер добавлен в сектор' + (initialStockDeduction?.deductStock ? ' (ресурсы списаны)' : ''), 'success');
+      renderTmaCabinet();
+      renderTmaOfficersPickerList();
+      if (typeof renderMyCabinet === 'function') renderMyCabinet().catch(() => {});
+    }
+  } catch (err) {
+    tmaHaptic('error');
+    toast('Ошибка сохранения офицера: ' + (err.message || err), 'error');
+  }
+}
+
 function closeTmaEventModal() {
   const modal = document.getElementById('tma-event-modal');
   if (modal) modal.style.display = 'none';
@@ -14601,4 +15634,20 @@ if (typeof window !== 'undefined') {
   window.toggleTmaRegisterSection = toggleTmaRegisterSection;
   window.refreshTmaCurrentTab = refreshTmaCurrentTab;
   window.tmaHaptic = tmaHaptic;
+
+  window.openTmaOfficersPickerModal = openTmaOfficersPickerModal;
+  window.renderTmaOfficersPickerList = renderTmaOfficersPickerList;
+  window.selectTmaTargetOfficer = selectTmaTargetOfficer;
+  window.toggleTmaOfficerMode = toggleTmaOfficerMode;
+  window.handleTmaStarClick = handleTmaStarClick;
+  window.handleTmaSkillClick = handleTmaSkillClick;
+  window.openTmaAddOfficerModal = openTmaAddOfficerModal;
+  window.openTmaEditOfficerModal = openTmaEditOfficerModal;
+  window.onTmaOfficerCatalogChange = onTmaOfficerCatalogChange;
+  window.onTmaOfficerModeChange = onTmaOfficerModeChange;
+  window.setTmaOfficerModalLevel = setTmaOfficerModalLevel;
+  window.setTmaOfficerModalStar = setTmaOfficerModalStar;
+  window.setTmaOfficerModalSkill = setTmaOfficerModalSkill;
+  window.deleteTmaCurrentOfficer = deleteTmaCurrentOfficer;
+  window.submitTmaOfficerEdit = submitTmaOfficerEdit;
 }
