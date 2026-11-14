@@ -1,4 +1,4 @@
-# Правила разработки проекта KoW Tracker (Kingdom of Winners)
+# Правила разработки проекта KoW Tracker (Kiss of War)
 
 ## 1. Методология GitFlow
 

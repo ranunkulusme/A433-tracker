@@ -3309,10 +3309,24 @@
       parseMode: 'HTML',
       placeholders: Object.freeze(['sectorName', 'eventName', 'place', 'coupons', 'officerName', 'link']),
       template: `☀️ <b>Доброе утро, {sectorName}!</b>\n\n📅 Сегодня стартует событие: <b>{eventName}</b>\n🎯 Ваше назначенное место: <b>#{place}</b> ({coupons} куп.)\n🎖 Офицер: <b>{officerName}</b>\n\n<i>Событие уже активно на игровом сервере (старт в 00:00 UTC). Желаем побед!</i>\n\n🔗 <a href="{link}">Открыть событие в трекере</a>`
+    }),
+    staff_event_registration: Object.freeze({
+      key: 'staff_event_registration',
+      title: 'Новая заявка на участие в событии',
+      channel: 'staff',
+      parseMode: 'HTML',
+      placeholders: Object.freeze(['eventName', 'sectorName', 'desiredPlace', 'link']),
+      template: `📝 <b>Новая заявка на событие: {eventName}</b>\n\nБоец: <b>{sectorName}</b>\nЖелаемое место: <b>{desiredPlace}</b>\n\n🔗 <a href="{link}">Открыть распределение мест</a>`
     })
   });
 
   const NOTIFICATION_TEMPLATE_SAMPLE_DATA = Object.freeze({
+    staff_event_registration: Object.freeze({
+      eventName: 'Мощные силы (Mighty Forces)',
+      sectorName: 'Sector 7 (Рейнджер)',
+      desiredPlace: '#1 (18к)',
+      link: 'https://kow.example.com/#events'
+    }),
     event_morning_briefing: Object.freeze({
       sectorName: 'Sector 7 (Рейнджер)',
       eventName: 'Мощные силы (Mighty Forces)',
@@ -3750,9 +3764,9 @@
     const sectorName = player?.name || user?.username || 'Сектор';
     parts.push(`👤 <b>Ваш профиль:</b> <b>${escapeHtml(sectorName)}</b> [${rankLabel}]`);
 
-    const power = player?.power || 0;
+    const power = player?.sector?.power ?? player?.power ?? 0;
     const powerFormatted = formatInputNumber(power);
-    const vip = player?.vip !== undefined ? player.vip : (user?.vip !== undefined ? user.vip : '—');
+    const vip = player?.sector?.vipLevel !== undefined ? player.sector.vipLevel : (player?.vip !== undefined ? player.vip : (user?.vip !== undefined ? user.vip : '—'));
     parts.push(`📊 Сила: <b>${powerFormatted}</b> | VIP: <b>${vip}</b>`);
 
     parts.push('\n📦 <b>Запасы склада:</b>');
@@ -3781,8 +3795,9 @@
     if (targetOfficer) {
       const offName = typeof targetOfficer === 'string' ? targetOfficer : targetOfficer.name;
       parts.push(`\n🎯 <b>Целевой офицер:</b> <b>${escapeHtml(offName)}</b>`);
+      const isMaxed = Boolean(targetOfficer?.isMaxed) || (Array.isArray(targetOfficer?.skills) && targetOfficer.skills.length >= 4 && targetOfficer.skills.every(s => Number(s) >= 5));
       if (targetDeficit !== undefined && targetDeficit !== null) {
-        if (targetDeficit <= 0) {
+        if (targetDeficit <= 0 || isMaxed) {
           parts.push('• Дефицит: <b>0</b> (готов к максимальной прокачке! 🎉)');
         } else {
           parts.push(`• Остаточный дефицит: <b>${formatInputNumber(targetDeficit)}</b> купонов`);
@@ -3958,7 +3973,10 @@
     if (places.length) {
       places.forEach((p, idx) => {
         const placeNum = p.place || (idx + 1);
-        const coup = p.coupons ? ` (${Math.round(p.coupons / 1000)}к)` : '';
+        let coup = '';
+        if (p.coupons) {
+          coup = p.coupons >= 1000 ? ` (${Math.round(p.coupons / 1000)}к)` : ` (${p.coupons})`;
+        }
         const isCurrent = registration && Number(registration.desiredPlace) === Number(placeNum);
         placeButtons.push({
           text: `${isCurrent ? '✓ ' : ''}#${placeNum}${coup}`,
@@ -4064,9 +4082,9 @@
     parts.push(`🪪 <b>Досье бойца:</b> <b>${escapeHtml(sectorName)}</b>`);
     parts.push(`👤 Владелец: <b>${escapeHtml(tgHandle)}</b> | Ранг: <b>${rankLabel}</b>`);
 
-    const power = player?.power || 0;
+    const power = player?.sector?.power ?? player?.power ?? 0;
     const powerFormatted = formatInputNumber(power);
-    const vip = player?.vip !== undefined ? player.vip : (user?.vip !== undefined ? user.vip : '—');
+    const vip = player?.sector?.vipLevel !== undefined ? player.sector.vipLevel : (player?.vip !== undefined ? player.vip : (user?.vip !== undefined ? user.vip : '—'));
     parts.push(`📊 Сила: <b>${powerFormatted}</b> | VIP: <b>${vip}</b>`);
 
     parts.push('\n📦 <b>Склад:</b>');
