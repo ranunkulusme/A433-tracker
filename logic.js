@@ -1037,9 +1037,21 @@
     }));
   }
 
-  function calculateOfficerDeficit({ officer, catalogItem, player, targetLevel = 180, today, includeStock = true }) {
+  function calculateOfficerDeficit(arg1, arg2, arg3, arg4) {
+    let officer, catalogItem, player, targetLevel, today, includeStock;
+    if (arg1 && typeof arg1 === 'object' && ('officer' in arg1 || 'catalogItem' in arg1 || 'player' in arg1)) {
+      ({ officer, catalogItem, player, targetLevel = 180, today, includeStock = true } = arg1);
+    } else {
+      // Positional fallback: (officer, stockOrPlayer, catalogItem, includeStock)
+      officer = arg1;
+      player = (arg2 && 'stock' in arg2) ? arg2 : { stock: arg2 || {} };
+      catalogItem = arg3;
+      includeStock = arg4 !== undefined ? Boolean(arg4) : true;
+      targetLevel = 180;
+    }
+
     const isOnlyPersonalPuzzles = Boolean(officer?.onlyPersonalPuzzles || officer?.only_personal_puzzles);
-    const rawCost = Number(catalogItem?.couponPerPuzzle);
+    const rawCost = Number(catalogItem?.couponPerPuzzle ?? catalogItem?.coupon_cost ?? catalogItem?.coupon_per_puzzle);
     const costPerPuzzle = rawCost === 0 ? 0 : (rawCost || COUPON_PER_PUZZLE);
     const target = Math.max(1, Math.min(MAX_LEVEL, Number(targetLevel) || MAX_LEVEL));
     const targetPuzzles = target * PUZZLES_PER_LEVEL;
@@ -1086,9 +1098,12 @@
       stockPuzzles,
       deficitPuzzles,
       deficitCoupons,
+      coupons: deficitCoupons,
+      remainingCoupons: deficitCoupons,
       costPerPuzzle,
       dailyIncome,
       daysWithoutEvents,
+      estimatedDays: daysWithoutEvents,
       dateWithoutEvents,
       isOnlyPersonalPuzzles,
       starRequirement: {

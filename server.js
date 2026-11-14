@@ -649,10 +649,16 @@ function getPlayerTargetOfficerDeficit(player) {
   const catEntry = catalog.find(c => c.id === (target.catalogId || target.officerId || target.id)) || { name: target.name || 'Офицер', coupon_cost: 50 };
   const targetName = catEntry.name || target.name || 'Офицер';
 
-  const defRes = logic.calculateOfficerDeficit(target, player.stock || {}, catEntry, true);
+  const rawCost = Number(catEntry?.coupon_per_puzzle ?? catEntry?.couponPerPuzzle ?? catEntry?.coupon_cost ?? 500);
+  const defRes = logic.calculateOfficerDeficit({
+    officer: target,
+    catalogItem: { ...catEntry, couponPerPuzzle: rawCost },
+    player,
+    targetLevel: 180
+  });
   return {
     targetOfficer: targetName,
-    targetDeficit: defRes ? defRes.coupons : 0,
+    targetDeficit: defRes ? (defRes.deficitCoupons || defRes.coupons || 0) : 0,
     deficitDetails: defRes
   };
 }

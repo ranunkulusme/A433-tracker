@@ -13597,31 +13597,62 @@ function renderTmaCabinet() {
       || null;
   }
   let officerName = 'Офицер';
-  let skillsStr = '5-5-5-5';
-  let progressPct = 100;
+  let offType = 'Пехота';
+  let offGen = '';
+  let offLevel = 0;
+  let skillsStr = '1-1-1-1';
+  let progressPct = 0;
   let remainingCoupons = 0;
   let remainingDays = 0;
   let isFull = false;
 
   if (targetOfficer) {
-    officerName = targetOfficer.name || officerName;
-    if (targetOfficer.skills && Array.isArray(targetOfficer.skills)) {
-      skillsStr = targetOfficer.skills.join('-');
-      const sumSkills = targetOfficer.skills.reduce((a, b) => a + Number(b || 0), 0);
-      isFull = (targetOfficer.skills.length === 4 && targetOfficer.skills.every(s => Number(s) >= 5)) || sumSkills >= 20;
-      progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((sumSkills / 20) * 100)));
-    }
+    const cat = getCatalogOfficer(targetOfficer.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
+    officerName = targetOfficer.name || cat?.name || 'Офицер';
+    offType = cat?.type || 'Пехота';
+    offGen = cat?.generation ? `G${cat.generation}` : '';
+    offLevel = Math.max(0, Number(targetOfficer.level) || 0);
+
+    const skills = (Array.isArray(targetOfficer.skills) && targetOfficer.skills.length === 4)
+      ? targetOfficer.skills.map(s => Number(s) || 1)
+      : [1, 1, 1, 1];
+    skillsStr = skills.join('-');
+    const sumSkills = skills.reduce((a, b) => a + Number(b || 0), 0);
+    const skillsFull = skills.every(s => Number(s) >= 5);
+
+    const rawCost = Number(cat?.couponPerPuzzle);
+    const costPerPuzzle = rawCost === 0
+      ? (cat?.upgradeType === 'special' ? 0 : 500)
+      : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
+    const today = new Date().toISOString().slice(0, 10);
+
     const def = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit)
-      ? logic.calculateOfficerDeficit(targetOfficer, stock, sector.vipLevel || 0)
+      ? logic.calculateOfficerDeficit({
+          officer: targetOfficer,
+          catalogItem: { ...cat, couponPerPuzzle: costPerPuzzle },
+          player,
+          targetLevel: 180,
+          today
+        })
       : null;
+
     if (def) {
-      if (def.remainingCoupons !== undefined) remainingCoupons = def.remainingCoupons;
-      if (def.estimatedDays !== undefined) remainingDays = def.estimatedDays;
-    }
-    if (isFull || remainingCoupons <= 0) {
-      remainingCoupons = 0;
-      remainingDays = 0;
-      isFull = true;
+      if (def.isOnlyPersonalPuzzles) {
+        remainingCoupons = 0;
+        remainingDays = 0;
+        isFull = skillsFull;
+        progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((sumSkills / 20) * 100)));
+      } else {
+        remainingCoupons = def.deficitCoupons || 0;
+        remainingDays = def.daysWithoutEvents !== null ? def.daysWithoutEvents : 0;
+        isFull = (def.deficitPuzzles === 0 && def.deficitCoupons === 0) || skillsFull;
+        const currentPuz = (def.currentPuzzles || 0) + (def.stockPuzzles || 0);
+        const targetPuz = def.targetPuzzles || 900;
+        progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((currentPuz / Math.max(1, targetPuz)) * 100)));
+      }
+    } else {
+      isFull = skillsFull;
+      progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((sumSkills / 20) * 100)));
     }
   }
 
@@ -13763,45 +13794,63 @@ function renderTmaCabinet() {
     </div>
 
     <!-- Target Officer Progression Simulator -->
+    ${targetOfficer ? `
     <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer" title="Нажмите, чтобы выбрать офицера в калькулятор">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:8px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="color:#9ca3af;font-weight:600">🎯 Калькулятор прокачки:</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:10px;background:#fbbf24;color:#000;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;box-shadow:0 2px 8px rgba(245,158,11,0.4)">
+            ${escapeHtml(officerName.charAt(0))}
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:13.5px;font-weight:800;color:#fff">${escapeHtml(officerName)}</span>
+              <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3);font-weight:700">★ Цель</span>
+            </div>
+            <span style="font-size:11px;color:#9ca3af;margin-top:1px;display:block">
+              ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''} • Ур. ${offLevel} (${escapeHtml(skillsStr)})
+            </span>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-          <span style="color:#fbbf24;font-weight:700">
-            ${escapeHtml(officerName)} <span style="color:#fde68a">(${escapeHtml(skillsStr)})</span>
-          </span>
-          <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3);white-space:nowrap">Сменить ⭐</span>
-        </div>
+        <span style="font-size:11px;color:#fbbf24;font-weight:700;background:rgba(245,158,11,0.1);padding:3px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.2)">Сменить ⭐</span>
       </div>
 
       <!-- Progress Track -->
-      <div>
+      <div style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-          <span style="color:#9ca3af">Прогресс до 5-5-5-5</span>
-          <span style="color:#fff;font-weight:700">${progressPct}%</span>
+          <span style="color:#9ca3af;font-weight:600">Прогресс до 5-5-5-5</span>
+          <span style="color:#fff;font-weight:800">${progressPct}%</span>
         </div>
         <div class="tma-progress-track">
           <div class="tma-progress-fill" style="width:${progressPct}%"></div>
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;background:#1f242e;padding:10px 12px;border-radius:12px;margin-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;background:#1f242e;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.04)">
         <div>
           <div style="font-size:10px;color:#9ca3af">Остаточный дефицит:</div>
-          <div style="font-weight:700;color:${(isFull || remainingCoupons <= 0) ? '#34d399' : '#fbbf24'};font-size:12.5px">
-            ${(isFull || remainingCoupons <= 0) ? '0 (готов к прокачке! 🎉)' : fmtNum(remainingCoupons) + ' купонов'}
+          <div style="font-weight:800;color:${isFull ? '#34d399' : '#fbbf24'};font-size:13px;margin-top:1px">
+            ${isFull ? '0 (готов к прокачке! 🎉)' : fmtNum(remainingCoupons) + ' куп.'}
           </div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:10px;color:#9ca3af">${(isFull || remainingCoupons <= 0) ? 'Статус:' : `Срок (с VIP ${playerVip}):`}</div>
-          <div style="font-weight:700;color:#34d399;font-size:12.5px">
-            ${(isFull || remainingCoupons <= 0) ? 'Фулл прокачка! 🎉' : `~${remainingDays} дней`}
+          <div style="font-size:10px;color:#9ca3af">${isFull ? 'Статус:' : `Срок (с VIP ${playerVip}):`}</div>
+          <div style="font-weight:800;color:#34d399;font-size:13px;margin-top:1px">
+            ${isFull ? 'Фулл прокачка! 🎉' : `~${remainingDays} дней`}
           </div>
         </div>
       </div>
     </div>
+    ` : `
+    <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer;padding:16px;text-align:center" title="Нажмите, чтобы выбрать офицера в калькулятор">
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px">
+        <span style="color:#9ca3af;font-weight:600">🎯 Калькулятор прокачки</span>
+        <span style="font-size:11px;color:#fbbf24;font-weight:700">+ Выбрать офицера</span>
+      </div>
+      <p style="font-size:12px;color:#9ca3af;margin:6px 0 0 0">
+        Добавьте или выберите офицера для расчета дефицита и срока прокачки ⭐
+      </p>
+    </div>
+    `}
 
     <!-- Sector Officers Section -->
     ${renderTmaOfficersSectionHtml(officers, targetOfficer, player)}
@@ -15410,11 +15459,23 @@ function renderTmaOfficersPickerList() {
     const skills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
     const skillsStr = skills.join('-');
 
+    const rawCost = Number(cat?.couponPerPuzzle);
+    const costPerPuzzle = rawCost === 0
+      ? (cat?.upgradeType === 'special' ? 0 : 500)
+      : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
+    const today = new Date().toISOString().slice(0, 10);
+
     const def = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit)
-      ? logic.calculateOfficerDeficit(off, player.stock || {}, player.sector?.vipLevel || 0)
+      ? logic.calculateOfficerDeficit({
+          officer: off,
+          catalogItem: { ...cat, couponPerPuzzle: costPerPuzzle },
+          player,
+          targetLevel: 180,
+          today
+        })
       : null;
-    const isFull = skills.every(s => Number(s) >= 5);
-    const remCoupons = isFull ? 0 : (def?.remainingCoupons || 0);
+    const isFull = skills.every(s => Number(s) >= 5) || (def && def.deficitPuzzles === 0);
+    const remCoupons = isFull ? 0 : (def?.deficitCoupons ?? def?.remainingCoupons ?? 0);
 
     return `
       <div class="tma-card tma-card-clickable" onclick="selectTmaTargetOfficer('${off.id}')" style="margin-bottom:0;padding:10px 12px;background:#181c24;border-color:${isTarget ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.08)'};box-shadow:${isTarget ? '0 0 10px rgba(245,158,11,0.15)' : 'none'}">
