@@ -4000,14 +4000,17 @@ async function saveMyOfficerSubmit() {
           skills,
           personalPuzzles,
           onlyPersonalPuzzles,
+          deductStock: !isRetro,
           ...(newInvested ? { invested: newInvested } : {})
         }
       });
-      if (newStock) {
-        await apiFetch('/api/my-profile', {
-          method: 'PUT',
-          body: { stock: newStock }
-        });
+      if (updatedOffData && updatedOffData.newStock) {
+        myCabinetProfile.stock = updatedOffData.newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = updatedOffData.newStock;
+        }
+      } else if (newStock) {
         myCabinetProfile.stock = newStock;
         if (state.players) {
           const me = state.players.find(p => p.id === myCabinetProfile.id);
@@ -4111,6 +4114,7 @@ async function saveMyOfficerSubmit() {
         skills,
         personalPuzzles,
         onlyPersonalPuzzles,
+        deductStock: !isRetro,
         ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
       };
 
@@ -4123,11 +4127,13 @@ async function saveMyOfficerSubmit() {
         setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
       }
 
-      if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-        await apiFetch('/api/my-profile', {
-          method: 'PUT',
-          body: { stock: initialStockDeduction.newStock }
-        });
+      if (createdOff && createdOff.newStock) {
+        myCabinetProfile.stock = createdOff.newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = createdOff.newStock;
+        }
+      } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
         myCabinetProfile.stock = initialStockDeduction.newStock;
         if (state.players) {
           const me = state.players.find(p => p.id === myCabinetProfile.id);
@@ -8439,6 +8445,7 @@ async function submitAddSectorOfficer() {
     skills,
     personalPuzzles,
     onlyPersonalPuzzles,
+    deductStock: !isRetro,
     ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
   };
 
@@ -8448,11 +8455,9 @@ async function submitAddSectorOfficer() {
       body: payload
     });
 
-    if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-      await apiFetch(`/api/players/${addSectorOfficerPlayerId}`, {
-        method: 'PUT',
-        body: { stock: initialStockDeduction.newStock }
-      });
+    if (p && res && res.newStock) {
+      p.stock = res.newStock;
+    } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
       if (p) p.stock = initialStockDeduction.newStock;
     }
 
@@ -15842,15 +15847,18 @@ async function submitTmaOfficerEdit() {
           skills,
           personalPuzzles,
           onlyPersonalPuzzles,
+          deductStock: !isRetro,
           ...(newInvested ? { invested: newInvested } : {})
         }
       });
 
-      if (newStock) {
-        await apiFetch('/api/my-profile', {
-          method: 'PUT',
-          body: { stock: newStock }
-        });
+      if (updatedOffData && updatedOffData.newStock) {
+        myCabinetProfile.stock = updatedOffData.newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = updatedOffData.newStock;
+        }
+      } else if (newStock) {
         myCabinetProfile.stock = newStock;
         if (state.players) {
           const me = state.players.find(p => p.id === myCabinetProfile.id);
@@ -15934,6 +15942,7 @@ async function submitTmaOfficerEdit() {
         skills,
         personalPuzzles,
         onlyPersonalPuzzles,
+        deductStock: !isRetro,
         ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
       };
 
@@ -15946,11 +15955,13 @@ async function submitTmaOfficerEdit() {
         setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
       }
 
-      if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-        await apiFetch('/api/my-profile', {
-          method: 'PUT',
-          body: { stock: initialStockDeduction.newStock }
-        });
+      if (createdOff && createdOff.newStock) {
+        myCabinetProfile.stock = createdOff.newStock;
+        if (state.players) {
+          const me = state.players.find(p => p.id === myCabinetProfile.id);
+          if (me) me.stock = createdOff.newStock;
+        }
+      } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
         myCabinetProfile.stock = initialStockDeduction.newStock;
         if (state.players) {
           const me = state.players.find(p => p.id === myCabinetProfile.id);

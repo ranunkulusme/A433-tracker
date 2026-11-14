@@ -10,6 +10,7 @@ const telegram = require('./telegram.js');
 const mieru = require('./mieru.js');
 const { createEventOperations } = require('./event-ops.js');
 const { createTelegramBotController } = require('./bot-controller.js');
+const { createOfficerProgression } = require('./officer-progression.js');
 
 let APP_VERSION = '3.21.0';
 try {
@@ -425,6 +426,8 @@ const botController = createTelegramBotController({
   getAppBaseUrl,
   checkStaleStockReminders: (...args) => checkStaleStockReminders(...args)
 });
+
+const officerProgression = createOfficerProgression({ db, logic });
 
 async function checkStaleStockReminders(req = null, options = {}) {
   try {
@@ -1363,20 +1366,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
-      if (body.skills !== undefined) {
-        body.skills = sanitizeSkills(body.skills);
+      const isRetro = body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false);
+      const deductStock = Boolean(body.deductStock || body.deduct_stock);
+      const result = officerProgression.addOfficer(activePlayerId, body, {
+        isRetro,
+        deductStock,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 400, result.error, result.message);
       }
-      if (body.invested !== undefined) {
-        body.invested = sanitizeInvested(body.invested);
-      }
-      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
-        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
-      }
-      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
-        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
-      }
-      const off = db.addPlayerOfficer(activePlayerId, body);
-      return sendJson(res, 200, off);
+      return sendJson(res, 200, {
+        ...result.officer,
+        newStock: result.newStock,
+        stockDeducted: result.stockDeducted
+      });
     }
 
     const myOfficerMatch = pathname.match(/^\/api\/my-profile\/officers\/([^/]+)$/);
@@ -1387,23 +1391,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
-      if (body.skills !== undefined) {
-        body.skills = sanitizeSkills(body.skills);
+      const isRetro = body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false);
+      const deductStock = Boolean(body.deductStock || body.deduct_stock);
+      const result = officerProgression.updateOfficer(activePlayerId, officerId, body, {
+        isRetro,
+        deductStock,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 400, result.error, result.message);
       }
-      if (body.invested !== undefined) {
-        body.invested = sanitizeInvested(body.invested);
-      }
-      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
-        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
-      }
-      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
-        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
-      }
-      const off = db.updatePlayerOfficer(activePlayerId, officerId, body);
-      if (!off) {
-        return sendError(res, 404, 'OFFICER_NOT_FOUND', 'Офицер не найден');
-      }
-      return sendJson(res, 200, off);
+      return sendJson(res, 200, {
+        ...result.officer,
+        newStock: result.newStock,
+        stockDeducted: result.stockDeducted
+      });
     }
 
     if (myOfficerMatch && req.method === 'DELETE') {
@@ -1413,7 +1415,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
-      db.deletePlayerOfficer(activePlayerId, officerId);
+      officerProgression.deleteOfficer(activePlayerId, officerId);
       return sendJson(res, 200, { success: true });
     }
 
@@ -1653,20 +1655,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      if (body.skills !== undefined) {
-        body.skills = sanitizeSkills(body.skills);
+      const isRetro = body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false);
+      const deductStock = Boolean(body.deductStock || body.deduct_stock);
+      const result = officerProgression.addOfficer(targetPlayerId, body, {
+        isRetro,
+        deductStock,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 400, result.error, result.message);
       }
-      if (body.invested !== undefined) {
-        body.invested = sanitizeInvested(body.invested);
-      }
-      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
-        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
-      }
-      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
-        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
-      }
-      const off = db.addPlayerOfficer(targetPlayerId, body);
-      return sendJson(res, 201, off);
+      return sendJson(res, 201, {
+        ...result.officer,
+        newStock: result.newStock,
+        stockDeducted: result.stockDeducted
+      });
     }
 
     const playerOfficerDetailMatch = pathname.match(/^\/api\/players\/(\d+)\/officers\/([^/]+)$/);
@@ -1676,23 +1679,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      if (body.skills !== undefined) {
-        body.skills = sanitizeSkills(body.skills);
+      const isRetro = body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false);
+      const deductStock = Boolean(body.deductStock || body.deduct_stock);
+      const result = officerProgression.updateOfficer(targetPlayerId, offId, body, {
+        isRetro,
+        deductStock,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 400, result.error, result.message);
       }
-      if (body.invested !== undefined) {
-        body.invested = sanitizeInvested(body.invested);
-      }
-      if (body.personalPuzzles !== undefined || body.personal_puzzles !== undefined) {
-        body.personalPuzzles = sanitizePersonalPuzzles(body.personalPuzzles ?? body.personal_puzzles);
-      }
-      if (body.onlyPersonalPuzzles !== undefined || body.only_personal_puzzles !== undefined) {
-        body.onlyPersonalPuzzles = Boolean(body.onlyPersonalPuzzles ?? body.only_personal_puzzles);
-      }
-      const off = db.updatePlayerOfficer(targetPlayerId, offId, body);
-      if (!off) {
-        return sendError(res, 404, 'OFFICER_NOT_FOUND', 'Офицер не найден');
-      }
-      return sendJson(res, 200, off);
+      return sendJson(res, 200, {
+        ...result.officer,
+        newStock: result.newStock,
+        stockDeducted: result.stockDeducted
+      });
     }
 
     if (playerOfficerDetailMatch && req.method === 'DELETE') {
@@ -1701,7 +1702,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      db.deletePlayerOfficer(targetPlayerId, offId);
+      officerProgression.deleteOfficer(targetPlayerId, offId);
       return sendJson(res, 200, { success: true });
     }
 
