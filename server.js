@@ -12,6 +12,9 @@ const { createEventOperations } = require('./event-ops.js');
 const { createTelegramBotController } = require('./bot-controller.js');
 const { createOfficerProgression } = require('./officer-progression.js');
 const { createNotificationEngine } = require('./notification-engine.js');
+const { createAuthGuard } = require('./auth-guard.js');
+
+const authGuard = createAuthGuard({ db, logic });
 
 let APP_VERSION = '3.21.0';
 try {
@@ -129,28 +132,7 @@ function readJsonBody(req) {
 }
 
 function authenticate(req) {
-  let token = null;
-  const authHeader = req.headers.authorization || req.headers.Authorization || '';
-  if (authHeader.startsWith('Bearer ')) {
-    token = authHeader.slice(7).trim();
-  } else if (req.headers.cookie) {
-    const match = req.headers.cookie.match(/(?:^|;\s*)token=([^;]+)/);
-    if (match) {
-      token = decodeURIComponent(match[1]);
-    }
-  }
-
-  if (!token) {
-    req.user = null;
-    return null;
-  }
-  const user = db.verifySession(token);
-  req.user = user || null;
-  req.token = token;
-  if (req.user && req.user.id) {
-    db.touchUserActive(req.user.id);
-  }
-  return req.user;
+  return authGuard.authenticate(req);
 }
 
 function sanitizeSkills(skills) {
@@ -244,11 +226,12 @@ function requireAuth(req, res) {
 
 function requireRole(roles) {
   return (req, res) => {
+    if (!req.user) authenticate(req);
     if (!req.user) {
       sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
       return false;
     }
-    if (!roles.includes(req.user.rank)) {
+    if (!authGuard.hasRole(req.user, roles)) {
       sendError(res, 403, 'FORBIDDEN', `Доступ запрещен для ранга ${req.user.rank}`);
       return false;
     }
@@ -269,7 +252,7 @@ function requirePermission(reqOrPerm, res, permission) {
     sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
     return false;
   }
-  if (logic.hasUserPermission(req.user, permission)) {
+  if (authGuard.hasPermission(req.user, permission)) {
     return true;
   }
   sendError(res, 403, 'FORBIDDEN', `Недостаточно прав: требуется разрешение ${permission}`);
@@ -277,25 +260,7 @@ function requirePermission(reqOrPerm, res, permission) {
 }
 
 function maskPlayerStockIfNeeded(player, user) {
-  if (!player) return player;
-  const isOwner = user && player.userId === user.id;
-  const canViewStocks = user && logic.hasUserPermission(user, 'view_stocks');
-  if (isOwner || canViewStocks) {
-    return player;
-  }
-  return {
-    ...player,
-    stock: {
-      coupons: 0,
-      puzzles: 0,
-      chests: 0,
-      starCoupons: 0,
-      legendaryStars1: 0,
-      legendaryStars2: 0,
-      legendaryStars3: 0,
-      masked: true
-    }
-  };
+  return authGuard.maskPlayerStockIfNeeded(player, user);
 }
 
 function getAppBaseUrl(req = null) {
@@ -784,14 +749,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (approveMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'approve_users')) return;
       const targetUserId = Number(approveMatch[1]);
-      let rank = body.rank === 'r4' ? 'r4' : 'r3';
-      if (req.user.rank !== 'r5' && body.rank && body.rank !== 'r3') {
-        return sendJson(res, 403, { error: 'Только глава альянса (Р5) может назначать ранг выше Р3' });
+      const guard = authGuard.canApproveUser(req.user, body.rank);
+      if (!guard.allowed) {
+        return sendJson(res, 403, { error: guard.message || 'Только глава альянса (Р5) может назначать ранг выше Р3' });
       }
-      if (req.user.rank === 'r5' && ['r3', 'r4'].includes(body.rank)) {
-        rank = body.rank;
-      }
-      const updatedUser = db.approveUser(targetUserId, rank);
+      const updatedUser = db.approveUser(targetUserId, guard.rank);
       return sendJson(res, 200, { success: true, user: updatedUser });
     }
 
@@ -826,8 +788,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (userBlockMatch && req.method === 'POST') {
       if (!requireRole(['r5'])(req, res)) return;
       const targetUserId = Number(userBlockMatch[1]);
-      if (targetUserId === req.user.id) {
-        return sendError(res, 400, 'SELF_BLOCK_FORBIDDEN', 'Вы не можете заблокировать собственный аккаунт');
+      const guard = authGuard.canBlockUser(req.user, targetUserId);
+      if (!guard.allowed) {
+        return sendError(res, 400, guard.error, guard.message);
       }
       const targetUser = db.findUserById(targetUserId);
       if (!targetUser) {
@@ -842,15 +805,11 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (userDeleteMatch && req.method === 'DELETE') {
       if (!requireRole(['r5'])(req, res)) return;
       const targetUserId = Number(userDeleteMatch[1]);
-      if (targetUserId === req.user.id) {
-        return sendError(res, 400, 'SELF_DELETE_FORBIDDEN', 'Вы не можете удалить собственный аккаунт');
-      }
       const targetUser = db.findUserById(targetUserId);
-      if (!targetUser) {
-        return sendError(res, 404, 'USER_NOT_FOUND', 'Пользователь не найден');
-      }
-      if (targetUser.username === 'admin') {
-        return sendError(res, 400, 'ADMIN_DELETE_FORBIDDEN', 'Главного администратора (admin) нельзя удалить');
+      const guard = authGuard.canDeleteUser(req.user, targetUser);
+      if (!guard.allowed) {
+        const statusCode = guard.error === 'USER_NOT_FOUND' ? 404 : 400;
+        return sendError(res, statusCode, guard.error, guard.message);
       }
       const deleteSectors = Boolean(body && body.deleteSectors);
       const result = db.deleteUser(targetUserId, { deleteSectors });
@@ -1159,27 +1118,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     function checkSectorAccess(targetPlayerId, isRead = false) {
-      if (!req.user) {
-        return { ok: false, status: 401, error: 'UNAUTHORIZED', message: 'Требуется авторизация' };
-      }
-      const player = db.getPlayerById(targetPlayerId);
-      if (!player) {
-        return { ok: false, status: 404, error: 'PLAYER_NOT_FOUND', message: 'Сектор не найден' };
-      }
-      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
-      const isOwner = player.userId === req.user.id;
-      if (isRead) {
-        const canRead = isLeader || isOwner || logic.hasUserPermission(req.user, 'view_sectors');
-        if (!canRead) {
-          return { ok: false, status: 403, error: 'FORBIDDEN', message: 'Вы не являетесь владельцем этого сектора' };
-        }
-        const maskedPlayer = maskPlayerStockIfNeeded(player, req.user);
-        return { ok: true, player: maskedPlayer, isLeader, isOwner };
-      }
-      if (!isLeader && !isOwner) {
-        return { ok: false, status: 403, error: 'FORBIDDEN', message: 'Вы не являетесь владельцем этого сектора' };
-      }
-      return { ok: true, player, isLeader, isOwner };
+      return authGuard.checkSectorAccess(req.user, targetPlayerId, isRead);
     }
 
     const playerMatch = pathname.match(/^\/api\/players\/(\d+)$/);
