@@ -11,6 +11,7 @@ const mieru = require('./mieru.js');
 const { createEventOperations } = require('./event-ops.js');
 const { createTelegramBotController } = require('./bot-controller.js');
 const { createOfficerProgression } = require('./officer-progression.js');
+const { createNotificationEngine } = require('./notification-engine.js');
 
 let APP_VERSION = '3.21.0';
 try {
@@ -308,104 +309,15 @@ function getAppBaseUrl(req = null) {
   return 'http://localhost:3000';
 }
 
-async function dispatchNotification(eventKey, data = {}, options = {}) {
-  try {
-    const template = db.getNotificationTemplate(eventKey);
-    if (!template) {
-      console.warn(`[Notification] Template "${eventKey}" not found`);
-      return { sent: false, reason: 'template_not_found' };
-    }
+const notificationEngine = createNotificationEngine({
+  db,
+  logic,
+  telegram,
+  getAppBaseUrl
+});
 
-    const token = db.getAppSetting('telegram_bot_token');
-    if (!token) {
-      return { sent: false, reason: 'no_bot_token' };
-    }
-
-    const renderedText = logic.renderTemplate(template.template, data);
-    const parseMode = template.parse_mode || 'HTML';
-    let replyMarkup = options.replyMarkup || undefined;
-    if (!replyMarkup && eventKey === 'event_registration_opened' && data.eventId) {
-      replyMarkup = logic.formatEventRegistrationKeyboard(data.eventId);
-    }
-
-    const mieruSettings = db.getMieruSettings();
-    const proxyUrl = options.proxyUrl || (mieruSettings.enabled ? `socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}` : undefined);
-    const sendOpts = proxyUrl ? { proxyUrl } : {};
-
-    if (template.channel === 'staff') {
-      let staffChatId = db.getAppSetting('telegram_staff_chat_id');
-      if (!staffChatId) {
-        return { sent: false, reason: 'no_staff_chat_id' };
-      }
-      if (staffChatId && !isNaN(Number(staffChatId))) {
-        staffChatId = Number(staffChatId);
-      }
-      const res = await telegram.sendTelegramMessage({
-        token,
-        chatId: staffChatId,
-        text: renderedText,
-        parseMode,
-        replyMarkup
-      }, sendOpts);
-      return { sent: res.ok, result: res };
-    }
-
-    if (template.channel === 'personal') {
-      if (options.userId) {
-        const user = db.findUserById(options.userId);
-        if (!user) {
-          return { sent: false, reason: 'user_not_found' };
-        }
-        if (!user.telegram_chat_id || user.telegram_notifications_enabled === 0) {
-          return { sent: false, reason: 'notifications_disabled_or_no_chat' };
-        }
-        const res = await telegram.sendTelegramMessage({
-          token,
-          chatId: user.telegram_chat_id,
-          text: renderedText,
-          parseMode,
-          replyMarkup
-        }, sendOpts);
-        return { sent: res.ok, result: res };
-      }
-
-      if (options.broadcast) {
-        const users = db.getUsers();
-        const targets = users.filter(u => u.is_approved !== 0 && u.telegram_chat_id && u.telegram_notifications_enabled !== 0);
-        let sentCount = 0;
-        for (const u of targets) {
-          const res = await telegram.sendTelegramMessage({
-            token,
-            chatId: u.telegram_chat_id,
-            text: renderedText,
-            parseMode,
-            replyMarkup
-          });
-          if (res.ok) sentCount++;
-        }
-        return { sent: true, sentCount, totalTargets: targets.length };
-      }
-
-      const directChatId = options.chatId || options.recipientChatId;
-      if (directChatId) {
-        const res = await telegram.sendTelegramMessage({
-          token,
-          chatId: directChatId,
-          text: renderedText,
-          parseMode,
-          replyMarkup
-        }, sendOpts);
-        return { sent: res.ok, result: res };
-      }
-
-      return { sent: false, reason: 'no_target_specified' };
-    }
-
-    return { sent: false, reason: 'unknown_channel' };
-  } catch (err) {
-    console.warn(`[Notification] Error dispatching "${eventKey}":`, err.message);
-    return { sent: false, error: err.message };
-  }
+function dispatchNotification(...args) {
+  return notificationEngine.dispatchNotification(...args);
 }
 
 const eventOps = createEventOperations({
@@ -421,6 +333,7 @@ const botController = createTelegramBotController({
   logic,
   telegram,
   eventOps,
+  notificationEngine,
   tryServerOcr,
   dispatchNotification,
   getAppBaseUrl,
@@ -429,234 +342,16 @@ const botController = createTelegramBotController({
 
 const officerProgression = createOfficerProgression({ db, logic });
 
-async function checkStaleStockReminders(req = null, options = {}) {
-  try {
-    const isScheduled = Boolean(options.isScheduled);
-    const force = Boolean(options.force || !isScheduled);
-    const forcePersonal = Boolean(options.forcePersonal);
-
-    const schedule = db.getStaleAlertSchedule();
-    const cooldownDays = schedule.personalCooldownDays !== undefined ? schedule.personalCooldownDays : 7;
-
-    const players = db.getPlayers();
-    const totalSectors = players.length;
-    let freshCount = 0;
-    let warningCount = 0;
-    let staleCount = 0;
-    let personalRemindersSent = 0;
-
-    const baseUrl = getAppBaseUrl(req);
-    const now = new Date();
-
-    const staleSectors = [];
-
-    for (const player of players) {
-      const freshness = logic.getStockFreshness(player.stockUpdatedAt, now);
-      if (freshness.status === 'fresh') {
-        freshCount++;
-      } else if (freshness.status === 'warning') {
-        warningCount++;
-      } else if (freshness.status === 'stale') {
-        staleCount++;
-        staleSectors.push({ player, freshness });
-      }
-    }
-
-    // 1. Personal reminders to owners of stale sectors
-    if (cooldownDays > 0 || forcePersonal) {
-      for (const { player, freshness } of staleSectors) {
-        if (player.userId) {
-          // Check personal cooldown
-          if (!forcePersonal && player.lastStockReminderSentAt) {
-            const lastSentTime = new Date(player.lastStockReminderSentAt).getTime();
-            if (!isNaN(lastSentTime)) {
-              const daysSince = (now.getTime() - lastSentTime) / (24 * 60 * 60 * 1000);
-              if (daysSince < cooldownDays) {
-                continue; // Suppressed by cooldown
-              }
-            }
-          }
-
-          const user = db.findUserById(player.userId);
-          if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
-            const res = await dispatchNotification('stock_reminder_personal', {
-              username: user.username,
-              sectorName: player.name || 'Сектор',
-              daysOverdue: String(freshness.days ?? '14+'),
-              link: `${baseUrl}/#cabinet`
-            }, { userId: user.id }).catch(err => {
-              console.warn(`[Reminders] Error sending reminder to user ${user.id}:`, err.message);
-              return { sent: false };
-            });
-            if (res && res.sent) {
-              personalRemindersSent++;
-              db.updatePlayerStockReminderTime(player.id, now.toISOString());
-            }
-          }
-        }
-      }
-    }
-
-    // 2. Staff alert summary
-    let staffAlertSent = false;
-    const shouldSkipStaffDueToSilence = isScheduled && schedule.smartSilence && staleCount === 0 && !force;
-
-    if (!shouldSkipStaffDueToSilence) {
-      const staffRes = await dispatchNotification('staff_stale_stocks_alert', {
-        totalSectors: String(totalSectors),
-        freshCount: String(freshCount),
-        warningCount: String(warningCount),
-        staleCount: String(staleCount),
-        link: `${baseUrl}/#sectors`
-      }).catch(err => {
-        console.warn('[Reminders] Error sending staff_stale_stocks_alert:', err.message);
-        return { sent: false };
-      });
-      if (staffRes && staffRes.sent) {
-        staffAlertSent = true;
-      }
-    } else {
-      console.log('[Reminders] Smart silence active: 0 stale sectors, staff alert skipped');
-    }
-
-    const result = {
-      totalSectors,
-      freshCount,
-      warningCount,
-      staleCount,
-      personalRemindersSent,
-      staffAlertSent,
-      silent: shouldSkipStaffDueToSilence
-    };
-
-    db.recordStaleAlertRun({ lastRunAt: now.toISOString(), status: result });
-
-    return result;
-  } catch (err) {
-    console.warn('[Reminders] Error in checkStaleStockReminders:', err.message);
-    return {
-      totalSectors: 0,
-      freshCount: 0,
-      warningCount: 0,
-      staleCount: 0,
-      personalRemindersSent: 0,
-      staffAlertSent: false,
-      silent: false,
-      error: err.message
-    };
-  }
+function checkStaleStockReminders(...args) {
+  return notificationEngine.checkStaleStockReminders(...args);
 }
 
-async function checkScheduledStaleStockReminders() {
-  try {
-    const schedule = db.getStaleAlertSchedule();
-    if (!schedule || schedule.frequency === 'disabled') return;
-
-    const now = new Date();
-    const shouldRun = logic.shouldRunStaleStockAlert({
-      frequency: schedule.frequency,
-      time: schedule.time,
-      lastRunAt: schedule.lastRunAt,
-      now,
-      timezoneOffset: schedule.timezoneOffset || 3
-    });
-
-    if (shouldRun) {
-      console.log(`[Reminders] Triggering scheduled stale stock check (${schedule.frequency} at ${schedule.time})`);
-      await checkStaleStockReminders(null, { isScheduled: true });
-    }
-  } catch (err) {
-    console.error('[Reminders] Error in checkScheduledStaleStockReminders:', err);
-  }
+function checkScheduledStaleStockReminders(...args) {
+  return notificationEngine.checkScheduledStaleStockReminders(...args);
 }
 
-async function checkScheduledEventMorningReminders(req = null, options = {}) {
-  try {
-    const events = db.getEvents();
-    if (!events || !events.length) {
-      return { eventsChecked: 0, remindersSent: 0 };
-    }
-
-    const eventTypes = db.getEventTypes();
-    const now = options.now ? new Date(options.now) : new Date();
-    const baseUrl = getAppBaseUrl(req);
-    let sentCount = 0;
-
-    const nowTime = now.getTime();
-    for (const ev of events) {
-      const assignments = ev.assignments || [];
-      if (!assignments.length) continue;
-
-      // Ранний отсев архивных и далеких будущих событий (окно старта ±36 часов от текущего момента)
-      if (!options.force && ev.dateFrom) {
-        const evTime = new Date(ev.dateFrom).getTime();
-        if (!isNaN(evTime) && Math.abs(evTime - nowTime) > 36 * 3600 * 1000) {
-          continue;
-        }
-      }
-
-      const et = eventTypes.find(t => t.id === ev.typeId);
-      const effectivePlaces = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
-
-      for (const a of assignments) {
-        if (!a.playerId || !a.place) continue;
-        const player = db.getPlayerById(a.playerId);
-        if (!player || !player.userId) continue;
-
-        const user = db.findUserById(player.userId);
-        if (!user || !user.telegramChatId || user.telegramNotificationsEnabled === false) continue;
-
-        const timezoneOffset = user.timezoneOffset !== undefined ? user.timezoneOffset : 3;
-        const targetHour = options.targetHour !== undefined ? options.targetHour : 9;
-
-        const shouldSend = logic.shouldSendMorningEventReminder({
-          eventDateFrom: ev.dateFrom,
-          now,
-          timezoneOffset,
-          targetHour
-        });
-
-        if (!shouldSend && !options.force) continue;
-
-        const zonedParts = logic.getZonedDateParts(now, timezoneOffset);
-        const reminderDate = zonedParts ? zonedParts.dateString : String(ev.dateFrom).slice(0, 10);
-
-        if (!options.force && db.hasEventReminderBeenSent(ev.id, a.place, user.id, reminderDate)) {
-          continue;
-        }
-
-        const placeInfo = (effectivePlaces || []).find(p => Number(p.place) === Number(a.place));
-        const coupons = placeInfo ? (placeInfo.coupons || 0) : 0;
-
-        let officerName = 'Любой';
-        if (a.officerId) {
-          const off = (player.officers || []).find(o => o.id === a.officerId || o.catalogId === a.officerId);
-          if (off) officerName = off.name;
-        }
-
-        const link = `${baseUrl}/#event/${ev.id}`;
-        await dispatchNotification('event_morning_briefing', {
-          sectorName: player.name,
-          eventName: et ? et.name : 'Событие альянса',
-          place: String(a.place),
-          coupons: String(coupons),
-          officerName,
-          link
-        }, {
-          userId: user.id,
-          chatId: user.telegramChatId
-        });
-
-        db.recordEventReminderSent(ev.id, a.place, user.id, reminderDate);
-        sentCount++;
-      }
-    }
-
-    return { eventsChecked: events.length, remindersSent: sentCount };
-  } catch (err) {
-    console.warn('[MorningReminders] Error in checkScheduledEventMorningReminders:', err.message);
-    return { eventsChecked: 0, remindersSent: 0, error: err.message };
-  }
+function checkScheduledEventMorningReminders(...args) {
+  return notificationEngine.checkScheduledEventMorningReminders(...args);
 }
 
 function getPlayerTargetOfficerDeficit(player) {

@@ -15,6 +15,7 @@ function createTelegramBotController({
   logic,
   telegram,
   eventOps,
+  notificationEngine,
   tryServerOcr,
   dispatchNotification,
   getAppBaseUrl,
@@ -25,6 +26,14 @@ function createTelegramBotController({
 
   const tg = telegram || require('./telegram.js');
   telegram = tg;
+
+  const staleRemindersFn = (notificationEngine && typeof notificationEngine.checkStaleStockReminders === 'function')
+    ? ((...args) => notificationEngine.checkStaleStockReminders(...args))
+    : checkStaleStockReminders;
+
+  const dispatchNotificationFn = (notificationEngine && typeof notificationEngine.dispatchNotification === 'function')
+    ? ((...args) => notificationEngine.dispatchNotification(...args))
+    : dispatchNotification;
 
   function getPlayerTargetOfficerDeficit(player) {
     if (!player) return { targetOfficer: null, targetDeficit: 0, deficitDetails: null };
@@ -623,7 +632,7 @@ async function handleTelegramUpdate(update) {
         return { ok: true, authorized: false, command: 'ping_stale' };
       }
 
-      const res = await checkStaleStockReminders(null, { force: true, forcePersonal: true });
+      const res = await staleRemindersFn(null, { force: true, forcePersonal: true });
       const sentCount = res ? (res.personalRemindersSent || 0) : 0;
       const totalStale = res ? (res.staleCount || 0) : 0;
 
@@ -1360,7 +1369,7 @@ async function handleTelegramUpdate(update) {
         const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
         const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'Любое';
         const baseUrl = getAppBaseUrl(req);
-        dispatchNotification('staff_event_registration', {
+        dispatchNotificationFn('staff_event_registration', {
           eventName: et?.name || `Событие #${eventId}`,
           sectorName: player.name || `Сектор #${player.id}`,
           desiredPlace: placeStr,
