@@ -13,6 +13,7 @@ const { createTelegramBotController } = require('./bot-controller.js');
 const { createOfficerProgression } = require('./officer-progression.js');
 const { createNotificationEngine } = require('./notification-engine.js');
 const { createAuthGuard } = require('./auth-guard.js');
+const { createSeasonPlanner } = require('./season-planner.js');
 
 const authGuard = createAuthGuard({ db, logic });
 
@@ -278,6 +279,13 @@ const notificationEngine = createNotificationEngine({
   db,
   logic,
   telegram,
+  getAppBaseUrl
+});
+
+const seasonPlanner = createSeasonPlanner({
+  db,
+  logic,
+  notificationEngine,
   getAppBaseUrl
 });
 
@@ -1672,123 +1680,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-
-      let cachedEventTypes = db.getEventTypes();
-      function ensureEventType(identifier, defaultColor) {
-        const search = String(identifier || '').trim().toLowerCase();
-        let found = cachedEventTypes.find(t => t.name && t.name.trim().toLowerCase() === search);
-
-        const preset = (logic.EVENT_PRESETS || []).find(p => p.id === search || p.name.trim().toLowerCase() === search);
-        if (!found && preset) {
-          found = cachedEventTypes.find(t => t.name && t.name.trim().toLowerCase() === preset.name.trim().toLowerCase());
-        }
-
-        if (!found) {
-          const typeName = preset ? preset.name : (identifier || 'Событие');
-          let color = defaultColor || (preset ? preset.color : '#8b5cf6');
-          if (preset?.id === 'king-of-war') color = '#8b5cf6';
-          else if (preset?.id === 'mighty-forces') color = '#10b981';
-          else if (preset?.id === 'power-of-time') color = '#f59e0b';
-
-          found = db.saveEventType({
-            name: typeName,
-            color: color || '#8b5cf6',
-            isPeriodic: 1,
-            startDayOfWeek: preset?.startDayOfWeek || 2,
-            endDayOfWeek: preset?.endDayOfWeek || 3,
-            activeWeeks: preset?.activeWeeks || 1,
-            breakWeeks: preset?.breakWeeks || 1,
-            weekOffset: preset?.weekOffset || 0,
-            places: [
-              { place: 1, label: '🥇 1 место', coupons: 12500 },
-              { place: 2, label: '🥈 2 место', coupons: 6500 },
-              { place: 3, label: '🥉 3 место', coupons: 3500 },
-              { place: 4, label: '4–10 место', coupons: 2750 },
-            ]
-          });
-          cachedEventTypes.push(found);
-        }
-        return found;
-      }
-
-      const createdEvents = [];
-
-      if (Array.isArray(body?.events)) {
-        // 1. Ready-made events array from UI preview (with possible deletions/edits)
-        for (const item of body.events) {
-          if (!item || !item.dateFrom || !item.dateTo) continue;
-          let et = null;
-          if (item.typeId && typeof item.typeId === 'number') {
-            const allTypes = db.getEventTypes();
-            et = allTypes.find(t => t.id === item.typeId);
-          }
-          if (!et) {
-            et = ensureEventType(item.typeName || item.name || item.typeId, item.color);
-          }
-          const saved = db.saveEvent({
-            typeId: et.id,
-            dateFrom: item.dateFrom,
-            dateTo: item.dateTo,
-            note: item.note || '',
-            assignments: []
-          });
-          createdEvents.push(saved);
-        }
-      } else if (body?.rules || body?.totalWeeks) {
-        // 2. Multi-rule season generation
-        const scheduleItems = logic.generateSeasonSchedule({
-          startDate: body.startDate || new Date().toISOString().slice(0, 10),
-          totalWeeks: body.totalWeeks,
-          rules: body.rules
-        });
-
-        for (const item of scheduleItems) {
-          const et = ensureEventType(item.typeName || item.name || item.typeId, item.color);
-          const saved = db.saveEvent({
-            typeId: et.id,
-            dateFrom: item.dateFrom,
-            dateTo: item.dateTo,
-            note: item.note || '',
-            assignments: []
-          });
-          createdEvents.push(saved);
-        }
-      } else {
-        // 3. Legacy fallback (presetId, startDate, cyclesCount)
-        const { presetId = 'king-of-war', startDate, cyclesCount = 1 } = body || {};
-        const preset = (logic.EVENT_PRESETS || []).find(p => p.id === presetId) || (logic.EVENT_PRESETS && logic.EVENT_PRESETS[0]) || {
-          id: 'king-of-war',
-          name: 'Король Войны',
-          cycleDays: 14,
-          durationDays: 2
-        };
-
-        const eventType = ensureEventType(preset.name, preset.color);
-        const count = Math.max(1, Number(cyclesCount) || 1);
-        const scheduleItems = logic.generateSeasonSchedule({
-          startDate: startDate || new Date().toISOString().slice(0, 10),
-          cyclesCount: count,
-          presetId: preset.id
-        });
-
-        for (const item of scheduleItems) {
-          const saved = db.saveEvent({
-            typeId: eventType.id,
-            dateFrom: item.dateFrom,
-            dateTo: item.dateTo,
-            note: item.note || '',
-            assignments: []
-          });
-          createdEvents.push(saved);
-        }
-      }
-
-      return sendJson(res, 201, {
-        success: true,
-        count: createdEvents.length,
-        createdCount: createdEvents.length,
-        events: createdEvents
-      });
+      const result = seasonPlanner.scheduleSeason(body);
+      return sendJson(res, 201, result);
     }
 
     const eventRegMatch = pathname.match(/^\/api\/events\/(\d+)\/register$/);
@@ -1874,31 +1767,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (autopickMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const eventId = Number(autopickMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) {
-        return sendError(res, 404, 'EVENT_NOT_FOUND', 'Ивент не найден');
+      const result = seasonPlanner.runSmartAutopick(eventId);
+      if (!result.success) {
+        return sendError(res, 404, result.error, result.message);
       }
-      const eventTypes = db.getEventTypes();
-      const et = eventTypes.find(t => t.id === ev.typeId);
-      const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, ev.dateFrom) : et.places) : [];
-
-      const players = db.getPlayers();
-      const officerCatalog = db.getCatalog();
-      const registrations = db.getRegistrationsByEventId(eventId);
-      const recentWinners = typeof db.getRecentWinners === 'function'
-        ? db.getRecentWinners(ev.typeId || ev.type_id, 2, ev.id)
-        : [];
-
-      const result = logic.smartAutoPickWithRegistrations({
-        event: { ...ev, places },
-        players,
-        registrations,
-        officerCatalog,
-        eventDate: ev.dateFrom,
-        recentWinners
-      });
-
-      // Dry-run preview: do not mutate db or send notifications until saveEvent is submitted
       return sendJson(res, 200, {
         success: true,
         assignments: result.assignments,

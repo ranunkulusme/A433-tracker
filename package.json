@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node logic.test.js && node db.test.js && node event-ops.test.js && node bot-controller.test.js && node officer-progression.test.js && node notification-engine.test.js && node auth-guard.test.js && node s3.test.js && node telegram.test.js && node api.test.js && node deploy.test.js && node i18n.test.js",
+    "test": "node logic.test.js && node db.test.js && node event-ops.test.js && node bot-controller.test.js && node officer-progression.test.js && node notification-engine.test.js && node auth-guard.test.js && node season-planner.test.js && node s3.test.js && node telegram.test.js && node api.test.js && node deploy.test.js && node i18n.test.js",
     "test:acceptance": "node test-demo-acceptance.js",
     "test:api": "node api.test.js",
     "test:auth-guard": "node auth-guard.test.js",
@@ -18,6 +18,7 @@
     "test:notifications": "node notification-engine.test.js",
     "test:officer-progression": "node officer-progression.test.js",
     "test:s3": "node s3.test.js",
+    "test:season-planner": "node season-planner.test.js",
     "test:telegram": "node telegram.test.js"
   },
   "dependencies": {
