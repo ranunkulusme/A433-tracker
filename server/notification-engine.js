@@ -64,6 +64,24 @@ function createNotificationEngine({
         return { sent: res.ok, result: res };
       }
 
+      if (template.channel === 'announcement' || template.channel === 'channel') {
+        let channelChatId = db.getAppSetting('telegram_announcement_chat_id');
+        if (!channelChatId) {
+          return { sent: false, reason: 'no_announcement_chat_id' };
+        }
+        if (channelChatId && !isNaN(Number(channelChatId))) {
+          channelChatId = Number(channelChatId);
+        }
+        const res = await tg.sendTelegramMessage({
+          token,
+          chatId: channelChatId,
+          text: renderedText,
+          parseMode,
+          replyMarkup
+        }, sendOpts);
+        return { sent: res.ok, result: res };
+      }
+
       if (template.channel === 'personal') {
         if (options.userId) {
           const user = db.findUserById(options.userId);

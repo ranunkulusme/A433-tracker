@@ -2011,9 +2011,29 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 400, 'BOT_TOKEN_NOT_CONFIGURED', 'Токен бота не настроен в системе');
       }
 
+      const target = body && body.target ? String(body.target).trim().toLowerCase() : 'staff';
       const staffChatId = db.getAppSetting('telegram_staff_chat_id');
-      if (!staffChatId) {
-        return sendError(res, 400, 'STAFF_CHAT_NOT_CONFIGURED', 'Чат штаба не настроен в системе');
+      const announcementChatId = db.getAppSetting('telegram_announcement_chat_id');
+
+      const targetChats = [];
+      if (target === 'staff') {
+        if (!staffChatId) {
+          return sendError(res, 400, 'STAFF_CHAT_NOT_CONFIGURED', 'Чат штаба не настроен в системе');
+        }
+        targetChats.push(staffChatId);
+      } else if (target === 'channel' || target === 'announcement') {
+        if (!announcementChatId) {
+          return sendError(res, 400, 'ANNOUNCEMENT_CHAT_NOT_CONFIGURED', 'Канал анонсов не настроен в системе');
+        }
+        targetChats.push(announcementChatId);
+      } else if (target === 'both') {
+        if (!staffChatId && !announcementChatId) {
+          return sendError(res, 400, 'NO_CHATS_CONFIGURED', 'Ни чат штаба, ни канал анонсов не настроены в системе');
+        }
+        if (staffChatId) targetChats.push(staffChatId);
+        if (announcementChatId) targetChats.push(announcementChatId);
+      } else {
+        return sendError(res, 400, 'INVALID_TARGET', 'Недопустимый канал назначения (staff, channel, both)');
       }
 
       const baseUrl = getAppBaseUrl(req);
@@ -2029,22 +2049,30 @@ function createRequestHandler(staticDir, s3Manager = null) {
         ]
       };
 
-      const result = await telegram.sendTelegramPhoto({
-        token: botToken,
-        chatId: staffChatId,
-        photo: imageBase64,
-        caption,
-        parseMode: 'HTML',
-        replyMarkup
-      });
+      const sendResults = [];
+      for (const destChatId of targetChats) {
+        const result = await telegram.sendTelegramPhoto({
+          token: botToken,
+          chatId: destChatId,
+          photo: imageBase64,
+          caption,
+          parseMode: 'HTML',
+          replyMarkup
+        });
+        if (result.ok) {
+          sendResults.push({ chatId: destChatId, messageId: result.result?.message_id });
+        }
+      }
 
-      if (!result.ok) {
-        return sendError(res, 502, 'TELEGRAM_ERROR', result.description || result.error || 'Ошибка отправки изображения в Telegram');
+      if (sendResults.length === 0) {
+        return sendError(res, 502, 'TELEGRAM_ERROR', 'Ошибка отправки изображения в Telegram');
       }
 
       return sendJson(res, 200, {
         success: true,
-        messageId: result.result?.message_id
+        sentCount: sendResults.length,
+        messageId: sendResults[0].messageId,
+        results: sendResults
       });
     }
 
