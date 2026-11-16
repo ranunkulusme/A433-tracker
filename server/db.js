@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested, calculateStockDiff, DEFAULT_NOTIFICATION_TEMPLATES } = require('./logic.js');
+const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested, calculateStockDiff, DEFAULT_NOTIFICATION_TEMPLATES } = require('../shared/logic.js');
 
 let currentDb = null;
 
@@ -1593,7 +1593,7 @@ function updateStockHistoryRecord(id, updates = {}) {
 
 async function cleanupExpiredScreenshots(dbInstance, screenshotsBaseDir) {
   const db = dbInstance || getDb();
-  const baseDir = screenshotsBaseDir || path.join(__dirname, 'data', 'screenshots');
+  const baseDir = screenshotsBaseDir || path.join(__dirname, '..', 'data', 'screenshots');
   const resolvedBaseDir = path.resolve(baseDir);
 
   const rows = db.prepare(`
@@ -2211,7 +2211,7 @@ function migrateSchema(db) {
 
 // ─── INIT DB ─────────────────────────────────────────────────
 function initDb(filePath) {
-  const dbPath = filePath || process.env.DB_PATH || path.join(__dirname, 'data', 'kow.db');
+  const dbPath = filePath || process.env.DB_PATH || path.join(__dirname, '..', 'data', 'kow.db');
 
   if (dbPath !== ':memory:') {
     const dir = path.dirname(dbPath);

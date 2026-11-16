@@ -1,19 +1,26 @@
 {
   "name": "kow-tracker",
-  "version": "3.47.0",
+  "version": "3.48.0",
   "description": "Kiss of War Officer Tracker and Event Planner",
-  "main": "server.js",
+  "main": "server/server.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "node logic.test.js && node db.test.js && node s3.test.js && node telegram.test.js && node api.test.js && node deploy.test.js && node i18n.test.js",
-    "test:acceptance": "node test-demo-acceptance.js",
-    "test:api": "node api.test.js",
-    "test:db": "node db.test.js",
+    "start": "node server/server.js",
+    "test": "node shared/logic.test.js && node server/db.test.js && node server/event-ops.test.js && node server/bot-controller.test.js && node server/officer-progression.test.js && node server/notification-engine.test.js && node server/auth-guard.test.js && node server/season-planner.test.js && node client/smart-scanner.test.js && node server/s3.test.js && node server/telegram.test.js && node server/api.test.js && node deploy.test.js && node client/i18n.test.js",
+    "test:acceptance": "node server/test-demo-acceptance.js",
+    "test:api": "node server/api.test.js",
+    "test:auth-guard": "node server/auth-guard.test.js",
+    "test:bot-controller": "node server/bot-controller.test.js",
+    "test:db": "node server/db.test.js",
     "test:deploy": "node deploy.test.js",
-    "test:i18n": "node i18n.test.js",
-    "test:logic": "node logic.test.js",
-    "test:s3": "node s3.test.js",
-    "test:telegram": "node telegram.test.js"
+    "test:event-ops": "node server/event-ops.test.js",
+    "test:i18n": "node client/i18n.test.js",
+    "test:logic": "node shared/logic.test.js",
+    "test:notifications": "node server/notification-engine.test.js",
+    "test:officer-progression": "node server/officer-progression.test.js",
+    "test:s3": "node server/s3.test.js",
+    "test:season-planner": "node server/season-planner.test.js",
+    "test:smart-scanner": "node client/smart-scanner.test.js",
+    "test:telegram": "node server/telegram.test.js"
   },
   "dependencies": {
     "i18next": "^23.11.5"

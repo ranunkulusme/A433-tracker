@@ -675,8 +675,8 @@
   }
 
   function dailyRewards(sector, vipTiers) {
-    const vip = Number(sector?.vipLevel) || 0;
-    const confidentiality = Number(sector?.confidentialityLevel) || 0;
+    const vip = Number(sector?.vipLevel ?? sector?.vip ?? sector?.vip_level) || 0;
+    const confidentiality = Number(sector?.confidentialityLevel ?? sector?.confidentiality ?? sector?.confidentiality_level) || 0;
     let vipPuzzles = 0;
     if (Array.isArray(vipTiers) && vipTiers.length > 0) {
       const tier = vipTiers.find(t => t.level === vip);
@@ -1037,9 +1037,21 @@
     }));
   }
 
-  function calculateOfficerDeficit({ officer, catalogItem, player, targetLevel = 180, today, includeStock = true }) {
+  function calculateOfficerDeficit(arg1, arg2, arg3, arg4) {
+    let officer, catalogItem, player, targetLevel, today, includeStock;
+    if (arg1 && typeof arg1 === 'object' && ('officer' in arg1 || 'catalogItem' in arg1 || 'player' in arg1)) {
+      ({ officer, catalogItem, player, targetLevel = 180, today, includeStock = true } = arg1);
+    } else {
+      // Positional fallback: (officer, stockOrPlayer, catalogItem, includeStock)
+      officer = arg1;
+      player = (arg2 && 'stock' in arg2) ? arg2 : { stock: arg2 || {} };
+      catalogItem = arg3;
+      includeStock = arg4 !== undefined ? Boolean(arg4) : true;
+      targetLevel = 180;
+    }
+
     const isOnlyPersonalPuzzles = Boolean(officer?.onlyPersonalPuzzles || officer?.only_personal_puzzles);
-    const rawCost = Number(catalogItem?.couponPerPuzzle);
+    const rawCost = Number(catalogItem?.couponPerPuzzle ?? catalogItem?.coupon_cost ?? catalogItem?.coupon_per_puzzle);
     const costPerPuzzle = rawCost === 0 ? 0 : (rawCost || COUPON_PER_PUZZLE);
     const target = Math.max(1, Math.min(MAX_LEVEL, Number(targetLevel) || MAX_LEVEL));
     const targetPuzzles = target * PUZZLES_PER_LEVEL;
@@ -1061,7 +1073,7 @@
     const deficitPuzzles = Math.max(0, targetPuzzles - currentPuzzles - stockPuzzles);
     const deficitCoupons = costPerPuzzle > 0 ? deficitPuzzles * costPerPuzzle : 0;
 
-    const daily = dailyRewards(player?.sector);
+    const daily = dailyRewards(player?.sector || player);
     const dailyIncome = isOnlyPersonalPuzzles ? 0 : daily.puzzlesPerDay;
 
     const daysWithoutEvents = isOnlyPersonalPuzzles
@@ -1086,10 +1098,14 @@
       stockPuzzles,
       deficitPuzzles,
       deficitCoupons,
+      coupons: deficitCoupons,
+      remainingCoupons: deficitCoupons,
       costPerPuzzle,
       dailyIncome,
       daysWithoutEvents,
+      estimatedDays: daysWithoutEvents,
       dateWithoutEvents,
+      forecastDate: dateWithoutEvents,
       isOnlyPersonalPuzzles,
       starRequirement: {
         currentStars,
@@ -4016,7 +4032,7 @@
   function getTelegramMainMenuKeyboard({ isStaff = false, webAppUrl = null } = {}) {
     const keyboard = [];
 
-    if (webAppUrl) {
+    if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
       keyboard.push([
         { text: '🚀 Открыть KoW Mini App', web_app: { url: webAppUrl } }
       ]);

@@ -4,7 +4,7 @@
  * сквозной пропуск API-запросов напрямую в сеть.
  */
 
-const CACHE_NAME = 'kow-cache-v3.43.1';
+const CACHE_NAME = 'kow-cache-v3.48.0';
 
 const STATIC_ASSETS = [
   '/',
