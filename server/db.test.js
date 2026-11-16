@@ -1758,6 +1758,11 @@ test('user telegram binding lifecycle and queries', () => {
   assert.ok(userByChat);
   assert.equal(userByChat.username, 'soldier_tg');
 
+  // Find user by chatId as string and number polymorphism
+  dbModule.bindUserTelegram(reg.userId, '987654321', 'poly_tg');
+  assert.equal(dbModule.findUserByTelegramChatId(987654321)?.id, reg.userId);
+  assert.equal(dbModule.findUserByTelegramChatId('987654321')?.id, reg.userId);
+
   // Toggle notifications
   dbModule.toggleTelegramNotifications(reg.userId, 0);
   assert.equal(dbModule.findUserById(reg.userId).telegram_notifications_enabled, 0);

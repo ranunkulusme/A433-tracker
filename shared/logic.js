@@ -4265,14 +4265,14 @@
       const maxAgeSec = options.maxAgeSec !== undefined ? options.maxAgeSec : 86400;
 
       if (maxAgeSec > 0) {
-        if (!authDate || (nowSec - authDate) > maxAgeSec || (authDate - nowSec) > 300) {
+        if (!authDate || (nowSec - authDate) > maxAgeSec || (authDate - nowSec) > 86400) {
           return { valid: false, error: 'expired' };
         }
       }
 
       const pairs = [];
       for (const [key, val] of params.entries()) {
-        if (key !== 'hash') {
+        if (key !== 'hash' && key !== 'signature') {
           pairs.push(`${key}=${val}`);
         }
       }

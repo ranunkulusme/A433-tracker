@@ -12178,6 +12178,9 @@ async function initApp() {
 
           if (reg.waiting) {
             newWorkerWaiting = reg.waiting;
+            try {
+              newWorkerWaiting.postMessage({ type: 'SKIP_WAITING' });
+            } catch (_) {}
             showPwaUpdatePrompt();
             return;
           }
@@ -12188,6 +12191,9 @@ async function initApp() {
             installingWorker.addEventListener('statechange', () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
                 newWorkerWaiting = installingWorker;
+                try {
+                  newWorkerWaiting.postMessage({ type: 'SKIP_WAITING' });
+                } catch (_) {}
                 showPwaUpdatePrompt();
               }
             });

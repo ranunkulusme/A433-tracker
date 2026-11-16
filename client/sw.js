@@ -1,10 +1,11 @@
 /**
  * KoW Tracker - Service Worker
- * Кэширование статической оболочки (App Shell) по стратегии Stale-While-Revalidate,
+ * Стратегия Network-First для навигации/HTML,
+ * Stale-While-Revalidate для статических ресурсов (CSS/JS/изображения),
  * сквозной пропуск API-запросов напрямую в сеть.
  */
 
-const CACHE_NAME = 'kow-cache-v3.48.1';
+const CACHE_NAME = 'kow-cache-v3.48.2';
 
 const STATIC_ASSETS = [
   '/',
@@ -12,6 +13,8 @@ const STATIC_ASSETS = [
   '/style.css',
   '/app.js',
   '/logic.js',
+  '/tma.js',
+  '/smart-scanner.js',
   '/ocr.js',
   '/vendor/i18next.min.js',
   '/i18n.js',
@@ -24,12 +27,16 @@ const STATIC_ASSETS = [
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(STATIC_ASSETS))
+      .then(async cache => {
+        // Использование allSettled гарантирует, что даже при временной ошибке одного файла
+        // сервис-воркер не упадет и успешно выполнит skipWaiting
+        await Promise.allSettled(STATIC_ASSETS.map(asset => cache.add(asset)));
+      })
       .then(() => self.skipWaiting())
   );
 });
 
-// Активация: удаление устаревших версий кэша и перехват управления клиентами
+// Активация: удаление устаревших версий кэша и немедленный перехват управления клиентами
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
@@ -44,14 +51,14 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Слушатель сообщений от клиента (принудительное обновление по кнопке)
+// Слушатель сообщений от клиента (принудительное обновление)
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// Fetch: Stale-While-Revalidate для статических ресурсов, bypass для API и не-GET
+// Fetch: Network-First для HTML/навигации, Stale-While-Revalidate для ассетов, bypass для API и не-GET
 self.addEventListener('fetch', event => {
   const request = event.request;
 
@@ -72,7 +79,33 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // 4. Стратегия Stale-While-Revalidate для статических файлов
+  // 4. Network-First стратегия для HTML/навигации (гарантирует получение актуальной версии приложения)
+  const isNavigation = request.mode === 'navigate' ||
+                       url.pathname === '/' ||
+                       url.pathname === '/index.html' ||
+                       url.pathname.endsWith('.html');
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request)
+        .then(networkResponse => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          // Fallback на кэшированную версию только при отсутствии сети
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          return caches.match('/index.html');
+        })
+    );
+    return;
+  }
+
+  // 5. Стратегия Stale-While-Revalidate для остальных статических файлов (js, css, images)
   event.respondWith(
     caches.open(CACHE_NAME).then(async cache => {
       const cachedResponse = await cache.match(request);
@@ -84,16 +117,7 @@ self.addEventListener('fetch', event => {
           }
           return networkResponse;
         })
-        .catch(async err => {
-          // При недоступности сети для навигационных запросов (страниц) отдавать fallback index.html
-          if (request.mode === 'navigate') {
-            const fallback = await cache.match('/index.html');
-            if (fallback) {
-              return fallback;
-            }
-          }
-          throw err;
-        });
+        .catch(() => cachedResponse);
 
       // Если ресурс найден в кэше — возвращаем немедленно, обновляя в фоне
       if (cachedResponse) {
@@ -101,7 +125,7 @@ self.addEventListener('fetch', event => {
         return cachedResponse;
       }
 
-      // Если в кэше нет — дожидаемся ответа сети или fallback
+      // Если в кэше нет — дожидаемся ответа сети
       return fetchPromise;
     })
   );

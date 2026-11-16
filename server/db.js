@@ -2654,8 +2654,16 @@ function unbindUserTelegram(userId) {
 }
 
 function findUserByTelegramChatId(chatId) {
-  if (chatId === undefined || chatId === null) return null;
-  const row = getDb().prepare('SELECT * FROM users WHERE telegram_chat_id = ?').get(chatId);
+  if (chatId === undefined || chatId === null || chatId === '') return null;
+  const numId = Number(chatId);
+  const strId = String(chatId).trim();
+  const row = getDb().prepare(`
+    SELECT * FROM users
+    WHERE telegram_chat_id = ?
+       OR telegram_chat_id = ?
+       OR CAST(telegram_chat_id AS TEXT) = ?
+       OR telegram_chat_id = CAST(? AS INTEGER)
+  `).get(chatId, isNaN(numId) ? chatId : numId, strId, isNaN(numId) ? 0 : numId);
   if (!row) return null;
   return {
     ...row,
