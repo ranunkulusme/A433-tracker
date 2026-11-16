@@ -42,13 +42,24 @@ async function doTmaApiFetch(url, options = {}) {
   return data;
 }
 
-// Global & lexical variable fallback so apiFetch is always defined and never throws ReferenceError
-if (typeof window !== 'undefined') {
-  if (typeof window.apiFetch === 'undefined') {
-    window.apiFetch = doTmaApiFetch;
+// Global fallback so apiFetch, toast, state, currentUser are safely accessible without lexical identifier collisions
+const _tmaGlobal = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this);
+if (_tmaGlobal) {
+  if (typeof _tmaGlobal.apiFetch === 'undefined') {
+    _tmaGlobal.apiFetch = doTmaApiFetch;
+  }
+  if (typeof _tmaGlobal.currentUser === 'undefined') {
+    _tmaGlobal.currentUser = null;
+  }
+  if (typeof _tmaGlobal.state === 'undefined') {
+    _tmaGlobal.state = { players: [], catalog: [], events: [], currentRole: 'r3' };
   }
 }
-var apiFetch = doTmaApiFetch;
+if (typeof window !== 'undefined') {
+  if (typeof window.apiFetch === 'undefined') window.apiFetch = doTmaApiFetch;
+  if (typeof window.currentUser === 'undefined') window.currentUser = _tmaGlobal?.currentUser || null;
+  if (typeof window.state === 'undefined') window.state = _tmaGlobal?.state || { players: [], catalog: [], events: [], currentRole: 'r3' };
+}
 
 // Safe fallback for toast notifications
 function doTmaToast(msg, type = 'success') {
@@ -64,14 +75,12 @@ function doTmaToast(msg, type = 'success') {
     setTimeout(() => { try { t.remove(); } catch (_) {} }, 3500);
   }
 }
+if (_tmaGlobal && typeof _tmaGlobal.toast === 'undefined') {
+  _tmaGlobal.toast = doTmaToast;
+}
 if (typeof window !== 'undefined' && typeof window.toast === 'undefined') {
   window.toast = doTmaToast;
 }
-var toast = doTmaToast;
-
-// Safe references for state and currentUser across modules
-var currentUser = (typeof window !== 'undefined' && window.currentUser) ? window.currentUser : null;
-var state = (typeof window !== 'undefined' && window.state) ? window.state : { players: [], catalog: [], events: [], currentRole: 'r3' };
 
 function isTmaMode() {
   if (typeof document !== 'undefined') {
@@ -170,14 +179,19 @@ async function initTmaAuth() {
         if (res && res.token && res.user) {
           localStorage.setItem('kow_token', res.token);
           currentUser = res.user;
+          if (typeof window !== 'undefined') window.currentUser = currentUser;
           if (res.player) {
             currentUser.player = res.player;
             currentUser.playerName = res.player.name;
           }
           try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
-          if (typeof state !== 'undefined') {
+          if (typeof state !== 'undefined' && state) {
             state.currentRole = currentUser.rank;
             state.currentPlayerId = currentUser.playerId || null;
+          }
+          if (typeof window !== 'undefined' && window.state) {
+            window.state.currentRole = currentUser.rank;
+            window.state.currentPlayerId = currentUser.playerId || null;
           }
           await doTmaLoadData();
           renderTmaApp();
@@ -197,14 +211,19 @@ async function initTmaAuth() {
         const data = await doTmaApiFetch('/api/auth/me');
         if (data && data.user) {
           currentUser = data.user;
+          if (typeof window !== 'undefined') window.currentUser = currentUser;
           if (data.player) {
             currentUser.player = data.player;
             currentUser.playerName = data.player.name;
           }
           try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
-          if (typeof state !== 'undefined') {
+          if (typeof state !== 'undefined' && state) {
             state.currentRole = currentUser.rank;
             state.currentPlayerId = currentUser.playerId || null;
+          }
+          if (typeof window !== 'undefined' && window.state) {
+            window.state.currentRole = currentUser.rank;
+            window.state.currentPlayerId = currentUser.playerId || null;
           }
           await doTmaLoadData();
           renderTmaApp();
