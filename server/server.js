@@ -354,7 +354,8 @@ async function syncTelegramBotInfoAndPolling() {
       }
     }
 
-    const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
+    const rawWebAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
+    const webAppUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
     if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
       telegram.setTelegramChatMenuButton(token, {
         text: 'KoW Tracker',
@@ -2248,9 +2249,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
         db.setAppSetting('telegram_webapp_url', rawWebAppUrl);
         const liveToken = db.getAppSetting('telegram_bot_token');
         if (liveToken && rawWebAppUrl && /^https:\/\//i.test(rawWebAppUrl)) {
+          const effectiveUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
           telegram.setTelegramChatMenuButton(liveToken, {
             text: '🚀 KoW Tracker',
-            url: rawWebAppUrl
+            url: effectiveUrl
           }).catch(err => {
             console.warn('[Telegram] Could not set chat menu button on settings update:', err.message);
           });

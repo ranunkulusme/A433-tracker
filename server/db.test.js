@@ -1693,6 +1693,14 @@ test('app_settings and notification_templates initialized and seeded on initDb',
   dbModule.setAppSetting('telegram_bot_token', '999999:UPDATED');
   assert.equal(dbModule.getAppSetting('telegram_bot_token'), '999999:UPDATED');
 
+  // Test env fallback for app_settings when setting is not stored in DB
+  assert.equal(dbModule.getAppSetting('telegram_webapp_url'), null);
+  process.env.TELEGRAM_WEBAPP_URL = 'https://kow-cloud.timeweb.app';
+  assert.equal(dbModule.getAppSetting('telegram_webapp_url'), 'https://kow-cloud.timeweb.app');
+  delete process.env.TELEGRAM_WEBAPP_URL;
+  assert.equal(dbModule.getAppSetting('telegram_webapp_url'), null);
+
+
   // notification_templates seeded with 11 baseline items
   const templates = dbModule.getNotificationTemplates();
   assert.equal(templates.length, 11);

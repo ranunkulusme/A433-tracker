@@ -3663,7 +3663,7 @@ test('telegram fighter suite formatters and keyboards', () => {
   // 5. getTelegramMainMenuKeyboard
   const r3Keyboard = getTelegramMainMenuKeyboard({ isStaff: false, webAppUrl: 'https://kow.example.com' });
   assert(Array.isArray(r3Keyboard.inline_keyboard));
-  assert(r3Keyboard.inline_keyboard[0][0].web_app && r3Keyboard.inline_keyboard[0][0].web_app.url === 'https://kow.example.com');
+  assert(r3Keyboard.inline_keyboard[0][0].web_app && r3Keyboard.inline_keyboard[0][0].web_app.url === 'https://kow.example.com/?tma=1');
   const r3Callbacks = r3Keyboard.inline_keyboard.flat().map(b => b.callback_data);
   assert(r3Callbacks.includes('cmd_me'));
   assert(r3Callbacks.includes('cmd_deficit'));
@@ -3870,6 +3870,34 @@ test('renderStarCouponIconHtml generates tilted ticket SVG with star', () => {
   const svgCustom = logic.renderStarCouponIconHtml(24, 'custom-class');
   assert.ok(svgCustom.includes('<svg class="star-coupon-icon custom-class" width="24" height="24"'));
 });
+
+test('formatTmaUrl and getTelegramMainMenuKeyboard enforce TMA URL parameters', () => {
+  const logic = require('./logic.js');
+  assert.equal(typeof logic.formatTmaUrl, 'function');
+
+  // Invalid inputs
+  assert.equal(logic.formatTmaUrl(null), null);
+  assert.equal(logic.formatTmaUrl(''), null);
+  assert.equal(logic.formatTmaUrl('ftp://example.com'), null);
+
+  // Clean URL without query
+  assert.equal(logic.formatTmaUrl('https://kow.example.com'), 'https://kow.example.com/?tma=1');
+  assert.equal(logic.formatTmaUrl('https://kow.example.com/'), 'https://kow.example.com/?tma=1');
+
+  // URL with existing query parameters
+  assert.equal(logic.formatTmaUrl('https://kow.example.com/app?tab=events'), 'https://kow.example.com/app?tab=events&tma=1');
+
+  // URL already having tma=1
+  assert.equal(logic.formatTmaUrl('https://kow.example.com/?tma=1'), 'https://kow.example.com/?tma=1');
+
+  // Telegram main menu keyboard uses formatTmaUrl
+  const kb = logic.getTelegramMainMenuKeyboard({ isStaff: false, webAppUrl: 'https://kow.timeweb.app' });
+  assert.ok(kb.inline_keyboard.length > 0);
+  const webAppBtn = kb.inline_keyboard[0][0];
+  assert.equal(webAppBtn.text, '🚀 Открыть KoW Mini App');
+  assert.equal(webAppBtn.web_app.url, 'https://kow.timeweb.app/?tma=1');
+});
+
 
 
 

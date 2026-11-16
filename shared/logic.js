@@ -4029,12 +4029,27 @@
     return { inline_keyboard: keyboard };
   }
 
+  function formatTmaUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    const trimmed = url.trim();
+    if (!/^https?:\/\//i.test(trimmed)) return null;
+    try {
+      const parsed = new URL(trimmed);
+      parsed.searchParams.set('tma', '1');
+      return parsed.toString();
+    } catch (_) {
+      if (trimmed.includes('tma=1')) return trimmed;
+      return trimmed.includes('?') ? (trimmed + '&tma=1') : (trimmed + '?tma=1');
+    }
+  }
+
   function getTelegramMainMenuKeyboard({ isStaff = false, webAppUrl = null } = {}) {
     const keyboard = [];
 
-    if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
+    const effectiveUrl = formatTmaUrl(webAppUrl);
+    if (effectiveUrl && /^https:\/\//i.test(effectiveUrl)) {
       keyboard.push([
-        { text: '🚀 Открыть KoW Mini App', web_app: { url: webAppUrl } }
+        { text: '🚀 Открыть KoW Mini App', web_app: { url: effectiveUrl } }
       ]);
     }
 
@@ -4432,6 +4447,7 @@
     getTelegramOcrConfirmationKeyboard,
     getTelegramStockFallbackKeyboard,
     validateTelegramWebAppData,
+    formatTmaUrl,
     renderStarCouponIconHtml,
     escapeHtml,
   };

@@ -2430,6 +2430,17 @@ function initDb(filePath) {
 function getAppSetting(key) {
   if (!key) return null;
   const row = getDb().prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  if (row && row.value !== null && row.value !== '') return row.value;
+
+  // Fallback to environment variables when setting is not stored in DB
+  if (key === 'telegram_bot_token' && process.env.TELEGRAM_BOT_TOKEN) return process.env.TELEGRAM_BOT_TOKEN;
+  if (key === 'telegram_webapp_url') {
+    return process.env.TELEGRAM_WEBAPP_URL || process.env.APP_BASE_URL || process.env.WEBAPP_URL || null;
+  }
+  if (key === 'app_base_url' && process.env.APP_BASE_URL) return process.env.APP_BASE_URL;
+  if (key === 'telegram_staff_chat_id' && process.env.TELEGRAM_STAFF_CHAT_ID) return process.env.TELEGRAM_STAFF_CHAT_ID;
+  if (key === 'telegram_announcement_chat_id' && process.env.TELEGRAM_ANNOUNCEMENT_CHAT_ID) return process.env.TELEGRAM_ANNOUNCEMENT_CHAT_ID;
+
   return row ? row.value : null;
 }
 

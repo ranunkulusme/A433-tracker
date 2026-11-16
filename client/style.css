@@ -3699,6 +3699,8 @@ tr.row-blocked:hover {
 }
 
 /* ─── TELEGRAM MINI APP (TMA) MODE & HIGH-GRADE MOCKUP LAYOUT ─── */
+html.tma-mode,
+html.tma-mode body,
 body.tma-mode {
   background-color: #090a0f !important;
   color: #f3f4f6 !important;
@@ -3708,10 +3710,12 @@ body.tma-mode {
   overscroll-behavior-y: none;
 }
 
+html.tma-mode #app,
 body.tma-mode #app {
   display: none !important;
 }
 
+html.tma-mode #tma-app,
 body.tma-mode #tma-app {
   display: flex !important;
   flex-direction: column;
