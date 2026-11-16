@@ -629,7 +629,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
     if (pathname === '/api/auth/telegram-webapp' && req.method === 'POST') {
-      const botToken = db.getAppSetting('telegram_bot_token');
+      const rawBotToken = db.getAppSetting('telegram_bot_token');
+      const botToken = rawBotToken ? String(rawBotToken).trim() : null;
       if (!botToken) {
         return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен на сервере');
       }
@@ -641,6 +642,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const validation = logic.validateTelegramWebAppData(initData, botToken);
       if (!validation.valid) {
+        console.warn('[Telegram WebApp] Validation error:', validation.error);
         return sendError(res, 401, 'INVALID_TELEGRAM_DATA', `Ошибка валидации Telegram WebApp: ${validation.error}`);
       }
 
@@ -658,6 +660,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
       if (!user) {
+        console.warn(`[Telegram WebApp] User not bound: tgUserId=${tgUserId}, tgUsername=${validation.user?.username}`);
         return sendError(res, 404, 'USER_NOT_BOUND', 'Пользователь с данным Telegram ID не найден в KoW Tracker. Привяжите Telegram в личном кабинете.');
       }
 

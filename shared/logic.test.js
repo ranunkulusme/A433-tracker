@@ -3856,6 +3856,13 @@ test('validateTelegramWebAppData HMAC validation and expiration', () => {
   const res4 = logic.validateTelegramWebAppData(paramsNoHash.toString(), botToken, { nowSec });
   assert.equal(res4.valid, false);
   assert.equal(res4.error, 'missing_hash');
+
+  // 5. Valid initData containing signature (Telegram Bot API 8.0+)
+  const paramsWithSig = new URLSearchParams(validData);
+  paramsWithSig.set('signature', 'ed25519_signature_sample_string_123');
+  const res5 = logic.validateTelegramWebAppData(paramsWithSig.toString(), botToken, { nowSec });
+  assert.equal(res5.valid, true);
+  assert.equal(res5.user.id, 777888);
 });
 
 test('renderStarCouponIconHtml generates tilted ticket SVG with star', () => {
