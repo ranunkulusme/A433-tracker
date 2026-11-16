@@ -83,34 +83,64 @@ if (typeof window !== 'undefined' && typeof window.toast === 'undefined') {
 }
 
 function isTmaMode() {
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      if (sessionStorage.getItem('kow_tma') === '1') return true;
+    } catch (_) {}
+  }
   if (typeof document !== 'undefined') {
     if (document.documentElement?.classList.contains('tma-mode') || document.body?.classList.contains('tma-mode')) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
   }
   if (typeof window === 'undefined') return false;
+  if (window.TelegramWebviewProxy || window.TelegramGameProxy) {
+    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+    return true;
+  }
+  if (typeof navigator !== 'undefined' && /Telegram/i.test(navigator.userAgent || '')) {
+    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+    return true;
+  }
   try {
     const s = window.location.search || '';
     const params = new URLSearchParams(s);
-    if (params.get('tma') === '1' || params.has('tma') || s.includes('tma=1') || s.includes('tma=')) return true;
+    if (params.get('tma') === '1' || params.has('tma') || s.includes('tma=1') || s.includes('tma=')) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
   } catch (_) {}
   try {
     const h = window.location.hash || '';
     if (h.includes('tma=1') || h.includes('tma') || h.includes('tgWebAppData') || h.includes('tgWebAppPlatform') || h.includes('tgWebAppVersion')) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
   } catch (_) {}
   const tg = window.Telegram?.WebApp;
   if (tg) {
-    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) return true;
-    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) return true;
-    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') return true;
+    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
+    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
+    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
   }
   return false;
 }
 
 function enableTmaView() {
   if (typeof document === 'undefined') return;
+  if (typeof sessionStorage !== 'undefined') {
+    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+  }
   if (document.documentElement) {
     document.documentElement.classList.add('tma-mode');
   }
@@ -124,6 +154,16 @@ function enableTmaView() {
   const appEl = document.getElementById('app');
   if (appEl) {
     appEl.style.display = 'none';
+  }
+  const authModal = document.getElementById('modal-auth');
+  if (authModal) {
+    authModal.classList.remove('open');
+    authModal.style.display = 'none';
+  }
+  const overlay = document.getElementById('overlay');
+  if (overlay) {
+    overlay.classList.remove('open');
+    overlay.style.display = 'none';
   }
 }
 
@@ -199,12 +239,16 @@ async function initTmaAuth() {
         }
       } catch (err) {
         console.warn('TMA telegram-webapp auth failed:', err);
-        renderTmaUnboundScreen(err);
-        return false;
+        if (err && (err.status === 403 || err.message?.includes('PENDING_APPROVAL') || err.error === 'PENDING_APPROVAL')) {
+          renderTmaUnboundScreen(err);
+          tmaAuthPromise = null;
+          return false;
+        }
+        // For 404 USER_NOT_BOUND, fall through to step 2 to check existing token or self-heal binding
       }
     }
 
-    // 2. If no initData (e.g. running in browser with ?tma=1 for debug / preview)
+    // 2. Check if user has an existing valid JWT token in localStorage (self-heal binding)
     const existingToken = localStorage.getItem('kow_token');
     if (existingToken) {
       try {
@@ -225,19 +269,39 @@ async function initTmaAuth() {
             window.state.currentRole = currentUser.rank;
             window.state.currentPlayerId = currentUser.playerId || null;
           }
+
+          // If we have initData, bind this telegram account right now so next time it logs in via Step 1!
+          if (initData) {
+            try {
+              await doTmaApiFetch('/api/telegram/bind-webapp', {
+                method: 'POST',
+                body: { initData }
+              });
+            } catch (bindErr) {
+              console.warn('Self-heal Telegram bind failed:', bindErr);
+            }
+          }
+
           await doTmaLoadData();
           renderTmaApp();
           return true;
         }
       } catch (err) {
         console.warn('TMA session check failed:', err);
+        localStorage.removeItem('kow_token');
+        localStorage.removeItem('kow_user');
       }
     }
 
     // 3. Fallback: Show unbound screen inside TMA
+    tmaAuthPromise = null;
     renderTmaUnboundScreen();
     return false;
-  })();
+  })().catch(e => {
+    tmaAuthPromise = null;
+    renderTmaUnboundScreen(e);
+    return false;
+  });
   return tmaAuthPromise;
 }
 
@@ -295,7 +359,7 @@ function renderTmaUnboundScreen(err = null) {
         Ваш аккаунт Telegram еще не привязан к профилю в <strong>KoW Tracker</strong>. Войдите в существующий аккаунт для быстрой привязки или зарегистрируйтесь.
       </p>
 
-      <div id="tma-auth-alert" style="display:none;padding:10px 12px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;font-size:12px;border-radius:10px;margin-bottom:12px"></div>
+      <div id="tma-auth-alert" style="${err && (err.message || typeof err === 'string') ? 'display:block;' : 'display:none;'}padding:10px 12px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;font-size:12px;border-radius:10px;margin-bottom:12px">${err ? escapeHtml(typeof err === 'string' ? err : err.message || '') : ''}</div>
 
       <!-- Quick Login Form -->
       <form id="tma-login-form" onsubmit="handleTmaLoginSubmit(event)" style="display:flex;flex-direction:column;gap:10px">
@@ -371,9 +435,14 @@ async function handleTmaLoginSubmit(event) {
   if (alertEl) alertEl.style.display = 'none';
 
   try {
+    const tg = window.Telegram?.WebApp;
+    const initData = tg?.initData || '';
+    const body = { username, password };
+    if (initData) body.initData = initData;
+
     const res = await doTmaApiFetch('/api/auth/login', {
       method: 'POST',
-      body: { username, password }
+      body
     });
 
     if (res && res.token && res.user) {
@@ -395,18 +464,18 @@ async function handleTmaLoginSubmit(event) {
       }
 
       // Auto-bind Telegram if WebApp initData is present!
-      const tg = window.Telegram?.WebApp;
-      if (tg && tg.initData) {
+      if (initData) {
         try {
           await doTmaApiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
-            body: { initData: tg.initData }
+            body: { initData }
           });
         } catch (bindErr) {
           console.warn('Auto bind Telegram failed:', bindErr);
         }
       }
 
+      tmaAuthPromise = null;
       await doTmaLoadData();
       tmaHaptic('success');
       toast('Вход успешно выполнен!', 'success');
@@ -415,6 +484,7 @@ async function handleTmaLoginSubmit(event) {
       throw new Error(res?.message || 'Неверный логин или пароль');
     }
   } catch (err) {
+    tmaAuthPromise = null;
     tmaHaptic('error');
     if (alertEl) {
       alertEl.textContent = err.message || 'Ошибка входа в систему';
@@ -443,9 +513,14 @@ async function handleTmaRegisterSubmit(event) {
   if (alertEl) alertEl.style.display = 'none';
 
   try {
+    const tg = window.Telegram?.WebApp;
+    const initData = tg?.initData || '';
+    const regBody = { username, password, playerName };
+    if (initData) regBody.initData = initData;
+
     const regRes = await doTmaApiFetch('/api/auth/register', {
       method: 'POST',
-      body: { username, password, playerName }
+      body: regBody
     });
 
     if (regRes.pendingApproval || !regRes.is_approved) {
@@ -455,9 +530,11 @@ async function handleTmaRegisterSubmit(event) {
     }
 
     // Auto login
+    const loginBody = { username, password };
+    if (initData) loginBody.initData = initData;
     const loginRes = await doTmaApiFetch('/api/auth/login', {
       method: 'POST',
-      body: { username, password }
+      body: loginBody
     });
 
     if (loginRes && loginRes.token && loginRes.user) {
@@ -479,22 +556,23 @@ async function handleTmaRegisterSubmit(event) {
       }
 
       // Auto bind telegram if WebApp initData is present
-      const tg = window.Telegram?.WebApp;
-      if (tg && tg.initData) {
+      if (initData) {
         try {
           await doTmaApiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
-            body: { initData: tg.initData }
+            body: { initData }
           });
         } catch (_) {}
       }
 
+      tmaAuthPromise = null;
       await doTmaLoadData();
       tmaHaptic('success');
       toast('Регистрация завершена!', 'success');
       renderTmaApp();
     }
   } catch (err) {
+    tmaAuthPromise = null;
     tmaHaptic('error');
     if (alertEl) {
       alertEl.textContent = err.message || 'Ошибка регистрации';

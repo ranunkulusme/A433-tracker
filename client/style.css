@@ -3711,7 +3711,13 @@ body.tma-mode {
 }
 
 html.tma-mode #app,
-body.tma-mode #app {
+body.tma-mode #app,
+html.tma-mode #modal-auth,
+body.tma-mode #modal-auth,
+html.tma-mode .modal.modal-auth,
+body.tma-mode .modal.modal-auth,
+html.tma-mode #overlay,
+body.tma-mode #overlay {
   display: none !important;
 }
 

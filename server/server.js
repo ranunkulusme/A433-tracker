@@ -620,6 +620,17 @@ function createRequestHandler(staticDir, s3Manager = null) {
           }
         }
 
+        const rawInitData = body && (body.initData || body.init_data);
+        if (rawInitData && typeof rawInitData === 'string' && regRes.userId) {
+          const botToken = db.getAppSetting('telegram_bot_token');
+          if (botToken) {
+            const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+            if (val && val.valid && val.user?.id) {
+              db.bindUserTelegram(regRes.userId, val.user.id, val.user.username || '');
+            }
+          }
+        }
+
         return sendJson(res, 200, {
           success: true,
           pendingApproval: regRes.pendingApproval,
@@ -713,10 +724,24 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (loginRes.error) {
         return sendError(res, 401, loginRes.error, 'Неверный логин или пароль');
       }
+      // If Telegram initData is provided, auto-bind Telegram account immediately
+      const rawInitData = body && (body.initData || body.init_data);
+      if (rawInitData && typeof rawInitData === 'string') {
+        const botToken = db.getAppSetting('telegram_bot_token');
+        if (botToken) {
+          const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+          if (val && val.valid && val.user?.id) {
+            db.bindUserTelegram(loginRes.user.id, val.user.id, val.user.username || '');
+          }
+        }
+      }
+
+      const updatedUser = (typeof db.getUserById === 'function') ? db.getUserById(loginRes.user.id) : loginRes.user;
+
       return sendJson(res, 200, {
         token: loginRes.token,
         user: {
-          ...loginRes.user,
+          ...(updatedUser || loginRes.user),
           hasDefaultAdminPassword: loginRes.user.username === 'admin' ? db.isDefaultAdminPassword() : false
         }
       });

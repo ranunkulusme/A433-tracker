@@ -22,10 +22,14 @@
   try {
     var s = window.location.search || '';
     var h = window.location.hash || '';
+    var ua = navigator.userAgent || '';
     var isTma = s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma' ||
                 h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1 ||
                 h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 ||
-                h.indexOf('tgWebAppVersion') !== -1;
+                h.indexOf('tgWebAppVersion') !== -1 ||
+                /Telegram/i.test(ua) ||
+                Boolean(window.TelegramWebviewProxy) ||
+                (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('kow_tma') === '1');
     if (!isTma && window.Telegram && window.Telegram.WebApp) {
       var tg = window.Telegram.WebApp;
       if ((tg.initData && tg.initData.length > 0) ||
@@ -35,7 +39,9 @@
       }
     }
     if (isTma) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       document.documentElement.classList.add('tma-mode');
+      if (document.body) document.body.classList.add('tma-mode');
     }
   } catch (_) {}
 })();
