@@ -649,7 +649,8 @@ test('smartAutoPickWithRegistrations respects candidate explicit isCooldown over
 });
 
 test('PWA manifest and mobile app icons exist and are valid', () => {
-  const manifestPath = path.join(__dirname, 'manifest.json');
+  const clientDir = path.join(__dirname, '..', 'client');
+  const manifestPath = path.join(clientDir, 'manifest.json');
   assert.ok(fs.existsSync(manifestPath), 'manifest.json must exist');
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
@@ -667,8 +668,8 @@ test('PWA manifest and mobile app icons exist and are valid', () => {
   assert.strictEqual(icon192.type, 'image/png');
   assert.strictEqual(icon512.type, 'image/png');
 
-  const file192 = path.join(__dirname, icon192.src.replace(/^\//, ''));
-  const file512 = path.join(__dirname, icon512.src.replace(/^\//, ''));
+  const file192 = path.join(clientDir, icon192.src.replace(/^\//, ''));
+  const file512 = path.join(clientDir, icon512.src.replace(/^\//, ''));
 
   assert.ok(fs.existsSync(file192), 'icon-192.png must exist');
   assert.ok(fs.statSync(file192).size > 0, 'icon-192.png must not be empty');
@@ -676,14 +677,14 @@ test('PWA manifest and mobile app icons exist and are valid', () => {
   assert.ok(fs.existsSync(file512), 'icon-512.png must exist');
   assert.ok(fs.statSync(file512).size > 0, 'icon-512.png must not be empty');
 
-  const htmlPath = path.join(__dirname, 'index.html');
+  const htmlPath = path.join(clientDir, 'index.html');
   const html = fs.readFileSync(htmlPath, 'utf-8');
   assert.ok(html.includes('<link rel="manifest" href="/manifest.json">'), 'index.html must link manifest.json');
   assert.ok(html.includes('<meta name="theme-color" content="#0f172a">'), 'index.html must have theme-color');
   assert.ok(html.includes('<meta name="apple-mobile-web-app-capable" content="yes">'), 'index.html must have apple-mobile-web-app-capable');
 
-  const svgFaviconPath = path.join(__dirname, 'favicon.svg');
-  const icoFaviconPath = path.join(__dirname, 'favicon.ico');
+  const svgFaviconPath = path.join(clientDir, 'favicon.svg');
+  const icoFaviconPath = path.join(clientDir, 'favicon.ico');
   assert.ok(fs.existsSync(svgFaviconPath), 'favicon.svg must exist');
   assert.ok(fs.statSync(svgFaviconPath).size > 0, 'favicon.svg must not be empty');
   assert.ok(fs.existsSync(icoFaviconPath), 'favicon.ico must exist');
@@ -1508,7 +1509,7 @@ test('generateSeasonSchedule preserves backward compatibility with legacy preset
 });
 
 test('smartScanner resolveLogic and browser UMD exports in logic.js', () => {
-  const ocr = require('./ocr.js');
+  const ocr = require('../client/ocr.js');
   const logic = require('./logic.js');
 
   // 1. resolveLogic should be exposed on smartScanner

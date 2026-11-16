@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 const { createAuthGuard } = require('./auth-guard.js');
 
 test('AuthGuard: extractToken and authenticate session', async () => {

@@ -3,14 +3,14 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const testDbPath = path.join(__dirname, 'data', 'test-officer-progression.db');
+const testDbPath = path.join(__dirname, '..', 'data', 'test-officer-progression.db');
 if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
 
 process.env.DB_PATH = testDbPath;
 const db = require('./db.js');
 db.initDb();
 
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 const { createOfficerProgression } = require('./officer-progression.js');
 
 test('OfficerProgression: addOfficer with initial stock deduction deducts resources atomically', async () => {

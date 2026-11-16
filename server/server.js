@@ -4,7 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const db = require('./db.js');
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 const s3 = require('./s3.js');
 const telegram = require('./telegram.js');
 const mieru = require('./mieru.js');
@@ -19,7 +19,7 @@ const authGuard = createAuthGuard({ db, logic });
 
 let APP_VERSION = '3.21.0';
 try {
-  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   if (pkg.version) APP_VERSION = pkg.version;
 } catch (_) {}
 
@@ -404,12 +404,21 @@ function serveStaticFile(req, res, staticDir, pathname) {
     return res.end('Forbidden');
   }
 
-  const safeBase = path.resolve(staticDir);
+  const safeBase = path.resolve(staticDir || path.join(__dirname, '..', 'client'));
   const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-  const targetPath = path.resolve(safeBase, relativePath);
+  let targetPath = path.resolve(safeBase, relativePath);
+
+  // If file doesn't exist in client staticDir, check shared directory (e.g. logic.js)
+  const sharedBase = path.resolve(__dirname, '..', 'shared');
+  if (!fs.existsSync(targetPath)) {
+    const sharedTarget = path.resolve(sharedBase, relativePath);
+    if (sharedTarget.startsWith(sharedBase) && fs.existsSync(sharedTarget) && !isForbiddenFile(path.basename(sharedTarget))) {
+      targetPath = sharedTarget;
+    }
+  }
 
   // Path traversal protection
-  if (!targetPath.startsWith(safeBase)) {
+  if (!targetPath.startsWith(safeBase) && !targetPath.startsWith(sharedBase)) {
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('Forbidden');
   }
@@ -1245,7 +1254,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       let screenshotPath = null;
       if (screenshotBase64 && typeof screenshotBase64 === 'string' && screenshotBase64.trim()) {
         const yyyyMm = new Date().toISOString().slice(0, 7);
-        const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
+        const screenshotsDir = path.join(__dirname, '..', 'data', 'screenshots', yyyyMm);
         if (!fs.existsSync(screenshotsDir)) {
           fs.mkdirSync(screenshotsDir, { recursive: true });
         }
@@ -2118,7 +2127,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав для просмотра этого скриншота');
       }
 
-      const baseScreenshotsDir = path.resolve(path.join(__dirname, 'data', 'screenshots'));
+      const baseScreenshotsDir = path.resolve(path.join(__dirname, '..', 'data', 'screenshots'));
       const fullFilePath = path.resolve(baseScreenshotsDir, record.screenshot_path);
 
       if (!fullFilePath.startsWith(baseScreenshotsDir + path.sep)) {
@@ -2342,7 +2351,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const updated = db.getMieruSettings();
       if (updated.enabled && (updated.server || updated.configJson)) {
-        const dataDir = path.join(__dirname, 'data');
+        const dataDir = path.join(__dirname, '..', 'data');
         if (mieru.isMieruBinaryAvailable()) {
           mieru.startMieruProcess(configToApply, dataDir);
         }
@@ -2396,7 +2405,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         const fullConfig = settings.configJson
           ? (mieru.parseMieruConfig(settings.configJson).config || mieru.formatMieruConfig(settings))
           : mieru.formatMieruConfig(settings);
-        mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+        mieru.startMieruProcess(fullConfig, path.join(__dirname, '..', 'data'));
         await new Promise(r => setTimeout(r, 600));
       }
 
@@ -2704,14 +2713,16 @@ function createRequestHandler(staticDir, s3Manager = null) {
   };
 }
 
-async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __dirname, s3Manager = null } = {}) {
+async function startServer({ port = 3000, dbPath = null, staticDir = null, s3Manager = null } = {}) {
+  const resolvedDbPath = dbPath || resolveDbPath();
+  const effectiveStaticDir = staticDir || path.join(__dirname, '..', 'client');
   let activeS3Manager = s3Manager;
-  if (!activeS3Manager && dbPath !== ':memory:') {
+  if (!activeS3Manager && resolvedDbPath !== ':memory:') {
     const s3Config = s3.getS3Config();
     if (s3Config) {
       activeS3Manager = new s3.S3SyncManager({
         config: s3Config,
-        dbPath,
+        dbPath: resolvedDbPath,
         onCheckpoint: () => {
           const currentDb = db.getDb();
           if (currentDb) {
@@ -2724,8 +2735,8 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
 
   if (activeS3Manager && activeS3Manager.getStatus().enabled) {
     try {
-      const pullResult = await activeS3Manager.pull(dbPath);
-      db.initDb(dbPath);
+      const pullResult = await activeS3Manager.pull(resolvedDbPath);
+      db.initDb(resolvedDbPath);
       if (!pullResult.found) {
         await activeS3Manager.pushImmediate().catch(err => {
           console.error('[S3] Initial push error:', err.message);
@@ -2733,14 +2744,14 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
       }
     } catch (pullErr) {
       console.error('[S3] Pull failed on startup, continuing with local db:', pullErr.message);
-      db.initDb(dbPath);
+      db.initDb(resolvedDbPath);
     }
   } else {
-    db.initDb(dbPath);
+    db.initDb(resolvedDbPath);
   }
 
   // Ensure screenshots base directory exists
-  const screenshotsDir = path.join(__dirname, 'data', 'screenshots');
+  const screenshotsDir = path.join(__dirname, '..', 'data', 'screenshots');
   if (!fs.existsSync(screenshotsDir)) {
     try {
       fs.mkdirSync(screenshotsDir, { recursive: true });
@@ -2780,7 +2791,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
         const fullConfig = mieruSettings.configJson
           ? (mieru.parseMieruConfig(mieruSettings.configJson).config || mieru.formatMieruConfig(mieruSettings))
           : mieru.formatMieruConfig(mieruSettings);
-        mieru.startMieruProcess(fullConfig, path.join(__dirname, 'data'));
+        mieru.startMieruProcess(fullConfig, path.join(__dirname, '..', 'data'));
       }
       telegram.setDefaultProxyUrl(`socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}`);
     }
@@ -2797,7 +2808,7 @@ async function startServer({ port = 3000, dbPath = 'data/kow.db', staticDir = __
     console.warn('[Telegram] Startup warning:', tErr.message);
   }
 
-  const server = http.createServer(createRequestHandler(staticDir, activeS3Manager));
+  const server = http.createServer(createRequestHandler(effectiveStaticDir, activeS3Manager));
   server.s3Manager = activeS3Manager;
 
   // Promisify close for clean test teardowns
@@ -2837,7 +2848,7 @@ function resolveDbPath() {
   if (fs.existsSync('/data')) {
     return '/data/kow.db';
   }
-  return path.join(__dirname, 'data', 'kow.db');
+  return path.join(__dirname, '..', 'data', 'kow.db');
 }
 
 if (require.main === module) {

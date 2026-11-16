@@ -3,7 +3,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 const { createSeasonPlanner } = require('./season-planner.js');
 
 test('SeasonPlanner: scheduleSeason with rules generates alternating cadence and creates events', () => {

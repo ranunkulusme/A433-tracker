@@ -7,11 +7,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const db = require('./db.js');
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 const { createEventOperations } = require('./event-ops.js');
 const { createTelegramBotController } = require('./bot-controller.js');
 
-const TEST_DB = path.join(__dirname, 'data', `kow-bot-ctrl-test-${Date.now()}.db`);
+const TEST_DB = path.join(__dirname, '..', 'data', `kow-bot-ctrl-test-${Date.now()}.db`);
 
 function cleanupDb() {
   try { if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB); } catch (_) {}

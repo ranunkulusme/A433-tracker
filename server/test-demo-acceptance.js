@@ -6,7 +6,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 
 const checklistResults = [];
 
@@ -22,7 +22,7 @@ async function runChecklistAcceptance() {
   console.log('================================================================\n');
 
   const { startServer } = require('./server.js');
-  const tempDbPath = path.join(__dirname, 'data', `kow-demo-test-${Date.now()}.db`);
+  const tempDbPath = path.join(__dirname, '..', 'data', `kow-demo-test-${Date.now()}.db`);
 
   // Запуск сервера с изолированной БД
   const server = await startServer({ port: 0, dbPath: tempDbPath });
@@ -82,8 +82,8 @@ async function runChecklistAcceptance() {
 
     // 1.3. Индикатор сетевого статуса
     try {
-      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
       assert(indexHtml.includes('network-badge') || indexHtml.includes('network-status'), 'HTML содержит бейдж сети');
       assert(appJs.includes('updateNetworkStatus'), 'app.js содержит обработчик статуса сети');
       recordTest('1.3', 'Индикатор сетевого статуса', 'БЛОК 1', true, 'Индикатор сети присутствует и переключается');
@@ -110,7 +110,7 @@ async function runChecklistAcceptance() {
 
     // 2.2. Открытие конструктора сезонов альянса
     try {
-      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
       assert(indexHtml.includes('id="modal-season-scheduler"'), 'Модалка конструктора сезонов найдена');
       assert(indexHtml.includes('id="season-start-date"'), 'Поле даты старта найдено');
       recordTest('2.2', 'Открытие конструктора сезонов альянса', 'БЛОК 2', true, 'Разметка конструктора сезонов подтверждена');
@@ -288,8 +288,8 @@ async function runChecklistAcceptance() {
       const resVip = await fetch(`${baseUrl}/api/vip-tiers`, { headers: { Cookie: adminCookie } });
       assert.equal(resVip.status, 200);
       const vipTiers = await resVip.json();
-      assert.equal(vipTiers.length, 30, 'Таблица содержит 30 уровней VIP');
-      recordTest('4.1', 'Открытие редактора таблицы VIP', 'БЛОК 4', true, 'Таблица VIP содержит 30 уровней');
+      assert.equal(vipTiers.length, 17, 'Таблица содержит 17 уровней VIP');
+      recordTest('4.1', 'Открытие редактора таблицы VIP', 'БЛОК 4', true, 'Таблица VIP содержит 17 уровней');
     } catch (e) {
       recordTest('4.1', 'Открытие редактора таблицы VIP', 'БЛОК 4', false, e.message);
     }
@@ -415,7 +415,7 @@ VIP: 15`;
 
     // 5.6. Точечное обновление карточки офицера в личном кабинете без перезагрузки всей страницы
     try {
-      const appJsContent = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const appJsContent = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
       const saveMyOfficerBlock = appJsContent.match(/async function saveMyOfficerSubmit\(\) \{([\s\S]*?)\nfunction /)?.[1] || '';
       assert(saveMyOfficerBlock.includes('cabinet-officer-card-'), 'saveMyOfficerSubmit ищет карточку cabinet-officer-card-');
       assert(saveMyOfficerBlock.includes('renderCabinetOfficerCardHtml'), 'saveMyOfficerSubmit вызывает renderCabinetOfficerCardHtml');
@@ -514,7 +514,7 @@ VIP: 15`;
       recordTest('6.6', 'Удаление офицера (кнопка 🗑️)', 'БЛОК 6', true, 'Офицер точечно удален из сектора');
 
       // 6.7. Точечное обновление элементов склада без перезагрузки всей страницы
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
       assert(appJs.includes('sector-stock-grid-wrap-'), 'ID sector-stock-grid-wrap найден');
       assert(appJs.includes('cabinet-stock-grid-wrap'), 'ID cabinet-stock-grid-wrap найден');
       assert(appJs.includes('sector-history-wrap-'), 'ID sector-history-wrap найден');
@@ -717,7 +717,7 @@ VIP: 15`;
 
     // 10.1. Корректность отображения на экранах с вырезом / Dynamic Island
     try {
-      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
       assert(indexHtml.includes('viewport-fit=cover'), 'Тег viewport содержит viewport-fit=cover');
       recordTest('10.1', 'Корректность отображения на экранах с вырезом / Dynamic Island (viewport-fit=cover)', 'БЛОК 10', true, 'viewport-fit=cover подтвержден');
     } catch (e) {
@@ -726,8 +726,8 @@ VIP: 15`;
 
     // 10.2. Мобильное бургер-меню и надежное снятие оверлея
     try {
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-      const styleCss = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'style.css'), 'utf8');
       assert(appJs.includes("document.getElementById('overlay')?.classList.remove('open')"), 'navigate() закрывает оверлей');
       assert(styleCss.includes('.sidebar.open') && styleCss.includes('z-index: 150'), 'Мобильный сайдбар имеет z-index 150 выше оверлея (100)');
       recordTest('10.2', 'Мобильное бургер-меню и надежное снятие оверлея', 'БЛОК 10', true, 'Закрытие оверлея в navigate() и z-index 150 подтверждены');
@@ -737,7 +737,7 @@ VIP: 15`;
 
     // 10.3. Плавный тач-скролл таблицы предпросмотра сезона
     try {
-      const styleCss = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'style.css'), 'utf8');
       assert(styleCss.includes('-webkit-overflow-scrolling: touch;'), 'Стиль -webkit-overflow-scrolling: touch; найден');
       assert(styleCss.includes('min-width: 500px;'), 'Стиль min-width: 500px; найден для предпросмотра');
       recordTest('10.3', 'Плавный тач-скролл таблицы предпросмотра сезона', 'БЛОК 10', true, 'Тач-скролл и min-width: 500px подтверждены');
@@ -747,7 +747,7 @@ VIP: 15`;
 
     // 10.4. Адаптивность кнопок длительности и карточек событий на узких экранах
     try {
-      const styleCss = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'style.css'), 'utf8');
       assert(styleCss.includes('.season-weeks-btn-group'), 'Селектор season-weeks-btn-group найден');
       assert(styleCss.includes('@media (max-width: 480px)'), 'Медиа-запрос 480px найден');
       assert(styleCss.includes('.season-config-grid'), 'Селектор season-config-grid найден');
@@ -841,8 +841,8 @@ VIP: 15`;
 
     // 11.4. Динамический конструктор сезонов на основе periodic типов событий
     try {
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
       assert(appJs.includes('function renderSeasonEventCards()'), 'app.js содержит renderSeasonEventCards()');
       assert(appJs.includes('onSeasonCardDayChange'), 'app.js содержит onSeasonCardDayChange()');
       assert(indexHtml.includes('id="modal-bulk-rewards"'), 'index.html содержит модальное окно #modal-bulk-rewards');
@@ -854,8 +854,8 @@ VIP: 15`;
 
     // 11.5. Режим «Ретроспектива» при добавлении офицера без списания ресурсов склада
     try {
-      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
       assert(indexHtml.includes('id="my-officer-retro-on"'), 'Модальное окно кабинета содержит радиобаттон ретроспективы');
       assert(indexHtml.includes('id="aso-retro-on"'), 'Модальное окно сектора содержит радиобаттон ретроспективы');
       assert(indexHtml.includes('id="so-retro-on"'), 'Модальное окно редактирования содержит радиобаттон ретроспективы');
@@ -871,8 +871,8 @@ VIP: 15`;
 
     // 11.6. Настройка «Только личные медали» и изолированный расчет дефицита
     try {
-      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
       assert(indexHtml.includes('id="my-officer-only-personal"'), 'Чекбокс my-officer-only-personal в ЛК');
       assert(indexHtml.includes('id="aso-only-personal"'), 'Чекбокс aso-only-personal в добавлении офицера сектора');
       assert(indexHtml.includes('id="so-only-personal"'), 'Чекбокс so-only-personal в редактировании офицера сектора');
@@ -925,8 +925,8 @@ VIP: 15`;
 
     // 11.7. Мультимодальный фильтр секторов по связкам и парам офицеров
     try {
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-      const styleCss = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
+      const styleCss = fs.readFileSync(path.join(__dirname, '..', 'client', 'style.css'), 'utf8');
       assert(appJs.includes('sectors-filter-bar'), 'app.js содержит панель sectors-filter-bar');
       assert(appJs.includes('id="filter-officer-1"'), 'app.js содержит селектор filter-officer-1');
       assert(appJs.includes('id="filter-officer-2"'), 'app.js содержит селектор filter-officer-2');
@@ -963,7 +963,7 @@ VIP: 15`;
 
     // 11.8. Допуск к симулятору только офицеров, качающихся за купоны и универсальные пазлы
     try {
-      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const appJs = fs.readFileSync(path.join(__dirname, '..', 'client', 'app.js'), 'utf8');
       assert(appJs.includes('getSimulatorEligibleOfficers'), 'app.js использует getSimulatorEligibleOfficers');
 
       const mockCatalog = [

@@ -6,7 +6,14 @@
 
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
-    const logicModule = typeof require !== 'undefined' ? require('./logic.js') : null;
+    let logicModule = null;
+    if (typeof require !== 'undefined') {
+      try {
+        logicModule = require('../shared/logic.js');
+      } catch (_) {
+        try { logicModule = require('./logic.js'); } catch (_) {}
+      }
+    }
     module.exports = factory(logicModule);
   } else {
     root.smartScanner = factory(root.logic || (typeof globalThis !== 'undefined' ? globalThis.logic : null));
@@ -128,7 +135,12 @@
     }
     if (!env.ignoreRequire && typeof require !== 'undefined') {
       try {
-        const mod = require('./logic.js');
+        let mod = null;
+        try {
+          mod = require('../shared/logic.js');
+        } catch (_) {
+          mod = require('./logic.js');
+        }
         if (mod && typeof mod.parseProfileScreenshotText === 'function') {
           return mod;
         }

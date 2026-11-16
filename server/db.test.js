@@ -696,7 +696,7 @@ test('players table user_id migration and safe backfill from users.player_id', (
   // Вызываем initDb / migrateSchema
   // Для тестирования передаем существующий db или используем initDb
   // В dbModule.initDb(':memory:') создается новая база, поэтому проверим миграцию через временный файл
-  const tmpFile = path.join(__dirname, 'data', `kow-migration-test-${Date.now()}.db`);
+  const tmpFile = path.join(__dirname, '..', 'data', `kow-migration-test-${Date.now()}.db`);
   try {
     const fileDb = new DatabaseSync(tmpFile);
     fileDb.exec(`
@@ -1635,7 +1635,7 @@ test('cleanupExpiredScreenshots deletes screenshot files older than 30 days and 
   const dbModule = require('./db.js');
   const db = dbModule.initDb(':memory:');
 
-  const tempDir = path.join(__dirname, 'data', 'test_screenshots_' + Date.now());
+  const tempDir = path.join(__dirname, '..', 'data', 'test_screenshots_' + Date.now());
   fs.mkdirSync(tempDir, { recursive: true });
 
   try {
@@ -1808,7 +1808,7 @@ test('db handles hq_level attribute in sectors and softly migrates vip > 17 to h
   const fs = require('node:fs');
   const dbModule = require('./db.js');
 
-  const testDbDir = path.join(__dirname, 'data', `test-hq-${Date.now()}`);
+  const testDbDir = path.join(__dirname, '..', 'data', `test-hq-${Date.now()}`);
   fs.mkdirSync(testDbDir, { recursive: true });
   const testDbPath = path.join(testDbDir, 'kow.db');
 

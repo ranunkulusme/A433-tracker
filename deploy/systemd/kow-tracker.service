@@ -7,7 +7,7 @@ Type=simple
 User=kow
 Group=kow
 WorkingDirectory=/opt/kow-tracker
-ExecStart=/usr/bin/node server.js
+ExecStart=/usr/bin/node server/server.js
 Restart=always
 RestartSec=5
 

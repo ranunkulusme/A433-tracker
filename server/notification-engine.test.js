@@ -3,14 +3,14 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const testDbPath = path.join(__dirname, 'data', 'test-notifications.db');
+const testDbPath = path.join(__dirname, '..', 'data', 'test-notifications.db');
 if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
 
 process.env.DB_PATH = testDbPath;
 const db = require('./db.js');
 db.initDb();
 
-const logic = require('./logic.js');
+const logic = require('../shared/logic.js');
 const { createNotificationEngine } = require('./notification-engine.js');
 
 test('NotificationEngine: dispatchNotification renders template and sends to personal chat', async () => {

@@ -9,7 +9,7 @@
 
 function createAuthGuard({ db, logic } = {}) {
   if (!logic) {
-    logic = require('./logic.js');
+    logic = require('../shared/logic.js');
   }
 
   function extractToken(req) {

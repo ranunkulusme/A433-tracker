@@ -177,7 +177,7 @@ function maskSecret(secret) {
 /**
  * Start or restart the local Mieru client process.
  */
-function startMieruProcess(configObj, dataDir = path.join(__dirname, 'data')) {
+function startMieruProcess(configObj, dataDir = path.join(__dirname, '..', 'data')) {
   stopMieruProcess();
 
   try {

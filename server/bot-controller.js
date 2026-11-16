@@ -814,7 +814,7 @@ async function handleTelegramUpdate(update) {
             if (fileBuf && fileBuf.length > 0) {
               downloadedFileBuf = fileBuf;
               const yyyyMm = new Date().toISOString().slice(0, 7);
-              const screenshotsDir = path.join(__dirname, 'data', 'screenshots', yyyyMm);
+              const screenshotsDir = path.join(__dirname, '..', 'data', 'screenshots', yyyyMm);
               if (!fs.existsSync(screenshotsDir)) {
                 fs.mkdirSync(screenshotsDir, { recursive: true });
               }

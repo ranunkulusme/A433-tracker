@@ -10,7 +10,7 @@
 function createSeasonPlanner({ db, logic, notificationEngine, getAppBaseUrl } = {}) {
   if (!db) throw new Error('db is required for SeasonPlanner');
   if (!logic) {
-    logic = require('./logic.js');
+    logic = require('../shared/logic.js');
   }
 
   function ensureEventType(identifier, defaultColor) {

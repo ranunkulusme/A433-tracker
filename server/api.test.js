@@ -1118,7 +1118,7 @@ test('API supports WASM static serving and star stock fields sanitization in pro
   const server = await startServer({ port: 0, dbPath: ':memory:' });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  const dummyWasmPath = path.join(__dirname, 'test_dummy_asset.wasm');
+  const dummyWasmPath = path.join(__dirname, '..', 'client', 'test_dummy_asset.wasm');
   fs.writeFileSync(dummyWasmPath, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
 
   try {
@@ -3056,7 +3056,7 @@ test('API POST /api/players/:id/stock-history uploads screenshot and creates aud
     assert(record.screenshotPath, 'Must have screenshotPath');
 
     // Verify screenshot file created on disk
-    const diskPath = path.join(__dirname, 'data', 'screenshots', record.screenshotPath);
+    const diskPath = path.join(__dirname, '..', 'data', 'screenshots', record.screenshotPath);
     assert.equal(fs.existsSync(diskPath), true, 'Screenshot file must exist on disk');
 
     // Clean up created file
@@ -3074,7 +3074,7 @@ test('API GET /api/screenshots/:filename validates traversal, authenticates user
   const server = await startServer({ port: 0, dbPath: ':memory:' });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  const tempScreenshotsDir = path.join(__dirname, 'data', 'screenshots', '2026-11');
+  const tempScreenshotsDir = path.join(__dirname, '..', 'data', 'screenshots', '2026-11');
   fs.mkdirSync(tempScreenshotsDir, { recursive: true });
   const testFilename = `test_${Date.now()}_img.jpg`;
   const testFilePath = path.join(tempScreenshotsDir, testFilename);
