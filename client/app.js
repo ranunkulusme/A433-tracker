@@ -455,6 +455,15 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
+if (typeof window !== 'undefined') {
+  window.apiFetch = apiFetch;
+  window.__appApiFetch = apiFetch;
+  window.state = state;
+  window.currentUser = currentUser;
+  window.toast = toast;
+  window.loadDataFromServer = loadDataFromServer;
+}
+
 async function flushOutboxQueue() {
   if (isFlushingOutbox) return;
   if (typeof navigator !== 'undefined' && !navigator.onLine) return;

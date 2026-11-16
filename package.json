@@ -5,7 +5,7 @@
   "main": "server/server.js",
   "scripts": {
     "start": "node server/server.js",
-    "test": "node shared/logic.test.js && node server/db.test.js && node server/event-ops.test.js && node server/bot-controller.test.js && node server/officer-progression.test.js && node server/notification-engine.test.js && node server/auth-guard.test.js && node server/season-planner.test.js && node client/smart-scanner.test.js && node server/s3.test.js && node server/telegram.test.js && node server/api.test.js && node deploy.test.js && node client/i18n.test.js",
+    "test": "node shared/logic.test.js && node server/db.test.js && node server/event-ops.test.js && node server/bot-controller.test.js && node server/officer-progression.test.js && node server/notification-engine.test.js && node server/auth-guard.test.js && node server/season-planner.test.js && node client/smart-scanner.test.js && node client/tma.test.js && node server/s3.test.js && node server/telegram.test.js && node server/api.test.js && node deploy.test.js && node client/i18n.test.js",
     "test:acceptance": "node server/test-demo-acceptance.js",
     "test:api": "node server/api.test.js",
     "test:auth-guard": "node server/auth-guard.test.js",

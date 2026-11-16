@@ -6,9 +6,72 @@
  * Decoupled from desktop desktop application monolith.
  */
 
-// ─── TELEGRAM MINI APP (TMA) CONTROLLER ──────────────────────────
+// ─── TELEGRAM MINI APP (TMA) SAFE RUNTIME & FALLBACKS ─────────────
 let activeTmaTab = 'cabinet';
 let tmaEventsSubTab = 'upcoming';
+
+// Standalone safe doTmaApiFetch (independent of script load/execution order)
+async function doTmaApiFetch(url, options = {}) {
+  // If app.js is loaded and defined __appApiFetch, delegate to it
+  if (typeof window !== 'undefined' && typeof window.__appApiFetch === 'function') {
+    return window.__appApiFetch(url, options);
+  }
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('kow_token') : null;
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  headers['Pragma'] = 'no-cache';
+  headers['Cache-Control'] = 'no-cache';
+
+  let body = options.body;
+  if (body && typeof body === 'object' && !(typeof FormData !== 'undefined' && body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(body);
+  }
+  const res = await fetch(url, { ...options, headers, body });
+  const contentType = res.headers.get('content-type') || '';
+  const data = contentType.includes('application/json') ? await res.json() : await res.text();
+  if (!res.ok) {
+    const message = (data && data.message) || (data && data.error) || res.statusText || 'API Error';
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+// Global & lexical variable fallback so apiFetch is always defined and never throws ReferenceError
+if (typeof window !== 'undefined') {
+  if (typeof window.apiFetch === 'undefined') {
+    window.apiFetch = doTmaApiFetch;
+  }
+}
+var apiFetch = doTmaApiFetch;
+
+// Safe fallback for toast notifications
+function doTmaToast(msg, type = 'success') {
+  if (typeof window !== 'undefined' && typeof window.toast === 'function' && window.toast !== doTmaToast) {
+    return window.toast(msg, type);
+  }
+  if (typeof document !== 'undefined') {
+    const container = document.getElementById('toasts') || document.body;
+    const t = document.createElement('div');
+    t.className = `toast ${type || 'info'}`;
+    t.textContent = msg;
+    container.appendChild(t);
+    setTimeout(() => { try { t.remove(); } catch (_) {} }, 3500);
+  }
+}
+if (typeof window !== 'undefined' && typeof window.toast === 'undefined') {
+  window.toast = doTmaToast;
+}
+var toast = doTmaToast;
+
+// Safe references for state and currentUser across modules
+var currentUser = (typeof window !== 'undefined' && window.currentUser) ? window.currentUser : null;
+var state = (typeof window !== 'undefined' && window.state) ? window.state : { players: [], catalog: [], events: [], currentRole: 'r3' };
 
 function isTmaMode() {
   if (typeof document !== 'undefined') {
@@ -81,27 +144,12 @@ function tmaHaptic(type = 'light') {
   } catch (_) {}
 }
 
-async function doTmaApiFetch(url, options = {}) {
-  if (typeof apiFetch === 'function') return apiFetch(url, options);
-  if (typeof window !== 'undefined' && typeof window.apiFetch === 'function') return window.apiFetch(url, options);
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('kow_token') : null;
-  const headers = { ...(options.headers || {}) };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  let body = options.body;
-  if (body && typeof body === 'object' && !(body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(body);
-  }
-  const res = await fetch(url, { ...options, headers, body });
-  return res.json();
-}
-
 async function doTmaLoadData() {
-  if (typeof loadDataFromServer === 'function') {
-    return loadDataFromServer().catch(() => {});
-  }
   if (typeof window !== 'undefined' && typeof window.loadDataFromServer === 'function') {
     return window.loadDataFromServer().catch(() => {});
+  }
+  if (typeof loadDataFromServer === 'function') {
+    return loadDataFromServer().catch(() => {});
   }
 }
 
@@ -304,7 +352,7 @@ async function handleTmaLoginSubmit(event) {
   if (alertEl) alertEl.style.display = 'none';
 
   try {
-    const res = await apiFetch('/api/auth/login', {
+    const res = await doTmaApiFetch('/api/auth/login', {
       method: 'POST',
       body: { username, password }
     });
@@ -312,19 +360,26 @@ async function handleTmaLoginSubmit(event) {
     if (res && res.token && res.user) {
       localStorage.setItem('kow_token', res.token);
       currentUser = res.user;
+      if (typeof window !== 'undefined') window.currentUser = currentUser;
       if (res.player) {
         currentUser.player = res.player;
         currentUser.playerName = res.player.name;
       }
       try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
-      state.currentRole = currentUser.rank;
-      state.currentPlayerId = currentUser.playerId || null;
+      if (typeof state !== 'undefined' && state) {
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+      }
+      if (typeof window !== 'undefined' && window.state) {
+        window.state.currentRole = currentUser.rank;
+        window.state.currentPlayerId = currentUser.playerId || null;
+      }
 
       // Auto-bind Telegram if WebApp initData is present!
       const tg = window.Telegram?.WebApp;
       if (tg && tg.initData) {
         try {
-          await apiFetch('/api/telegram/bind-webapp', {
+          await doTmaApiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
             body: { initData: tg.initData }
           });
@@ -333,7 +388,7 @@ async function handleTmaLoginSubmit(event) {
         }
       }
 
-      await loadDataFromServer().catch(() => {});
+      await doTmaLoadData();
       tmaHaptic('success');
       toast('Вход успешно выполнен!', 'success');
       renderTmaApp();
@@ -369,7 +424,7 @@ async function handleTmaRegisterSubmit(event) {
   if (alertEl) alertEl.style.display = 'none';
 
   try {
-    const regRes = await apiFetch('/api/auth/register', {
+    const regRes = await doTmaApiFetch('/api/auth/register', {
       method: 'POST',
       body: { username, password, playerName }
     });
@@ -381,7 +436,7 @@ async function handleTmaRegisterSubmit(event) {
     }
 
     // Auto login
-    const loginRes = await apiFetch('/api/auth/login', {
+    const loginRes = await doTmaApiFetch('/api/auth/login', {
       method: 'POST',
       body: { username, password }
     });
@@ -389,26 +444,33 @@ async function handleTmaRegisterSubmit(event) {
     if (loginRes && loginRes.token && loginRes.user) {
       localStorage.setItem('kow_token', loginRes.token);
       currentUser = loginRes.user;
+      if (typeof window !== 'undefined') window.currentUser = currentUser;
       if (loginRes.player) {
         currentUser.player = loginRes.player;
         currentUser.playerName = loginRes.player.name;
       }
       try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
-      state.currentRole = currentUser.rank;
-      state.currentPlayerId = currentUser.playerId || null;
+      if (typeof state !== 'undefined' && state) {
+        state.currentRole = currentUser.rank;
+        state.currentPlayerId = currentUser.playerId || null;
+      }
+      if (typeof window !== 'undefined' && window.state) {
+        window.state.currentRole = currentUser.rank;
+        window.state.currentPlayerId = currentUser.playerId || null;
+      }
 
       // Auto bind telegram if WebApp initData is present
       const tg = window.Telegram?.WebApp;
       if (tg && tg.initData) {
         try {
-          await apiFetch('/api/telegram/bind-webapp', {
+          await doTmaApiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
             body: { initData: tg.initData }
           });
         } catch (_) {}
       }
 
-      await loadDataFromServer().catch(() => {});
+      await doTmaLoadData();
       tmaHaptic('success');
       toast('Регистрация завершена!', 'success');
       renderTmaApp();
@@ -1185,13 +1247,13 @@ async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
 
   const sectorId = player ? player.id : currentUser?.playerId;
   try {
-    await apiFetch(`/api/events/${eventId}/register`, {
+    await doTmaApiFetch(`/api/events/${eventId}/register`, {
       method: 'POST',
       body: { desiredPlace, sectorId }
     });
     tmaHaptic('success');
     toast('Заявка на ивент успешно принята!', 'success');
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
     const modal = document.getElementById('tma-event-modal');
@@ -1216,10 +1278,10 @@ async function handleTmaUnregisterEvent(eventId) {
     const url = sectorId
       ? `/api/events/${eventId}/register?sectorId=${sectorId}`
       : `/api/events/${eventId}/register`;
-    await apiFetch(url, { method: 'DELETE' });
+    await doTmaApiFetch(url, { method: 'DELETE' });
     tmaHaptic('success');
     toast('Заявка отменена', 'info');
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
     const modal = document.getElementById('tma-event-modal');
@@ -1240,7 +1302,7 @@ async function openTmaEventDetail(eventId) {
 
   let ev = (state.events || []).find(e => Number(e.id) === Number(eventId));
   try {
-    const fetched = await apiFetch(`/api/events/${eventId}`);
+    const fetched = await doTmaApiFetch(`/api/events/${eventId}`);
     if (fetched && fetched.id) {
       ev = fetched;
       const idx = (state.events || []).findIndex(e => Number(e.id) === Number(eventId));
@@ -1644,7 +1706,7 @@ async function runTmaEventAutopick() {
   tmaHaptic('medium');
   if (tmaEditEventId) {
     try {
-      const res = await apiFetch(`/api/events/${tmaEditEventId}/autopick`, { method: 'POST' });
+      const res = await doTmaApiFetch(`/api/events/${tmaEditEventId}/autopick`, { method: 'POST' });
       if (res && res.assignments) {
         for (const a of res.assignments) {
           const p = tmaEventEditorPlaces.find(pl => Number(pl.place) === Number(a.place));
@@ -1727,12 +1789,12 @@ async function submitTmaEventEditor() {
   const targetEventId = tmaEditEventId;
 
   try {
-    const saved = await apiFetch('/api/events', { method: 'POST', body: payload });
+    const saved = await doTmaApiFetch('/api/events', { method: 'POST', body: payload });
     tmaHaptic('success');
     toast(isEditingExisting ? '✅ Событие обновлено' : '✅ Событие создано', 'success');
     const finalEventId = targetEventId || saved?.id;
     closeTmaEventEditorModal();
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
 
@@ -1752,12 +1814,12 @@ async function handleTmaDeleteEvent(eventId) {
   if (!confirm('Удалить это событие альянса?')) return;
   tmaHaptic('medium');
   try {
-    await apiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
+    await doTmaApiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
     tmaHaptic('success');
     toast('🗑️ Событие удалено', 'info');
     closeTmaEventEditorModal();
     closeTmaEventModal();
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
   } catch (err) {
@@ -1769,10 +1831,10 @@ async function handleTmaDeleteEvent(eventId) {
 async function handleTmaRunAutopick(eventId) {
   tmaHaptic('medium');
   try {
-    await apiFetch(`/api/events/${eventId}/autopick`, { method: 'POST' });
+    await doTmaApiFetch(`/api/events/${eventId}/autopick`, { method: 'POST' });
     tmaHaptic('success');
     toast('⚡ Автоподбор выполнен штабом!', 'success');
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     renderTmaEvents();
     openTmaEventDetail(eventId);
   } catch (err) {
@@ -2002,7 +2064,7 @@ async function handleTmaSwitchSector(sectorId) {
   try {
     const sId = Number(sectorId);
     if (!sId) return;
-    await apiFetch('/api/my-profile/active-sector', {
+    await doTmaApiFetch('/api/my-profile/active-sector', {
       method: 'POST',
       body: { sectorId: sId }
     });
@@ -2092,7 +2154,7 @@ async function submitTmaSectorEdit() {
   const targetId = tmaEditingSectorId || Number(currentUser?.playerId || myCabinetProfile?.id);
 
   try {
-    await apiFetch(endpoint, {
+    await doTmaApiFetch(endpoint, {
       method: 'PUT',
       body: {
         name,
@@ -2222,7 +2284,7 @@ async function submitTmaStockEdit() {
   const stock = { coupons, puzzles, chests, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3 };
 
   try {
-    await apiFetch('/api/my-profile', {
+    await doTmaApiFetch('/api/my-profile', {
       method: 'PUT',
       body: { stock }
     });
@@ -2850,7 +2912,7 @@ async function submitTmaOfficerEdit() {
 
   try {
     if (tmaOfficerModalEditId) {
-      const updatedOffData = await apiFetch(`/api/my-profile/officers/${tmaOfficerModalEditId}`, {
+      const updatedOffData = await doTmaApiFetch(`/api/my-profile/officers/${tmaOfficerModalEditId}`, {
         method: 'PUT',
         body: {
           level,
@@ -2957,7 +3019,7 @@ async function submitTmaOfficerEdit() {
         ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
       };
 
-      const createdOff = await apiFetch('/api/my-profile/officers', {
+      const createdOff = await doTmaApiFetch('/api/my-profile/officers', {
         method: 'POST',
         body: payload
       });
@@ -3008,13 +3070,13 @@ function closeTmaEventModal() {
 async function handleTmaConfirmRsvp(eventId, placeNum) {
   tmaHaptic('medium');
   try {
-    await apiFetch(`/api/events/${eventId}/rsvp`, {
+    await doTmaApiFetch(`/api/events/${eventId}/rsvp`, {
       method: 'POST',
       body: { place: Number(placeNum), status: 'confirmed' }
     });
     tmaHaptic('success');
     toast(`Место #${placeNum} подтверждено!`, 'success');
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     openTmaEventDetail(eventId);
     renderTmaEvents();
   } catch (err) {
@@ -3052,14 +3114,14 @@ async function handleTmaAssignPlace(eventId, playerId, newPlace) {
       assignments
     };
 
-    await apiFetch(`/api/events/${eventId}`, {
+    await doTmaApiFetch(`/api/events/${eventId}`, {
       method: 'PUT',
       body: payload
     });
 
     tmaHaptic('success');
     toast(placeNum > 0 ? `Место #${placeNum} назначено!` : 'Назначение отменено', 'success');
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     openTmaEventDetail(eventId);
     renderTmaEvents();
   } catch (err) {
@@ -3072,14 +3134,14 @@ async function handleTmaStaffRemoveParticipant(eventId, playerId) {
   tmaHaptic('medium');
   if (!confirm('Снять участника с события?')) return;
   try {
-    await apiFetch(`/api/events/${eventId}/register?sectorId=${playerId}`, {
+    await doTmaApiFetch(`/api/events/${eventId}/register?sectorId=${playerId}`, {
       method: 'DELETE'
     });
 
     const ev = (state.events || []).find(e => Number(e.id) === Number(eventId));
     if (ev && Array.isArray(ev.assignments) && ev.assignments.some(a => Number(a.playerId) === Number(playerId))) {
       const assignments = ev.assignments.filter(a => Number(a.playerId) !== Number(playerId));
-      await apiFetch(`/api/events/${eventId}`, {
+      await doTmaApiFetch(`/api/events/${eventId}`, {
         method: 'PUT',
         body: {
           id: ev.id,
@@ -3094,7 +3156,7 @@ async function handleTmaStaffRemoveParticipant(eventId, playerId) {
 
     tmaHaptic('success');
     toast('Игрок снят с события', 'info');
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     openTmaEventDetail(eventId);
     renderTmaEvents();
   } catch (err) {
@@ -3141,7 +3203,7 @@ function handleTmaOcrFileInput(event) {
 async function refreshTmaCurrentTab() {
   tmaHaptic('light');
   try {
-    await loadDataFromServer().catch(() => {});
+    await doTmaLoadData();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
     else if (activeTmaTab === 'events') renderTmaEvents();
     else if (activeTmaTab === 'matrix') renderTmaMatrix();
