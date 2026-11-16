@@ -312,4 +312,142 @@ test('sequential execution of logic.js, app.js and tma.js has zero identifier co
     context.renderTmaUnboundScreen();
     assert.equal(elements['tma-unbound-screen'].style.display, 'block');
   });
+
+  // 6. Test openAuthModal in TMA mode suppresses modal-auth and renders unbound screen
+  assert.doesNotThrow(() => {
+    elements['modal-auth'].classList.remove('open');
+    elements['overlay'].classList.remove('open');
+    context.openAuthModal('login', 'Тестовое предупреждение');
+    assert.equal(elements['modal-auth'].classList.contains('open'), false);
+    assert.equal(elements['overlay'].classList.contains('open'), false);
+    assert.equal(elements['tma-unbound-screen'].style.display, 'block');
+  });
+});
+
+test('initTmaAuth self-heals using kow_token and binds telegram when telegram-webapp returns 404', async () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  const elements = {};
+  function getEl(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        innerHTML: '',
+        style: {},
+        classList: {
+          _classes: new Set(),
+          add: function(c) { this._classes.add(c); },
+          remove: function(c) { this._classes.delete(c); },
+          contains: function(c) { return this._classes.has(c); }
+        },
+        querySelectorAll: () => [],
+        querySelector: () => null,
+        addEventListener: () => {}
+      };
+    }
+    return elements[id];
+  }
+
+  const mockStorage = {
+    kow_token: 'existing_valid_token'
+  };
+
+  const requestsMade = [];
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => mockStorage[k] || null,
+      setItem: (k, v) => { mockStorage[k] = String(v); },
+      removeItem: (k) => { delete mockStorage[k]; }
+    },
+    Telegram: {
+      WebApp: {
+        initData: 'query_id=test_data&user=%7B%22id%22%3A999%7D',
+        platform: 'ios',
+        ready: () => {},
+        expand: () => {}
+      }
+    },
+    fetch: async (url, options) => {
+      requestsMade.push({ url, options });
+      if (url === '/api/auth/telegram-webapp') {
+        return {
+          ok: false,
+          status: 404,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ error: 'USER_NOT_BOUND' })
+        };
+      }
+      if (url === '/api/auth/me') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ user: { id: 42, username: 'player42', rank: 'Р3' } })
+        };
+      }
+      if (url === '/api/telegram/bind-webapp') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ success: true })
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ ok: true, events: [], players: [], catalog: [] })
+      };
+    },
+    addEventListener: () => {}
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    getElementById: (id) => getEl(id),
+    querySelector: (sel) => getEl(sel.replace(/^[#.]/, '')),
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    addEventListener: () => {}
+  });
+  context.window = context;
+  context.globalThis = context;
+  mockDocument.defaultView = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(appCode, context);
+  vm.runInContext(tmaCode, context);
+
+  const authSuccess = await context.initTmaAuth();
+  assert.equal(authSuccess, true, 'initTmaAuth should return true after self-healing via existing token');
+
+  // Verify requests made in order:
+  // 1. /api/auth/telegram-webapp (fails with 404)
+  // 2. /api/auth/me (validates existing session)
+  // 3. /api/telegram/bind-webapp (binds telegram so subsequent launches auto-login)
+  const calledUrls = requestsMade.map(r => r.url);
+  assert.ok(calledUrls.includes('/api/auth/telegram-webapp'), 'Should attempt telegram-webapp');
+  assert.ok(calledUrls.includes('/api/auth/me'), 'Should check /api/auth/me fallback');
+  assert.ok(calledUrls.includes('/api/telegram/bind-webapp'), 'Should auto-bind telegram to account');
 });

@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.48.4';
+const APP_VERSION = 'v3.48.5';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -425,12 +425,20 @@ async function apiFetch(url, options = {}) {
   }
 
   if (res.status === 401) {
-    localStorage.removeItem('kow_token');
-    localStorage.removeItem('kow_user');
-    currentUser = null;
-    renderTopbarProfile();
-    renderSidebarNav();
-    openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
+    if (!url.includes('/api/auth/telegram-webapp')) {
+      localStorage.removeItem('kow_token');
+      localStorage.removeItem('kow_user');
+      currentUser = null;
+      renderTopbarProfile();
+      renderSidebarNav();
+      if (typeof isTmaMode === 'function' && isTmaMode()) {
+        if (typeof renderTmaUnboundScreen === 'function') {
+          renderTmaUnboundScreen({ message: 'Сессия истекла. Пожалуйста, войдите снова.' });
+        }
+      } else {
+        openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
+      }
+    }
     const err = new Error('UNAUTHORIZED');
     err.status = 401;
     throw err;
@@ -990,6 +998,12 @@ function showToast(msg, type = 'info') {
 }
 
 function openModal(id) {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    if (id === 'modal-auth') {
+      if (typeof renderTmaUnboundScreen === 'function') renderTmaUnboundScreen();
+      return;
+    }
+  }
   document.getElementById('overlay')?.classList.add('open');
   document.getElementById(id)?.classList.add('open');
 }
@@ -1002,6 +1016,12 @@ function closeModal(id) {
   }
 }
 function closeAllModals() {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    document.getElementById('overlay')?.classList.remove('open');
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.querySelectorAll('.modal.open').forEach(m=>m.classList.remove('open'));
+    return;
+  }
   if (!currentUser && document.getElementById('modal-auth')?.classList.contains('open')) {
     return;
   }
@@ -1084,6 +1104,14 @@ async function checkAuthDemoHint() {
 }
 
 function openAuthModal(tab = 'login', alertMessage = null) {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    enableTmaView();
+    closeAllModals();
+    if (typeof renderTmaUnboundScreen === 'function') {
+      renderTmaUnboundScreen(alertMessage ? { message: alertMessage } : null);
+    }
+    return;
+  }
   openModal('modal-auth');
   switchAuthTab(tab);
   checkAuthDemoHint();
@@ -1154,10 +1182,14 @@ async function handleLoginSubmit(e) {
   hideAuthAlert();
 
   try {
+    const initData = window.Telegram?.WebApp?.initData || '';
+    const reqBody = { username, password };
+    if (initData) reqBody.initData = initData;
+
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify(reqBody)
     });
     const data = await res.json();
     if (res.status === 403 && data.error === 'PENDING_APPROVAL') {
@@ -1184,9 +1216,17 @@ async function handleLoginSubmit(e) {
     closeAllModals();
     renderTopbarProfile();
     renderSidebarNav();
-    await loadDataFromServer();
-    flushOutboxQueue();
-    navigateInitialOrHash();
+    if (typeof isTmaMode === 'function' && isTmaMode()) {
+      enableTmaView();
+      if (typeof doTmaLoadData === 'function') await doTmaLoadData();
+      if (typeof renderTmaApp === 'function') {
+        renderTmaApp();
+      }
+    } else {
+      await loadDataFromServer();
+      flushOutboxQueue();
+      navigateInitialOrHash();
+    }
   } catch (err) {
     showAuthAlert('Ошибка соединения с сервером', 'error');
   } finally {
@@ -1222,8 +1262,10 @@ async function handleRegisterSubmit(e) {
   hideAuthAlert();
 
   try {
+    const initData = window.Telegram?.WebApp?.initData || '';
     const body = { username, password };
     if (playerName) body.playerName = playerName;
+    if (initData) body.initData = initData;
 
     const res = await fetch('/api/auth/register', {
       method: 'POST',
@@ -1368,11 +1410,13 @@ async function checkAuth() {
     enableTmaView();
     setupTmaEnvironment();
     const tmaAuthed = await initTmaAuth();
+    closeAllModals();
     if (tmaAuthed) {
-      closeAllModals();
       return true;
     }
-    closeAllModals();
+    if (typeof renderTmaUnboundScreen === 'function') {
+      renderTmaUnboundScreen();
+    }
     return false;
   }
 
@@ -12380,23 +12424,49 @@ function isTmaMode() {
       return true;
     }
   }
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      if (sessionStorage.getItem('kow_tma') === '1') return true;
+    } catch (_) {}
+  }
   if (typeof window === "undefined") return false;
+  if (window.TelegramWebviewProxy || window.TelegramGameProxy) {
+    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+    return true;
+  }
+  if (typeof navigator !== 'undefined' && /Telegram/i.test(navigator.userAgent || '')) {
+    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+    return true;
+  }
   try {
     const s = window.location.search || '';
     const params = new URLSearchParams(s);
-    if (params.get("tma") === "1" || params.has("tma") || s.includes('tma=1') || s.includes('tma=')) return true;
+    if (params.get("tma") === "1" || params.has("tma") || s.includes('tma=1') || s.includes('tma=')) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
   } catch (_) {}
   try {
     const h = window.location.hash || '';
     if (h.includes('tma=1') || h.includes('tma') || h.includes('tgWebAppData') || h.includes('tgWebAppPlatform') || h.includes('tgWebAppVersion')) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
   } catch (_) {}
   const tg = window.Telegram?.WebApp;
   if (tg) {
-    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) return true;
-    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) return true;
-    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') return true;
+    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
+    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
+    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') {
+      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+      return true;
+    }
   }
   return false;
 }
@@ -12408,10 +12478,21 @@ function enableTmaView() {
   if (typeof document !== 'undefined') {
     document.documentElement?.classList.add('tma-mode');
     document.body?.classList.add('tma-mode');
+    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
     const tmaEl = document.getElementById('tma-app');
     if (tmaEl) tmaEl.style.display = 'flex';
     const appEl = document.getElementById('app');
     if (appEl) appEl.style.display = 'none';
+    const authModal = document.getElementById('modal-auth');
+    if (authModal) {
+      authModal.classList.remove('open');
+      authModal.style.display = 'none';
+    }
+    const overlay = document.getElementById('overlay');
+    if (overlay) {
+      overlay.classList.remove('open');
+      overlay.style.display = 'none';
+    }
   }
 }
 
