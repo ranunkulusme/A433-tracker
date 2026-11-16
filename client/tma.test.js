@@ -451,3 +451,93 @@ test('initTmaAuth self-heals using kow_token and binds telegram when telegram-we
   assert.ok(calledUrls.includes('/api/auth/me'), 'Should check /api/auth/me fallback');
   assert.ok(calledUrls.includes('/api/telegram/bind-webapp'), 'Should auto-bind telegram to account');
 });
+
+test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия истекла"', async () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  let unboundMessage = null;
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '', pathname: '/' },
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {}
+    },
+    Telegram: {
+      WebApp: { initData: '', platform: 'ios', ready: () => {}, expand: () => {} }
+    },
+    fetch: async (url) => {
+      if (url === '/api/auth/login') {
+        return {
+          ok: false,
+          status: 401,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ error: 'INVALID_CREDENTIALS', message: 'Неверный логин или пароль' })
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({})
+      };
+    },
+    addEventListener: () => {}
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    getElementById: () => ({ style: {}, classList: { add: () => {}, remove: () => {}, contains: () => false }, querySelectorAll: () => [], querySelector: () => null }),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    addEventListener: () => {}
+  });
+  context.window = context;
+  context.globalThis = context;
+  mockDocument.defaultView = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(appCode, context);
+  vm.runInContext(tmaCode, context);
+
+  // Hook renderTmaUnboundScreen to ensure it is NOT called with "Сессия истекла"
+  context.renderTmaUnboundScreen = (err) => {
+    unboundMessage = err ? (err.message || String(err)) : null;
+  };
+
+  await assert.rejects(
+    async () => {
+      await context.apiFetch('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username: 'bad', password: 'wrong' })
+      });
+    },
+    (err) => {
+      assert.equal(err.message, 'Неверный логин или пароль');
+      assert.equal(err.status, 401);
+      return true;
+    }
+  );
+
+  assert.equal(unboundMessage, null, 'renderTmaUnboundScreen must not be triggered with session expired on auth routes');
+});

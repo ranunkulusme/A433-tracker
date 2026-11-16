@@ -425,22 +425,38 @@ async function apiFetch(url, options = {}) {
   }
 
   if (res.status === 401) {
-    if (!url.includes('/api/auth/telegram-webapp')) {
-      localStorage.removeItem('kow_token');
-      localStorage.removeItem('kow_user');
+    const isAuthRoute = url.includes('/api/auth/');
+    if (!isAuthRoute) {
+      const hadSession = Boolean(currentUser || (typeof localStorage !== 'undefined' && localStorage.getItem('kow_token')));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('kow_token');
+        localStorage.removeItem('kow_user');
+      }
       currentUser = null;
       renderTopbarProfile();
       renderSidebarNav();
-      if (typeof isTmaMode === 'function' && isTmaMode()) {
-        if (typeof renderTmaUnboundScreen === 'function') {
-          renderTmaUnboundScreen({ message: 'Сессия истекла. Пожалуйста, войдите снова.' });
+      if (hadSession) {
+        if (typeof isTmaMode === 'function' && isTmaMode()) {
+          if (typeof renderTmaUnboundScreen === 'function') {
+            renderTmaUnboundScreen({ message: 'Сессия истекла. Пожалуйста, войдите снова.' });
+          }
+        } else {
+          openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
         }
-      } else {
-        openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
       }
     }
-    const err = new Error('UNAUTHORIZED');
+
+    let data = null;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try { data = await res.json(); } catch (_) {}
+    } else {
+      try { data = await res.text(); } catch (_) {}
+    }
+    const message = (data && (data.message || data.error)) || res.statusText || 'UNAUTHORIZED';
+    const err = new Error(message);
     err.status = 401;
+    err.data = data;
     throw err;
   }
 
