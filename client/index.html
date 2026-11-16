@@ -788,14 +788,14 @@
   </div>
 
   <!-- TMA Event Editor Modal / Bottom Sheet (R4/R5) -->
-  <div id="tma-event-editor-modal" class="tma-modal" style="display:none;z-index:60" onclick="closeTmaModals()">
+  <div id="tma-event-editor-modal" class="tma-modal" style="display:none;z-index:120" onclick="closeTmaEventEditorModal()">
     <div class="tma-modal-sheet" id="tma-event-editor-sheet" style="max-height:92vh" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
           <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Управление событиями (Р4/Р5)</div>
           <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-event-editor-title">✨ Создать событие</h3>
         </div>
-        <button type="button" class="tma-modal-close-btn" onclick="closeTmaModals()">✕</button>
+        <button type="button" class="tma-modal-close-btn" onclick="closeTmaEventEditorModal()">✕</button>
       </div>
       <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px">
         <!-- Event Type -->
@@ -849,21 +849,21 @@
       <!-- Pinned Footer Actions -->
       <div class="tma-modal-footer">
         <button type="button" id="tma-ee-delete-btn" class="tma-btn-danger" onclick="deleteTmaCurrentEvent()" style="padding:10px 14px;display:none">🗑️</button>
-        <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
+        <button type="button" class="tma-btn-ghost" onclick="closeTmaEventEditorModal()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
         <button type="button" class="tma-btn-primary" onclick="submitTmaEventEditor()" style="flex:2;padding:10px;font-size:12.5px" id="tma-ee-save-btn">💾 Опубликовать</button>
       </div>
     </div>
   </div>
 
   <!-- TMA Sector Dossier Modal / Bottom Sheet -->
-  <div id="tma-sector-detail-modal" class="tma-modal" style="display:none;z-index:60" onclick="closeTmaModals()">
+  <div id="tma-sector-detail-modal" class="tma-modal" style="display:none;z-index:120" onclick="closeTmaSectorDetailModal()">
     <div class="tma-modal-sheet" id="tma-sector-detail-sheet" style="max-height:92vh" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
           <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Досье сектора</div>
           <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-sd-name">Сектор</h3>
         </div>
-        <button type="button" class="tma-modal-close-btn" onclick="closeTmaModals()">✕</button>
+        <button type="button" class="tma-modal-close-btn" onclick="closeTmaSectorDetailModal()">✕</button>
       </div>
       <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px" id="tma-sd-content">
         <!-- Rendered dynamically by openTmaSectorDetail(playerId) -->

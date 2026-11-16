@@ -6609,7 +6609,12 @@ test('TMA R4/R5 events CRUD, smart autopick, sector dossier viewing and compact 
     const cssText = await cssRes.text();
     assert.ok(cssText.includes('.tma-officer-card-compact'));
 
-    // 9. Verify app.js exports new TMA functions
+    assert.ok(indexHtml.includes('id="tma-event-editor-modal" class="tma-modal" style="display:none;z-index:120"'));
+    assert.ok(indexHtml.includes('id="tma-sector-detail-modal" class="tma-modal" style="display:none;z-index:120"'));
+    assert.ok(indexHtml.includes('closeTmaEventEditorModal()'));
+    assert.ok(indexHtml.includes('closeTmaSectorDetailModal()'));
+
+    // 9. Verify app.js and tma.js export new TMA functions
     const appRes = await fetch(`${baseUrl}/app.js`);
     const appText = await appRes.text();
     assert.ok(appText.includes('window.toggleTmaOfficersAccordion = toggleTmaOfficersAccordion;'));
@@ -6618,6 +6623,12 @@ test('TMA R4/R5 events CRUD, smart autopick, sector dossier viewing and compact 
     assert.ok(appText.includes('window.submitTmaEventEditor = submitTmaEventEditor;'));
     assert.ok(appText.includes('window.handleTmaDeleteEvent = handleTmaDeleteEvent;'));
     assert.ok(appText.includes('window.openTmaSectorDetail = openTmaSectorDetail;'));
+
+    const tmaRes = await fetch(`${baseUrl}/tma.js`);
+    const tmaText = await tmaRes.text();
+    assert.ok(tmaText.includes('window.closeTmaEventEditorModal = closeTmaEventEditorModal;'));
+    assert.ok(tmaText.includes('window.closeTmaSectorDetailModal = closeTmaSectorDetailModal;'));
+    assert.ok(tmaText.includes('await openTmaEventDetail(finalEventId);'));
   } finally {
     await server.close();
   }

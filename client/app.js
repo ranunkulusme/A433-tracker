@@ -12571,4 +12571,6 @@ if (typeof window !== 'undefined') {
   window.submitTmaEventEditor = submitTmaEventEditor;
   window.handleTmaDeleteEvent = handleTmaDeleteEvent;
   window.openTmaSectorDetail = openTmaSectorDetail;
+  window.closeTmaEventEditorModal = typeof closeTmaEventEditorModal !== 'undefined' ? closeTmaEventEditorModal : () => {};
+  window.closeTmaSectorDetailModal = typeof closeTmaSectorDetailModal !== 'undefined' ? closeTmaSectorDetailModal : () => {};
 }

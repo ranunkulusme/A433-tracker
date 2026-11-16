@@ -1428,10 +1428,22 @@ function closeTmaModals() {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
+  tmaEditEventId = null;
 }
 
 function closeTmaEventModal() {
   closeTmaModals();
+}
+
+function closeTmaEventEditorModal() {
+  const modal = document.getElementById('tma-event-editor-modal');
+  if (modal) modal.style.display = 'none';
+  tmaEditEventId = null;
+}
+
+function closeTmaSectorDetailModal() {
+  const modal = document.getElementById('tma-sector-detail-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 // ─── TMA EVENTS CRUD & AUTOPICK (R4/R5) ─────────────────────────
@@ -1449,6 +1461,7 @@ function openTmaEventEditor(eventId = null) {
   const noteInput = document.getElementById('tma-ee-note');
   const deleteBtn = document.getElementById('tma-ee-delete-btn');
   if (!modal) return;
+  modal.style.zIndex = '120';
 
   const types = state.eventTypes || [];
   typeSelect.innerHTML = types.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
@@ -1658,14 +1671,23 @@ async function submitTmaEventEditor() {
     assignments
   };
 
+  const isEditingExisting = Boolean(tmaEditEventId);
+  const targetEventId = tmaEditEventId;
+
   try {
-    await apiFetch('/api/events', { method: 'POST', body: payload });
+    const saved = await apiFetch('/api/events', { method: 'POST', body: payload });
     tmaHaptic('success');
-    toast(tmaEditEventId ? '✅ Событие обновлено' : '✅ Событие создано', 'success');
-    closeTmaModals();
+    toast(isEditingExisting ? '✅ Событие обновлено' : '✅ Событие создано', 'success');
+    const finalEventId = targetEventId || saved?.id;
+    closeTmaEventEditorModal();
     await loadDataFromServer().catch(() => {});
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
+
+    const eventModal = document.getElementById('tma-event-modal');
+    if (finalEventId && (isEditingExisting || (eventModal && eventModal.style.display !== 'none'))) {
+      await openTmaEventDetail(finalEventId);
+    }
   } catch (err) {
     tmaHaptic('error');
     toast('Ошибка сохранения: ' + (err.message || 'попробуйте позже'), 'error');
@@ -1681,7 +1703,8 @@ async function handleTmaDeleteEvent(eventId) {
     await apiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
     tmaHaptic('success');
     toast('🗑️ Событие удалено', 'info');
-    closeTmaModals();
+    closeTmaEventEditorModal();
+    closeTmaEventModal();
     await loadDataFromServer().catch(() => {});
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
@@ -1717,6 +1740,7 @@ async function openTmaSectorDetail(playerId) {
   const nameEl = document.getElementById('tma-sd-name');
   const content = document.getElementById('tma-sd-content');
   if (!modal || !content) return;
+  modal.style.zIndex = '120';
 
   const p = (state.players || []).find(pl => Number(pl.id) === Number(playerId));
   if (!p) { toast('Сектор не найден', 'error'); return; }
@@ -3130,6 +3154,8 @@ if (typeof window !== "undefined") {
   window.handleTmaRunAutopick = handleTmaRunAutopick;
   window.deleteTmaCurrentEvent = deleteTmaCurrentEvent;
   window.openTmaSectorDetail = openTmaSectorDetail;
+  window.closeTmaEventEditorModal = closeTmaEventEditorModal;
+  window.closeTmaSectorDetailModal = closeTmaSectorDetailModal;
 }
 
 // Auto-initialize TMA if launched inside Telegram WebApp
