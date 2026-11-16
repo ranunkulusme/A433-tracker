@@ -5,6 +5,26 @@
 
 ---
 
+## [3.48.4] - 2026-11-16
+
+### Исправлено (Fixed)
+- **Устранение критического конфликта идентификаторов (`SyntaxError: Identifier 'currentUser' has already been declared`) и восстановление работы Telegram Mini App (TMA)**:
+  - **Ликвидация синтаксических коллизий между `app.js` и `tma.js`**:
+    - В `client/tma.js` удалены декларации `var apiFetch`, `var toast`, `var currentUser`, `var state`, которые вызывали ошибку на этапе компиляции движком браузера (`SyntaxError: Identifier 'X' has already been declared`) из-за предшествующего объявления `let currentUser` и `let state` в глобальной лексической области видимости `client/app.js`.
+    - Доступ к `currentUser`, `state`, `apiFetch`, `toast` переведён на безопасное обращение через `_tmaGlobal` / `window`, что исключает дублирование объявлений в глобальном лексическом окружении и обеспечивает 100% совместимость при последовательной загрузке в браузере.
+  - **Удаление рекурсивных заглушек-перехватчиков в `client/app.js`**:
+    - В `client/app.js` устранены фиктивные заглушки (`renderTmaCabinet`, `renderTmaApp`, `renderTmaEvents`, `renderTmaMatrix`), вызывавшие переполнение стека вызовов (`RangeError: Maximum call stack size exceeded`) при циклическом вызове `window.renderTmaCabinet = renderTmaCabinet`. Заглушки заменены на безопасную проверку `window.renderTmaCabinet !== renderTmaCabinet`.
+    - Удалены конфликтующие декларации `const openTma...` в `client/app.js`, блокировавшие выполнение `tma.js`. Все функции TMA теперь полноценно экспортируются и контролируются модулем `tma.js`.
+  - **Восстановление интерфейса и навигации TMA**:
+    - Полностью восстановлен запуск `renderTmaApp()` и `renderTmaUnboundScreen()`. При открытии Mini App интерфейс автоматически загружает актуальные данные игрока, рендерит вкладку Кабинет, предстоящие События и Матрицу, а кнопки нижней навигации переключают экраны без ошибок.
+    - При отсутствии авторизации или привязки Telegram корректно отображается экран входа и привязки аккаунта (`#tma-unbound-screen`).
+  - **Безопасная проверка `FormData`**:
+    - В методе `apiFetch` (`client/app.js`) проверка `!(options.body instanceof FormData)` защищена условием `!(typeof FormData !== 'undefined' && options.body instanceof FormData)` во избежание `ReferenceError` в мобильных WebKit webview.
+  - **Автоматические тесты**:
+    - В `client/tma.test.js` добавлен сквозной тест последовательной загрузки `logic.js` + `app.js` + `tma.js`, подтверждающий отсутствие синтаксических ошибок компиляции, корректность экспорта `window.switchTmaTab` и безошибочное переключение всех вкладок интерфейса.
+
+---
+
 ## [3.48.3] - 2026-11-16
 
 ### Исправлено (Fixed)

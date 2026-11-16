@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.48.3';
+const APP_VERSION = 'v3.48.4';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -405,7 +405,7 @@ async function apiFetch(url, options = {}) {
     } catch (e) {}
   }
 
-  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+  if (options.body && typeof options.body === 'object' && !(typeof FormData !== 'undefined' && options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(options.body);
   }
@@ -12436,35 +12436,50 @@ async function initTmaAuth() {
 }
 
 function renderTmaApp(...args) {
-  return typeof window !== 'undefined' && typeof window.renderTmaApp === 'function' ? window.renderTmaApp(...args) : null;
+  if (typeof window !== 'undefined' && typeof window.renderTmaApp === 'function' && window.renderTmaApp !== renderTmaApp) {
+    return window.renderTmaApp(...args);
+  }
+  return null;
 }
 function renderTmaUnboundScreen(...args) {
-  return typeof window !== 'undefined' && typeof window.renderTmaUnboundScreen === 'function' ? window.renderTmaUnboundScreen(...args) : null;
+  if (typeof window !== 'undefined' && typeof window.renderTmaUnboundScreen === 'function' && window.renderTmaUnboundScreen !== renderTmaUnboundScreen) {
+    return window.renderTmaUnboundScreen(...args);
+  }
+  return null;
 }
 
 function renderTmaCabinet(...args) {
-  return typeof window !== 'undefined' && typeof window.renderTmaCabinet === 'function' ? window.renderTmaCabinet(...args) : null;
+  if (typeof window !== 'undefined' && typeof window.renderTmaCabinet === 'function' && window.renderTmaCabinet !== renderTmaCabinet) {
+    return window.renderTmaCabinet(...args);
+  }
+  return null;
 }
 function renderTmaEvents(...args) {
-  return typeof window !== 'undefined' && typeof window.renderTmaEvents === 'function' ? window.renderTmaEvents(...args) : null;
+  if (typeof window !== 'undefined' && typeof window.renderTmaEvents === 'function' && window.renderTmaEvents !== renderTmaEvents) {
+    return window.renderTmaEvents(...args);
+  }
+  return null;
 }
 function renderTmaMatrix(...args) {
-  return typeof window !== 'undefined' && typeof window.renderTmaMatrix === 'function' ? window.renderTmaMatrix(...args) : null;
+  if (typeof window !== 'undefined' && typeof window.renderTmaMatrix === 'function' && window.renderTmaMatrix !== renderTmaMatrix) {
+    return window.renderTmaMatrix(...args);
+  }
+  return null;
 }
 
-const openTmaOfficersPickerModal = (...a) => window.tma?.openTmaOfficersPickerModal?.(...a);
-const selectTmaTargetOfficer = (...a) => window.tma?.selectTmaTargetOfficer?.(...a);
-const openTmaAddOfficerModal = (...a) => window.tma?.openTmaAddOfficerModal?.(...a);
-const openTmaEditOfficerModal = (...a) => window.tma?.openTmaEditOfficerModal?.(...a);
-const submitTmaOfficerEdit = (...a) => window.tma?.submitTmaOfficerEdit?.(...a);
-const deleteTmaCurrentOfficer = (...a) => window.tma?.deleteTmaCurrentOfficer?.(...a);
+function openTmaOfficersPickerModal(...a) { return window.tma?.openTmaOfficersPickerModal?.(...a); }
+function selectTmaTargetOfficer(...a) { return window.tma?.selectTmaTargetOfficer?.(...a); }
+function openTmaAddOfficerModal(...a) { return window.tma?.openTmaAddOfficerModal?.(...a); }
+function openTmaEditOfficerModal(...a) { return window.tma?.openTmaEditOfficerModal?.(...a); }
+function submitTmaOfficerEdit(...a) { return window.tma?.submitTmaOfficerEdit?.(...a); }
+function deleteTmaCurrentOfficer(...a) { return window.tma?.deleteTmaCurrentOfficer?.(...a); }
 
-const toggleTmaOfficersAccordion = (...a) => window.tma?.toggleTmaOfficersAccordion?.(...a);
-const openTmaEventEditor = (...a) => window.tma?.openTmaEventEditor?.(...a);
-const runTmaEventAutopick = (...a) => window.tma?.runTmaEventAutopick?.(...a);
-const submitTmaEventEditor = (...a) => window.tma?.submitTmaEventEditor?.(...a);
-const handleTmaDeleteEvent = (...a) => window.tma?.handleTmaDeleteEvent?.(...a);
-const openTmaSectorDetail = (...a) => window.tma?.openTmaSectorDetail?.(...a);
+function toggleTmaOfficersAccordion(...a) { return window.tma?.toggleTmaOfficersAccordion?.(...a); }
+function openTmaEventEditor(...a) { return window.tma?.openTmaEventEditor?.(...a); }
+function runTmaEventAutopick(...a) { return window.tma?.runTmaEventAutopick?.(...a); }
+function submitTmaEventEditor(...a) { return window.tma?.submitTmaEventEditor?.(...a); }
+function handleTmaDeleteEvent(...a) { return window.tma?.handleTmaDeleteEvent?.(...a); }
+function openTmaSectorDetail(...a) { return window.tma?.openTmaSectorDetail?.(...a); }
 
 // ─── INIT ────────────────────────────────────────────────────
 initApp();
@@ -12636,11 +12651,6 @@ if (typeof window !== 'undefined') {
   window.enableTmaView = enableTmaView;
   window.setupTmaEnvironment = setupTmaEnvironment;
   window.initTmaAuth = initTmaAuth;
-  window.renderTmaApp = renderTmaApp;
-  window.renderTmaUnboundScreen = renderTmaUnboundScreen;
-  window.renderTmaCabinet = renderTmaCabinet;
-  window.renderTmaEvents = renderTmaEvents;
-  window.renderTmaMatrix = renderTmaMatrix;
 
   window.openTmaOfficersPickerModal = openTmaOfficersPickerModal;
   window.selectTmaTargetOfficer = selectTmaTargetOfficer;
@@ -12655,6 +12665,4 @@ if (typeof window !== 'undefined') {
   window.submitTmaEventEditor = submitTmaEventEditor;
   window.handleTmaDeleteEvent = handleTmaDeleteEvent;
   window.openTmaSectorDetail = openTmaSectorDetail;
-  window.closeTmaEventEditorModal = typeof closeTmaEventEditorModal !== 'undefined' ? closeTmaEventEditorModal : () => {};
-  window.closeTmaSectorDetailModal = typeof closeTmaSectorDetailModal !== 'undefined' ? closeTmaSectorDetailModal : () => {};
 }

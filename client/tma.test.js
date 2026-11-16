@@ -193,3 +193,123 @@ test('doTmaApiFetch delegates to window.__appApiFetch when app.js is loaded', as
   assert.equal(res.delegated, true);
   assert.equal(res.url, '/api/delegated-test');
 });
+
+test('sequential execution of logic.js, app.js and tma.js has zero identifier collisions and switches tabs cleanly', () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  const elements = {};
+  function getEl(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        innerHTML: '',
+        style: {},
+        classList: {
+          _classes: new Set(),
+          add: function(c) { this._classes.add(c); },
+          remove: function(c) { this._classes.delete(c); },
+          contains: function(c) { return this._classes.has(c); }
+        },
+        querySelectorAll: () => [],
+        querySelector: () => null,
+        addEventListener: () => {},
+        focus: () => {}
+      };
+    }
+    return elements[id];
+  }
+
+  const mockStorage = {};
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => mockStorage[k] || null,
+      setItem: (k, v) => { mockStorage[k] = String(v); },
+      removeItem: (k) => { delete mockStorage[k]; }
+    },
+    Telegram: {
+      WebApp: {
+        initData: '',
+        platform: 'ios',
+        ready: () => {},
+        expand: () => {}
+      }
+    },
+    fetch: async () => ({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ ok: true, events: [], players: [], catalog: [] })
+    }),
+    addEventListener: () => {}
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => false, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => false, add: () => {}, remove: () => {} } },
+    getElementById: (id) => getEl(id),
+    querySelector: (sel) => getEl(sel.replace(/^[#.]/, '')),
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    addEventListener: () => {}
+  });
+  context.window = context;
+  context.globalThis = context;
+  mockDocument.defaultView = context;
+
+  // 1. Must load sequentially without SyntaxError: Identifier 'X' has already been declared
+  assert.doesNotThrow(() => {
+    vm.runInContext(logicCode, context);
+    vm.runInContext(appCode, context);
+    vm.runInContext(tmaCode, context);
+  }, 'Loading logic.js, app.js, tma.js sequentially threw a SyntaxError or ReferenceError');
+
+  // 2. Verify TMA functions exist and are not recursive stubs
+  assert.equal(typeof context.switchTmaTab, 'function');
+  assert.equal(typeof context.window.switchTmaTab, 'function');
+  assert.equal(typeof context.renderTmaCabinet, 'function');
+  assert.equal(typeof context.window.renderTmaCabinet, 'function');
+  assert.equal(typeof context.renderTmaApp, 'function');
+  assert.equal(typeof context.window.renderTmaApp, 'function');
+
+  // 3. Test calling renderTmaApp
+  assert.doesNotThrow(() => {
+    context.renderTmaApp();
+  });
+
+  // 4. Test switching tabs
+  assert.doesNotThrow(() => {
+    context.switchTmaTab('events');
+    assert.equal(elements['tma-tab-events'].style.display, 'block');
+
+    context.switchTmaTab('matrix');
+    assert.equal(elements['tma-tab-matrix'].style.display, 'block');
+
+    context.switchTmaTab('cabinet');
+    assert.equal(elements['tma-tab-cabinet'].style.display, 'block');
+  });
+
+  // 5. Test unbound screen
+  assert.doesNotThrow(() => {
+    context.renderTmaUnboundScreen();
+    assert.equal(elements['tma-unbound-screen'].style.display, 'block');
+  });
+});
