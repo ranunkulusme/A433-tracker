@@ -11,21 +11,40 @@ let activeTmaTab = 'cabinet';
 let tmaEventsSubTab = 'upcoming';
 
 function isTmaMode() {
+  if (typeof document !== 'undefined') {
+    if (document.documentElement?.classList.contains('tma-mode') || document.body?.classList.contains('tma-mode')) {
+      return true;
+    }
+  }
   if (typeof window === 'undefined') return false;
   try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('tma') === '1' || params.has('tma')) return true;
+    const s = window.location.search || '';
+    const params = new URLSearchParams(s);
+    if (params.get('tma') === '1' || params.has('tma') || s.includes('tma=1') || s.includes('tma=')) return true;
+  } catch (_) {}
+  try {
+    const h = window.location.hash || '';
+    if (h.includes('tma=1') || h.includes('tma') || h.includes('tgWebAppData') || h.includes('tgWebAppPlatform') || h.includes('tgWebAppVersion')) {
+      return true;
+    }
   } catch (_) {}
   const tg = window.Telegram?.WebApp;
-  if (tg && (tg.initData || (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id)))) {
-    return true;
+  if (tg) {
+    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) return true;
+    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) return true;
+    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') return true;
   }
   return false;
 }
 
 function enableTmaView() {
   if (typeof document === 'undefined') return;
-  document.body.classList.add('tma-mode');
+  if (document.documentElement) {
+    document.documentElement.classList.add('tma-mode');
+  }
+  if (document.body) {
+    document.body.classList.add('tma-mode');
+  }
   const tmaEl = document.getElementById('tma-app');
   if (tmaEl) {
     tmaEl.style.display = 'flex';
@@ -62,64 +81,97 @@ function tmaHaptic(type = 'light') {
   } catch (_) {}
 }
 
+async function doTmaApiFetch(url, options = {}) {
+  if (typeof apiFetch === 'function') return apiFetch(url, options);
+  if (typeof window !== 'undefined' && typeof window.apiFetch === 'function') return window.apiFetch(url, options);
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('kow_token') : null;
+  const headers = { ...(options.headers || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  let body = options.body;
+  if (body && typeof body === 'object' && !(body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(body);
+  }
+  const res = await fetch(url, { ...options, headers, body });
+  return res.json();
+}
+
+async function doTmaLoadData() {
+  if (typeof loadDataFromServer === 'function') {
+    return loadDataFromServer().catch(() => {});
+  }
+  if (typeof window !== 'undefined' && typeof window.loadDataFromServer === 'function') {
+    return window.loadDataFromServer().catch(() => {});
+  }
+}
+
+let tmaAuthPromise = null;
 async function initTmaAuth() {
-  const tg = window.Telegram?.WebApp;
-  const initData = tg?.initData;
+  if (tmaAuthPromise) return tmaAuthPromise;
+  tmaAuthPromise = (async () => {
+    const tg = window.Telegram?.WebApp;
+    const initData = tg?.initData;
 
-  // 1. If Telegram initData is present, attempt WebApp auto-auth
-  if (initData) {
-    try {
-      const res = await apiFetch('/api/auth/telegram-webapp', {
-        method: 'POST',
-        body: { initData }
-      });
-      if (res && res.token && res.user) {
-        localStorage.setItem('kow_token', res.token);
-        currentUser = res.user;
-        if (res.player) {
-          currentUser.player = res.player;
-          currentUser.playerName = res.player.name;
+    // 1. If Telegram initData is present, attempt WebApp auto-auth
+    if (initData) {
+      try {
+        const res = await doTmaApiFetch('/api/auth/telegram-webapp', {
+          method: 'POST',
+          body: { initData }
+        });
+        if (res && res.token && res.user) {
+          localStorage.setItem('kow_token', res.token);
+          currentUser = res.user;
+          if (res.player) {
+            currentUser.player = res.player;
+            currentUser.playerName = res.player.name;
+          }
+          try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+          if (typeof state !== 'undefined') {
+            state.currentRole = currentUser.rank;
+            state.currentPlayerId = currentUser.playerId || null;
+          }
+          await doTmaLoadData();
+          renderTmaApp();
+          return true;
         }
-        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
-        state.currentRole = currentUser.rank;
-        state.currentPlayerId = currentUser.playerId || null;
-        await loadDataFromServer().catch(() => {});
-        renderTmaApp();
-        return true;
+      } catch (err) {
+        console.warn('TMA telegram-webapp auth failed:', err);
+        renderTmaUnboundScreen(err);
+        return false;
       }
-    } catch (err) {
-      console.warn('TMA telegram-webapp auth failed:', err);
-      renderTmaUnboundScreen(err);
-      return false;
     }
-  }
 
-  // 2. If no initData (e.g. running in browser with ?tma=1 for debug / preview)
-  const existingToken = localStorage.getItem('kow_token');
-  if (existingToken) {
-    try {
-      const data = await apiFetch('/api/auth/me');
-      if (data && data.user) {
-        currentUser = data.user;
-        if (data.player) {
-          currentUser.player = data.player;
-          currentUser.playerName = data.player.name;
+    // 2. If no initData (e.g. running in browser with ?tma=1 for debug / preview)
+    const existingToken = localStorage.getItem('kow_token');
+    if (existingToken) {
+      try {
+        const data = await doTmaApiFetch('/api/auth/me');
+        if (data && data.user) {
+          currentUser = data.user;
+          if (data.player) {
+            currentUser.player = data.player;
+            currentUser.playerName = data.player.name;
+          }
+          try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
+          if (typeof state !== 'undefined') {
+            state.currentRole = currentUser.rank;
+            state.currentPlayerId = currentUser.playerId || null;
+          }
+          await doTmaLoadData();
+          renderTmaApp();
+          return true;
         }
-        try { localStorage.setItem('kow_user', JSON.stringify(currentUser)); } catch (_) {}
-        state.currentRole = currentUser.rank;
-        state.currentPlayerId = currentUser.playerId || null;
-        await loadDataFromServer().catch(() => {});
-        renderTmaApp();
-        return true;
+      } catch (err) {
+        console.warn('TMA session check failed:', err);
       }
-    } catch (err) {
-      console.warn('TMA session check failed:', err);
     }
-  }
 
-  // 3. Fallback: Show unbound screen inside TMA
-  renderTmaUnboundScreen();
-  return false;
+    // 3. Fallback: Show unbound screen inside TMA
+    renderTmaUnboundScreen();
+    return false;
+  })();
+  return tmaAuthPromise;
 }
 
 function renderTmaUnboundScreen(err = null) {
@@ -3160,10 +3212,21 @@ if (typeof window !== "undefined") {
 
 // Auto-initialize TMA if launched inside Telegram WebApp
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  const launchTmaIfActive = () => {
+  let tmaAutoLaunched = false;
+  const launchTmaIfActive = async () => {
+    if (tmaAutoLaunched) return;
     if (typeof isTmaMode === 'function' && isTmaMode()) {
+      tmaAutoLaunched = true;
       enableTmaView();
       setupTmaEnvironment();
+      try {
+        await initTmaAuth();
+      } catch (err) {
+        console.warn('[TMA] Auto-auth failed on launch:', err);
+        if (typeof renderTmaUnboundScreen === 'function') {
+          renderTmaUnboundScreen(err);
+        }
+      }
     }
   };
   if (document.readyState === 'loading') {

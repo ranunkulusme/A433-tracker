@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.48.0';
+const APP_VERSION = 'v3.48.1';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -6177,6 +6177,10 @@ let currentPage = 'calendar';
 let pageParams = {};
 
 function navigate(page, params={}, updateHash = true) {
+  if (typeof isTmaMode === 'function' && isTmaMode()) {
+    if (typeof renderTmaApp === 'function') renderTmaApp();
+    return;
+  }
   const role = currentUser?.rank || state.currentRole || 'r3';
 
   // Role permissions check
@@ -6272,6 +6276,7 @@ function navigate(page, params={}, updateHash = true) {
 }
 
 function handleHashRoute() {
+  if (typeof isTmaMode === 'function' && isTmaMode()) return;
   if (typeof window === 'undefined' || !window.location.hash) return;
   const parseFn = typeof parseRouteFromHash === 'function'
     ? parseRouteFromHash
@@ -12355,13 +12360,71 @@ function isTmaMode() {
   if (typeof window !== "undefined" && typeof window.isTmaMode === "function" && window.isTmaMode !== isTmaMode) {
     return window.isTmaMode();
   }
+  if (typeof document !== 'undefined') {
+    if (document.documentElement?.classList.contains('tma-mode') || document.body?.classList.contains('tma-mode')) {
+      return true;
+    }
+  }
   if (typeof window === "undefined") return false;
   try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("tma") === "1" || params.has("tma")) return true;
+    const s = window.location.search || '';
+    const params = new URLSearchParams(s);
+    if (params.get("tma") === "1" || params.has("tma") || s.includes('tma=1') || s.includes('tma=')) return true;
+  } catch (_) {}
+  try {
+    const h = window.location.hash || '';
+    if (h.includes('tma=1') || h.includes('tma') || h.includes('tgWebAppData') || h.includes('tgWebAppPlatform') || h.includes('tgWebAppVersion')) {
+      return true;
+    }
   } catch (_) {}
   const tg = window.Telegram?.WebApp;
-  return Boolean(tg && (tg.initData || (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id))));
+  if (tg) {
+    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) return true;
+    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) return true;
+    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') return true;
+  }
+  return false;
+}
+
+function enableTmaView() {
+  if (typeof window !== 'undefined' && typeof window.enableTmaView === 'function' && window.enableTmaView !== enableTmaView) {
+    return window.enableTmaView();
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement?.classList.add('tma-mode');
+    document.body?.classList.add('tma-mode');
+    const tmaEl = document.getElementById('tma-app');
+    if (tmaEl) tmaEl.style.display = 'flex';
+    const appEl = document.getElementById('app');
+    if (appEl) appEl.style.display = 'none';
+  }
+}
+
+function setupTmaEnvironment() {
+  if (typeof window !== 'undefined' && typeof window.setupTmaEnvironment === 'function' && window.setupTmaEnvironment !== setupTmaEnvironment) {
+    return window.setupTmaEnvironment();
+  }
+  const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+  if (tg) {
+    try {
+      tg.ready?.();
+      tg.expand?.();
+    } catch (_) {}
+  }
+}
+
+async function initTmaAuth() {
+  if (typeof window !== 'undefined' && typeof window.initTmaAuth === 'function' && window.initTmaAuth !== initTmaAuth) {
+    return window.initTmaAuth();
+  }
+  return false;
+}
+
+function renderTmaApp(...args) {
+  return typeof window !== 'undefined' && typeof window.renderTmaApp === 'function' ? window.renderTmaApp(...args) : null;
+}
+function renderTmaUnboundScreen(...args) {
+  return typeof window !== 'undefined' && typeof window.renderTmaUnboundScreen === 'function' ? window.renderTmaUnboundScreen(...args) : null;
 }
 
 function renderTmaCabinet(...args) {
@@ -12553,7 +12616,13 @@ if (typeof window !== 'undefined') {
   window.clearMatrixOfficerFilter = clearMatrixOfficerFilter;
   window.onMatrixOfficerKeydown = onMatrixOfficerKeydown;
 
+  window.apiFetch = apiFetch;
   window.isTmaMode = isTmaMode;
+  window.enableTmaView = enableTmaView;
+  window.setupTmaEnvironment = setupTmaEnvironment;
+  window.initTmaAuth = initTmaAuth;
+  window.renderTmaApp = renderTmaApp;
+  window.renderTmaUnboundScreen = renderTmaUnboundScreen;
   window.renderTmaCabinet = renderTmaCabinet;
   window.renderTmaEvents = renderTmaEvents;
   window.renderTmaMatrix = renderTmaMatrix;
