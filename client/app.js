@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.48.2';
+const APP_VERSION = 'v3.48.3';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -453,6 +453,15 @@ async function apiFetch(url, options = {}) {
   }
 
   return data;
+}
+
+if (typeof window !== 'undefined') {
+  window.apiFetch = apiFetch;
+  window.__appApiFetch = apiFetch;
+  window.state = state;
+  window.currentUser = currentUser;
+  window.toast = toast;
+  window.loadDataFromServer = loadDataFromServer;
 }
 
 async function flushOutboxQueue() {
