@@ -182,11 +182,11 @@ function renderTmaUnboundScreen(err = null) {
       <form id="tma-login-form" onsubmit="handleTmaLoginSubmit(event)" style="display:flex;flex-direction:column;gap:10px">
         <div>
           <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЛОГИН</label>
-          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="Ваш логин в KoW" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="Ваш логин в KoW" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
-          <input type="password" id="tma-login-pass" required autocomplete="current-password" placeholder="Пароль" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+          <input type="password" id="tma-login-pass" required autocomplete="current-password" placeholder="Пароль" class="tma-input" style="padding:10px 12px">
         </div>
         <button type="submit" id="tma-login-btn" class="tma-main-btn" style="margin-top:4px">
           🔑 Войти и привязать Telegram
@@ -204,15 +204,15 @@ function renderTmaUnboundScreen(err = null) {
       <form id="tma-register-form" onsubmit="handleTmaRegisterSubmit(event)" style="display:none;flex-direction:column;gap:10px;margin-top:12px">
         <div>
           <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЖЕЛАЕМЫЙ ЛОГИН</label>
-          <input type="text" id="tma-reg-user" required placeholder="Например, Commander7" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+          <input type="text" id="tma-reg-user" required placeholder="Например, Commander7" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
-          <input type="password" id="tma-reg-pass" required placeholder="Придумайте пароль" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+          <input type="password" id="tma-reg-pass" required placeholder="Придумайте пароль" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ИМЯ ПЕРСОНАЖА / СЕКТОРА</label>
-          <input type="text" id="tma-reg-player" required placeholder="Например, Sector 7" style="width:100%;box-sizing:border-box;padding:10px 12px;background:#1f242e;border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:#fff;font-size:13px">
+          <input type="text" id="tma-reg-player" required placeholder="Например, Sector 7" class="tma-input" style="padding:10px 12px">
         </div>
         <button type="submit" id="tma-reg-btn" class="tma-main-btn" style="margin-top:4px">
           📝 Зарегистрироваться
@@ -688,7 +688,7 @@ function renderTmaCabinet() {
           <div>
             <div style="display:flex;align-items:center;gap:8px">
               <h2 style="font-size:14.5px;font-weight:700;color:#fff;margin:0">${escapeHtml(playerName)}</h2>
-              <span class="badge badge-warning" style="font-size:10px;font-weight:700;padding:2px 6px">${escapeHtml(role)}</span>
+              <span class="tma-badge-rank">${escapeHtml(role)}</span>
               <span style="font-size:11px;opacity:0.75" title="Редактировать параметры сектора">✏️</span>
             </div>
             <p style="font-size:12px;color:#9ca3af;margin:2px 0 0 0">
@@ -862,20 +862,20 @@ function renderTmaEvents() {
       if (myReg) {
         const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
         statusBadgeHtml = `
-          <span style="padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">
+          <span class="tma-badge-status is-gold">
             Вы записаны (${placeStr})
           </span>
         `;
       } else {
         statusBadgeHtml = `
-          <span style="padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.25)">
+          <span class="tma-badge-status is-green">
             Запись
           </span>
         `;
       }
 
       const staffPencilHtml = isStaff ? `
-        <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" style="padding:3px 7px;border-radius:6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#d1d5db;font-size:11px;cursor:pointer" title="Редактировать событие">
+        <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать событие">
           ✏️
         </button>
       ` : '';
@@ -917,7 +917,7 @@ function renderTmaEvents() {
       const regCount = (ev.registrations || []).length;
 
       return `
-        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#161a22;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
+        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
           <div style="display:flex;align-items:flex-start;justify-content:space-between">
             <div>
               <div style="display:flex;align-items:center;gap:6px">
@@ -993,7 +993,7 @@ function renderTmaEvents() {
       }
 
       return `
-        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#161a22;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
+        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
           <div style="display:flex;align-items:center;justify-content:space-between">
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:14px">${evIcon}</span>
@@ -1023,7 +1023,7 @@ function renderTmaEvents() {
         <span style="font-size:11px;font-weight:800;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
           Управление событиями (Р4/Р5)
         </span>
-        <button type="button" onclick="openTmaEventEditor(null)" style="padding:5px 12px;border-radius:8px;background:#fbbf24;color:#000;font-weight:800;font-size:11.5px;border:none;cursor:pointer;display:flex;align-items:center;gap:4px;box-shadow:0 2px 10px rgba(245,158,11,0.25)">
+        <button type="button" onclick="openTmaEventEditor(null)" class="tma-btn-primary" style="padding:6px 14px;font-size:11.5px">
           <span style="font-size:13px;font-weight:900;line-height:1">+</span> Создать событие
         </button>
       </div>
@@ -1275,7 +1275,7 @@ async function openTmaEventDetail(eventId) {
             <div style="font-size:12.5px;font-weight:700;color:#fde68a">✅ Вы записаны на событие</div>
             <div style="font-size:11px;color:#9ca3af;margin-top:2px">Желаемое: <strong>${placeText}</strong>${assignText}</div>
           </div>
-          <button type="button" onclick="handleTmaUnregisterEvent(${ev.id})" style="background:#ef4444;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer">
+          <button type="button" onclick="handleTmaUnregisterEvent(${ev.id})" class="tma-btn-danger" style="padding:6px 12px;font-size:11px">
             ✕ Отозвать
           </button>
         </div>
@@ -1289,7 +1289,7 @@ async function openTmaEventDetail(eventId) {
     placesButtons.push(`<button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 0)" class="tma-event-reg-btn">Любое</button>`);
 
     regActionHtml = `
-      <div style="background:#161a22;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-bottom:14px">
+      <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;margin-bottom:14px">
         <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:8px">Подать заявку на участие:</div>
         <div style="display:grid;grid-template-columns:repeat(${Math.min(4, placesButtons.length)}, 1fr);gap:6px">
           ${placesButtons.join('')}
@@ -1301,7 +1301,7 @@ async function openTmaEventDetail(eventId) {
   let rosterHtml = '';
   if (registeredSectors.length === 0) {
     rosterHtml = `
-      <div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;background:#161a22;border-radius:12px;border:1px solid rgba(255,255,255,0.06)">
+      <div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;background:#1f242e;border-radius:12px;border:1px solid rgba(255,255,255,0.08)">
         Пока нет поданных заявок на это событие
       </div>
     `;
@@ -1369,7 +1369,7 @@ async function openTmaEventDetail(eventId) {
   let notRegisteredHtml = '';
   if (unRegisteredSectors.length > 0) {
     notRegisteredHtml = `
-      <details style="margin-top:12px;background:#161a22;border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:10px 12px">
+      <details style="margin-top:12px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:10px 12px">
         <summary style="font-size:11.5px;font-weight:700;color:#9ca3af;cursor:pointer;user-select:none">
           Не подали заявку (${unRegisteredSectors.length} секторов)
         </summary>
@@ -1390,18 +1390,18 @@ async function openTmaEventDetail(eventId) {
         <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Событие альянса</div>
         <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0">${escapeHtml(evTitle)}</h3>
       </div>
-      <button type="button" onclick="closeTmaEventModal()" class="tma-icon-btn" style="font-size:14px;border-radius:999px">✕</button>
+      <button type="button" onclick="closeTmaEventModal()" class="tma-modal-close-btn">✕</button>
     </div>
     <div class="tma-modal-body">
       ${isStaff ? `
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08)">
-          <button type="button" onclick="openTmaEventEditor(${ev.id})" style="flex:1;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);color:#fbbf24;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+          <button type="button" onclick="openTmaEventEditor(${ev.id})" class="tma-btn-ghost" style="flex:1;padding:7px 10px;font-size:11.5px;color:#fbbf24;border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.15)">
             ✏️ Редактировать
           </button>
-          <button type="button" onclick="handleTmaRunAutopick(${ev.id})" style="flex:1;background:rgba(56,189,248,0.15);border:1px solid rgba(56,189,248,0.35);color:#38bdf8;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+          <button type="button" onclick="handleTmaRunAutopick(${ev.id})" class="tma-btn-ghost" style="flex:1;padding:7px 10px;font-size:11.5px;color:#38bdf8;border-color:rgba(56,189,248,0.35);background:rgba(56,189,248,0.15)">
             ⚡ Автоподбор
           </button>
-          <button type="button" onclick="handleTmaDeleteEvent(${ev.id})" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);color:#ef4444;border-radius:8px;padding:7px 10px;font-size:11.5px;font-weight:700;cursor:pointer" title="Удалить событие">
+          <button type="button" onclick="handleTmaDeleteEvent(${ev.id})" class="tma-btn-danger" style="padding:7px 10px;font-size:11.5px" title="Удалить событие">
             🗑️
           </button>
         </div>
@@ -1536,7 +1536,7 @@ function renderTmaEventEditorPlaces() {
           <span style="font-size:12px;font-weight:800;color:#fbbf24">Место #${p.place}</span>
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:11px;color:#9ca3af">Купоны:</span>
-            <input type="number" min="0" value="${p.coupons || 0}" onchange="tmaEventEditorPlaces[${idx}].coupons = Number(this.value)" style="width:75px;background:#161a22;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;color:#fff;font-size:11.5px;font-weight:700;text-align:right">
+            <input type="number" min="0" value="${p.coupons || 0}" onchange="tmaEventEditorPlaces[${idx}].coupons = Number(this.value)" style="width:75px;background:#1f242e;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;color:#fff;font-size:11.5px;font-weight:700;text-align:right">
             ${tmaEventEditorPlaces.length > 1 ? `
               <button type="button" onclick="removeTmaEventPlaceRow(${idx})" style="background:none;border:none;color:#ef4444;font-size:13px;cursor:pointer;padding:2px 4px">✕</button>
             ` : ''}
@@ -1544,7 +1544,7 @@ function renderTmaEventEditorPlaces() {
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <label style="font-size:10.5px;color:#9ca3af;white-space:nowrap">Назначен:</label>
-          <select onchange="tmaEventEditorPlaces[${idx}].playerId = this.value ? Number(this.value) : null" style="flex:1;background:#161a22;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 6px;color:#fff;font-size:11px">
+          <select onchange="tmaEventEditorPlaces[${idx}].playerId = this.value ? Number(this.value) : null" style="flex:1;background:#1f242e;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 6px;color:#fff;font-size:11px">
             <option value="" ${!p.playerId ? 'selected' : ''}>— Не назначен —</option>
             ${(state.players || []).map(pl => {
               const sel = Number(pl.id) === Number(p.playerId) ? 'selected' : '';
@@ -1753,7 +1753,7 @@ async function openTmaSectorDetail(playerId) {
   let officersListHtml = '';
   if (!officers.length) {
     officersListHtml = `
-      <div style="text-align:center;padding:12px;color:#9ca3af;font-size:11.5px;background:#161a22;border-radius:10px">
+      <div style="text-align:center;padding:12px;color:#9ca3af;font-size:11.5px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:10px">
         Офицеры не добавлены
       </div>
     `;
@@ -1791,16 +1791,16 @@ async function openTmaSectorDetail(playerId) {
       } catch (_) {}
 
       return `
-        <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 10px;margin-bottom:6px">
+        <div class="tma-officer-card-compact" style="margin-bottom:6px;padding:8px 10px">
           <div style="display:flex;align-items:center;justify-content:space-between">
             <div style="display:flex;align-items:center;gap:8px">
-              <div style="width:30px;height:30px;border-radius:8px;background:#262626;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-weight:900;color:#fbbf24;font-size:11px">
+              <div style="width:36px;height:36px;border-radius:10px;background:#262626;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-weight:900;color:#fbbf24;font-size:12px">
                 ${offGen || escapeHtml(offName.charAt(0))}
               </div>
               <div>
                 <div style="display:flex;align-items:center;gap:4px">
                   <span style="font-size:12.5px;font-weight:700;color:#fff">${escapeHtml(offName)}</span>
-                  <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(56,189,248,0.2);color:#7dd3fc">${escapeHtml(offType)}</span>
+                  <span class="tma-badge-troop">${escapeHtml(offType)}</span>
                 </div>
                 <div style="font-size:10.5px;color:#9ca3af;margin-top:1px">
                   Ур. ${off.level || 0} • ${'★'.repeat(offStars)}${'☆'.repeat(5 - offStars)}
@@ -1808,7 +1808,7 @@ async function openTmaSectorDetail(playerId) {
               </div>
             </div>
             <div style="text-align:right">
-              <span style="padding:1px 5px;border-radius:4px;background:rgba(16,185,129,0.2);color:#34d399;font-family:var(--mono, monospace);font-weight:800;font-size:10.5px">
+              <span class="tma-badge-skills">
                 [${offSkills.join('-')}]
               </span>
               <div style="font-size:10px;color:#9ca3af;margin-top:2px">
@@ -1870,7 +1870,7 @@ async function openTmaSectorDetail(playerId) {
     <div class="tma-stock-edit-card" style="padding:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;font-weight:800;background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.3);padding:2px 8px;border-radius:6px">
+          <span class="tma-badge-rank">
             ${escapeHtml(rankStr)}
           </span>
           <span style="font-size:12px;color:#9ca3af">
@@ -1878,7 +1878,7 @@ async function openTmaSectorDetail(playerId) {
           </span>
         </div>
         ${(isStaff || isSelf) ? `
-          <button type="button" onclick="closeTmaModals();openTmaSectorEditModal(${p.id})" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;font-size:11px;color:#fff;cursor:pointer">
+          <button type="button" onclick="closeTmaModals();openTmaSectorEditModal(${p.id})" class="tma-quick-btn" style="padding:4px 10px;font-size:11px">
             ✏️ Изменить
           </button>
         ` : ''}
@@ -2198,11 +2198,11 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
   let cardsHtml = '';
   if (!officers || officers.length === 0) {
     cardsHtml = `
-      <div style="background:#161a22;border:1px dashed rgba(255,255,255,0.15);border-radius:14px;padding:20px;text-align:center;color:#9ca3af">
+      <div style="background:#1f242e;border:1px dashed rgba(255,255,255,0.15);border-radius:14px;padding:20px;text-align:center;color:#9ca3af">
         <div style="font-size:28px;margin-bottom:6px">🎖️</div>
         <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">Нет офицеров в секторе</div>
         <div style="font-size:11.5px;margin-bottom:12px">Добавьте офицеров для отслеживания прокачки и расчета дефицита</div>
-        <button type="button" class="btn-primary btn-sm" onclick="openTmaAddOfficerModal()" style="font-size:11.5px;padding:6px 14px">
+        <button type="button" class="tma-btn-primary" onclick="openTmaAddOfficerModal()" style="padding:8px 16px">
           + Добавить первого офицера
         </button>
       </div>
@@ -2257,7 +2257,7 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;${
                 isTarget
-                  ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.4)'
+                  ? 'background:#fbbf24;color:#000;box-shadow:0 2px 8px rgba(245,158,11,0.35);'
                   : 'background:#262626;color:#d1d5db;border:1px solid rgba(255,255,255,0.1)'
               }">
                 ${offGen || escapeHtml(offName.charAt(0))}
@@ -2265,7 +2265,7 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
               <div>
                 <div style="display:flex;align-items:center;gap:6px">
                   <span style="font-size:13.5px;font-weight:800;color:#fff">${escapeHtml(offName)}</span>
-                  <span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:rgba(56,189,248,0.2);color:#7dd3fc;font-weight:700">
+                  <span class="tma-badge-troop">
                     ${escapeHtml(offType)}
                   </span>
                   ${(off.personalPuzzles || off.personal_puzzles) ? `<span style="font-size:9.5px;color:#fde68a;background:rgba(245,158,11,0.1);padding:1px 4px;border-radius:4px">🧩 ${off.personalPuzzles || off.personal_puzzles}</span>` : ''}
@@ -2287,11 +2287,11 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
                 ${isRetro ? '📜 Ретро' : '⚡ Склад'}
               </button>
 
-              <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" style="background:none;border:none;font-size:15px;cursor:pointer;color:${isTarget ? '#fbbf24' : '#9ca3af'};padding:0 2px" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
+              <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
                 ${isTarget ? '⭐' : '☆'}
               </button>
 
-              <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;font-size:11px;cursor:pointer" title="Редактировать параметры офицера">
+              <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать параметры офицера">
                 ✏️
               </button>
             </div>
@@ -2301,7 +2301,7 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
           <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:space-between;font-size:11px">
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:9.5px;color:#9ca3af;font-weight:600">Навыки:</span>
-              <span style="padding:1px 6px;border-radius:4px;background:rgba(16,185,129,0.2);color:#34d399;font-family:var(--mono, monospace);font-weight:800;font-size:11px">
+              <span class="tma-badge-skills">
                 [${offSkills.join('-')}]
               </span>
             </div>
@@ -2324,7 +2324,7 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
           <span style="font-size:11px;color:#fbbf24;background:rgba(245,158,11,0.2);padding:1px 7px;border-radius:6px;font-weight:700">${count}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <button type="button" class="btn-primary btn-sm" onclick="event.stopPropagation();openTmaAddOfficerModal()" style="font-size:11px;padding:3px 9px;font-weight:700">
+          <button type="button" class="tma-btn-add" onclick="event.stopPropagation();openTmaAddOfficerModal()">
             + Добавить
           </button>
           <span id="tma-officers-arrow" style="font-size:12px;color:#fbbf24;font-weight:800;transition:transform 0.2s">
@@ -2377,7 +2377,7 @@ function renderTmaOfficersPickerList() {
         <div style="font-size:28px;margin-bottom:6px">🎖️</div>
         <p style="font-weight:700;color:#fff;margin:0 0 4px 0">Нет офицеров в секторе</p>
         <p style="font-size:11.5px;color:#9ca3af;margin:0 0 12px 0">Нажмите «+ Добавить», чтобы добавить первого офицера</p>
-        <button type="button" class="btn-primary btn-sm" onclick="openTmaAddOfficerModal()" style="padding:6px 14px">
+        <button type="button" class="tma-btn-primary" onclick="openTmaAddOfficerModal()" style="padding:8px 16px">
           + Добавить офицера
         </button>
       </div>
@@ -2392,7 +2392,8 @@ function renderTmaOfficersPickerList() {
     const offType = cat?.type || 'Пехота';
     const offGen = cat?.generation ? `G${cat.generation}` : '';
     const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
-    const starsStr = '★'.repeat(offStars) + '☆'.repeat(5 - offStars);
+    const starsGold = '★'.repeat(offStars);
+    const starsGray = '☆'.repeat(5 - offStars);
     const skills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
     const skillsStr = skills.join('-');
 
@@ -2417,25 +2418,31 @@ function renderTmaOfficersPickerList() {
     const remCoupons = isFull ? 0 : (def?.deficitCoupons ?? def?.remainingCoupons ?? 0);
 
     return `
-      <div class="tma-card tma-card-clickable" onclick="selectTmaTargetOfficer('${off.id}')" style="margin-bottom:0;padding:10px 12px;background:#181c24;border-color:${isTarget ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.08)'};box-shadow:${isTarget ? '0 0 10px rgba(245,158,11,0.15)' : 'none'}">
+      <div class="tma-officer-card-compact tma-card-clickable" onclick="selectTmaTargetOfficer('${off.id}')" style="margin-bottom:8px;padding:10px 12px;background:#1f242e;border:1px solid ${
+        isTarget ? 'rgba(245,158,11,0.5)' : 'rgba(255,255,255,0.08)'
+      };border-radius:14px;${
+        isTarget ? 'box-shadow:0 2px 10px rgba(245,158,11,0.15);' : ''
+      }">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:10px">
-            <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;${
-              isTarget ? 'background:#fbbf24;color:#000' : 'background:#1f242e;color:#fff;border:1px solid rgba(255,255,255,0.1)'
+            <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;${
+              isTarget
+                ? 'background:#fbbf24;color:#000;box-shadow:0 2px 8px rgba(245,158,11,0.35);'
+                : 'background:#262626;color:#d1d5db;border:1px solid rgba(255,255,255,0.1)'
             }">
-              ${escapeHtml(offName.charAt(0))}
+              ${offGen || escapeHtml(offName.charAt(0))}
             </div>
             <div>
               <div style="display:flex;align-items:center;gap:6px">
-                <span style="font-size:13px;font-weight:700;color:#fff">${escapeHtml(offName)}</span>
-                <span style="font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.06);color:#9ca3af;font-weight:600">
-                  ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''}
+                <span style="font-size:13.5px;font-weight:800;color:#fff">${escapeHtml(offName)}</span>
+                <span class="tma-badge-troop">
+                  ${escapeHtml(offType)}
                 </span>
               </div>
               <div style="display:flex;align-items:center;gap:8px;margin-top:2px;font-size:11px">
-                <span style="color:#fbbf24;font-family:var(--mono);font-weight:700">${skillsStr}</span>
-                <span style="color:#c084fc;letter-spacing:-1px">${starsStr}</span>
-                <span style="color:#38bdf8">Ур. ${off.level || 0}</span>
+                <span class="tma-badge-skills">[${skillsStr}]</span>
+                <span style="color:#fbbf24;letter-spacing:1px">${starsGold}${starsGray}</span>
+                <span style="color:#38bdf8;font-weight:700">Ур. ${off.level || 0}</span>
               </div>
             </div>
           </div>
