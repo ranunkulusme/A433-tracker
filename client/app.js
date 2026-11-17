@@ -12446,7 +12446,7 @@ function isTmaMode() {
     return window.isTmaMode();
   }
   if (typeof window === "undefined") return false;
-  if (window.TelegramWebviewProxy || window.TelegramGameProxy) {
+  if (window.TelegramWebviewProxy) {
     try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
     return true;
   }
