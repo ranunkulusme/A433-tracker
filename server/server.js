@@ -742,7 +742,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       // If Telegram initData is provided, auto-bind Telegram account immediately
       const rawInitData = body && (body.initData || body.init_data);
       if (rawInitData && typeof rawInitData === 'string') {
-        const botToken = db.getAppSetting('telegram_bot_token');
+        const rawBotToken = db.getAppSetting('telegram_bot_token');
+        const botToken = rawBotToken ? String(rawBotToken).trim() : null;
         if (botToken) {
           const val = logic.validateTelegramWebAppData(rawInitData, botToken);
           if (val && val.valid && val.user?.id) {
@@ -2490,7 +2491,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!authenticate(req)) {
         return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
       }
-      const botToken = db.getAppSetting('telegram_bot_token');
+      const rawBotToken = db.getAppSetting('telegram_bot_token');
+      const botToken = rawBotToken ? String(rawBotToken).trim() : null;
       if (!botToken) {
         return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен');
       }
@@ -2500,7 +2502,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
       const validation = logic.validateTelegramWebAppData(initData, botToken);
       if (!validation.valid || !validation.user?.id) {
-        return sendError(res, 401, 'INVALID_TELEGRAM_DATA', 'Ошибка валидации Telegram WebApp');
+        return sendError(res, 400, 'INVALID_TELEGRAM_DATA', 'Ошибка валидации Telegram WebApp');
       }
       db.bindUserTelegram(req.user.id, validation.user.id, validation.user.username || '');
       const updatedUser = (typeof db.getUserById === 'function') ? db.getUserById(req.user.id) : req.user;
