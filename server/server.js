@@ -620,6 +620,17 @@ function createRequestHandler(staticDir, s3Manager = null) {
           }
         }
 
+        const rawInitData = body && (body.initData || body.init_data);
+        if (rawInitData && typeof rawInitData === 'string' && regRes.userId) {
+          const botToken = db.getAppSetting('telegram_bot_token');
+          if (botToken) {
+            const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+            if (val && val.valid && val.user?.id) {
+              db.bindUserTelegram(regRes.userId, val.user.id, val.user.username || '');
+            }
+          }
+        }
+
         return sendJson(res, 200, {
           success: true,
           pendingApproval: regRes.pendingApproval,
@@ -659,8 +670,23 @@ function createRequestHandler(staticDir, s3Manager = null) {
           user = (typeof db.getUserById === 'function') ? db.getUserById(matched.id) : matched;
         }
       }
+      if (!user && validation.user?.first_name) {
+        const matchedFirst = db.findUserByTelegramUsername(validation.user.first_name);
+        if (matchedFirst && (!matchedFirst.telegram_chat_id || String(matchedFirst.telegram_chat_id) !== String(tgUserId))) {
+          db.bindUserTelegram(matchedFirst.id, tgUserId, validation.user.username || validation.user.first_name);
+          user = (typeof db.getUserById === 'function') ? db.getUserById(matchedFirst.id) : matchedFirst;
+        }
+      }
+      if (!user && validation.user?.first_name && validation.user?.last_name) {
+        const fullName = `${validation.user.first_name} ${validation.user.last_name}`.trim();
+        const matchedFull = db.findUserByTelegramUsername(fullName);
+        if (matchedFull && (!matchedFull.telegram_chat_id || String(matchedFull.telegram_chat_id) !== String(tgUserId))) {
+          db.bindUserTelegram(matchedFull.id, tgUserId, validation.user.username || fullName);
+          user = (typeof db.getUserById === 'function') ? db.getUserById(matchedFull.id) : matchedFull;
+        }
+      }
       if (!user) {
-        console.warn(`[Telegram WebApp] User not bound: tgUserId=${tgUserId}, tgUsername=${validation.user?.username}`);
+        console.warn(`[Telegram WebApp] User not bound: tgUserId=${tgUserId}, tgUsername=${validation.user?.username}, firstName=${validation.user?.first_name}`);
         return sendError(res, 404, 'USER_NOT_BOUND', 'Пользователь с данным Telegram ID не найден в KoW Tracker. Привяжите Telegram в личном кабинете.');
       }
 
@@ -713,10 +739,24 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (loginRes.error) {
         return sendError(res, 401, loginRes.error, 'Неверный логин или пароль');
       }
+      // If Telegram initData is provided, auto-bind Telegram account immediately
+      const rawInitData = body && (body.initData || body.init_data);
+      if (rawInitData && typeof rawInitData === 'string') {
+        const botToken = db.getAppSetting('telegram_bot_token');
+        if (botToken) {
+          const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+          if (val && val.valid && val.user?.id) {
+            db.bindUserTelegram(loginRes.user.id, val.user.id, val.user.username || '');
+          }
+        }
+      }
+
+      const updatedUser = (typeof db.getUserById === 'function') ? db.getUserById(loginRes.user.id) : loginRes.user;
+
       return sendJson(res, 200, {
         token: loginRes.token,
         user: {
-          ...loginRes.user,
+          ...(updatedUser || loginRes.user),
           hasDefaultAdminPassword: loginRes.user.username === 'admin' ? db.isDefaultAdminPassword() : false
         }
       });

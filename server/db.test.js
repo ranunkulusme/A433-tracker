@@ -96,6 +96,42 @@ test('handles duplicate usernames and linking to existing playerId', () => {
   assert.equal(foundUser.playerName, 'Морской Волк');
 });
 
+test('loginUser supports multi-identifier login: username, telegram_username, and sector name', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const reg = dbModule.registerUser({
+    username: 'commander_x',
+    password: 'secret_pass_123',
+    playerName: 'Сектор Альфа'
+  });
+  dbModule.approveUser(reg.userId, 'r3');
+  dbModule.bindUserTelegram(reg.userId, 11223344, 'alpha_telegram');
+
+  // 1. Login by exact username
+  const loginByUsername = dbModule.loginUser('commander_x', 'secret_pass_123');
+  assert.equal(loginByUsername.error, undefined);
+  assert.equal(loginByUsername.user.id, reg.userId);
+
+  // 2. Login by telegram username (with and without @)
+  const loginByTg = dbModule.loginUser('@alpha_telegram', 'secret_pass_123');
+  assert.equal(loginByTg.error, undefined);
+  assert.equal(loginByTg.user.id, reg.userId);
+
+  const loginByTgNoAt = dbModule.loginUser('alpha_telegram', 'secret_pass_123');
+  assert.equal(loginByTgNoAt.error, undefined);
+  assert.equal(loginByTgNoAt.user.id, reg.userId);
+
+  // 3. Login by sector name
+  const loginBySector = dbModule.loginUser('Сектор Альфа', 'secret_pass_123');
+  assert.equal(loginBySector.error, undefined);
+  assert.equal(loginBySector.user.id, reg.userId);
+
+  // 4. Invalid password returns error
+  const loginBadPass = dbModule.loginUser('Сектор Альфа', 'wrong_pass');
+  assert.equal(loginBadPass.error, 'INVALID_CREDENTIALS');
+});
+
 test('hashPassword and verifyPassword work correctly with salt', () => {
   const dbModule = require('./db.js');
   const hash = dbModule.hashPassword('secret123');

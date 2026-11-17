@@ -198,8 +198,53 @@ function registerUser({ username, password, playerId, playerName }) {
   };
 }
 
+function findUserForLogin(identifier) {
+  if (!identifier) return null;
+  const raw = String(identifier).trim();
+  const clean = raw.replace(/^@+/, '');
+  if (!clean) return null;
+
+  // 1. Direct match on users.username (case-insensitive)
+  let row = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1').get(raw);
+  if (!row && clean !== raw) {
+    row = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1').get(clean);
+  }
+
+  // 2. Match on users.telegram_username (case-insensitive)
+  if (!row) {
+    row = getDb().prepare(`
+      SELECT * FROM users
+      WHERE telegram_username IS NOT NULL
+        AND LOWER(REPLACE(telegram_username, '@', '')) = LOWER(?)
+      LIMIT 1
+    `).get(clean);
+  }
+
+  // 3. Match on linked player's sector name (players.name, case-insensitive)
+  if (!row) {
+    row = getDb().prepare(`
+      SELECT u.* FROM users u
+      JOIN players p ON (p.user_id = u.id OR p.id = u.player_id)
+      WHERE LOWER(p.name) = LOWER(?)
+      ORDER BY u.id ASC
+      LIMIT 1
+    `).get(raw);
+  }
+
+  if (!row) return null;
+  return {
+    ...row,
+    permissions: parsePermissions(row.permissions),
+    telegramChatId: row.telegram_chat_id,
+    telegramUsername: row.telegram_username,
+    telegramNotificationsEnabled: row.telegram_notifications_enabled !== 0,
+    timezone: row.timezone || 'Europe/Moscow',
+    timezoneOffset: (row.timezone_offset !== null && row.timezone_offset !== undefined) ? Number(row.timezone_offset) : 3
+  };
+}
+
 function loginUser(username, password) {
-  const user = findUserByUsername(username);
+  const user = findUserForLogin(username);
   if (!user) {
     return { error: 'INVALID_CREDENTIALS' };
   }
@@ -2714,14 +2759,23 @@ function findUserByTelegramChatId(chatId) {
 
 function findUserByTelegramUsername(tgUsername) {
   if (!tgUsername) return null;
-  const clean = String(tgUsername).replace(/^@+/, '').trim();
+  const raw = String(tgUsername).trim();
+  const clean = raw.replace(/^@+/, '');
   if (!clean) return null;
   const row = getDb().prepare(`
-    SELECT * FROM users
-    WHERE (LOWER(telegram_username) = LOWER(?) OR LOWER(username) = LOWER(?))
-    ORDER BY CASE WHEN LOWER(telegram_username) = LOWER(?) THEN 0 ELSE 1 END, id ASC
+    SELECT u.* FROM users u
+    LEFT JOIN players p ON (p.user_id = u.id OR p.id = u.player_id)
+    WHERE LOWER(u.telegram_username) = LOWER(?)
+       OR (u.telegram_username IS NOT NULL AND LOWER(REPLACE(u.telegram_username, '@', '')) = LOWER(?))
+       OR LOWER(u.username) = LOWER(?)
+       OR LOWER(p.name) = LOWER(?)
+    ORDER BY CASE 
+      WHEN (u.telegram_username IS NOT NULL AND LOWER(REPLACE(u.telegram_username, '@', '')) = LOWER(?)) THEN 0 
+      WHEN LOWER(u.username) = LOWER(?) THEN 1 
+      ELSE 2 
+    END, u.id ASC
     LIMIT 1
-  `).get(clean, clean, clean);
+  `).get(raw, clean, clean, raw, clean, clean);
   if (!row) return null;
   return {
     ...row,
@@ -2839,6 +2893,7 @@ module.exports = {
   deleteSession,
   clearUserSessions,
   findUserByUsername,
+  findUserForLogin,
   findUserById,
   registerUser,
   loginUser,

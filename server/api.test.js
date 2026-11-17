@@ -112,6 +112,9 @@ test('API enforces registration flow, pending approval, and login RBAC', async (
       body: JSON.stringify({ username: 'admin', password: 'wrongpassword' })
     });
     assert.equal(badLoginRes.status, 401);
+    const badLoginData = await badLoginRes.json();
+    assert.equal(badLoginData.error, 'INVALID_CREDENTIALS');
+    assert.equal(badLoginData.message, 'Неверный логин или пароль');
 
     // 2. Login under bootstrapped admin (R5) -> 200
     const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
@@ -151,6 +154,7 @@ test('API enforces registration flow, pending approval, and login RBAC', async (
       body: JSON.stringify({ username: 'linked_user', password: 'password123', playerId: 2 })
     });
     assert.equal(linkedReg.status, 200);
+    const linkedRegJson = await linkedReg.json();
 
     // Registration with already linked playerId -> 400 PLAYER_ALREADY_LINKED
     const dupPlayerReg = await fetch(`${baseUrl}/api/auth/register`, {
@@ -208,6 +212,26 @@ test('API enforces registration flow, pending approval, and login RBAC', async (
       headers: { Authorization: `Bearer ${soldierToken}` }
     });
     assert.equal(soldierPendingRes.status, 403);
+
+    // 9. Login by sector name ("Морской Волк") instead of username
+    const approveLinked = await fetch(`${baseUrl}/api/users/${linkedRegJson.userId}/approve`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ rank: 'r3' })
+    });
+    assert.equal(approveLinked.status, 200);
+
+    const sectorLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'Морской Волк', password: 'password123' })
+    });
+    assert.equal(sectorLoginRes.status, 200);
+    const sectorLoginData = await sectorLoginRes.json();
+    assert.equal(sectorLoginData.user.id, linkedRegJson.userId);
   } finally {
     await server.close();
   }
