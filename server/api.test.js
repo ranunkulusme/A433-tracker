@@ -5349,6 +5349,54 @@ test('API POST /api/events/:id/share-grid enforces RBAC and sends poster to staf
     assert.equal(sentPhotos.length, 1);
     assert.equal(String(sentPhotos[0].chatId), '-100987654321');
     assert.ok(sentPhotos[0].caption.includes('Битва за трон'));
+
+    // 4. Target = channel without configured announcementChatId -> 400
+    const failChanRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        target: 'channel'
+      })
+    });
+    assert.equal(failChanRes.status, 400);
+
+    // Configure announcementChatId
+    await fetch(`${baseUrl}/api/telegram/settings`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ announcementChatId: '-100555444333' })
+    });
+
+    // 5. Target = channel -> sends to announcementChatId
+    sentPhotos.length = 0;
+    const okChanRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        target: 'channel'
+      })
+    });
+    assert.equal(okChanRes.status, 200);
+    assert.equal(sentPhotos.length, 1);
+    assert.equal(String(sentPhotos[0].chatId), '-100555444333');
+
+    // 6. Target = both -> sends to both staff and announcement channel
+    sentPhotos.length = 0;
+    const okBothRes = await fetch(`${baseUrl}/api/events/${event.id}/share-grid`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminLogin.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        target: 'both'
+      })
+    });
+    assert.equal(okBothRes.status, 200);
+    assert.equal(sentPhotos.length, 2);
+    const targetChatIds = sentPhotos.map(p => String(p.chatId));
+    assert.ok(targetChatIds.includes('-100987654321'));
+    assert.ok(targetChatIds.includes('-100555444333'));
   } finally {
     telegram.setTelegramFetch(null);
     await server.close();

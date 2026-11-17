@@ -150,3 +150,57 @@ test('NotificationEngine: templates CRUD, reset and test render', async () => {
   const resetRes = engine.resetTemplate('staff_new_user_pending');
   assert.ok(!resetRes.template.includes('Тест:'));
 });
+
+test('NotificationEngine: dispatchNotification routes to announcement channel and handles missing channel', async () => {
+  const sentMessages = [];
+  const fakeTelegram = {
+    sendTelegramMessage: async (payload) => {
+      sentMessages.push(payload);
+      return { ok: true };
+    }
+  };
+
+  db.setAppSetting('telegram_bot_token', 'fake_token_123');
+  db.setAppSetting('telegram_announcement_chat_id', '');
+
+  const engine = createNotificationEngine({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    getAppBaseUrl: () => 'http://localhost:3000'
+  });
+
+  // Save template configured for announcement channel
+  engine.saveTemplate('event_registration_opened', {
+    channel: 'announcement'
+  });
+
+  // 1. Without announcement chat ID -> fails with no_announcement_chat_id
+  const failRes = await engine.dispatchNotification('event_registration_opened', {
+    eventName: 'Битва за Ресурсы',
+    eventDate: '2026-11-20',
+    totalPlaces: '15',
+    link: 'http://localhost:3000/#events'
+  });
+  assert.equal(failRes.sent, false);
+  assert.equal(failRes.reason, 'no_announcement_chat_id');
+  assert.equal(sentMessages.length, 0);
+
+  // 2. Set announcement chat ID -> successfully sent to announcement channel
+  db.setAppSetting('telegram_announcement_chat_id', '-100777888999');
+
+  const successRes = await engine.dispatchNotification('event_registration_opened', {
+    eventName: 'Битва за Ресурсы',
+    eventDate: '2026-11-20',
+    totalPlaces: '15',
+    link: 'http://localhost:3000/#events'
+  });
+
+  assert.equal(successRes.sent, true);
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].chatId, -100777888999);
+  assert.ok(sentMessages[0].text.includes('Битва за Ресурсы'));
+
+  // Reset template back to default
+  engine.resetTemplate('event_registration_opened');
+});

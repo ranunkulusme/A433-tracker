@@ -2193,7 +2193,7 @@ function migrateSchema(db) {
     CREATE TABLE IF NOT EXISTS notification_templates (
       key TEXT PRIMARY KEY,
       title TEXT NOT NULL,
-      channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff')),
+      channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff', 'announcement', 'channel')),
       parse_mode TEXT NOT NULL DEFAULT 'HTML',
       template TEXT NOT NULL,
       default_template TEXT NOT NULL,
@@ -2210,6 +2210,26 @@ function migrateSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_event_reminders_lookup ON event_reminders_log(event_id, place, user_id, reminder_date);
   `);
+
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_templates'").get();
+    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('announcement')) {
+      db.exec(`
+        CREATE TABLE notification_templates_new (
+          key TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff', 'announcement', 'channel')),
+          parse_mode TEXT NOT NULL DEFAULT 'HTML',
+          template TEXT NOT NULL,
+          default_template TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO notification_templates_new SELECT * FROM notification_templates;
+        DROP TABLE notification_templates;
+        ALTER TABLE notification_templates_new RENAME TO notification_templates;
+      `);
+    }
+  } catch (e) {}
 
   try {
     if (DEFAULT_NOTIFICATION_TEMPLATES) {
@@ -2429,7 +2449,7 @@ function initDb(filePath) {
     CREATE TABLE IF NOT EXISTS notification_templates (
       key TEXT PRIMARY KEY,
       title TEXT NOT NULL,
-      channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff')),
+      channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff', 'announcement', 'channel')),
       parse_mode TEXT NOT NULL DEFAULT 'HTML',
       template TEXT NOT NULL,
       default_template TEXT NOT NULL,
@@ -2446,6 +2466,26 @@ function initDb(filePath) {
     );
     CREATE INDEX IF NOT EXISTS idx_event_reminders_lookup ON event_reminders_log(event_id, place, user_id, reminder_date);
   `);
+
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_templates'").get();
+    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('announcement')) {
+      db.exec(`
+        CREATE TABLE notification_templates_new (
+          key TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          channel TEXT NOT NULL CHECK(channel IN ('personal', 'staff', 'announcement', 'channel')),
+          parse_mode TEXT NOT NULL DEFAULT 'HTML',
+          template TEXT NOT NULL,
+          default_template TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO notification_templates_new SELECT * FROM notification_templates;
+        DROP TABLE notification_templates;
+        ALTER TABLE notification_templates_new RENAME TO notification_templates;
+      `);
+    }
+  } catch (e) {}
 
   migrateSchema(db);
 
@@ -2625,15 +2665,16 @@ function updateNotificationTemplate(key, updates = {}) {
   if (!existing) return null;
 
   const title = updates.title !== undefined ? updates.title : existing.title;
+  const channel = updates.channel !== undefined ? updates.channel : existing.channel;
   const parseMode = updates.parse_mode !== undefined ? updates.parse_mode : (updates.parseMode !== undefined ? updates.parseMode : existing.parse_mode);
   const template = updates.template !== undefined ? updates.template : existing.template;
   const now = new Date().toISOString();
 
   getDb().prepare(`
     UPDATE notification_templates
-    SET title = ?, parse_mode = ?, template = ?, updated_at = ?
+    SET title = ?, channel = ?, parse_mode = ?, template = ?, updated_at = ?
     WHERE key = ?
-  `).run(title, parseMode, template, now, key);
+  `).run(title, channel, parseMode, template, now, key);
 
   return getNotificationTemplate(key);
 }

@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.48.7';
+const APP_VERSION = 'v3.49.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -5115,6 +5115,7 @@ async function renderNotificationsPage() {
     const botTokenVal = (settingsRes && settingsRes.tokenMasked) ? settingsRes.tokenMasked : '';
     const botUserVal = (settingsRes && settingsRes.botUsername) ? settingsRes.botUsername : '';
     const staffChatVal = (settingsRes && settingsRes.staffChatId) ? settingsRes.staffChatId : '';
+    const announcementChatVal = (settingsRes && settingsRes.announcementChatId) ? settingsRes.announcementChatId : '';
     const webAppUrlVal = (settingsRes && settingsRes.webAppUrl) ? settingsRes.webAppUrl : (window.location.origin || '');
 
     const userTz = typeof logic !== 'undefined' && logic.getUserTimezoneInfo
@@ -5145,7 +5146,7 @@ async function renderNotificationsPage() {
             </div>
           </div>
           <div class="settings-card-body">
-            <div class="form-row form-row-3">
+            <div class="form-row form-row-2">
               <div class="form-group">
                 <label for="tg-setting-token">${typeof t === 'function' ? t('telegram.bot_token') : 'Токен бота (BotFather)'}</label>
                 <input type="password" id="tg-setting-token" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" value="${escapeHtml(botTokenVal)}" autocomplete="off">
@@ -5154,9 +5155,17 @@ async function renderNotificationsPage() {
                 <label for="tg-setting-username">${typeof t === 'function' ? t('telegram.bot_username') : 'Имя бота (@username)'}</label>
                 <input type="text" id="tg-setting-username" placeholder="KoWTrackerBot" value="${escapeHtml(botUserVal)}" autocomplete="off">
               </div>
+            </div>
+            <div class="form-row form-row-2" style="margin-top:10px">
               <div class="form-group">
                 <label for="tg-setting-chat-id">${typeof t === 'function' ? t('telegram.staff_chat_id') : 'ID чата штаба'}</label>
                 <input type="text" id="tg-setting-chat-id" placeholder="-1001234567890" value="${escapeHtml(staffChatVal)}" autocomplete="off">
+                <span class="form-hint" style="font-size:11px;color:var(--text3);margin-top:2px">Закрытый чат руководства (Р4/Р5) для модерации и сводок</span>
+              </div>
+              <div class="form-group">
+                <label for="tg-setting-announcement-chat-id">${typeof t === 'function' ? t('telegram.announcement_chat_id') : 'ID канала анонсов / общего чата'}</label>
+                <input type="text" id="tg-setting-announcement-chat-id" placeholder="-1009876543210" value="${escapeHtml(announcementChatVal)}" autocomplete="off">
+                <span class="form-hint" style="font-size:11px;color:var(--text3);margin-top:2px">Общий чат альянса или канал для сеток событий и объявлений</span>
               </div>
             </div>
             <div class="form-row" style="margin-top:10px">
@@ -5172,6 +5181,9 @@ async function renderNotificationsPage() {
               </button>
               <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-staff-pin" onclick="generateStaffPinCode()">
                 ${typeof t === 'function' ? t('telegram.btn_generate_staff_pin') : '🔑 Сгенерировать код привязки штаба'}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-channel-pin" onclick="generateChannelPinCode()">
+                ${typeof t === 'function' ? t('telegram.btn_generate_channel_pin') : '📢 Сгенерировать код привязки канала'}
               </button>
             </div>
           </div>
@@ -5730,7 +5742,82 @@ async function copyStaffPinCommand() {
   const pinEl = document.getElementById('staff-pin-code-text');
   const pin = pinEl ? pinEl.textContent.trim() : '';
   const cmd = `/connect_staff ${pin}`;
-  const btn = document.getElementById('btn-copy-staff-cmd');
+  const btn = document.getElementById('btn-copy-staff-pin') || document.getElementById('btn-copy-staff-cmd');
+  const originalText = btn ? btn.textContent : '';
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(cmd);
+    }
+    showToast(typeof t === 'function' ? t('telegram.pin_copied') : 'Команда скопирована в буфер обмена', 'success');
+    if (btn) {
+      btn.textContent = '✅ Скопировано!';
+      setTimeout(() => {
+        if (btn) btn.textContent = originalText;
+      }, 1800);
+    }
+  } catch (err) {
+    showToast(`Команда: ${cmd}`, 'info');
+  }
+}
+
+let channelPinPollTimer = null;
+
+async function generateChannelPinCode() {
+  try {
+    const res = await apiFetch('/api/telegram/channel-bind-token', { method: 'POST' });
+    if (res && res.pin) {
+      const pinEl = document.getElementById('channel-pin-code-text');
+      if (pinEl) pinEl.textContent = res.pin;
+      const modal = document.getElementById('modal-channel-pin');
+      const overlay = document.getElementById('overlay');
+      if (modal) modal.classList.add('open');
+      if (overlay) overlay.classList.add('open');
+
+      if (channelPinPollTimer) clearInterval(channelPinPollTimer);
+      let pollCount = 0;
+      channelPinPollTimer = setInterval(async () => {
+        pollCount++;
+        if (pollCount > 40 || !modal.classList.contains('open')) {
+          clearInterval(channelPinPollTimer);
+          channelPinPollTimer = null;
+          return;
+        }
+        try {
+          const settings = await apiFetch('/api/telegram/settings');
+          if (settings && settings.announcementChatId) {
+            clearInterval(channelPinPollTimer);
+            channelPinPollTimer = null;
+            const input = document.getElementById('tg-setting-announcement-chat-id');
+            if (input) input.value = settings.announcementChatId;
+            showToast(typeof t === 'function' ? t('telegram.channel_bound_success') : 'Канал анонсов успешно привязан!', 'success');
+            closeChannelPinModal();
+            renderNotifications();
+          }
+        } catch (_) {}
+      }, 3000);
+    }
+  } catch (err) {
+    showToast(err.message || 'Ошибка генерации PIN-кода канала', 'error');
+  }
+}
+
+function closeChannelPinModal() {
+  if (channelPinPollTimer) {
+    clearInterval(channelPinPollTimer);
+    channelPinPollTimer = null;
+  }
+  const modal = document.getElementById('modal-channel-pin');
+  const overlay = document.getElementById('overlay');
+  if (modal) modal.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function copyChannelPinCommand() {
+  const pinEl = document.getElementById('channel-pin-code-text');
+  const pin = pinEl ? pinEl.textContent.trim() : '';
+  const cmd = `/connect_channel ${pin}`;
+  const btn = document.getElementById('btn-copy-channel-pin');
   const originalText = btn ? btn.textContent : '';
 
   try {
@@ -5753,6 +5840,7 @@ async function saveTelegramSettings() {
   const tokenInput = document.getElementById('tg-setting-token');
   const userInput = document.getElementById('tg-setting-username');
   const chatInput = document.getElementById('tg-setting-chat-id');
+  const announcementInput = document.getElementById('tg-setting-announcement-chat-id');
   const webAppInput = document.getElementById('tg-setting-webapp-url');
 
   const payload = {};
@@ -5764,6 +5852,9 @@ async function saveTelegramSettings() {
   }
   if (chatInput) {
     payload.staffChatId = chatInput.value.trim();
+  }
+  if (announcementInput) {
+    payload.announcementChatId = announcementInput.value.trim();
   }
   if (webAppInput) {
     payload.webAppUrl = webAppInput.value.trim();
@@ -6878,7 +6969,7 @@ function renderEventDetail(eventId) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="downloadEventGridPoster(${ev.id})" title="${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}">${typeof t === 'function' ? t('events.btn_download_poster') : '🖼 Скачать сетку (PNG)'}</button>
         ${(canManage() || hasPermission('manage_events')) ? `
-          <button class="btn btn-secondary btn-sm" onclick="shareEventGridToTelegram(${ev.id})" title="${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}">${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="openShareGridModal(${ev.id})" title="${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}">${typeof t === 'function' ? t('events.btn_share_poster') : '📤 Отправить сетку в Telegram'}</button>
         ` : ''}
         ${(canManage() || hasPermission('manage_events')) && isEventPast(ev) ? `
           <button class="btn btn-secondary btn-sm" onclick="requestEventResultsTg(${ev.id})" title="Разослать участникам запрос фактического места в Telegram">🏁 ${typeof t === 'function' ? t('events.btn_request_results_tg') : 'Запросить итоги в TG'}</button>
@@ -7176,7 +7267,43 @@ function downloadEventGridPoster(eventId) {
   showToast(typeof t === 'function' ? t('events.poster_downloaded') : 'Инфографика сетки сохранена', 'success');
 }
 
-async function shareEventGridToTelegram(eventId) {
+function openShareGridModal(eventId) {
+  const ev = getEvent(eventId);
+  if (!ev) return;
+  const inputEl = document.getElementById('share-grid-event-id');
+  if (inputEl) inputEl.value = String(eventId);
+  const modal = document.getElementById('modal-share-grid');
+  const overlay = document.getElementById('overlay');
+  if (modal) modal.classList.add('open');
+  if (overlay) overlay.classList.add('open');
+}
+
+function closeShareGridModal() {
+  const modal = document.getElementById('modal-share-grid');
+  const overlay = document.getElementById('overlay');
+  if (modal) modal.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function submitShareGridToTelegram() {
+  const inputEl = document.getElementById('share-grid-event-id');
+  const eventId = inputEl ? Number(inputEl.value) : null;
+  if (!eventId) return;
+
+  const destRadios = document.querySelectorAll('input[name="share-grid-dest"]');
+  let selectedTarget = 'staff';
+  for (const r of destRadios) {
+    if (r.checked) {
+      selectedTarget = r.value;
+      break;
+    }
+  }
+
+  closeShareGridModal();
+  await shareEventGridToTelegram(eventId, selectedTarget);
+}
+
+async function shareEventGridToTelegram(eventId, target = 'staff') {
   const ev = getEvent(eventId);
   if (!ev) return;
   const et = getEventType(ev.typeId);
@@ -7189,10 +7316,13 @@ async function shareEventGridToTelegram(eventId) {
   try {
     const res = await apiFetch(`/api/events/${eventId}/share-grid`, {
       method: 'POST',
-      body: JSON.stringify({ imageBase64 })
+      body: JSON.stringify({ imageBase64, target })
     });
     if (res && res.success) {
-      showToast(typeof t === 'function' ? t('events.poster_sent_success') : 'Инфографика сетки успешно отправлена в чат штаба', 'success');
+      let targetLabel = 'в чат штаба';
+      if (target === 'channel') targetLabel = 'в канал анонсов';
+      else if (target === 'both') targetLabel = 'в оба чата';
+      showToast(`Инфографика сетки успешно отправлена ${targetLabel}`, 'success');
     }
   } catch (err) {
     showToast(err.message || 'Ошибка отправки постера в Telegram', 'error');
@@ -12760,7 +12890,17 @@ if (typeof window !== 'undefined') {
   window.sendEventSummaryStaff = sendEventSummaryStaff;
   window.renderEventGridPosterCanvas = renderEventGridPosterCanvas;
   window.downloadEventGridPoster = downloadEventGridPoster;
+  window.openShareGridModal = openShareGridModal;
+  window.closeShareGridModal = closeShareGridModal;
+  window.submitShareGridToTelegram = submitShareGridToTelegram;
   window.shareEventGridToTelegram = shareEventGridToTelegram;
+  window.generateStaffPinCode = generateStaffPinCode;
+  window.closeStaffPinModal = closeStaffPinModal;
+  window.copyStaffPinCommand = copyStaffPinCommand;
+  window.generateChannelPinCode = generateChannelPinCode;
+  window.closeChannelPinModal = closeChannelPinModal;
+  window.copyChannelPinCommand = copyChannelPinCommand;
+  window.saveTelegramSettings = saveTelegramSettings;
   window.dismissAppUpdate = dismissAppUpdate;
   window.applyAppUpdate = applyAppUpdate;
 
