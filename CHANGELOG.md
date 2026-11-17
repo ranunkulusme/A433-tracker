@@ -5,6 +5,23 @@
 
 ---
 
+## [3.49.1] - 2026-11-17
+
+### Исправлено (Fixed)
+- **Устранение ложного срабатывания ошибки «Сессия истекла» при входе и авторизации в Telegram Mini App (TMA)**:
+  - **Защита эндпоинтов Telegram-привязки в перехватчике `apiFetch` (`client/app.js`)**:
+    - В перехватчик `401 Unauthorized` добавлено исключение маршрутов привязки (`/api/telegram/bind`, `/api/telegram/channel-bind`).
+    - Ошибки валидации подписи Telegram WebApp (`INVALID_TELEGRAM_DATA`, `MISSING_TELEGRAM_USER`) теперь явно изолированы от ошибок авторизации сессии пользователя (`!isTelegramDataError`): они никогда не сбрасывают токен `kow_token` из `localStorage` и не показывают экран «Сессия истекла».
+  - **Безопасная обработка фоновой привязки Telegram (`client/tma.js`)**:
+    - В функциях `initTmaAuth`, `handleTmaLoginSubmit` и `handleTmaRegisterSubmit` вызов `/api/telegram/bind-webapp` выполняется только при отсутствии привязки (`!currentUser.telegramChatId`). Возможные ошибки привязки логируются и больше не прерывают успешную авторизацию.
+  - **Корректные HTTP-статусы на сервере (`server/server.js`)**:
+    - На эндпоинте `POST /api/telegram/bind-webapp` при сбое проверки HMAC-подписи `initData` сервер теперь возвращает статус `400 Bad Request` (`INVALID_TELEGRAM_DATA`) вместо ошибочного `401 Unauthorized`, так как сессия самого пользователя валидна.
+    - Токен Telegram-бота из базы санитизируется через `.trim()` во всех точках валидации WebApp.
+  - **Автоматические тесты (`client/tma.test.js`)**:
+    - Добавлен сквозной TDD-тест, проверяющий, что ошибки `/api/telegram/bind-webapp` не приводят к удалению токена сессии и не вызывают ложный экран «Сессия истекла».
+
+---
+
 ## [3.49.0] - 2026-11-17
 
 ### Добавлено (Added)
