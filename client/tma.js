@@ -83,17 +83,6 @@ if (typeof window !== 'undefined' && typeof window.toast === 'undefined') {
 }
 
 function isTmaMode() {
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      if (sessionStorage.getItem('kow_tma') === '1') return true;
-    } catch (_) {}
-  }
-  if (typeof document !== 'undefined') {
-    if (document.documentElement?.classList.contains('tma-mode') || document.body?.classList.contains('tma-mode')) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-  }
   if (typeof window === 'undefined') return false;
   if (window.TelegramWebviewProxy || window.TelegramGameProxy) {
     try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
@@ -104,16 +93,22 @@ function isTmaMode() {
     return true;
   }
   try {
-    const s = window.location.search || '';
-    const params = new URLSearchParams(s);
-    if (params.get('tma') === '1' || params.has('tma') || s.includes('tma=1') || s.includes('tma=')) {
+    const s = (window.location && window.location.search) ? window.location.search : '';
+    if (s && (s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma')) {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
+    if (typeof URLSearchParams !== 'undefined' && s) {
+      const params = new URLSearchParams(s);
+      if (params.get('tma') === '1' || params.has('tma')) {
+        try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+        return true;
+      }
+    }
   } catch (_) {}
   try {
-    const h = window.location.hash || '';
-    if (h.includes('tma=1') || h.includes('tma') || h.includes('tgWebAppData') || h.includes('tgWebAppPlatform') || h.includes('tgWebAppVersion')) {
+    const h = (window.location && window.location.hash) ? window.location.hash : '';
+    if (h && (h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 || h.indexOf('tgWebAppVersion') !== -1 || h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1)) {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
@@ -128,12 +123,31 @@ function isTmaMode() {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
-    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
+  }
+  disableTmaView();
+  return false;
+}
+
+function disableTmaView() {
+  if (typeof sessionStorage !== 'undefined') {
+    try { sessionStorage.removeItem('kow_tma'); } catch (_) {}
+  }
+  if (typeof document !== 'undefined') {
+    if (typeof document.documentElement?.classList?.remove === 'function') {
+      document.documentElement.classList.remove('tma-mode');
+    }
+    if (typeof document.body?.classList?.remove === 'function') {
+      document.body.classList.remove('tma-mode');
+    }
+    const appEl = document.getElementById('app');
+    if (appEl && appEl.style && appEl.style.display === 'none') {
+      appEl.style.display = '';
+    }
+    const tmaEl = document.getElementById('tma-app');
+    if (tmaEl && tmaEl.style) {
+      tmaEl.style.display = 'none';
     }
   }
-  return false;
 }
 
 function enableTmaView() {
@@ -356,7 +370,7 @@ function renderTmaUnboundScreen(err = null) {
       </div>
 
       <p style="font-size:12.5px;color:#d1d5db;margin-bottom:14px;line-height:1.45">
-        Ваш аккаунт Telegram еще не привязан к профилю в <strong>KoW Tracker</strong>. Войдите в существующий аккаунт для быстрой привязки или зарегистрируйтесь.
+        Ваш аккаунт Telegram еще не привязан к профилю в <strong>KoW Tracker</strong>. Войдите, указав логин аккаунта (или название вашего сектора) и пароль для привязки.
       </p>
 
       <div id="tma-auth-alert" style="${err && (err.message || typeof err === 'string') ? 'display:block;' : 'display:none;'}padding:10px 12px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;font-size:12px;border-radius:10px;margin-bottom:12px">${err ? escapeHtml(typeof err === 'string' ? err : err.message || '') : ''}</div>
@@ -364,8 +378,8 @@ function renderTmaUnboundScreen(err = null) {
       <!-- Quick Login Form -->
       <form id="tma-login-form" onsubmit="handleTmaLoginSubmit(event)" style="display:flex;flex-direction:column;gap:10px">
         <div>
-          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЛОГИН</label>
-          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="Ваш логин в KoW" class="tma-input" style="padding:10px 12px">
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЛОГИН ИЛИ ИМЯ СЕКТОРА</label>
+          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="Логин аккаунта или название сектора" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
           <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
@@ -406,7 +420,7 @@ function renderTmaUnboundScreen(err = null) {
     <!-- Bot instruction hint -->
     <div class="tma-card" style="font-size:12px;color:#9ca3af;line-height:1.45">
       💡 <strong>Совет:</strong> Вы также можете привязать аккаунт прямо в чате с ботом, отправив команду:<br>
-      <code style="display:inline-block;margin-top:6px;padding:4px 8px;background:#1f242e;border-radius:6px;color:#fbbf24;font-family:monospace;font-size:12px">/bind ваш_логин</code>
+      <code style="display:inline-block;margin-top:6px;padding:4px 8px;background:#1f242e;border-radius:6px;color:#fbbf24;font-family:monospace;font-size:12px">/bind ваш_логин ваш_пароль</code>
     </div>
   `;
 }
@@ -3314,6 +3328,7 @@ async function refreshTmaCurrentTab() {
 if (typeof window !== "undefined") {
   window.isTmaMode = isTmaMode;
   window.enableTmaView = enableTmaView;
+  window.disableTmaView = disableTmaView;
   window.setupTmaEnvironment = setupTmaEnvironment;
   window.initTmaAuth = initTmaAuth;
   window.renderTmaApp = renderTmaApp;
@@ -3385,6 +3400,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
         if (typeof renderTmaUnboundScreen === 'function') {
           renderTmaUnboundScreen(err);
         }
+      }
+    } else {
+      if (typeof disableTmaView === 'function') {
+        disableTmaView();
       }
     }
   };
