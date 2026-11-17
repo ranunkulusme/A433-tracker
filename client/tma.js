@@ -285,7 +285,7 @@ async function initTmaAuth() {
           }
 
           // If we have initData, bind this telegram account right now so next time it logs in via Step 1!
-          if (initData) {
+          if (initData && !currentUser?.telegramChatId && !currentUser?.telegram_chat_id) {
             try {
               await doTmaApiFetch('/api/telegram/bind-webapp', {
                 method: 'POST',
@@ -477,8 +477,8 @@ async function handleTmaLoginSubmit(event) {
         window.state.currentPlayerId = currentUser.playerId || null;
       }
 
-      // Auto-bind Telegram if WebApp initData is present!
-      if (initData) {
+      // Auto-bind Telegram if WebApp initData is present and user is not yet bound!
+      if (initData && !currentUser?.telegramChatId && !currentUser?.telegram_chat_id) {
         try {
           await doTmaApiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
@@ -569,8 +569,8 @@ async function handleTmaRegisterSubmit(event) {
         window.state.currentPlayerId = currentUser.playerId || null;
       }
 
-      // Auto bind telegram if WebApp initData is present
-      if (initData) {
+      // Auto bind telegram if WebApp initData is present and user is not yet bound
+      if (initData && !currentUser?.telegramChatId && !currentUser?.telegram_chat_id) {
         try {
           await doTmaApiFetch('/api/telegram/bind-webapp', {
             method: 'POST',

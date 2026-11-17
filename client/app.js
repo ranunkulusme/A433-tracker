@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.49.0';
+const APP_VERSION = 'v3.49.1';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -425,8 +425,20 @@ async function apiFetch(url, options = {}) {
   }
 
   if (res.status === 401) {
-    const isAuthRoute = url.includes('/api/auth/');
-    if (!isAuthRoute) {
+    let data = null;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try { data = await res.json(); } catch (_) {}
+    } else {
+      try { data = await res.text(); } catch (_) {}
+    }
+
+    const isAuthRoute = url.includes('/api/auth/') ||
+                        url.includes('/api/telegram/bind') ||
+                        url.includes('/api/telegram/channel-bind');
+    const isTelegramDataError = Boolean(data && (data.error === 'INVALID_TELEGRAM_DATA' || data.error === 'MISSING_TELEGRAM_USER'));
+
+    if (!isAuthRoute && !isTelegramDataError) {
       const hadSession = Boolean(currentUser || (typeof localStorage !== 'undefined' && localStorage.getItem('kow_token')));
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('kow_token');
@@ -446,13 +458,6 @@ async function apiFetch(url, options = {}) {
       }
     }
 
-    let data = null;
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      try { data = await res.json(); } catch (_) {}
-    } else {
-      try { data = await res.text(); } catch (_) {}
-    }
     const message = (data && (data.message || data.error)) || res.statusText || 'UNAUTHORIZED';
     const err = new Error(message);
     err.status = 401;

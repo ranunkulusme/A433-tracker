@@ -749,3 +749,148 @@ test('app.js isTmaMode returns false in regular browser and correctly cleans up 
   assert.equal(appElement.style.display, '');
   assert.equal(tmaElement.style.display, 'none');
 });
+
+test('apiFetch and initTmaAuth do not kill session or show "Сессия истекла" when /api/telegram/bind-webapp returns 401', async () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  let unboundMessage = null;
+  const storage = {
+    kow_token: 'valid_jwt_token_123',
+    kow_user: JSON.stringify({ id: 5, username: 'hero' })
+  };
+
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '', pathname: '/' },
+    localStorage: {
+      getItem: (k) => storage[k] || null,
+      setItem: (k, v) => { storage[k] = String(v); },
+      removeItem: (k) => { delete storage[k]; }
+    },
+    Telegram: {
+      WebApp: { initData: 'query_id=1&auth_date=100&hash=mock', platform: 'ios', ready: () => {}, expand: () => {} }
+    },
+    fetch: async (url, options = {}) => {
+      if (url === '/api/auth/me') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ user: { id: 5, username: 'hero', rank: 'r3' } })
+        };
+      }
+      if (url === '/api/auth/login') {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ token: 'valid_jwt_token_123', user: { id: 5, username: 'hero', rank: 'r3' } })
+        };
+      }
+      if (url === '/api/telegram/bind-webapp') {
+        return {
+          ok: false,
+          status: 401,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ error: 'INVALID_TELEGRAM_DATA', message: 'Ошибка валидации Telegram WebApp' })
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({})
+      };
+    },
+    addEventListener: () => {}
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    getElementById: () => ({ style: {}, classList: { add: () => {}, remove: () => {}, contains: () => false }, querySelectorAll: () => [], querySelector: () => null, focus: () => {} }),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    addEventListener: () => {}
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+  mockDocument.defaultView = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(appCode, context);
+  vm.runInContext(tmaCode, context);
+
+  context.renderTmaUnboundScreen = (err) => {
+    unboundMessage = err ? (err.message || String(err)) : null;
+  };
+
+  // 1. Direct call to apiFetch('/api/telegram/bind-webapp') must not clear token or trigger "Сессия истекла"
+  await assert.rejects(
+    async () => {
+      await context.apiFetch('/api/telegram/bind-webapp', {
+        method: 'POST',
+        body: JSON.stringify({ initData: 'mock' })
+      });
+    },
+    (err) => {
+      assert.equal(err.status, 401);
+      return true;
+    }
+  );
+
+  assert.equal(storage.kow_token, 'valid_jwt_token_123', 'kow_token must NOT be wiped when bind-webapp fails');
+  assert.equal(unboundMessage, null, 'renderTmaUnboundScreen must NOT be called with "Сессия истекла"');
+
+  // 2. initTmaAuth self-heal with valid token must succeed even if bind-webapp fails
+  unboundMessage = null;
+  const authSuccess = await context.initTmaAuth();
+  assert.equal(authSuccess, true, 'initTmaAuth should succeed via valid token');
+  assert.equal(storage.kow_token, 'valid_jwt_token_123', 'token should remain valid in storage');
+  assert.equal(unboundMessage, null, 'unbound screen should not show session expired');
+
+  // 3. handleTmaLoginSubmit must preserve token even if background bind-webapp fails
+  unboundMessage = null;
+  const loginStorage = {};
+  context.localStorage = {
+    getItem: (k) => loginStorage[k] || null,
+    setItem: (k, v) => { loginStorage[k] = String(v); },
+    removeItem: (k) => { delete loginStorage[k]; }
+  };
+  const mockUserInput = { value: 'hero' };
+  const mockPassInput = { value: 'pass123' };
+  const mockBtn = { disabled: false, textContent: '' };
+  const mockAlert = { style: {}, textContent: '' };
+
+  context.document.getElementById = (id) => {
+    if (id === 'tma-login-user') return mockUserInput;
+    if (id === 'tma-login-pass') return mockPassInput;
+    if (id === 'tma-login-btn') return mockBtn;
+    if (id === 'tma-auth-alert') return mockAlert;
+    return { style: {}, classList: { add: () => {}, remove: () => {}, contains: () => false }, querySelectorAll: () => [], querySelector: () => null, focus: () => {} };
+  };
+
+  await context.handleTmaLoginSubmit({ preventDefault: () => {} });
+  assert.equal(loginStorage.kow_token, 'valid_jwt_token_123', 'token must be retained in localStorage after login');
+  assert.equal(unboundMessage, null, 'renderTmaUnboundScreen should not be triggered with session expired');
+});
+
