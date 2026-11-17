@@ -40,8 +40,8 @@ test('tma.js executes without ReferenceError in bare browser environment without
 
   const mockDocument = {
     readyState: 'complete',
-    documentElement: { classList: { add: () => {}, contains: () => true } },
-    body: { classList: { add: () => {}, contains: () => true }, appendChild: () => {} },
+    documentElement: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    body: { classList: { add: () => {}, remove: () => {}, contains: () => true }, appendChild: () => {} },
     getElementById: () => null,
     addEventListener: () => {}
   };
@@ -108,8 +108,8 @@ test('doTmaApiFetch executes standalone fetch and handles JSON and errors', asyn
 
   const mockDocument = {
     readyState: 'complete',
-    documentElement: { classList: { add: () => {}, contains: () => true } },
-    body: { classList: { add: () => {}, contains: () => true } },
+    documentElement: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    body: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
     getElementById: () => null,
     addEventListener: () => {}
   };
@@ -169,8 +169,8 @@ test('doTmaApiFetch delegates to window.__appApiFetch when app.js is loaded', as
 
   const mockDocument = {
     readyState: 'complete',
-    documentElement: { classList: { add: () => {}, contains: () => true } },
-    body: { classList: { add: () => {}, contains: () => true } },
+    documentElement: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    body: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
     getElementById: () => null,
     addEventListener: () => {}
   };
@@ -271,6 +271,8 @@ test('sequential execution of logic.js, app.js and tma.js has zero identifier co
     clearInterval: () => {},
     addEventListener: () => {}
   });
+  Object.assign(context, mockWindow);
+  Object.assign(context, mockWindow);
   context.window = context;
   context.globalThis = context;
   mockDocument.defaultView = context;
@@ -431,6 +433,8 @@ test('initTmaAuth self-heals using kow_token and binds telegram when telegram-we
     clearInterval: () => {},
     addEventListener: () => {}
   });
+  Object.assign(context, mockWindow);
+  Object.assign(context, mockWindow);
   context.window = context;
   context.globalThis = context;
   mockDocument.defaultView = context;
@@ -490,7 +494,7 @@ test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия ис�
     readyState: 'complete',
     documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
     body: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
-    getElementById: () => ({ style: {}, classList: { add: () => {}, remove: () => {}, contains: () => false }, querySelectorAll: () => [], querySelector: () => null }),
+    getElementById: () => ({ style: {}, classList: { add: () => {}, remove: () => {}, contains: () => false }, querySelectorAll: () => [], querySelector: () => null, focus: () => {} }),
     querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: () => {}
@@ -512,6 +516,8 @@ test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия ис�
     clearInterval: () => {},
     addEventListener: () => {}
   });
+  Object.assign(context, mockWindow);
+  Object.assign(context, mockWindow);
   context.window = context;
   context.globalThis = context;
   mockDocument.defaultView = context;
@@ -540,4 +546,196 @@ test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия ис�
   );
 
   assert.equal(unboundMessage, null, 'renderTmaUnboundScreen must not be triggered with session expired on auth routes');
+});
+
+test('isTmaMode returns false in regular browser with Telegram SDK platform=weba and cleans up tma-mode', () => {
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  const sessionStorageMock = {
+    kow_tma: '1',
+    getItem: (k) => sessionStorageMock[k] || null,
+    setItem: (k, v) => { sessionStorageMock[k] = String(v); },
+    removeItem: (k) => { delete sessionStorageMock[k]; }
+  };
+
+  const docClasses = new Set(['tma-mode']);
+  const bodyClasses = new Set(['tma-mode']);
+  const appElement = { id: 'app', style: { display: 'none' } };
+  const tmaElement = { id: 'tma-app', style: { display: 'flex' } };
+
+  const mockWindow = {
+    location: { search: '', hash: '' },
+    navigator: { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    sessionStorage: sessionStorageMock,
+    Telegram: {
+      WebApp: {
+        platform: 'weba',
+        initData: '',
+        initDataUnsafe: {}
+      }
+    }
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: {
+      classList: {
+        contains: (c) => docClasses.has(c),
+        add: (c) => docClasses.add(c),
+        remove: (c) => docClasses.delete(c)
+      }
+    },
+    body: {
+      classList: {
+        contains: (c) => bodyClasses.has(c),
+        add: (c) => bodyClasses.add(c),
+        remove: (c) => bodyClasses.delete(c)
+      }
+    },
+    getElementById: (id) => {
+      if (id === 'app') return appElement;
+      if (id === 'tma-app') return tmaElement;
+      return null;
+    },
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    addEventListener: () => {}
+  };
+
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    sessionStorage: mockWindow.sessionStorage,
+    Telegram: mockWindow.Telegram,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {}
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+
+  vm.runInContext(tmaCode, context);
+
+  // In standard browser with empty initData and platform 'weba', isTmaMode must be false
+  assert.equal(context.isTmaMode(), false);
+  // Stale kow_tma must be removed from sessionStorage
+  assert.equal(sessionStorageMock.kow_tma, undefined);
+  // tma-mode class must be removed from documentElement and body
+  assert.equal(docClasses.has('tma-mode'), false);
+  assert.equal(bodyClasses.has('tma-mode'), false);
+  // Web app must be restored to visible, and tma app hidden
+  assert.equal(appElement.style.display, '');
+  assert.equal(tmaElement.style.display, 'none');
+
+  // Verify that legitimate TMA markers return true
+  // 1. With initData:
+  mockWindow.Telegram.WebApp.initData = 'query_id=123&user=%7B%22id%22%3A1%7D&hash=abc';
+  assert.equal(context.isTmaMode(), true);
+  assert.equal(sessionStorageMock.kow_tma, '1');
+
+  // 2. With tgWebAppData in hash:
+  mockWindow.Telegram.WebApp.initData = '';
+  sessionStorageMock.kow_tma = undefined;
+  mockWindow.location.hash = '#tgWebAppData=test';
+  assert.equal(context.isTmaMode(), true);
+
+  // 3. With proxy:
+  mockWindow.location.hash = '';
+  context.TelegramWebviewProxy = {};
+  assert.equal(context.isTmaMode(), true);
+  delete context.TelegramWebviewProxy;
+
+  // 4. With ?tma=1 search param:
+  mockWindow.location.search = '?tma=1';
+  assert.equal(context.isTmaMode(), true);
+});
+
+test('app.js isTmaMode returns false in regular browser and correctly cleans up classes', () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+
+  const sessionStorageMock = {
+    kow_tma: '1',
+    getItem: (k) => sessionStorageMock[k] || null,
+    setItem: (k, v) => { sessionStorageMock[k] = String(v); },
+    removeItem: (k) => { delete sessionStorageMock[k]; }
+  };
+
+  const docClasses = new Set(['tma-mode']);
+  const bodyClasses = new Set(['tma-mode']);
+  const appElement = { id: 'app', style: { display: 'none' } };
+  const tmaElement = { id: 'tma-app', style: { display: 'flex' } };
+
+  const mockWindow = {
+    location: { search: '', hash: '', pathname: '/' },
+    navigator: { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' },
+    sessionStorage: sessionStorageMock,
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    Telegram: {
+      WebApp: {
+        platform: 'weba',
+        initData: '',
+        initDataUnsafe: {}
+      }
+    },
+    addEventListener: () => {},
+    fetch: async () => ({ ok: true, json: async () => ({}) })
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: {
+      classList: {
+        contains: (c) => docClasses.has(c),
+        add: (c) => docClasses.add(c),
+        remove: (c) => docClasses.delete(c)
+      }
+    },
+    body: {
+      classList: {
+        contains: (c) => bodyClasses.has(c),
+        add: (c) => bodyClasses.add(c),
+        remove: (c) => bodyClasses.delete(c)
+      }
+    },
+    getElementById: (id) => {
+      if (id === 'app') return appElement;
+      if (id === 'tma-app') return tmaElement;
+      return null;
+    },
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    addEventListener: () => {}
+  };
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    sessionStorage: mockWindow.sessionStorage,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {}
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(appCode, context);
+
+  // In standard browser, app.js isTmaMode must return false
+  assert.equal(context.isTmaMode(), false);
+  assert.equal(sessionStorageMock.kow_tma, undefined);
+  assert.equal(docClasses.has('tma-mode'), false);
+  assert.equal(bodyClasses.has('tma-mode'), false);
+  assert.equal(appElement.style.display, '');
+  assert.equal(tmaElement.style.display, 'none');
 });

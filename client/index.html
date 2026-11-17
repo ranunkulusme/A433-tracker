@@ -23,25 +23,24 @@
     var s = window.location.search || '';
     var h = window.location.hash || '';
     var ua = navigator.userAgent || '';
-    var isTma = s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma' ||
-                h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1 ||
-                h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 ||
-                h.indexOf('tgWebAppVersion') !== -1 ||
-                /Telegram/i.test(ua) ||
-                Boolean(window.TelegramWebviewProxy) ||
-                (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('kow_tma') === '1');
-    if (!isTma && window.Telegram && window.Telegram.WebApp) {
-      var tg = window.Telegram.WebApp;
-      if ((tg.initData && tg.initData.length > 0) ||
-          (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) ||
-          (tg.platform && tg.platform !== 'unknown')) {
-        isTma = true;
-      }
-    }
+    var tg = window.Telegram && window.Telegram.WebApp;
+    var hasInitData = Boolean(tg && tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0);
+    var hasInitDataUnsafe = Boolean(tg && tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param));
+    var hasProxy = Boolean(window.TelegramWebviewProxy || window.TelegramGameProxy);
+    var hasTgHash = h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 || h.indexOf('tgWebAppVersion') !== -1 || h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1;
+    var hasTmaParam = s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma';
+    var hasTgUa = /Telegram/i.test(ua);
+
+    var isTma = hasInitData || hasInitDataUnsafe || hasProxy || hasTgHash || hasTmaParam || hasTgUa;
+
     if (isTma) {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       document.documentElement.classList.add('tma-mode');
       if (document.body) document.body.classList.add('tma-mode');
+    } else {
+      try { sessionStorage.removeItem('kow_tma'); } catch (_) {}
+      document.documentElement.classList.remove('tma-mode');
+      if (document.body) document.body.classList.remove('tma-mode');
     }
   } catch (_) {}
 })();

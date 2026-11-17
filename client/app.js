@@ -1155,13 +1155,19 @@ function switchAuthTab(tab) {
     if (regForm) regForm.style.display = 'flex';
     loginBtn?.classList.remove('active');
     regBtn?.classList.add('active');
-    setTimeout(() => document.getElementById('auth-reg-username')?.focus(), 50);
+    setTimeout(() => {
+      const el = document.getElementById('auth-reg-username');
+      if (typeof el?.focus === 'function') el.focus();
+    }, 50);
   } else {
     if (loginForm) loginForm.style.display = 'flex';
     if (regForm) regForm.style.display = 'none';
     loginBtn?.classList.add('active');
     regBtn?.classList.remove('active');
-    setTimeout(() => document.getElementById('auth-login-username')?.focus(), 50);
+    setTimeout(() => {
+      const el = document.getElementById('auth-login-username');
+      if (typeof el?.focus === 'function') el.focus();
+    }, 50);
   }
 }
 
@@ -12175,6 +12181,10 @@ async function initApp() {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
     enableTmaView();
     setupTmaEnvironment();
+  } else {
+    if (typeof disableTmaView === 'function') {
+      disableTmaView();
+    }
   }
   load();
   if (typeof initI18n === 'function') {
@@ -12435,16 +12445,6 @@ function isTmaMode() {
   if (typeof window !== "undefined" && typeof window.isTmaMode === "function" && window.isTmaMode !== isTmaMode) {
     return window.isTmaMode();
   }
-  if (typeof document !== 'undefined') {
-    if (document.documentElement?.classList.contains('tma-mode') || document.body?.classList.contains('tma-mode')) {
-      return true;
-    }
-  }
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      if (sessionStorage.getItem('kow_tma') === '1') return true;
-    } catch (_) {}
-  }
   if (typeof window === "undefined") return false;
   if (window.TelegramWebviewProxy || window.TelegramGameProxy) {
     try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
@@ -12455,16 +12455,22 @@ function isTmaMode() {
     return true;
   }
   try {
-    const s = window.location.search || '';
-    const params = new URLSearchParams(s);
-    if (params.get("tma") === "1" || params.has("tma") || s.includes('tma=1') || s.includes('tma=')) {
+    const s = (window.location && window.location.search) ? window.location.search : '';
+    if (s && (s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma')) {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
+    if (typeof URLSearchParams !== 'undefined' && s) {
+      const params = new URLSearchParams(s);
+      if (params.get("tma") === "1" || params.has("tma")) {
+        try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
+        return true;
+      }
+    }
   } catch (_) {}
   try {
-    const h = window.location.hash || '';
-    if (h.includes('tma=1') || h.includes('tma') || h.includes('tgWebAppData') || h.includes('tgWebAppPlatform') || h.includes('tgWebAppVersion')) {
+    const h = (window.location && window.location.hash) ? window.location.hash : '';
+    if (h && (h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 || h.indexOf('tgWebAppVersion') !== -1 || h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1)) {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
@@ -12479,12 +12485,34 @@ function isTmaMode() {
       try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
       return true;
     }
-    if (tg.platform && typeof tg.platform === 'string' && tg.platform !== 'unknown') {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
+  }
+  disableTmaView();
+  return false;
+}
+
+function disableTmaView() {
+  if (typeof window !== 'undefined' && typeof window.disableTmaView === 'function' && window.disableTmaView !== disableTmaView) {
+    return window.disableTmaView();
+  }
+  if (typeof sessionStorage !== 'undefined') {
+    try { sessionStorage.removeItem('kow_tma'); } catch (_) {}
+  }
+  if (typeof document !== 'undefined') {
+    if (typeof document.documentElement?.classList?.remove === 'function') {
+      document.documentElement.classList.remove('tma-mode');
+    }
+    if (typeof document.body?.classList?.remove === 'function') {
+      document.body.classList.remove('tma-mode');
+    }
+    const appEl = document.getElementById('app');
+    if (appEl && appEl.style && appEl.style.display === 'none') {
+      appEl.style.display = '';
+    }
+    const tmaEl = document.getElementById('tma-app');
+    if (tmaEl && tmaEl.style) {
+      tmaEl.style.display = 'none';
     }
   }
-  return false;
 }
 
 function enableTmaView() {
@@ -12746,6 +12774,7 @@ if (typeof window !== 'undefined') {
   window.apiFetch = apiFetch;
   window.isTmaMode = isTmaMode;
   window.enableTmaView = enableTmaView;
+  window.disableTmaView = disableTmaView;
   window.setupTmaEnvironment = setupTmaEnvironment;
   window.initTmaAuth = initTmaAuth;
 
