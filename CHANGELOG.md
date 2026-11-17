@@ -5,6 +5,17 @@
 
 ---
 
+## [3.48.7] - 2026-11-17
+
+### Исправлено (Fixed)
+- **Устранение ложного срабатывания TMA из-за объекта `TelegramGameProxy` в веб-браузерах**:
+  - Диагностика показала, что официальная клиентская библиотека Telegram (`https://telegram.org/js/telegram-web-app.js`) безусловно объявляет в глобальном объекте `window` свойство `window.TelegramGameProxy = { receiveEvent: receiveEvent }` для обратной совместимости со старыми играми Telegram.
+  - Из-за этого проверка `Boolean(window.TelegramWebviewProxy || window.TelegramGameProxy)` в `<head>` (`client/index.html`), `client/app.js` и `client/tma.js` всегда давала `true` в любых стандартных веб-браузерах (Chrome на Android/ПК, Safari, Firefox), приводя к ошибочному включению класса `.tma-mode` и скрытию веб-приложения (`#app`).
+  - Проверка `window.TelegramGameProxy` полностью удалена: среда Telegram Mini App теперь распознается только по реальному нативному прокси приложения Telegram (`window.TelegramWebviewProxy`), подписанным параметрам `initData`, хэшу `#tgWebAppData` или явному параметру `?tma=1`.
+  - В `client/tma.test.js` добавлен автоматический регрессионный тест, подтверждающий, что наличие `window.TelegramGameProxy` не переводит приложение в режим TMA.
+
+---
+
 ## [3.48.6] - 2026-11-16
 
 ### Исправлено (Fixed)

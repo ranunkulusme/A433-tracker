@@ -652,6 +652,16 @@ test('isTmaMode returns false in regular browser with Telegram SDK platform=weba
   // 4. With ?tma=1 search param:
   mockWindow.location.search = '?tma=1';
   assert.equal(context.isTmaMode(), true);
+
+  // 5. TelegramGameProxy (defined by telegram-web-app.js for backward compatibility) must NOT trigger TMA mode
+  mockWindow.location.search = '';
+  mockWindow.location.hash = '';
+  mockWindow.Telegram.WebApp.initData = '';
+  mockWindow.TelegramGameProxy = { receiveEvent: () => {} };
+  context.TelegramGameProxy = mockWindow.TelegramGameProxy;
+  assert.equal(context.isTmaMode(), false);
+  delete mockWindow.TelegramGameProxy;
+  delete context.TelegramGameProxy;
 });
 
 test('app.js isTmaMode returns false in regular browser and correctly cleans up classes', () => {
