@@ -1091,7 +1091,7 @@
     const requiredStars = 5;
     const isStarReady = currentStars >= requiredStars;
 
-    return {
+    const result = {
       targetLevel: target,
       targetPuzzles,
       currentPuzzles,
@@ -1112,6 +1112,120 @@
         requiredStars,
         isStarReady,
       },
+    };
+
+    result.deficitSummary = formatOfficerDeficitSummary(result);
+    return result;
+  }
+
+  function formatOfficerDeficitSummary(def) {
+    if (!def || typeof def !== 'object') {
+      return {
+        isFull: true,
+        deficitPuzzles: 0,
+        deficitCoupons: 0,
+        deficitValue: 0,
+        unit: 'пазл.',
+        unitShort: 'пазл.',
+        deficitText: '0 пазл.',
+        deficitShort: '0 пазл.',
+        forecastText: '✓ Фулл',
+        forecastShort: '✓ Фулл',
+        daysText: '0 дней',
+        isOnlyPersonalPuzzles: false,
+      };
+    }
+
+    const isOnlyPersonal = Boolean(def.isOnlyPersonalPuzzles);
+    const cost = Number(def.costPerPuzzle) || 0;
+    const puzDeficit = Math.max(0, Number(def.deficitPuzzles) || 0);
+    const coupDeficit = Math.max(0, Number(def.deficitCoupons) || 0);
+
+    const isFull = isOnlyPersonal
+      ? (puzDeficit === 0)
+      : (puzDeficit === 0 && (cost === 0 || coupDeficit === 0));
+
+    const fmt = typeof formatInputNumber === 'function'
+      ? formatInputNumber
+      : (n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '));
+
+    if (isFull) {
+      return {
+        isFull: true,
+        deficitPuzzles: 0,
+        deficitCoupons: 0,
+        deficitValue: 0,
+        unit: isOnlyPersonal ? 'личных пазл.' : (cost > 0 ? 'куп.' : 'пазл.'),
+        unitShort: isOnlyPersonal ? 'личн. пазл.' : (cost > 0 ? 'куп.' : 'пазл.'),
+        deficitText: '0',
+        deficitShort: 'Фулл (0)',
+        forecastText: '✓ Фулл',
+        forecastShort: '✓ Фулл',
+        daysText: 'Фулл прокачка! 🎉',
+        isOnlyPersonalPuzzles: isOnlyPersonal,
+      };
+    }
+
+    if (isOnlyPersonal) {
+      return {
+        isFull: false,
+        deficitPuzzles: puzDeficit,
+        deficitCoupons: 0,
+        deficitValue: puzDeficit,
+        unit: 'личных пазл.',
+        unitShort: 'личн. пазл.',
+        deficitText: `${fmt(puzDeficit)} личных пазл.`,
+        deficitShort: `${fmt(puzDeficit)} личн. пазл.`,
+        forecastText: '🧩 Только личные медали',
+        forecastShort: '🧩 Личные',
+        daysText: 'Только личные медали',
+        isOnlyPersonalPuzzles: true,
+      };
+    }
+
+    if (cost > 0) {
+      const days = def.daysWithoutEvents !== null && def.daysWithoutEvents !== undefined ? def.daysWithoutEvents : null;
+      const daysLabel = days !== null ? `~${days} дн.` : '—';
+      const dateStr = def.forecastDate || def.dateWithoutEvents;
+      let forecastShort = '📅 —';
+      if (dateStr) {
+        try {
+          const d = new Date(dateStr);
+          forecastShort = `📅 ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`;
+        } catch (_) {
+          forecastShort = '📅 —';
+        }
+      }
+      return {
+        isFull: false,
+        deficitPuzzles: puzDeficit,
+        deficitCoupons: coupDeficit,
+        deficitValue: coupDeficit,
+        unit: 'куп.',
+        unitShort: 'куп.',
+        deficitText: `${fmt(puzDeficit)} пазл. (${fmt(coupDeficit)} куп.)`,
+        deficitShort: `${fmt(coupDeficit)} куп.`,
+        forecastText: dateStr ? `${dateStr} (${daysLabel})` : '—',
+        forecastShort,
+        daysText: days !== null ? `~${days} дней` : '—',
+        isOnlyPersonalPuzzles: false,
+      };
+    }
+
+    // cost === 0: special officer (upgradeType: 'special', universal puzzles only)
+    return {
+      isFull: false,
+      deficitPuzzles: puzDeficit,
+      deficitCoupons: 0,
+      deficitValue: puzDeficit,
+      unit: 'пазл.',
+      unitShort: 'пазл.',
+      deficitText: `${fmt(puzDeficit)} пазл. (только пазлы)`,
+      deficitShort: `${fmt(puzDeficit)} пазл.`,
+      forecastText: '🧩 Только пазлы',
+      forecastShort: '🧩 Пазлы',
+      daysText: 'Только пазлы',
+      isOnlyPersonalPuzzles: false,
     };
   }
 
@@ -4373,6 +4487,7 @@
     validateImportData,
     buildAutoPick,
     calculateOfficerDeficit,
+    formatOfficerDeficitSummary,
     simulateEventProgress,
     extractSectorCalendarEvents,
     simulateCalendarEventProgress,

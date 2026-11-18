@@ -3905,6 +3905,99 @@ test('formatTmaUrl and getTelegramMainMenuKeyboard enforce TMA URL parameters', 
   assert.equal(webAppBtn.web_app.url, 'https://kow.timeweb.app/?tma=1');
 });
 
+test('formatOfficerDeficitSummary unifies officer deficit and forecast display across TMA, Web, and Bot', () => {
+  const logic = require('./logic.js');
+  assert.equal(typeof logic.formatOfficerDeficitSummary, 'function', 'formatOfficerDeficitSummary must be exported');
+
+  // 1. Анхель: уровень 146, 155 личных пазлов, onlyPersonalPuzzles = true (дефицит 15 личных пазлов)
+  const angelDef = logic.calculateOfficerDeficit({
+    officer: { level: 146, personalPuzzles: 155, onlyPersonalPuzzles: true, coupons: 0 },
+    catalogItem: { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special', generation: 1 },
+    player: { stock: { coupons: 10000, puzzles: 500 } },
+    targetLevel: 180,
+  });
+
+  const angelSummary = logic.formatOfficerDeficitSummary(angelDef);
+  assert.strictEqual(angelSummary.isFull, false);
+  assert.strictEqual(angelSummary.isOnlyPersonalPuzzles, true);
+  assert.strictEqual(angelSummary.deficitPuzzles, 15);
+  assert.strictEqual(angelSummary.deficitCoupons, 0);
+  assert.strictEqual(angelSummary.deficitValue, 15);
+  assert.strictEqual(angelSummary.unit, 'личных пазл.');
+  assert.strictEqual(angelSummary.unitShort, 'личн. пазл.');
+  assert.strictEqual(angelSummary.deficitText, '15 личных пазл.');
+  assert.strictEqual(angelSummary.deficitShort, '15 личн. пазл.');
+  assert.strictEqual(angelSummary.forecastText, '🧩 Только личные медали');
+  assert.strictEqual(angelSummary.forecastShort, '🧩 Личные');
+  assert.strictEqual(angelSummary.daysText, 'Только личные медали');
+
+  // Проверка прямого включения сводки в результат calculateOfficerDeficit
+  assert.ok(angelDef.deficitSummary, 'calculateOfficerDeficit should include deficitSummary');
+  assert.strictEqual(angelDef.deficitSummary.deficitShort, '15 личн. пазл.');
+
+  // 2. Анхель фулл: уровень 180, onlyPersonalPuzzles = true
+  const angelFullDef = logic.calculateOfficerDeficit({
+    officer: { level: 180, personalPuzzles: 0, onlyPersonalPuzzles: true },
+    catalogItem: { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special' },
+    targetLevel: 180,
+  });
+  const angelFullSummary = logic.formatOfficerDeficitSummary(angelFullDef);
+  assert.strictEqual(angelFullSummary.isFull, true);
+  assert.strictEqual(angelFullSummary.deficitPuzzles, 0);
+  assert.strictEqual(angelFullSummary.deficitShort, 'Фулл (0)');
+  assert.strictEqual(angelFullSummary.forecastShort, '✓ Фулл');
+
+  // 3. Стандартный офицер за купоны (дефицит 15 пазлов = 7 500 купонов)
+  const stdDef = logic.calculateOfficerDeficit({
+    officer: { level: 177, personalPuzzles: 0, coupons: 0, onlyPersonalPuzzles: false },
+    catalogItem: { id: 'valkyrie', couponPerPuzzle: 500, upgradeType: 'standard' },
+    player: { stock: { coupons: 0, puzzles: 0 } },
+    targetLevel: 180,
+  });
+  const stdSummary = logic.formatOfficerDeficitSummary(stdDef);
+  assert.strictEqual(stdSummary.isFull, false);
+  assert.strictEqual(stdSummary.isOnlyPersonalPuzzles, false);
+  assert.strictEqual(stdSummary.deficitPuzzles, 15);
+  assert.strictEqual(stdSummary.deficitCoupons, 7500);
+  assert.strictEqual(stdSummary.deficitValue, 7500);
+  assert.strictEqual(stdSummary.unit, 'куп.');
+  assert.strictEqual(stdSummary.unitShort, 'куп.');
+  assert.strictEqual(stdSummary.deficitText, '15 пазл. (7 500 куп.)');
+  assert.strictEqual(stdSummary.deficitShort, '7 500 куп.');
+  assert.strictEqual(stdSummary.forecastShort, '📅 —');
+
+  // 4. Специальный офицер (только универсальные пазлы, costPerPuzzle = 0, no onlyPersonalPuzzles)
+  const specialDef = logic.calculateOfficerDeficit({
+    officer: { level: 177, personalPuzzles: 0, coupons: 0, onlyPersonalPuzzles: false },
+    catalogItem: { id: 'special-hero', couponPerPuzzle: 0, upgradeType: 'special' },
+    player: { stock: { coupons: 0, puzzles: 0 } },
+    targetLevel: 180,
+  });
+  const specialSummary = logic.formatOfficerDeficitSummary(specialDef);
+  assert.strictEqual(specialSummary.isFull, false);
+  assert.strictEqual(specialSummary.isOnlyPersonalPuzzles, false);
+  assert.strictEqual(specialSummary.deficitPuzzles, 15);
+  assert.strictEqual(specialSummary.deficitCoupons, 0);
+  assert.strictEqual(specialSummary.unit, 'пазл.');
+  assert.strictEqual(specialSummary.unitShort, 'пазл.');
+  assert.strictEqual(specialSummary.deficitText, '15 пазл. (только пазлы)');
+  assert.strictEqual(specialSummary.deficitShort, '15 пазл.');
+  assert.strictEqual(specialSummary.forecastText, '🧩 Только пазлы');
+  assert.strictEqual(specialSummary.forecastShort, '🧩 Пазлы');
+
+  // 5. Стандартный офицер фулл (180 ур.)
+  const stdFullDef = logic.calculateOfficerDeficit({
+    officer: { level: 180, personalPuzzles: 0, coupons: 0 },
+    catalogItem: { id: 'valkyrie', couponPerPuzzle: 500, upgradeType: 'standard' },
+    targetLevel: 180,
+  });
+  const stdFullSummary = logic.formatOfficerDeficitSummary(stdFullDef);
+  assert.strictEqual(stdFullSummary.isFull, true);
+  assert.strictEqual(stdFullSummary.deficitShort, 'Фулл (0)');
+  assert.strictEqual(stdFullSummary.forecastShort, '✓ Фулл');
+});
+
+
 
 
 

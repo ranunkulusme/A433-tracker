@@ -2838,7 +2838,7 @@ function renderCabinetSimulatorHtml() {
           <div class="label">${typeof t === 'function' ? t('game.sim.deficit') : 'Оставшийся дефицит'}</div>
           <div class="value">${fmtNum(sim.remainingDeficitPuzzles)} <span style="font-size:12px;color:var(--text3)">пазлов</span></div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
-            ${costPerPuzzle > 0 ? `${fmtNum(sim.remainingDeficitCoupons)} купонов` : 'Только пазлы'}
+            ${def.isOnlyPersonalPuzzles ? 'Только личные медали' : (costPerPuzzle > 0 ? `${fmtNum(sim.remainingDeficitCoupons)} купонов` : 'Только пазлы')}
           </div>
         </div>
         <div class="stock-card">
@@ -3652,7 +3652,7 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--text3)">${deficitLabel}</span>
-          <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} ${def.isOnlyPersonalPuzzles ? 'личных пазл.' : (def.costPerPuzzle > 0 ? `пазл. (${fmtNum(def.deficitCoupons)} куп.)` : 'пазл. (только пазлы)')}</strong>
+          <strong style="color:var(--text)">${def.deficitSummary ? def.deficitSummary.deficitText : (`${fmtNum(def.deficitPuzzles)} ${def.isOnlyPersonalPuzzles ? 'личных пазл.' : (def.costPerPuzzle > 0 ? `пазл. (${fmtNum(def.deficitCoupons)} куп.)` : 'пазл. (только пазлы)')}`)}</strong>
         </div>
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--text3)">${forecastLabel}</span>

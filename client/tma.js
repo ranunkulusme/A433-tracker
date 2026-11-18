@@ -763,6 +763,8 @@ function renderTmaCabinet() {
   let remainingCoupons = 0;
   let remainingDays = 0;
   let isFull = false;
+  let targetDeficitFormatted = '0 куп.';
+  let targetDaysFormatted = '—';
 
   if (targetOfficer) {
     const cat = getCatalogOfficer(targetOfficer.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
@@ -795,17 +797,31 @@ function renderTmaCabinet() {
       : null;
 
     if (def) {
+      const summary = def.deficitSummary
+        || ((typeof logic !== 'undefined' && logic.formatOfficerDeficitSummary) ? logic.formatOfficerDeficitSummary(def) : null);
+      if (summary) {
+        isFull = summary.isFull;
+        targetDeficitFormatted = summary.deficitShort;
+        targetDaysFormatted = summary.isOnlyPersonalPuzzles ? '🧩 Личные медали' : summary.daysText;
+      } else if (def.isOnlyPersonalPuzzles) {
+        isFull = (def.deficitPuzzles === 0);
+        targetDeficitFormatted = isFull ? '0' : `${fmtNum(def.deficitPuzzles)} личн. пазл.`;
+        targetDaysFormatted = '🧩 Личные медали';
+      } else {
+        isFull = (def.deficitPuzzles === 0 && (def.deficitCoupons || 0) === 0);
+        targetDeficitFormatted = isFull ? '0' : `${fmtNum(def.deficitCoupons || 0)} куп.`;
+        targetDaysFormatted = def.daysWithoutEvents !== null ? `~${def.daysWithoutEvents} дней` : '—';
+      }
+
       if (def.isOnlyPersonalPuzzles) {
         remainingCoupons = 0;
         remainingDays = 0;
-        isFull = (def.deficitPuzzles === 0);
         const currentPuz = (def.currentPuzzles || 0);
         const targetPuz = def.targetPuzzles || 900;
         progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((currentPuz / Math.max(1, targetPuz)) * 100)));
       } else {
         remainingCoupons = def.deficitCoupons || 0;
         remainingDays = def.daysWithoutEvents !== null ? def.daysWithoutEvents : 0;
-        isFull = (def.deficitPuzzles === 0 && remainingCoupons === 0);
         const currentPuz = (def.currentPuzzles || 0) + (def.stockPuzzles || 0);
         const targetPuz = def.targetPuzzles || 900;
         progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((currentPuz / Math.max(1, targetPuz)) * 100)));
@@ -813,6 +829,8 @@ function renderTmaCabinet() {
     } else {
       isFull = (offLevel >= 180 && skillsFull);
       progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((offLevel / 180) * 100)));
+      targetDeficitFormatted = isFull ? '0 (готов к прокачке! 🎉)' : '—';
+      targetDaysFormatted = isFull ? 'Фулл прокачка! 🎉' : '—';
     }
   }
 
@@ -989,13 +1007,13 @@ function renderTmaCabinet() {
         <div>
           <div style="font-size:10px;color:#9ca3af">Остаточный дефицит:</div>
           <div style="font-weight:800;color:${isFull ? '#34d399' : '#fbbf24'};font-size:13px;margin-top:1px">
-            ${isFull ? '0 (готов к прокачке! 🎉)' : fmtNum(remainingCoupons) + ' куп.'}
+            ${isFull ? '0 (готов к прокачке! 🎉)' : targetDeficitFormatted}
           </div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:10px;color:#9ca3af">${isFull ? 'Статус:' : `Срок (с VIP ${playerVip}):`}</div>
+          <div style="font-size:10px;color:#9ca3af">${isFull ? 'Статус:' : (targetOfficer?.onlyPersonalPuzzles || targetOfficer?.only_personal_puzzles ? 'Режим:' : `Срок (с VIP ${playerVip}):`)}</div>
           <div style="font-weight:800;color:#34d399;font-size:13px;margin-top:1px">
-            ${isFull ? 'Фулл прокачка! 🎉' : (remainingDays !== null && remainingDays !== undefined ? `~${remainingDays} дней` : '—')}
+            ${isFull ? 'Фулл прокачка! 🎉' : targetDaysFormatted}
           </div>
         </div>
       </div>
@@ -2022,12 +2040,18 @@ async function openTmaSectorDetail(playerId) {
         const calcDefFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
         if (calcDefFn) {
           const def = calcDefFn({ officer: off, catalogItem: cat, player: p, targetLevel: 180, today });
-          if (def.isOnlyPersonalPuzzles) {
-            deficitStr = '0 куп.';
-            forecastStr = def.deficitPuzzles === 0 ? '✓ Фулл' : '🧩 Личные';
+          const summary = def.deficitSummary
+            || ((typeof logic !== 'undefined' && logic.formatOfficerDeficitSummary) ? logic.formatOfficerDeficitSummary(def) : null);
+          if (summary) {
+            deficitStr = summary.deficitShort;
+            forecastStr = summary.forecastShort;
+            isFull = summary.isFull;
+          } else if (def.isOnlyPersonalPuzzles) {
             isFull = def.deficitPuzzles === 0;
+            deficitStr = isFull ? 'Фулл (0)' : `${fmtNum(def.deficitPuzzles)} личн. пазл.`;
+            forecastStr = isFull ? '✓ Фулл' : '🧩 Личные';
           } else if (def.deficitCoupons > 0) {
-            deficitStr = `${fmtNum(def.deficitCoupons)}`;
+            deficitStr = `${fmtNum(def.deficitCoupons)} куп.`;
             isFull = false;
             if (def.forecastDate) {
               const d = new Date(def.forecastDate);
@@ -2475,12 +2499,18 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
         const calcDefFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
         if (calcDefFn) {
           const def = calcDefFn({ officer: off, catalogItem: cat, player, targetLevel: 180, today });
-          if (def.isOnlyPersonalPuzzles) {
-            deficitStr = '0 куп.';
-            forecastStr = def.deficitPuzzles === 0 ? '✓ Фулл' : '🧩 Личные';
+          const summary = def.deficitSummary
+            || ((typeof logic !== 'undefined' && logic.formatOfficerDeficitSummary) ? logic.formatOfficerDeficitSummary(def) : null);
+          if (summary) {
+            deficitStr = summary.deficitShort;
+            forecastStr = summary.forecastShort;
+            isFull = summary.isFull;
+          } else if (def.isOnlyPersonalPuzzles) {
             isFull = def.deficitPuzzles === 0;
+            deficitStr = isFull ? 'Фулл (0)' : `${fmtNum(def.deficitPuzzles)} личн. пазл.`;
+            forecastStr = isFull ? '✓ Фулл' : '🧩 Личные';
           } else if (def.deficitCoupons > 0) {
-            deficitStr = `${fmtNum(def.deficitCoupons)}`;
+            deficitStr = `${fmtNum(def.deficitCoupons)} куп.`;
             isFull = false;
             if (def.forecastDate) {
               const d = new Date(def.forecastDate);
@@ -2661,10 +2691,14 @@ function renderTmaOfficersPickerList() {
           today
         })
       : null;
-    const isFull = def
-      ? (def.deficitPuzzles === 0 && (def.deficitCoupons || 0) === 0)
-      : ((off.level || 0) >= 180 && skills.every(s => Number(s) >= 5));
-    const remCoupons = isFull ? 0 : (def?.deficitCoupons ?? def?.remainingCoupons ?? 0);
+    const summary = def?.deficitSummary
+      || ((typeof logic !== 'undefined' && logic.formatOfficerDeficitSummary && def) ? logic.formatOfficerDeficitSummary(def) : null);
+    const isFull = summary
+      ? summary.isFull
+      : (def ? (def.deficitPuzzles === 0 && (def.deficitCoupons || 0) === 0) : ((off.level || 0) >= 180 && skills.every(s => Number(s) >= 5)));
+    const deficitDisplay = summary
+      ? summary.deficitShort
+      : (isFull ? 'Фулл (0)' : `${fmtNum(def?.deficitCoupons ?? def?.remainingCoupons ?? 0)} куп.`);
 
     return `
       <div class="tma-officer-card-compact tma-card-clickable" onclick="selectTmaTargetOfficer('${off.id}')" style="margin-bottom:8px;padding:10px 12px;background:#1f242e;border:1px solid ${
@@ -2699,7 +2733,7 @@ function renderTmaOfficersPickerList() {
           <div style="display:flex;align-items:center;gap:8px">
             <div style="text-align:right">
               <div style="font-size:11.5px;font-weight:700;color:${isFull ? '#34d399' : '#fbbf24'}">
-                ${isFull ? 'Фулл (0)' : fmtNum(remCoupons) + ' куп.'}
+                ${deficitDisplay}
               </div>
               <div style="font-size:10px;color:#9ca3af">дефицит</div>
             </div>
