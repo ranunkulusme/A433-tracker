@@ -956,6 +956,19 @@ test('renderTmaCabinetEventBanner distinguishes between active and upcoming even
   const upcomingHtml = context.renderTmaCabinetEventBanner([upcomingEvent], {});
   assert.ok(upcomingHtml.includes('Ближайший ивент'), 'Для будущего события баннер должен содержать "Ближайший ивент"');
   assert.ok(!upcomingHtml.includes('Идёт сейчас'), 'Для будущего события баннер НЕ должен содержать "Идёт сейчас"');
+
+  // 3. Событие с dateFrom / dateTo (17-18 ноября) при текущей дате 18 ноября
+  const event1718 = {
+    id: 103,
+    title: 'Сила времени',
+    dateFrom: '2026-11-17',
+    dateTo: '2026-11-18',
+    officerCatalogId: 'beatrice'
+  };
+  // Проверяем через classifyEvents с временем 18 ноября 13:47 UTC (16:47 MSK)
+  const classified1718 = context.logic.classifyEvents([event1718], new Date('2026-11-18T13:47:56Z'));
+  assert.equal(classified1718.active.length, 1, 'Событие 17-18 ноября 18 ноября днем должно быть в active');
+  assert.equal(classified1718.past.length, 0, 'Событие 17-18 ноября 18 ноября днем НЕ должно быть в past');
 });
 
 test('renderTmaMatrix renders compact officer cards instead of sector power ranking', () => {

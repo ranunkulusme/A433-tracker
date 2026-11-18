@@ -5048,18 +5048,27 @@ function isEventActive(ev) {
   if (typeof logic !== 'undefined' && typeof logic.getEventStatus === 'function') {
     return logic.getEventStatus(ev) === 'active';
   }
-  const now = new Date(); now.setHours(0,0,0,0);
-  const f = new Date((ev.dateFrom || ev.startDate)+'T00:00:00');
-  const t = new Date((ev.dateTo || ev.endDate)+'T00:00:00');
-  return now >= f && now <= t;
+  const now = Date.now();
+  const rawStart = ev.startDate || ev.dateFrom || ev.dateStart;
+  const rawEnd = ev.endDate || ev.dateTo || ev.dateEnd;
+  const s = (typeof logic !== 'undefined' && typeof logic.parseEventBoundary === 'function')
+    ? logic.parseEventBoundary(rawStart, false)
+    : (rawStart ? new Date(rawStart).getTime() : 0);
+  const e = (typeof logic !== 'undefined' && typeof logic.parseEventBoundary === 'function')
+    ? logic.parseEventBoundary(rawEnd, true)
+    : (rawEnd ? (new Date(rawEnd).getTime() + 86400000 - 1) : 0);
+  return Boolean(s && e && now >= s && now <= e);
 }
 function isEventUpcoming(ev) {
   if (typeof logic !== 'undefined' && typeof logic.getEventStatus === 'function') {
     return logic.getEventStatus(ev) === 'upcoming';
   }
-  const now = new Date(); now.setHours(0,0,0,0);
-  const f = new Date((ev.dateFrom || ev.startDate)+'T00:00:00');
-  return f > now;
+  const now = Date.now();
+  const rawStart = ev.startDate || ev.dateFrom || ev.dateStart;
+  const s = (typeof logic !== 'undefined' && typeof logic.parseEventBoundary === 'function')
+    ? logic.parseEventBoundary(rawStart, false)
+    : (rawStart ? new Date(rawStart).getTime() : 0);
+  return Boolean(s && now < s);
 }
 function isEventPast(ev) {
   if (typeof logic !== 'undefined' && typeof logic.getEventStatus === 'function') {
