@@ -4099,6 +4099,27 @@ test('getEventStatus accurately determines active, upcoming, and past event life
 
   // 7. Явный status: 'active'
   assert.strictEqual(getEventStatus({ status: 'active' }, now), 'active');
+
+  // 8. Событие с датами в формате YYYY-MM-DD должно быть активно ВЕСЬ день даты окончания (до 00:00 UTC / 03:00 МСК след. дня)
+  const eventNov17_18 = {
+    id: 10,
+    title: 'Сила времени',
+    dateFrom: '2026-11-17',
+    dateTo: '2026-11-18'
+  };
+
+  // 18 ноября в 16:47 МСК (13:47 UTC) - событие ОБЯЗАНО быть active
+  assert.strictEqual(getEventStatus(eventNov17_18, new Date('2026-11-18T13:47:56Z')), 'active', 'Ивент 17-18 ноября должен быть активен 18 ноября днём');
+  // 18 ноября в 23:59:59 UTC - все еще active
+  assert.strictEqual(getEventStatus(eventNov17_18, new Date('2026-11-18T23:59:59Z')), 'active', 'Ивент 17-18 ноября активен до конца суток 18 ноября по UTC');
+  // 19 ноября в 00:00:01 UTC (03:00:01 МСК) - переходит в past
+  assert.strictEqual(getEventStatus(eventNov17_18, new Date('2026-11-19T00:00:01Z')), 'past', 'Ивент 17-18 ноября завершается 19 ноября в 00:00 UTC / 03:00 МСК');
+  // 16 ноября в 23:59:59 UTC - предстоящий
+  assert.strictEqual(getEventStatus(eventNov17_18, new Date('2026-11-16T23:59:59Z')), 'upcoming', 'До наступления 17 ноября ивент должен быть upcoming');
+
+  // 9. Поддержка всех алиасов полей (startDate/endDate, dateStart/dateEnd, dateFrom/dateTo)
+  assert.strictEqual(getEventStatus({ startDate: '2026-11-17', endDate: '2026-11-18' }, new Date('2026-11-18T13:47:56Z')), 'active');
+  assert.strictEqual(getEventStatus({ dateStart: '2026-11-17', dateEnd: '2026-11-18' }, new Date('2026-11-18T13:47:56Z')), 'active');
 });
 
 test('classifyEvents partitions and sorts events into active, upcoming and past buckets', () => {

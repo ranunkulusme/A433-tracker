@@ -4475,15 +4475,46 @@
     `</svg>`;
   }
 
+  function parseEventBoundary(val, isEnd = false) {
+    if (!val) return null;
+    if (val instanceof Date) return val.getTime();
+    if (typeof val === 'number') return val;
+    if (typeof val !== 'string') return null;
+
+    const str = val.trim();
+    if (!str) return null;
+
+    // Проверка формата только даты: YYYY-MM-DD
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+      const year = parseInt(m[1], 10);
+      const month = parseInt(m[2], 10) - 1;
+      const day = parseInt(m[3], 10);
+      if (isEnd) {
+        // Конец дня включительно: 23:59:59.999 UTC (03:00 МСК след. дня)
+        return Date.UTC(year, month, day, 23, 59, 59, 999);
+      } else {
+        // Начало дня: 00:00:00.000 UTC (03:00 МСК)
+        return Date.UTC(year, month, day, 0, 0, 0, 0);
+      }
+    }
+
+    const parsed = new Date(str).getTime();
+    return isNaN(parsed) ? null : parsed;
+  }
+
   function getEventStatus(event, now = new Date()) {
     if (!event) return 'unknown';
-    if (event.status === 'completed') return 'past';
+    if (event.status === 'completed' || event.isCompleted) return 'past';
 
     const currentTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
-    const startTime = event.startDate ? new Date(event.startDate).getTime() : null;
+    const rawStart = event.startDate || event.dateFrom || event.dateStart;
+    const rawEnd = event.endDate || event.dateTo || event.dateEnd;
+
+    const startTime = parseEventBoundary(rawStart, false);
     const durationDays = Number(event.durationDays) || 3;
     const durationMs = durationDays * 24 * 60 * 60 * 1000;
-    const endTime = event.endDate ? new Date(event.endDate).getTime() : (startTime ? startTime + durationMs : null);
+    const endTime = rawEnd ? parseEventBoundary(rawEnd, true) : (startTime ? startTime + durationMs - 1 : null);
 
     if (startTime && currentTime < startTime) {
       return 'upcoming';
@@ -4513,16 +4544,20 @@
     });
 
     active.sort((a, b) => {
-      const aEnd = a.endDate ? new Date(a.endDate).getTime() : (a.startDate ? new Date(a.startDate).getTime() + (Number(a.durationDays) || 3) * 86400000 : 0);
-      const bEnd = b.endDate ? new Date(b.endDate).getTime() : (b.startDate ? new Date(b.startDate).getTime() + (Number(b.durationDays) || 3) * 86400000 : 0);
+      const aEnd = parseEventBoundary(a.endDate || a.dateTo || a.dateEnd, true) || (parseEventBoundary(a.startDate || a.dateFrom || a.dateStart, false) ? parseEventBoundary(a.startDate || a.dateFrom || a.dateStart, false) + (Number(a.durationDays) || 3) * 86400000 : 0);
+      const bEnd = parseEventBoundary(b.endDate || b.dateTo || b.dateEnd, true) || (parseEventBoundary(b.startDate || b.dateFrom || b.dateStart, false) ? parseEventBoundary(b.startDate || b.dateFrom || b.dateStart, false) + (Number(b.durationDays) || 3) * 86400000 : 0);
       return aEnd - bEnd;
     });
 
-    upcoming.sort((a, b) => new Date(a.startDate || 0).getTime() - new Date(b.startDate || 0).getTime());
+    upcoming.sort((a, b) => {
+      const aStart = parseEventBoundary(a.startDate || a.dateFrom || a.dateStart, false) || 0;
+      const bStart = parseEventBoundary(b.startDate || b.dateFrom || b.dateStart, false) || 0;
+      return aStart - bStart;
+    });
 
     past.sort((a, b) => {
-      const aTime = a.endDate ? new Date(a.endDate).getTime() : (a.startDate ? new Date(a.startDate).getTime() : 0);
-      const bTime = b.endDate ? new Date(b.endDate).getTime() : (b.startDate ? new Date(b.startDate).getTime() : 0);
+      const aTime = parseEventBoundary(a.endDate || a.dateTo || a.dateEnd, true) || parseEventBoundary(a.startDate || a.dateFrom || a.dateStart, false) || 0;
+      const bTime = parseEventBoundary(b.endDate || b.dateTo || b.dateEnd, true) || parseEventBoundary(b.startDate || b.dateFrom || b.dateStart, false) || 0;
       return bTime - aTime;
     });
 
@@ -4651,6 +4686,7 @@
     validateTelegramWebAppData,
     formatTmaUrl,
     renderStarCouponIconHtml,
+    parseEventBoundary,
     getEventStatus,
     classifyEvents,
     escapeHtml,

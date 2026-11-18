@@ -138,6 +138,30 @@ if (typeof window !== 'undefined' && typeof window.getCatalogOfficer === 'undefi
   window.getCatalogOfficer = doTmaGetCatalogOfficer;
 }
 
+// Safe fallback for parseEventBoundary
+function doTmaParseEventBoundary(val, isEnd = false) {
+  if (typeof logic !== 'undefined' && typeof logic.parseEventBoundary === 'function') {
+    return logic.parseEventBoundary(val, isEnd);
+  }
+  if (!val) return null;
+  if (val instanceof Date) return val.getTime();
+  if (typeof val === 'number') return val;
+  const str = String(val).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1, d = parseInt(m[3], 10);
+    return isEnd ? Date.UTC(y, mo, d, 23, 59, 59, 999) : Date.UTC(y, mo, d, 0, 0, 0, 0);
+  }
+  const p = new Date(str).getTime();
+  return isNaN(p) ? null : p;
+}
+if (_tmaGlobal && typeof _tmaGlobal.parseEventBoundary === 'undefined') {
+  _tmaGlobal.parseEventBoundary = doTmaParseEventBoundary;
+}
+if (typeof window !== 'undefined' && typeof window.parseEventBoundary === 'undefined') {
+  window.parseEventBoundary = doTmaParseEventBoundary;
+}
+
 function isTmaMode() {
   if (typeof window === 'undefined') return false;
   if (window.TelegramWebviewProxy) {
@@ -781,8 +805,10 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
     const past = [];
     events.forEach(e => {
       if (e.status === 'completed' || e.isCompleted) { past.push(e); return; }
-      const s = e.startDate ? new Date(e.startDate).getTime() : (e.dateStart ? new Date(e.dateStart).getTime() : 0);
-      const end = e.endDate ? new Date(e.endDate).getTime() : (e.dateEnd ? new Date(e.dateEnd).getTime() : (s ? s + 3 * 86400000 : 0));
+      const rawStart = e.startDate || e.dateFrom || e.dateStart;
+      const rawEnd = e.endDate || e.dateTo || e.dateEnd;
+      const s = doTmaParseEventBoundary(rawStart, false) || 0;
+      const end = rawEnd ? doTmaParseEventBoundary(rawEnd, true) : (s ? s + 3 * 86400000 - 1 : 0);
       if (s && now < s) upcoming.push(e);
       else if (s && end && now >= s && now <= end) active.push(e);
       else if (end && now > end) past.push(e);
@@ -1167,8 +1193,10 @@ function renderTmaEvents() {
     const now = Date.now();
     (state.events || []).forEach(ev => {
       if (ev.status === 'completed' || ev.isCompleted) { pastEvents.push(ev); return; }
-      const s = ev.startDate ? new Date(ev.startDate).getTime() : 0;
-      const end = ev.endDate ? new Date(ev.endDate).getTime() : (s ? s + 3 * 86400000 : 0);
+      const rawStart = ev.startDate || ev.dateFrom || ev.dateStart;
+      const rawEnd = ev.endDate || ev.dateTo || ev.dateEnd;
+      const s = doTmaParseEventBoundary(rawStart, false) || 0;
+      const end = rawEnd ? doTmaParseEventBoundary(rawEnd, true) : (s ? s + 3 * 86400000 - 1 : 0);
       if (s && now < s) upcomingEvents.push(ev);
       else if (s && end && now >= s && now <= end) activeEvents.push(ev);
       else if (end && now > end) pastEvents.push(ev);
