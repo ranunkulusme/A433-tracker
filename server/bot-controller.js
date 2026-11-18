@@ -59,7 +59,8 @@ function createTelegramBotController({
     return {
       targetOfficer: targetName,
       targetDeficit: defRes ? (defRes.deficitCoupons || defRes.coupons || 0) : 0,
-      deficitDetails: defRes
+      deficitDetails: defRes,
+      deficitSummary: defRes?.deficitSummary || (defRes ? logic.formatOfficerDeficitSummary(defRes) : null)
     };
   }
 
@@ -326,14 +327,15 @@ async function handleTelegramUpdate(update) {
       const sectors = db.getPlayersByUserId(user.id);
       const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
       const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
-      const { targetOfficer, targetDeficit } = getPlayerTargetOfficerDeficit(player);
+      const { targetOfficer, targetDeficit, deficitSummary } = getPlayerTargetOfficerDeficit(player);
 
       const replyText = logic.formatTelegramMeMessage({
         user,
         player,
         freshness,
         targetOfficer,
-        targetDeficit
+        targetDeficit,
+        deficitSummary
       });
 
       const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
@@ -366,12 +368,13 @@ async function handleTelegramUpdate(update) {
 
       const sectors = db.getPlayersByUserId(user.id);
       const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
-      const { targetOfficer, targetDeficit, deficitDetails } = getPlayerTargetOfficerDeficit(player);
+      const { targetOfficer, targetDeficit, deficitDetails, deficitSummary } = getPlayerTargetOfficerDeficit(player);
 
       const vip = player?.vip !== undefined ? Number(player.vip) : (user.vip !== undefined ? Number(user.vip) : 10);
       const daily = logic.dailyRewards(vip, Number(player?.confidentiality || 0));
       const dailyCoupons = (daily?.coupons || 0) + ((daily?.puzzles || 0) * 50);
-      const daysEstimate = (targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null);
+      const isPersonalOnly = Boolean(deficitDetails?.isOnlyPersonalPuzzles || deficitSummary?.isOnlyPersonalPuzzles);
+      const daysEstimate = isPersonalOnly ? null : ((targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null));
 
       const replyText = logic.formatTelegramDeficitMessage({
         player,
@@ -1014,8 +1017,8 @@ async function handleTelegramUpdate(update) {
 
       if (data === 'cmd_me') {
         const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
-        const { targetOfficer, targetDeficit } = getPlayerTargetOfficerDeficit(player);
-        const replyText = logic.formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit });
+        const { targetOfficer, targetDeficit, deficitSummary } = getPlayerTargetOfficerDeficit(player);
+        const replyText = logic.formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit, deficitSummary });
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
         }
@@ -1023,11 +1026,12 @@ async function handleTelegramUpdate(update) {
       }
 
       if (data === 'cmd_deficit') {
-        const { targetOfficer, targetDeficit, deficitDetails } = getPlayerTargetOfficerDeficit(player);
+        const { targetOfficer, targetDeficit, deficitDetails, deficitSummary } = getPlayerTargetOfficerDeficit(player);
         const vip = player?.vip !== undefined ? Number(player.vip) : (user.vip !== undefined ? Number(user.vip) : 10);
         const daily = logic.dailyRewards(vip, Number(player?.confidentiality || 0));
         const dailyCoupons = (daily?.coupons || 0) + ((daily?.puzzles || 0) * 50);
-        const daysEstimate = (targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null);
+        const isPersonalOnly = Boolean(deficitDetails?.isOnlyPersonalPuzzles || deficitSummary?.isOnlyPersonalPuzzles);
+        const daysEstimate = isPersonalOnly ? null : ((targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null));
         const replyText = logic.formatTelegramDeficitMessage({ player, targetOfficer: targetOfficer || 'Офицер', deficit: deficitDetails, dailyRewards: daily, daysEstimate });
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
@@ -1334,7 +1338,11 @@ async function handleTelegramUpdate(update) {
       }
 
       const pOfficers = Array.isArray(player.officers) ? player.officers : [];
-      const officer = pOfficers.find(o => !o.onlyPersonalPuzzles) || pOfficers[0];
+      const catalog = db.getCatalog ? db.getCatalog() : [];
+      const eligibleOfficers = typeof logic.getEventEligibleOfficers === 'function'
+        ? logic.getEventEligibleOfficers(pOfficers, catalog)
+        : pOfficers.filter(o => !Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles));
+      const officer = eligibleOfficers[0] || null;
       const officerId = (officer ? (officer.catalogId || officer.id) : '') || '';
 
       if (eventOps && typeof eventOps.registerForEvent === 'function') {

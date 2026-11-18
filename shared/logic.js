@@ -689,10 +689,11 @@
   }
 
   function totalPuzzlesForOfficer(officer, catalogItem) {
+    const personal = Math.max(0, Number(officer?.personalPuzzles ?? officer?.personal_puzzles) || 0);
     const rawCost = Number(catalogItem?.couponPerPuzzle);
-    if (rawCost === 0) return officer.level * PUZZLES_PER_LEVEL;
+    if (rawCost === 0) return officer.level * PUZZLES_PER_LEVEL + personal;
     const couponPerPuzzle = rawCost || COUPON_PER_PUZZLE;
-    return officer.level * PUZZLES_PER_LEVEL + Math.floor((Number(officer.coupons) || 0) / couponPerPuzzle);
+    return officer.level * PUZZLES_PER_LEVEL + personal + Math.floor((Number(officer.coupons) || 0) / couponPerPuzzle);
   }
 
   function dateAdd(iso, days) {
@@ -2970,8 +2971,13 @@
       return false;
     }
 
-    const cat = Array.isArray(catalog) ? catalog.find(c => c.id === officer.catalogId) : null;
+    const catList = Array.isArray(catalog) && catalog.length ? catalog : DEFAULT_OFFICERS;
+    const offCatId = officer.catalogId || officer.catalog_id || officer.id;
+    const cat = catList.find(c => c.id === offCatId);
     if (cat?.upgradeType === 'special') {
+      return false;
+    }
+    if (Boolean(cat?.onlyPersonalPuzzles || cat?.only_personal_puzzles)) {
       return false;
     }
     const rawCost = cat ? Number(cat.couponPerPuzzle) : (officer.couponPerPuzzle !== undefined ? Number(officer.couponPerPuzzle) : 500);
@@ -2982,10 +2988,14 @@
     return true;
   }
 
+  const isOfficerEligibleForEvents = isOfficerEligibleForSimulator;
+
   function getSimulatorEligibleOfficers(officers, catalog) {
     if (!Array.isArray(officers)) return [];
     return officers.filter(o => isOfficerEligibleForSimulator(o, catalog));
   }
+
+  const getEventEligibleOfficers = getSimulatorEligibleOfficers;
 
   function collectUniqueOfficers(catalog = [], players = []) {
     const map = new Map();
@@ -3887,7 +3897,7 @@
     return l.yearAgo;
   }
 
-  function formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit }) {
+  function formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit, deficitSummary }) {
     const parts = [];
     const rankMap = { r5: 'Р5', r4: 'Р4', r3: 'Р3', r2: 'Р2', r1: 'Р1' };
     const rankLabel = rankMap[(user?.rank || '').toLowerCase()] || (user?.rank || 'Р3').toUpperCase();
@@ -3926,7 +3936,13 @@
       const offName = typeof targetOfficer === 'string' ? targetOfficer : targetOfficer.name;
       parts.push(`\n🎯 <b>Целевой офицер:</b> <b>${escapeHtml(offName)}</b>`);
       const isMaxed = Boolean(targetOfficer?.isMaxed) || (Array.isArray(targetOfficer?.skills) && targetOfficer.skills.length >= 4 && targetOfficer.skills.every(s => Number(s) >= 5));
-      if (targetDeficit !== undefined && targetDeficit !== null) {
+      if (deficitSummary) {
+        if (deficitSummary.isFull || isMaxed) {
+          parts.push('• Дефицит: <b>0</b> (готов к максимальной прокачке! 🎉)');
+        } else {
+          parts.push(`• Остаточный дефицит: <b>${deficitSummary.deficitShort || (formatInputNumber(deficitSummary.deficitValue) + ' ' + deficitSummary.unit)}</b>`);
+        }
+      } else if (targetDeficit !== undefined && targetDeficit !== null) {
         if (targetDeficit <= 0 || isMaxed) {
           parts.push('• Дефицит: <b>0</b> (готов к максимальной прокачке! 🎉)');
         } else {
@@ -3948,11 +3964,22 @@
 
     if (deficit) {
       parts.push('\n🎯 <b>Необходимо ресурсов:</b>');
-      if (deficit.coupons !== undefined) {
-        parts.push(`• Купоны: <b>${formatInputNumber(deficit.coupons)}</b> 🎟️`);
-      }
-      if (deficit.puzzles !== undefined) {
-        parts.push(`• Пазлы: <b>${formatInputNumber(deficit.puzzles)}</b> 🧩`);
+      const defPuzzles = deficit.deficitPuzzles ?? deficit.puzzles;
+      const defCoupons = deficit.deficitCoupons ?? deficit.coupons;
+      const isPersonalOnly = Boolean(deficit.isOnlyPersonalPuzzles || deficit.deficitSummary?.isOnlyPersonalPuzzles);
+
+      if (isPersonalOnly) {
+        if (defPuzzles !== undefined && defPuzzles > 0) {
+          parts.push(`• Личные пазлы: <b>${formatInputNumber(defPuzzles)}</b> 🧩`);
+        }
+        parts.push(`• Ресурс прокачки: <b>Личные медали</b> 🧩 (купоны не применимы)`);
+      } else {
+        if (defCoupons !== undefined) {
+          parts.push(`• Купоны: <b>${formatInputNumber(defCoupons)}</b> 🎟️`);
+        }
+        if (defPuzzles !== undefined && defPuzzles > 0) {
+          parts.push(`• Пазлы: <b>${formatInputNumber(defPuzzles)}</b> 🧩`);
+        }
       }
       if (deficit.medalsRemaining !== undefined) {
         parts.push(`• Медалей до максимума (5-5-5-5): <b>${deficit.medalsRemaining}</b>`);
@@ -3967,6 +3994,8 @@
 
     if (daysEstimate !== undefined && daysEstimate !== null) {
       parts.push(`\n⏳ <b>Прогноз завершения:</b> ~<b>${daysEstimate} дн.</b>`);
+    } else if (deficit && (deficit.isOnlyPersonalPuzzles || deficit.deficitSummary?.isOnlyPersonalPuzzles)) {
+      parts.push(`\n⏳ <b>Прогноз завершения:</b> <i>Зависит от личных наград (ивенты купонов не ускоряют)</i>`);
     }
 
     return parts.join('\n');
@@ -4513,8 +4542,11 @@
     formatDayRange,
     filterPlayersByOfficers,
     prioritizeFilteredOfficers,
+    totalPuzzlesForOfficer,
     isOfficerEligibleForSimulator,
+    isOfficerEligibleForEvents,
     getSimulatorEligibleOfficers,
+    getEventEligibleOfficers,
     USER_PERMISSIONS,
     PERMISSION_PRESETS,
     hasUserPermission,
