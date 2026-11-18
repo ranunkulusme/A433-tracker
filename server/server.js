@@ -43,52 +43,91 @@ function setServerOcrRunner(runner) {
   customOcrRunner = runner;
 }
 
+async function runOcrOnImageBuffer(imageBuffer, options = {}) {
+  if (typeof customOcrRunner === 'function') {
+    try {
+      const res = await customOcrRunner(imageBuffer, options);
+      if (res === null) return { success: false, error: 'ocr_null' };
+      if (typeof res === 'string') return { success: true, text: res };
+      if (res && typeof res.text === 'string') return { success: true, text: res.text, stock: res.stock };
+      if (res && res.stock) return { success: true, text: '', stock: res.stock };
+      if (res && (res.coupons !== undefined || res.puzzles !== undefined || res.starCoupons !== undefined)) {
+        return { success: true, text: '', stock: res };
+      }
+      if (res && typeof res === 'object') return { success: true, text: '', ...res };
+      return { success: true, text: '' };
+    } catch (err) {
+      console.warn('[OCR] Custom OCR runner error:', err.message);
+      return { success: false, error: 'ocr_error', message: err.message };
+    }
+  }
+
+  const { execFile } = require('node:child_process');
+  const os = require('node:os');
+  const tempPath = path.join(os.tmpdir(), `ocr_scan_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
+
+  try {
+    await fs.promises.writeFile(tempPath, imageBuffer);
+    const ocrText = await new Promise((resolve, reject) => {
+      execFile('tesseract', [tempPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 25000 }, (error, stdout) => {
+        if (error) return reject(error);
+        resolve(stdout || '');
+      });
+    });
+    return { success: true, text: ocrText || '' };
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.message?.includes('not found'))) {
+      return { success: false, error: 'tesseract_not_installed', message: 'Tesseract OCR не установлен на сервере' };
+    }
+    return { success: false, error: 'ocr_failed', message: err.message || 'Ошибка распознавания текста' };
+  } finally {
+    fs.promises.unlink(tempPath).catch(() => {});
+  }
+}
+
 async function tryServerOcr(imageBufferOrPath) {
   if (typeof customOcrRunner === 'function') {
     try {
-      const res = await customOcrRunner(imageBufferOrPath);
-      return res;
+      const direct = await customOcrRunner(imageBufferOrPath);
+      if (direct === null) return null;
+      if (direct && (direct.coupons !== undefined || direct.puzzles !== undefined || direct.starCoupons !== undefined)) {
+        return direct;
+      }
+      if (direct && direct.stock) {
+        return direct.stock;
+      }
+      if (typeof direct === 'string') {
+        const parsed = logic.parseWarehouseScreenshotText(direct);
+        return parsed && parsed.isWarehouse ? parsed.stock : null;
+      }
     } catch (err) {
       console.warn('[OCR] Custom OCR runner error:', err.message);
       return null;
     }
   }
 
-  try {
-    const { execFile } = require('node:child_process');
-    const os = require('node:os');
-
-    let filePath = imageBufferOrPath;
-    let tempCreated = false;
-    if (Buffer.isBuffer(imageBufferOrPath)) {
-      filePath = path.join(os.tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
-      await fs.promises.writeFile(filePath, imageBufferOrPath);
-      tempCreated = true;
-    }
-
+  let buf = imageBufferOrPath;
+  if (typeof imageBufferOrPath === 'string') {
     try {
-      const ocrText = await new Promise((resolve, reject) => {
-        execFile('tesseract', [filePath, 'stdout', '-l', 'eng+rus'], { timeout: 15000 }, (error, stdout) => {
-          if (error) return reject(error);
-          resolve(stdout || '');
-        });
-      });
-
-      if (ocrText && ocrText.trim()) {
-        const parsedStock = logic.parseWarehouseScreenshotText(ocrText);
-        if (parsedStock && (parsedStock.coupons > 0 || parsedStock.puzzles > 0 || parsedStock.starCoupons > 0)) {
-          return parsedStock;
-        }
-      }
+      buf = await fs.promises.readFile(imageBufferOrPath);
+    } catch (_) {
       return null;
-    } finally {
-      if (tempCreated) {
-        fs.promises.unlink(filePath).catch(() => {});
-      }
     }
-  } catch (ocrErr) {
-    return null;
   }
+  const ocrRes = await runOcrOnImageBuffer(buf);
+  if (!ocrRes || !ocrRes.success) return null;
+  if (ocrRes.stock) return ocrRes.stock;
+  if (!ocrRes.text || !ocrRes.text.trim()) return null;
+  const parsedStock = logic.parseWarehouseScreenshotText(ocrRes.text);
+  if (parsedStock && parsedStock.stock && (
+    parsedStock.stock.coupons > 0 ||
+    parsedStock.stock.puzzles > 0 ||
+    parsedStock.stock.starCoupons > 0 ||
+    parsedStock.stock.legendaryStars1 > 0
+  )) {
+    return parsedStock.stock;
+  }
+  return null;
 }
 
 function sendJson(res, statusCode, data) {
@@ -1133,6 +1172,98 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const officerId = myOfficerMatch[1];
       officerProgression.deleteOfficer(activePlayerId, officerId);
       return sendJson(res, 200, { success: true });
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // OCR SCREENSHOT SCANNING (ALL CLIENTS & ROLES)
+    // ─────────────────────────────────────────────────────────
+    if (pathname === '/api/ocr/scan' && req.method === 'POST') {
+      if (!requireAuth(req, res)) return;
+
+      const rawImages = Array.isArray(body.images) ? body.images : (body.image ? [body.image] : []);
+      if (!rawImages.length) {
+        return sendError(res, 400, 'NO_IMAGES', 'Не переданы изображения для распознавания');
+      }
+
+      let accumulated = { sector: {}, stock: {} };
+      let allRecognizedFields = [];
+      let allRawTexts = [];
+      let detectedTypes = [];
+      let processedCount = 0;
+      let lastError = null;
+
+      for (const imgItem of rawImages) {
+        let buf = null;
+        if (typeof imgItem === 'string') {
+          const match = imgItem.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/);
+          const base64Str = match ? match[1] : imgItem;
+          try {
+            buf = Buffer.from(base64Str, 'base64');
+          } catch (_) {
+            continue;
+          }
+        } else if (Buffer.isBuffer(imgItem)) {
+          buf = imgItem;
+        }
+
+        if (!buf || buf.length === 0) continue;
+
+        const ocrRes = await runOcrOnImageBuffer(buf);
+        if (!ocrRes.success) {
+          lastError = ocrRes;
+          continue;
+        }
+
+        const rawText = ocrRes.text || '';
+        if (rawText) {
+          allRawTexts.push(rawText);
+        }
+
+        if (ocrRes.stock && Object.keys(ocrRes.stock).length > 0) {
+          accumulated = logic.mergeScanResults(accumulated, {
+            isWarehouse: true,
+            stock: ocrRes.stock
+          });
+          detectedTypes.push('warehouse');
+          allRecognizedFields.push(...Object.keys(ocrRes.stock));
+          processedCount++;
+          continue;
+        }
+
+        const parsed = logic.parseSmartScanText(rawText);
+        detectedTypes.push(parsed.detectedType);
+        if (parsed.recognizedFields && parsed.recognizedFields.length > 0) {
+          allRecognizedFields.push(...parsed.recognizedFields);
+        }
+
+        const currentScan = {
+          isProfile: parsed.isProfile,
+          isWarehouse: parsed.isWarehouse,
+          sector: parsed.sector || {},
+          stock: parsed.stock || {},
+        };
+        accumulated = logic.mergeScanResults(accumulated, currentScan);
+        processedCount++;
+      }
+
+      if (processedCount === 0 && lastError) {
+        return sendError(res, 500, lastError.error || 'OCR_ERROR', lastError.message || 'Ошибка распознавания');
+      }
+
+      const uniqueFields = Array.from(new Set(allRecognizedFields));
+      const hasRecognizedData = uniqueFields.length > 0;
+      const primaryType = detectedTypes.find(t => t !== 'unknown') || 'unknown';
+
+      return sendJson(res, 200, {
+        success: true,
+        detectedType: primaryType,
+        hasRecognizedData,
+        sector: accumulated.sector || {},
+        stock: accumulated.stock || {},
+        recognizedFields: uniqueFields,
+        imagesProcessed: processedCount,
+        rawText: allRawTexts.join('\n\n--- [След. скриншот] ---\n\n')
+      });
     }
 
     // ─────────────────────────────────────────────────────────
@@ -3000,5 +3131,6 @@ module.exports = {
   handleTelegramUpdate,
   syncTelegramBotInfoAndPolling,
   setServerOcrRunner,
+  runOcrOnImageBuffer,
   tryServerOcr
 };

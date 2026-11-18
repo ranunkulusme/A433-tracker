@@ -1461,6 +1461,24 @@ select option { background: var(--bg3); }
   color: #ff7b72;
 }
 
+.ocr-detected-input {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25) !important;
+}
+
+.ocr-detected-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .scanner-section {
   background: var(--bg3);
   border: 1px solid var(--border);

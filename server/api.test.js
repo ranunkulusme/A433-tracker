@@ -6746,6 +6746,82 @@ test('TMA R4/R5 events CRUD, smart autopick, sector dossier viewing and compact 
   }
 });
 
+test('POST /api/ocr/scan authenticates, processes screenshots and returns recognized fields report', async () => {
+  const { startServer, setServerOcrRunner } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Unauthenticated request -> 401
+    const unauthRes = await fetch(`${baseUrl}/api/ocr/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: ['data:image/jpeg;base64,ZmFrZQ=='] })
+    });
+    assert.equal(unauthRes.status, 401);
+
+    // 2. Login under admin
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'admin123' })
+    });
+    assert.equal(loginRes.status, 200);
+    const { token: adminToken } = await loginRes.json();
+    assert(adminToken);
+
+    // 3. Empty images -> 400
+    const emptyRes = await fetch(`${baseUrl}/api/ocr/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ images: [] })
+    });
+    assert.equal(emptyRes.status, 400);
+
+    // 4. Warehouse screenshot OCR
+    setServerOcrRunner(async () => ({
+      text: `Купон готовности офицера\nВ наличии: 350,000\nМедаль легендарного офицера\nВ наличии: 1,800`
+    }));
+
+    const whRes = await fetch(`${baseUrl}/api/ocr/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ images: ['data:image/jpeg;base64,ZmFrZQ=='] })
+    });
+    assert.equal(whRes.status, 200);
+    const whData = await whRes.json();
+    assert.equal(whData.success, true);
+    assert.equal(whData.detectedType, 'warehouse');
+    assert.equal(whData.hasRecognizedData, true);
+    assert.equal(whData.stock.coupons, 350000);
+    assert.equal(whData.stock.puzzles, 1800);
+    assert.ok(whData.recognizedFields.includes('coupons'));
+    assert.ok(whData.recognizedFields.includes('puzzles'));
+
+    // 5. Unrecognized / blank screenshot
+    setServerOcrRunner(async () => ({
+      text: `Текст без склада и без профиля 123`
+    }));
+
+    const blankRes = await fetch(`${baseUrl}/api/ocr/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ images: ['data:image/jpeg;base64,ZmFrZQ=='] })
+    });
+    assert.equal(blankRes.status, 200);
+    const blankData = await blankRes.json();
+    assert.equal(blankData.success, true);
+    assert.equal(blankData.detectedType, 'unknown');
+    assert.equal(blankData.hasRecognizedData, false);
+    assert.deepEqual(blankData.recognizedFields, []);
+    assert.deepEqual(blankData.recognizedFields, []);
+  } finally {
+    setServerOcrRunner(null);
+    await server.close();
+  }
+});
+
 
 
 

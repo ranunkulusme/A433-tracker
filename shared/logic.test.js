@@ -46,6 +46,8 @@ const {
   cleanOcrNumber,
   parseProfileScreenshotText,
   parseWarehouseScreenshotText,
+  classifyScreenshotText,
+  parseSmartScanText,
   mergeScanResults,
   normalizeStock,
   USER_PERMISSIONS,
@@ -1243,6 +1245,125 @@ TERT звезда!
 
   const profileCheck = parseProfileScreenshotText(realOcrText);
   assert.strictEqual(profileCheck.isProfile, false, 'Warehouse with exclusive star Natalia must not be parsed as player profile');
+});
+
+test('parseWarehouseScreenshotText recognizes English and German game localization', () => {
+  // English warehouse inventory
+  const enWarehouseText = `
+Officer Readiness Coupon
+In Stock: 520,100
+Legendary Officer Medal
+Owned: 3,450
+Star Readiness Coupon
+In Stock: 88,200
+Legendary Star I
+Owned: 1,230
+Legendary Star II
+Owned: 140
+Legendary Star III
+Owned: 35
+  `;
+  const enParsed = parseWarehouseScreenshotText(enWarehouseText);
+  assert.strictEqual(enParsed.isWarehouse, true);
+  assert.strictEqual(enParsed.stock.coupons, 520100);
+  assert.strictEqual(enParsed.stock.puzzles, 3450);
+  assert.strictEqual(enParsed.stock.starCoupons, 88200);
+  assert.strictEqual(enParsed.stock.legendaryStars1, 1230);
+  assert.strictEqual(enParsed.stock.legendaryStars2, 140);
+  assert.strictEqual(enParsed.stock.legendaryStars3, 35);
+  assert.ok(Array.isArray(enParsed.recognizedFields));
+  assert.strictEqual(enParsed.recognizedFields.includes('coupons'), true);
+  assert.strictEqual(enParsed.recognizedFields.includes('puzzles'), true);
+
+  // German warehouse inventory
+  const deWarehouseText = `
+Offiziersbereitschafts-Gutschein
+Vorhanden: 15,200
+Legendäre Offiziersmedaille
+Im Besitz: 820
+Sternbereitschafts-Gutschein
+Vorhanden: 4,500
+Legendärer Stern I
+110
+Im Besitz: 310
+Legendärer Stern II
+420
+Im Besitz: 45
+Legendärer Stern III
+960
+Im Besitz: 12
+  `;
+  const deParsed = parseWarehouseScreenshotText(deWarehouseText);
+  assert.strictEqual(deParsed.isWarehouse, true);
+  assert.strictEqual(deParsed.stock.coupons, 15200);
+  assert.strictEqual(deParsed.stock.puzzles, 820);
+  assert.strictEqual(deParsed.stock.starCoupons, 4500);
+  assert.strictEqual(deParsed.stock.legendaryStars1, 310);
+  assert.strictEqual(deParsed.stock.legendaryStars2, 45);
+  assert.strictEqual(deParsed.stock.legendaryStars3, 12);
+  assert.strictEqual(deParsed.recognizedFields.includes('coupons'), true);
+});
+
+test('parseProfileScreenshotText recognizes English and German player profiles', () => {
+  // English profile
+  const enProfileText = `
+[USA]EagleOne
+Power: 145,200,300
+VIP 14
+Kills: 65,400,200
+Kill Points: 5,120,400,000
+  `;
+  const enProfile = parseProfileScreenshotText(enProfileText);
+  assert.strictEqual(enProfile.isProfile, true);
+  assert.strictEqual(enProfile.sector.allianceTag, 'USA');
+  assert.strictEqual(enProfile.sector.name, 'EagleOne');
+  assert.strictEqual(enProfile.sector.power, 145200300);
+  assert.strictEqual(enProfile.sector.kills, 65400200);
+  assert.strictEqual(enProfile.sector.killPoints, 5120400000);
+  assert.ok(Array.isArray(enProfile.recognizedFields));
+  assert.strictEqual(enProfile.recognizedFields.includes('power'), true);
+
+  // German profile
+  const deProfileText = `
+[GER]Kaiser
+Macht: 88,100,500
+Eliminierungen: 32,400,000
+Tötungspunkte: 3.5B
+  `;
+  const deProfile = parseProfileScreenshotText(deProfileText);
+  assert.strictEqual(deProfile.isProfile, true);
+  assert.strictEqual(deProfile.sector.allianceTag, 'GER');
+  assert.strictEqual(deProfile.sector.name, 'Kaiser');
+  assert.strictEqual(deProfile.sector.power, 88100500);
+  assert.strictEqual(deProfile.sector.kills, 32400000);
+  assert.strictEqual(deProfile.sector.killPoints, 3500000000);
+  assert.strictEqual(deProfile.recognizedFields.includes('power'), true);
+});
+
+test('parseSmartScanText classifies screenshots and returns recognized fields report', () => {
+  assert.strictEqual(typeof parseSmartScanText, 'function');
+  assert.strictEqual(typeof classifyScreenshotText, 'function');
+
+  // Blank / noisy image
+  const blankScan = parseSmartScanText('случайный текст без игровых данных и цифр');
+  assert.strictEqual(blankScan.hasRecognizedData, false);
+  assert.strictEqual(blankScan.detectedType, 'unknown');
+  assert.deepStrictEqual(blankScan.recognizedFields, []);
+
+  // Warehouse scan
+  const whScan = parseSmartScanText(`Купон готовности офицера\nВ наличии: 10,000`);
+  assert.strictEqual(whScan.hasRecognizedData, true);
+  assert.strictEqual(whScan.detectedType, 'warehouse');
+  assert.strictEqual(whScan.stock.coupons, 10000);
+  assert.deepStrictEqual(whScan.recognizedFields, ['coupons']);
+
+  // Profile scan
+  const profScan = parseSmartScanText(`[RUS]Лидер\nСила: 50,000,000\nУбито: 10,000,000`);
+  assert.strictEqual(profScan.hasRecognizedData, true);
+  assert.strictEqual(profScan.detectedType, 'profile');
+  assert.strictEqual(profScan.sector.power, 50000000);
+  assert.strictEqual(profScan.sector.kills, 10000000);
+  assert.strictEqual(profScan.recognizedFields.includes('power'), true);
 });
 
 test('mergeScanResults combines multiple screenshots without losing or overwriting data', () => {

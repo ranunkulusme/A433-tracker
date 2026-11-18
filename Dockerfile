@@ -2,8 +2,12 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apk add --no-cache ca-certificates tzdata curl
+# Install system dependencies including Tesseract OCR for server-side screenshot scanning
+RUN apk add --no-cache ca-certificates tzdata curl \
+    tesseract-ocr \
+    tesseract-ocr-data-rus \
+    tesseract-ocr-data-eng \
+    tesseract-ocr-data-deu
 
 # Install Mieru binary for anti-censorship tunnel
 ARG MIERU_VERSION=3.39.0

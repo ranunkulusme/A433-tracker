@@ -315,42 +315,52 @@
 
   function parseProfileScreenshotText(text) {
     if (!text || typeof text !== 'string') {
-      return { isProfile: false, sector: {} };
+      return { isProfile: false, sector: {}, recognizedFields: [] };
     }
 
     const sector = {};
+    const recognizedFields = [];
 
     const tagMatch = text.match(/\[([A-Za-zА-Яа-яЁё0-9_#]{2,12})\]\s*([^\r\n,;:()]{1,35})/);
     if (tagMatch) {
       sector.allianceTag = tagMatch[1].trim();
       sector.name = tagMatch[2].trim();
+      recognizedFields.push('allianceTag', 'name');
     } else {
-      const nameMatch = text.match(/(?:Ник(?:нейм)?|Имя|Командир)\s*[:：]?\s*([^\r\n,;:()]{1,35})/i);
+      const nameMatch = text.match(/(?:Ник(?:нейм)?|Имя|Командир|Commander|Name|Kommandant)\s*[:：]?\s*([^\r\n,;:()]{1,35})/i);
       if (nameMatch) {
         const rawName = nameMatch[1].trim();
         const innerTag = rawName.match(/^\[([A-Za-zА-Яа-яЁё0-9_#]+)\]\s*(.*)$/);
         if (innerTag) {
           sector.allianceTag = innerTag[1].trim();
           sector.name = innerTag[2].trim();
+          recognizedFields.push('allianceTag', 'name');
         } else {
           sector.name = rawName;
+          recognizedFields.push('name');
         }
       }
     }
 
-    const powerMatch = text.match(/(?:Сила|Мощь|Power)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+    const powerMatch = text.match(/(?:Сила|Мощь|Power|Macht|Kraft)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
     if (powerMatch) {
       const powerVal = cleanOcrNumber(powerMatch[1]);
-      if (powerVal > 0) sector.power = powerVal;
+      if (powerVal > 0) {
+        sector.power = powerVal;
+        recognizedFields.push('power');
+      }
     }
 
-    const killsMatch = text.match(/(?:Уничтожено(?:\s+юнитов|\s+войск)?|Убито|Kills)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+    const killsMatch = text.match(/(?:Уничтожено(?:\s+юнитов|\s+войск)?|Убито|Kills|Eliminierungen|Getötet|Besiegt)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
     if (killsMatch) {
       const killsVal = cleanOcrNumber(killsMatch[1]);
-      if (killsVal > 0) sector.kills = killsVal;
+      if (killsVal > 0) {
+        sector.kills = killsVal;
+        recognizedFields.push('kills');
+      }
     }
 
-    const kpRegex = /(?:Очки\s+(?:за\s+)?убийств[ао]?|Kill\s*Points?)\s*[:：]?\s*([0-9OoLlI.,\s']+(?:[KkMmBb])?)/gi;
+    const kpRegex = /(?:Очки\s+(?:за\s+)?убийств[ао]?|Kill\s*Points?|Tötungspunkte|Eliminierungspunkte)\s*[:：]?\s*([0-9OoLlI.,\s']+(?:[KkMmBb])?)/gi;
     let exactKp = 0;
     let roundedKp = 0;
     let match;
@@ -369,50 +379,51 @@
     const finalKp = exactKp || roundedKp;
     if (finalKp > 0) {
       sector.killPoints = finalKp;
+      recognizedFields.push('killPoints');
     }
 
     const hasStats = Boolean(sector.power || sector.kills || sector.killPoints);
-    const hasWarehouseMarkers = /(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|предмет|звезд|опыт|купон\s+готовност|медал[ья]\s+легендарн)/i.test(text);
+    const hasWarehouseMarkers = /(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|предмет|звезд|опыт|купон\s+готовност|медал[ья]\s+легендарн|officer\s+readiness|in\s*stock|vorhanden|im\s*besitz)/i.test(text);
 
     // Если в скриншоте есть явные складские маркеры и нет боевых параметров (сила, убийства) — это инвентарь/склад, а не профиль
     if (hasWarehouseMarkers && !hasStats) {
-      return { isProfile: false, sector: {} };
+      return { isProfile: false, sector: {}, recognizedFields: [] };
     }
 
     const isProfile = Boolean(hasStats || sector.name || sector.allianceTag);
-    return { isProfile, sector };
+    return { isProfile, sector, recognizedFields };
   }
 
   const WAREHOUSE_ITEM_DEFINITIONS = [
     {
       key: 'coupons',
-      pattern: /Купон\s+готовности\s+офицера/i,
+      pattern: /(?:Купон\s+готовности\s+офицера|Officer\s+Readiness\s+Coupon|Offiziersbereitschafts-Gutschein|Offiziersgutschein)/i,
     },
     {
       key: 'puzzles',
-      pattern: /Медаль\s+легендарного\s+офицера/i,
+      pattern: /(?:Медаль\s+легендарного\s+офицера|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille)/i,
     },
     {
       key: 'starCoupons',
-      pattern: /Купон\s+готовности\s+звезд[ыае]?/i,
+      pattern: /(?:Купон\s+готовности\s+звезд[ыае]?|Star\s+Readiness\s+Coupon|Sternbereitschafts-Gutschein|Sterngutschein)/i,
     },
     {
       key: 'legendaryStars3',
-      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
     {
       key: 'legendaryStars2',
-      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
     {
       key: 'legendaryStars1',
-      pattern: /(?:110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
   ];
 
   function parseWarehouseScreenshotText(text) {
     if (!text || typeof text !== 'string') {
-      return { isWarehouse: false, stock: {} };
+      return { isWarehouse: false, stock: {}, recognizedFields: [] };
     }
 
     const stock = {};
@@ -424,8 +435,8 @@
       const startIndex = match.index + match[0].length;
       const windowText = text.slice(startIndex, startIndex + 250);
 
-      // Ищем количество: "В наличии: <число>" строго без захвата переводов строк следующей карточки
-      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
+      // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>" строго без захвата переводов строк следующей карточки
+      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
       if (countMatch) {
         const val = cleanOcrNumber(countMatch[1]);
         if (val > 0) {
@@ -446,8 +457,75 @@
       }
     }
 
-    const isWarehouse = Object.keys(stock).length > 0;
-    return { isWarehouse, stock };
+    const recognizedFields = Object.keys(stock).filter(k => typeof stock[k] === 'number');
+    const isWarehouse = recognizedFields.length > 0;
+    return { isWarehouse, stock, recognizedFields };
+  }
+
+  function classifyScreenshotText(text) {
+    if (!text || typeof text !== 'string') return 'unknown';
+    const shopParsed = parseExchangeShopScreenshotText(text);
+    if (shopParsed && shopParsed.length > 0) return 'exchange_shop';
+    const whParsed = parseWarehouseScreenshotText(text);
+    if (whParsed && whParsed.isWarehouse) return 'warehouse';
+    const profParsed = parseProfileScreenshotText(text);
+    if (profParsed && profParsed.isProfile) return 'profile';
+    return 'unknown';
+  }
+
+  function parseSmartScanText(text) {
+    if (!text || typeof text !== 'string') {
+      return {
+        detectedType: 'unknown',
+        hasRecognizedData: false,
+        isWarehouse: false,
+        isProfile: false,
+        isExchangeShop: false,
+        sector: {},
+        stock: {},
+        officers: [],
+        recognizedFields: [],
+        rawText: text || '',
+      };
+    }
+    const detectedType = classifyScreenshotText(text);
+    const profParsed = parseProfileScreenshotText(text);
+    const whParsed = parseWarehouseScreenshotText(text);
+    const shopParsed = parseExchangeShopScreenshotText(text);
+
+    const isWarehouse = whParsed.isWarehouse;
+    const isProfile = isWarehouse ? false : profParsed.isProfile;
+    const isExchangeShop = detectedType === 'exchange_shop';
+
+    const sector = isProfile ? profParsed.sector : {};
+    const stock = whParsed.stock || {};
+    const officers = isExchangeShop ? shopParsed : [];
+
+    const recognizedFields = [];
+    if (isWarehouse && whParsed.recognizedFields) {
+      recognizedFields.push(...whParsed.recognizedFields);
+    }
+    if (isProfile && profParsed.recognizedFields) {
+      recognizedFields.push(...profParsed.recognizedFields);
+    }
+    if (isExchangeShop && officers.length > 0) {
+      recognizedFields.push('exchange_shop_officers');
+    }
+
+    const hasRecognizedData = recognizedFields.length > 0;
+
+    return {
+      detectedType,
+      hasRecognizedData,
+      isWarehouse,
+      isProfile,
+      isExchangeShop,
+      sector,
+      stock,
+      officers,
+      recognizedFields,
+      rawText: text,
+    };
   }
 
   function mergeScanResults(accumulated = {}, nextScan = {}) {
@@ -4623,6 +4701,8 @@
     cleanOcrNumber,
     parseProfileScreenshotText,
     parseWarehouseScreenshotText,
+    classifyScreenshotText,
+    parseSmartScanText,
     mergeScanResults,
     normalizeStock,
     OFFICER_TYPES,
