@@ -82,6 +82,62 @@ if (typeof window !== 'undefined' && typeof window.toast === 'undefined') {
   window.toast = doTmaToast;
 }
 
+// Safe fallback for fmtNum
+function doTmaFmtNum(value, digits = 0) {
+  if (typeof window !== 'undefined' && typeof window.fmtNum === 'function' && window.fmtNum !== doTmaFmtNum) {
+    return window.fmtNum(value, digits);
+  }
+  if (value === null || value === undefined || isNaN(value)) return '0';
+  const n = Number(value);
+  if (digits > 0) {
+    return n.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+  return n.toLocaleString('ru-RU');
+}
+if (_tmaGlobal && typeof _tmaGlobal.fmtNum === 'undefined') {
+  _tmaGlobal.fmtNum = doTmaFmtNum;
+}
+if (typeof window !== 'undefined' && typeof window.fmtNum === 'undefined') {
+  window.fmtNum = doTmaFmtNum;
+}
+
+// Safe fallback for escapeHtml
+function doTmaEscapeHtml(str) {
+  if (typeof window !== 'undefined' && typeof window.escapeHtml === 'function' && window.escapeHtml !== doTmaEscapeHtml) {
+    return window.escapeHtml(str);
+  }
+  if (typeof logic !== 'undefined' && typeof logic.escapeHtml === 'function') {
+    return logic.escapeHtml(str);
+  }
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+if (_tmaGlobal && typeof _tmaGlobal.escapeHtml === 'undefined') {
+  _tmaGlobal.escapeHtml = doTmaEscapeHtml;
+}
+if (typeof window !== 'undefined' && typeof window.escapeHtml === 'undefined') {
+  window.escapeHtml = doTmaEscapeHtml;
+}
+
+// Safe fallback for getCatalogOfficer
+function doTmaGetCatalogOfficer(id) {
+  if (typeof window !== 'undefined' && typeof window.getCatalogOfficer === 'function' && window.getCatalogOfficer !== doTmaGetCatalogOfficer) {
+    return window.getCatalogOfficer(id);
+  }
+  const catalog = (typeof state !== 'undefined' && (state.officerCatalog || state.catalog)) || [];
+  return catalog.find(o => String(o.id) === String(id)) || null;
+}
+if (_tmaGlobal && typeof _tmaGlobal.getCatalogOfficer === 'undefined') {
+  _tmaGlobal.getCatalogOfficer = doTmaGetCatalogOfficer;
+}
+if (typeof window !== 'undefined' && typeof window.getCatalogOfficer === 'undefined') {
+  window.getCatalogOfficer = doTmaGetCatalogOfficer;
+}
+
 function isTmaMode() {
   if (typeof window === 'undefined') return false;
   if (window.TelegramWebviewProxy) {
@@ -682,33 +738,124 @@ function switchTmaEventsSubTab(subTab) {
   tmaEventsSubTab = subTab;
   tmaHaptic('light');
 
-  const isUp = subTab === 'upcoming';
+  const listActive = document.getElementById('tma-events-list-active');
   const listUp = document.getElementById('tma-events-list-upcoming');
   const listPast = document.getElementById('tma-events-list-past');
-  if (listUp) listUp.style.display = isUp ? 'block' : 'none';
-  if (listPast) listPast.style.display = isUp ? 'none' : 'block';
+  if (listActive) listActive.style.display = subTab === 'active' ? 'block' : 'none';
+  if (listUp) listUp.style.display = subTab === 'upcoming' ? 'block' : 'none';
+  if (listPast) listPast.style.display = subTab === 'past' ? 'block' : 'none';
 
+  const btnActive = document.getElementById('tma-events-subtab-active');
   const btnUp = document.getElementById('tma-events-subtab-upcoming');
   const btnPast = document.getElementById('tma-events-subtab-past');
-  if (btnUp && btnPast) {
-    if (isUp) {
-      btnUp.style.backgroundColor = 'rgba(245, 158, 11, 0.2)';
-      btnUp.style.color = '#fbbf24';
-      btnUp.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-      btnPast.style.backgroundColor = 'transparent';
-      btnPast.style.color = '#9ca3af';
-      btnPast.style.borderColor = 'transparent';
-    } else {
-      btnPast.style.backgroundColor = 'rgba(245, 158, 11, 0.2)';
-      btnPast.style.color = '#fbbf24';
-      btnPast.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-      btnUp.style.backgroundColor = 'transparent';
-      btnUp.style.color = '#9ca3af';
-      btnUp.style.borderColor = 'transparent';
-    }
-  }
+  [
+    { btn: btnActive, key: 'active' },
+    { btn: btnUp, key: 'upcoming' },
+    { btn: btnPast, key: 'past' }
+  ].forEach(({ btn, key }) => {
+    if (!btn) return;
+    const isSelected = subTab === key;
+    btn.style.backgroundColor = isSelected ? 'rgba(245, 158, 11, 0.2)' : 'transparent';
+    btn.style.color = isSelected ? '#fbbf24' : '#9ca3af';
+    btn.style.borderColor = isSelected ? 'rgba(245, 158, 11, 0.3)' : 'transparent';
+  });
 
   updateTmaMainButton();
+}
+
+function renderTmaCabinetEventBanner(eventsList, playerObj) {
+  const events = eventsList || (typeof state !== 'undefined' ? state.events : []) || [];
+  const player = playerObj || (typeof myCabinetProfile !== 'undefined' ? myCabinetProfile : null) || {};
+  const myPlayerId = player.id || (typeof currentUser !== 'undefined' ? currentUser?.playerId : null);
+
+  const classifyFn = (typeof logic !== 'undefined' && logic.classifyEvents)
+    || (typeof classifyEvents === 'function' ? classifyEvents : null);
+
+  let classified;
+  if (classifyFn) {
+    classified = classifyFn(events);
+  } else {
+    const now = Date.now();
+    const active = [];
+    const upcoming = [];
+    const past = [];
+    events.forEach(e => {
+      if (e.status === 'completed' || e.isCompleted) { past.push(e); return; }
+      const s = e.startDate ? new Date(e.startDate).getTime() : (e.dateStart ? new Date(e.dateStart).getTime() : 0);
+      const end = e.endDate ? new Date(e.endDate).getTime() : (e.dateEnd ? new Date(e.dateEnd).getTime() : (s ? s + 3 * 86400000 : 0));
+      if (s && now < s) upcoming.push(e);
+      else if (s && end && now >= s && now <= end) active.push(e);
+      else if (end && now > end) past.push(e);
+      else if (e.status === 'active') active.push(e);
+      else upcoming.push(e);
+    });
+    classified = { active, upcoming, past };
+  }
+
+  const currentEvent = (classified.active && classified.active[0]) || null;
+  const nextUpcoming = (classified.upcoming && classified.upcoming[0]) || null;
+  const targetEvent = currentEvent || nextUpcoming;
+
+  if (!targetEvent) {
+    return `
+      <div class="tma-card" style="font-size:12.5px;color:#9ca3af;text-align:center;padding:16px">
+        Нет активных или запланированных событий
+      </div>
+    `;
+  }
+
+  const isActive = !!currentEvent;
+  const evDateStr = (targetEvent.startDate || targetEvent.dateStart)
+    ? (isActive
+        ? 'Идёт сейчас'
+        : 'Старт: ' + new Date(targetEvent.startDate || targetEvent.dateStart).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ', 00:00 UTC')
+    : (isActive ? 'Идёт сейчас' : 'Скоро');
+
+  const myReg = (targetEvent.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
+
+  let regStatusSnippet = '';
+  if (myReg) {
+    const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+    regStatusSnippet = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:16px">🥇</span>
+          <span style="font-size:12px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeText}</span>
+        </div>
+        <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">Записан</span>
+      </div>
+    `;
+  } else {
+    regStatusSnippet = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
+        <span style="font-size:12px;color:#9ca3af">Регистрация открыта</span>
+        <button type="button" onclick="event.stopPropagation();openTmaEventDetail(${targetEvent.id})" class="tma-event-reg-btn" style="padding:4px 12px;font-size:11.5px">
+          Записаться
+        </button>
+      </div>
+    `;
+  }
+
+  const badgeBg = isActive ? 'rgba(34,197,94,0.2)' : 'rgba(14,165,233,0.2)';
+  const badgeColor = isActive ? '#4ade80' : '#38bdf8';
+  const badgeBorder = isActive ? 'rgba(34,197,94,0.3)' : 'rgba(14,165,233,0.3)';
+  const badgeLabel = isActive ? '🟢 Идёт сейчас • Подробнее ↗' : '◎ Ближайший ивент • Подробнее ↗';
+
+  return `
+    <!-- Next/Active Event Quick Card -->
+    <div class="tma-card" onclick="openTmaEventDetail(${targetEvent.id})" style="background:linear-gradient(135deg,#17202e 0%,#161a22 100%);border-color:${badgeBorder};cursor:pointer">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="padding:2px 8px;font-size:10px;font-weight:700;background:${badgeBg};color:${badgeColor};border-radius:6px;border:1px solid ${badgeBorder}">
+          ${badgeLabel}
+        </span>
+        <span style="font-size:11.5px;color:#9ca3af">${escapeHtml(evDateStr)}</span>
+      </div>
+      <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">
+        ${escapeHtml(targetEvent.title || targetEvent.name || 'Событие #' + targetEvent.id)}
+      </div>
+      ${regStatusSnippet}
+    </div>
+  `;
 }
 
 function renderTmaCabinet() {
@@ -834,64 +981,8 @@ function renderTmaCabinet() {
     }
   }
 
-  // Next Upcoming Event
-  const upcomingEvents = (state.events || [])
-    .filter(e => !e.isCompleted && e.status !== 'completed')
-    .sort((a, b) => new Date(a.startDate || a.dateStart || 0) - new Date(b.startDate || b.dateStart || 0));
-  const nextEvent = upcomingEvents[0] || null;
-
-  let nextEventHtml = '';
-  if (nextEvent) {
-    const evDateStr = (nextEvent.startDate || nextEvent.dateStart)
-      ? new Date(nextEvent.startDate || nextEvent.dateStart).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ', 00:00 UTC'
-      : 'Скоро';
-    const myReg = (nextEvent.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(player.id || currentUser?.playerId));
-
-    let regStatusSnippet = '';
-    if (myReg) {
-      const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
-      regStatusSnippet = `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:16px">🥇</span>
-            <span style="font-size:12px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeText}</span>
-          </div>
-          <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">Записан</span>
-        </div>
-      `;
-    } else {
-      regStatusSnippet = `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
-          <span style="font-size:12px;color:#9ca3af">Регистрация открыта</span>
-          <button type="button" onclick="event.stopPropagation();openTmaEventDetail(${nextEvent.id})" class="tma-event-reg-btn" style="padding:4px 12px;font-size:11.5px">
-            Записаться
-          </button>
-        </div>
-      `;
-    }
-
-    nextEventHtml = `
-      <!-- Next Event Quick Card -->
-      <div class="tma-card" onclick="openTmaEventDetail(${nextEvent.id})" style="background:linear-gradient(135deg,#17202e 0%,#161a22 100%);border-color:rgba(14,165,233,0.3);cursor:pointer">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="padding:2px 8px;font-size:10px;font-weight:700;background:rgba(14,165,233,0.2);color:#38bdf8;border-radius:6px;border:1px solid rgba(14,165,233,0.3)">
-            Ближайший ивент • Подробнее ↗
-          </span>
-          <span style="font-size:11.5px;color:#9ca3af">${escapeHtml(evDateStr)}</span>
-        </div>
-        <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">
-          ${escapeHtml(nextEvent.title || nextEvent.name || 'Событие #' + nextEvent.id)}
-        </div>
-        ${regStatusSnippet}
-      </div>
-    `;
-  } else {
-    nextEventHtml = `
-      <div class="tma-card" style="font-size:12.5px;color:#9ca3af;text-align:center;padding:16px">
-        Нет запланированных событий в ближайшие дни
-      </div>
-    `;
-  }
+  // Next/Active Event Quick Card
+  const nextEventHtml = renderTmaCabinetEventBanner(state.events, player);
 
   const userSectors = getUserSectors();
   let sectorSwitcherHtml = '';
@@ -1059,135 +1150,154 @@ function renderTmaEvents() {
   const myPlayerId = player.id || currentUser?.playerId;
   const isStaff = currentUser?.rank === 'r4' || currentUser?.rank === 'r5' || (typeof logic !== 'undefined' && logic.hasUserPermission(currentUser, 'manage_events'));
 
-  // Sort upcoming and past events
-  const upcomingEvents = (state.events || [])
-    .filter(e => !e.isCompleted && e.status !== 'completed')
-    .sort((a, b) => new Date(a.startDate || a.dateStart || 0) - new Date(b.startDate || b.dateStart || 0));
+  // Classify events into active, upcoming, past
+  let activeEvents = [];
+  let upcomingEvents = [];
+  let pastEvents = [];
 
-  const pastEvents = (state.events || [])
-    .filter(e => e.isCompleted || e.status === 'completed')
-    .sort((a, b) => new Date(b.startDate || b.dateStart || 0) - new Date(a.startDate || a.dateStart || 0));
+  const classifyFn = (typeof logic !== 'undefined' && logic.classifyEvents)
+    || (typeof classifyEvents === 'function' ? classifyEvents : null);
 
-  // Upcoming HTML
-  let upcomingHtml = '';
-  if (upcomingEvents.length === 0) {
-    upcomingHtml = `
-      <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
-        <div style="font-size:32px;margin-bottom:8px">📅</div>
-        Нет активных предстоящих событий
-      </div>
-    `;
+  if (classifyFn) {
+    const c = classifyFn(state.events || []);
+    activeEvents = c.active;
+    upcomingEvents = c.upcoming;
+    pastEvents = c.past;
   } else {
-    upcomingHtml = upcomingEvents.map(ev => {
-      const myReg = (ev.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
-      const evTitle = ev.title || ev.name || ('Событие #' + ev.id);
-      const evIcon = getTmaEventIcon(evTitle);
+    const now = Date.now();
+    (state.events || []).forEach(ev => {
+      if (ev.status === 'completed' || ev.isCompleted) { pastEvents.push(ev); return; }
+      const s = ev.startDate ? new Date(ev.startDate).getTime() : 0;
+      const end = ev.endDate ? new Date(ev.endDate).getTime() : (s ? s + 3 * 86400000 : 0);
+      if (s && now < s) upcomingEvents.push(ev);
+      else if (s && end && now >= s && now <= end) activeEvents.push(ev);
+      else if (end && now > end) pastEvents.push(ev);
+      else if (ev.status === 'active') activeEvents.push(ev);
+      else upcomingEvents.push(ev);
+    });
+  }
 
-      const dStart = ev.startDate || ev.dateStart || ev.dateFrom;
-      const dEnd = ev.endDate || ev.dateEnd || ev.dateTo;
-      let evDateRange = '';
-      if (dStart) {
-        const sStr = new Date(dStart).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
-        if (dEnd) {
-          const eStr = new Date(dEnd).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
-          evDateRange = `${sStr} — ${eStr}`;
-        } else {
-          evDateRange = sStr;
-        }
+  function renderEventCard(ev, mode = 'upcoming') {
+    const myReg = (ev.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
+    const evTitle = ev.title || ev.name || ('Событие #' + ev.id);
+    const evIcon = getTmaEventIcon(evTitle);
+
+    const dStart = ev.startDate || ev.dateStart || ev.dateFrom;
+    const dEnd = ev.endDate || ev.dateEnd || ev.dateTo;
+    let evDateRange = '';
+    if (dStart) {
+      const sStr = new Date(dStart).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+      if (dEnd) {
+        const eStr = new Date(dEnd).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+        evDateRange = `${sStr} — ${eStr}`;
       } else {
-        evDateRange = 'Дата уточняется';
+        evDateRange = sStr;
       }
+    } else {
+      evDateRange = 'Дата уточняется';
+    }
 
-      const maxPlaces = (ev.places && ev.places.length) || ev.placesCount || ev.maxPlaces || 5;
+    const maxPlaces = (ev.places && ev.places.length) || ev.placesCount || ev.maxPlaces || 5;
 
-      // Status badge
-      let statusBadgeHtml = '';
-      if (myReg) {
-        const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
-        statusBadgeHtml = `
-          <span class="tma-badge-status is-gold">
-            Вы записаны (${placeStr})
-          </span>
-        `;
-      } else {
-        statusBadgeHtml = `
-          <span class="tma-badge-status is-green">
-            Запись
-          </span>
-        `;
-      }
+    let statusBadgeHtml = '';
+    if (mode === 'active') {
+      statusBadgeHtml = myReg
+        ? `<span class="tma-badge-status is-gold">Вы записаны (${(myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : '#' + myReg.desiredPlace})</span>`
+        : `<span class="tma-badge-status is-green" style="background:rgba(34,197,94,0.2);color:#4ade80;border-color:rgba(34,197,94,0.3)">🟢 Идёт сейчас</span>`;
+    } else {
+      statusBadgeHtml = myReg
+        ? `<span class="tma-badge-status is-gold">Вы записаны (${(myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : '#' + myReg.desiredPlace})</span>`
+        : `<span class="tma-badge-status is-green">Запись</span>`;
+    }
 
-      const staffPencilHtml = isStaff ? `
-        <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать событие">
-          ✏️
-        </button>
-      ` : '';
+    const staffPencilHtml = isStaff ? `
+      <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать событие">
+        ✏️
+      </button>
+    ` : '';
 
-      // Top-3 prizes snippet
-      const placesArr = (ev.places && ev.places.length > 0) ? ev.places : (ev.eventType?.places || []);
-      const top3 = placesArr.slice(0, 3);
-      let prizesSnippetHtml = '';
-      if (top3.length > 0) {
-        prizesSnippetHtml = `
-          <div style="display:grid;grid-template-columns:repeat(${Math.min(3, top3.length)}, 1fr);gap:6px;margin:10px 0">
-            ${top3.map(p => `
-              <div style="background:#1f242e;padding:6px;border-radius:8px;text-align:center;border:1px solid rgba(255,255,255,0.04)">
-                <span style="font-size:9.5px;color:#9ca3af;display:block">#${p.place} место</span>
-                <span style="font-size:11.5px;font-weight:800;color:#fbbf24">${fmtNum(p.coupons || 0)} 🎟️</span>
-              </div>
-            `).join('')}
-          </div>
-        `;
-      }
-
-      // My registration row if registered
-      let myRegBanner = '';
-      if (myReg) {
-        const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
-        myRegBanner = `
-          <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:6px 10px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:13px">🎯</span>
-              <span style="font-size:11px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeStr}</span>
+    const placesArr = (ev.places && ev.places.length > 0) ? ev.places : (ev.eventType?.places || []);
+    const top3 = placesArr.slice(0, 3);
+    let prizesSnippetHtml = '';
+    if (top3.length > 0) {
+      prizesSnippetHtml = `
+        <div style="display:grid;grid-template-columns:repeat(${Math.min(3, top3.length)}, 1fr);gap:6px;margin:10px 0">
+          ${top3.map(p => `
+            <div style="background:#1f242e;padding:6px;border-radius:8px;text-align:center;border:1px solid rgba(255,255,255,0.04)">
+              <span style="font-size:9.5px;color:#9ca3af;display:block">#${p.place} место</span>
+              <span style="font-size:11.5px;font-weight:800;color:#fbbf24">${fmtNum(p.coupons || 0)} 🎟️</span>
             </div>
-            <button type="button" onclick="event.stopPropagation();handleTmaUnregisterEvent(${ev.id})" style="background:none;border:none;color:#ef4444;font-size:10.5px;font-weight:700;cursor:pointer;padding:2px 4px">
-              ✕ Отменить
-            </button>
-          </div>
-        `;
-      }
-
-      const regCount = (ev.registrations || []).length;
-
-      return `
-        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between">
-            <div>
-              <div style="display:flex;align-items:center;gap:6px">
-                <span style="font-size:14px">${evIcon}</span>
-                <h3 style="font-size:13px;font-weight:800;color:#fff;margin:0">${escapeHtml(evTitle)}</h3>
-              </div>
-              <p style="font-size:11px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDateRange)} • ${maxPlaces} призовых мест</p>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px">
-              ${staffPencilHtml}
-              ${statusBadgeHtml}
-            </div>
-          </div>
-
-          ${prizesSnippetHtml}
-          ${myRegBanner}
-
-          <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9ca3af;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
-            <span>Заявок бойцов: <strong style="color:#fff">${regCount}</strong></span>
-            <span style="color:#fbbf24;font-weight:700;display:flex;align-items:center;gap:2px">
-              Участники и назначения ↗
-            </span>
-          </div>
+          `).join('')}
         </div>
       `;
-    }).join('');
+    }
+
+    let myRegBanner = '';
+    if (myReg) {
+      const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+      myRegBanner = `
+        <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:6px 10px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:13px">🎯</span>
+            <span style="font-size:11px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeStr}</span>
+          </div>
+          <button type="button" onclick="event.stopPropagation();handleTmaUnregisterEvent(${ev.id})" style="background:none;border:none;color:#ef4444;font-size:10.5px;font-weight:700;cursor:pointer;padding:2px 4px">
+            ✕ Отменить
+          </button>
+        </div>
+      `;
+    }
+
+    const regCount = (ev.registrations || []).length;
+
+    return `
+      <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#1f242e;border:1px solid ${mode === 'active' ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'};margin-bottom:10px;cursor:pointer">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:14px">${evIcon}</span>
+              <h3 style="font-size:13px;font-weight:800;color:#fff;margin:0">${escapeHtml(evTitle)}</h3>
+            </div>
+            <p style="font-size:11px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDateRange)} • ${maxPlaces} призовых мест</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${staffPencilHtml}
+            ${statusBadgeHtml}
+          </div>
+        </div>
+
+        ${prizesSnippetHtml}
+        ${myRegBanner}
+
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9ca3af;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
+          <span>Заявок бойцов: <strong style="color:#fff">${regCount}</strong></span>
+          <span style="color:#fbbf24;font-weight:700;display:flex;align-items:center;gap:2px">
+            Участники и назначения ↗
+          </span>
+        </div>
+      </div>
+    `;
   }
+
+  // Active HTML
+  const activeHtml = activeEvents.length === 0
+    ? `
+      <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
+        <div style="font-size:32px;margin-bottom:8px">🟢</div>
+        Нет активных событий, идущих прямо сейчас
+      </div>
+    `
+    : activeEvents.map(ev => renderEventCard(ev, 'active')).join('');
+
+  // Upcoming HTML
+  const upcomingHtml = upcomingEvents.length === 0
+    ? `
+      <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
+        <div style="font-size:32px;margin-bottom:8px">📅</div>
+        Нет запланированных предстоящих событий
+      </div>
+    `
+    : upcomingEvents.map(ev => renderEventCard(ev, 'upcoming')).join('');
 
   // Past HTML
   let pastHtml = '';
@@ -1236,10 +1346,10 @@ function renderTmaEvents() {
       }
 
       return `
-        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;cursor:pointer">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:14px">${evIcon}</span>
+        <div class="tma-card" onclick="openTmaEventDetail(${ev.id})" style="padding:14px;border-radius:16px;background:#1a1e27;border:1px solid rgba(255,255,255,0.06);margin-bottom:10px;cursor:pointer;opacity:0.9">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:18px;filter:grayscale(0.6)">${evIcon}</span>
               <div>
                 <h3 style="font-size:13px;font-weight:800;color:#d1d5db;margin:0">${escapeHtml(evTitle)}</h3>
                 <p style="font-size:10.5px;color:#6b7280;margin:2px 0 0 0">${escapeHtml(evDate)}</p>
@@ -1259,7 +1369,15 @@ function renderTmaEvents() {
     }).join('');
   }
 
+  // Determine current active subtab
+  if (!tmaEventsSubTab || (tmaEventsSubTab !== 'active' && tmaEventsSubTab !== 'upcoming' && tmaEventsSubTab !== 'past')) {
+    tmaEventsSubTab = activeEvents.length > 0 ? 'active' : (upcomingEvents.length > 0 ? 'upcoming' : 'past');
+  }
+
+  const isAct = tmaEventsSubTab === 'active';
   const isUp = tmaEventsSubTab === 'upcoming';
+  const isPast = tmaEventsSubTab === 'past';
+
   container.innerHTML = `
     ${isStaff ? `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
@@ -1277,21 +1395,283 @@ function renderTmaEvents() {
         Календарь событий
       </div>
       <div style="display:inline-flex;padding:2px;background:#161a22;border:1px solid rgba(255,255,255,0.08);border-radius:10px">
-        <button id="tma-events-subtab-upcoming" onclick="switchTmaEventsSubTab('upcoming')" type="button" style="padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isUp ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
-          ◎ Предстоящие (${upcomingEvents.length})
+        <button id="tma-events-subtab-active" onclick="switchTmaEventsSubTab('active')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isAct ? 'background:rgba(34,197,94,0.2);color:#4ade80;border-color:rgba(34,197,94,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
+          🟢 Идут (${activeEvents.length})
         </button>
-        <button id="tma-events-subtab-past" onclick="switchTmaEventsSubTab('past')" type="button" style="padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${!isUp ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
-          ◌ Прошедшие (${pastEvents.length})
+        <button id="tma-events-subtab-upcoming" onclick="switchTmaEventsSubTab('upcoming')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isUp ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
+          ◎ Скоро (${upcomingEvents.length})
+        </button>
+        <button id="tma-events-subtab-past" onclick="switchTmaEventsSubTab('past')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isPast ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
+          ◌ Архив (${pastEvents.length})
         </button>
       </div>
+    </div>
+
+    <div id="tma-events-list-active" style="display:${isAct ? 'block' : 'none'}">
+      ${activeHtml}
     </div>
 
     <div id="tma-events-list-upcoming" style="display:${isUp ? 'block' : 'none'}">
       ${upcomingHtml}
     </div>
 
-    <div id="tma-events-list-past" style="display:${isUp ? 'none' : 'block'}">
+    <div id="tma-events-list-past" style="display:${isPast ? 'block' : 'none'}">
       ${pastHtml}
+    </div>
+  `;
+}
+// ─── TMA MATRIX (Officer Readiness Matrix for Mobile) ───────────
+let tmaMatrixFilterType = 'all';
+let tmaMatrixFilterGen = 'all';
+let tmaMatrixFilterOwner = 'all'; // 'all' | 'mine'
+let tmaMatrixSearch = '';
+let tmaMatrixSortCol = 'deficit'; // 'deficit' | 'level' | 'days' | 'officer' | 'player'
+let tmaMatrixSortDir = 'desc';
+let tmaMatrixPage = 1;
+const TMA_MATRIX_PAGE_SIZE = 30;
+
+function setTmaMatrixFilterType(type) {
+  tmaMatrixFilterType = type;
+  tmaMatrixPage = 1;
+  tmaHaptic('light');
+  renderTmaMatrix();
+}
+
+function setTmaMatrixFilterGen(gen) {
+  tmaMatrixFilterGen = gen;
+  tmaMatrixPage = 1;
+  tmaHaptic('light');
+  renderTmaMatrix();
+}
+
+function setTmaMatrixFilterOwner(owner) {
+  tmaMatrixFilterOwner = owner;
+  tmaMatrixPage = 1;
+  tmaHaptic('light');
+  renderTmaMatrix();
+}
+
+function setTmaMatrixSortCol(col) {
+  if (tmaMatrixSortCol === col) {
+    tmaMatrixSortDir = tmaMatrixSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    tmaMatrixSortCol = col;
+    tmaMatrixSortDir = (col === 'officer' || col === 'player') ? 'asc' : 'desc';
+  }
+  tmaMatrixPage = 1;
+  tmaHaptic('light');
+  renderTmaMatrix();
+}
+
+function cycleTmaMatrixSort() {
+  const cols = ['deficit', 'level', 'days', 'officer', 'player'];
+  const curIdx = cols.indexOf(tmaMatrixSortCol);
+  const nextCol = cols[(curIdx + 1) % cols.length];
+  setTmaMatrixSortCol(nextCol);
+}
+
+function onTmaMatrixSearchInput(val) {
+  tmaMatrixSearch = (val || '').trim().toLowerCase();
+  tmaMatrixPage = 1;
+  renderTmaMatrix();
+}
+
+function clearTmaMatrixSearch() {
+  tmaMatrixSearch = '';
+  tmaMatrixPage = 1;
+  const el = document.getElementById('tma-matrix-search-input');
+  if (el) el.value = '';
+  renderTmaMatrix();
+}
+
+function loadMoreTmaMatrixCards() {
+  tmaMatrixPage++;
+  tmaHaptic('light');
+  renderTmaMatrix();
+}
+
+function buildTmaMatrixRows() {
+  const rows = [];
+  const player = (state.players || []).find(p => Number(p.id) === Number(currentUser?.playerId))
+    || myCabinetProfile
+    || (currentUser?.player ? currentUser.player : null)
+    || (state.players || [])[0]
+    || {};
+  const myPlayerId = player.id || currentUser?.playerId;
+  const isStaff = currentUser?.rank === 'r4' || currentUser?.rank === 'r5'
+    || (typeof logic !== 'undefined' && logic.hasUserPermission && logic.hasUserPermission(currentUser, 'manage_events'));
+
+  (state.players || []).forEach(p => {
+    const isMe = Number(p.id) === Number(myPlayerId) || Number(p.userId) === Number(currentUser?.id);
+    if (tmaMatrixFilterOwner === 'mine' && !isMe) return;
+
+    const canViewStock = isStaff || isMe || (typeof canSeeStock === 'function' ? canSeeStock(p.id) : false);
+
+    (p.officers || []).forEach(o => {
+      const cat = getCatalogOfficer(o.catalogId);
+      if (!cat) return;
+
+      // Filter by troop type (Aviation excluded, only 5 canonical types from OFFICER_TYPES)
+      if (tmaMatrixFilterType !== 'all' && cat.type !== tmaMatrixFilterType) return;
+      if (tmaMatrixFilterGen !== 'all' && String(cat.generation) !== String(tmaMatrixFilterGen)) return;
+
+      if (tmaMatrixSearch) {
+        const pName = (p.name || '').toLowerCase();
+        const oName = (o.name || cat.name || '').toLowerCase();
+        if (!pName.includes(tmaMatrixSearch) && !oName.includes(tmaMatrixSearch)) return;
+      }
+
+      let def;
+      try {
+        const calcFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
+        if (calcFn) {
+          def = calcFn({ officer: o, catalogItem: cat, player: p, targetLevel: 180, includeStock: false });
+        }
+      } catch (_) {}
+
+      if (!def) {
+        def = {
+          deficitPuzzles: 0,
+          deficitCoupons: 0,
+          isOnlyPersonalPuzzles: !!o.onlyPersonalPuzzles,
+          costPerPuzzle: cat.couponPerPuzzle || 500,
+          daysWithoutEvents: null
+        };
+      }
+
+      // Recommendation badge
+      let recBadge = { label: '4–10 место', style: 'background:rgba(107,114,128,0.18);color:#9ca3af;border:1px solid rgba(107,114,128,0.25)', rank: 4 };
+      if (def.deficitPuzzles === 0) {
+        recBadge = { label: 'Максимум ✓', style: 'background:rgba(34,197,94,0.18);color:#4ade80;border:1px solid rgba(34,197,94,0.3)', rank: 0 };
+      } else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) {
+        recBadge = { label: 'Только личные', style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
+      } else if (def.costPerPuzzle === 0) {
+        recBadge = { label: 'Только пазлы', style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
+      } else if (def.deficitCoupons >= 12500) {
+        recBadge = { label: '🥇 1 место', style: 'background:rgba(245,158,11,0.22);color:#fbbf24;border:1px solid rgba(245,158,11,0.35)', rank: 1 };
+      } else if (def.deficitCoupons >= 6500) {
+        recBadge = { label: '🥈 2 место', style: 'background:rgba(148,163,184,0.2);color:#cbd5e1;border:1px solid rgba(148,163,184,0.3)', rank: 2 };
+      } else if (def.deficitCoupons >= 3500) {
+        recBadge = { label: '🥉 3 место', style: 'background:rgba(180,83,9,0.25);color:#f59e0b;border:1px solid rgba(180,83,9,0.35)', rank: 3 };
+      }
+
+      // Troop emoji icon (strictly 5 types)
+      let troopIcon = '🎖️';
+      const tNorm = (cat.type || '').trim().toLowerCase();
+      if (tNorm.includes('танк')) troopIcon = '🛡️';
+      else if (tNorm.includes('пехота')) troopIcon = '🪖';
+      else if (tNorm.includes('пт')) troopIcon = '🎯';
+      else if (tNorm.includes('гарнизон') || tNorm.includes('горнизон')) troopIcon = '🏰';
+      else if (tNorm.includes('осада')) troopIcon = '💥';
+
+      rows.push({
+        player: p,
+        officer: o,
+        catalog: cat,
+        def,
+        recBadge,
+        troopIcon,
+        isMe,
+        canViewStock
+      });
+    });
+  });
+
+  // Sorting
+  rows.sort((a, b) => {
+    let diff = 0;
+    if (tmaMatrixSortCol === 'player') {
+      diff = (a.player.name || '').localeCompare(b.player.name || '');
+    } else if (tmaMatrixSortCol === 'officer') {
+      diff = (a.catalog.name || a.officer.name || '').localeCompare(b.catalog.name || b.officer.name || '');
+    } else if (tmaMatrixSortCol === 'level') {
+      diff = (Number(a.officer.level) || 0) - (Number(b.officer.level) || 0);
+    } else if (tmaMatrixSortCol === 'days') {
+      const da = a.def.daysWithoutEvents !== null && a.def.daysWithoutEvents !== undefined ? a.def.daysWithoutEvents : 999999;
+      const db = b.def.daysWithoutEvents !== null && b.def.daysWithoutEvents !== undefined ? b.def.daysWithoutEvents : 999999;
+      diff = da - db;
+    } else { // default: 'deficit'
+      diff = (a.def.deficitPuzzles || 0) - (b.def.deficitPuzzles || 0);
+    }
+    return tmaMatrixSortDir === 'asc' ? diff : -diff;
+  });
+
+  return rows;
+}
+
+function renderTmaMatrixCard(row) {
+  const o = row.officer;
+  const cat = row.catalog;
+  const p = row.player;
+  const def = row.def;
+  const isMe = row.isMe;
+  const canViewStock = row.canViewStock;
+  const starsCount = Math.max(0, Math.min(5, Number(o.stars) || 0));
+  const starsHtml = '★'.repeat(starsCount) + '☆'.repeat(5 - starsCount);
+
+  let deficitText = '';
+  if (def.deficitPuzzles === 0) {
+    deficitText = '<span style="color:#4ade80;font-weight:700">0 пазл. (Фулл)</span>';
+  } else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) {
+    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} личн. пазл.</span>`;
+  } else if (def.costPerPuzzle === 0) {
+    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} пазл. (только пазлы)</span>`;
+  } else {
+    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} пазл.</span> <span style="font-size:10.5px;color:#9ca3af">(${fmtNum(def.deficitCoupons)} куп.)</span>`;
+  }
+
+  const stockText = canViewStock
+    ? `${fmtNum(p.stock?.coupons || 0)} 🎟️ / ${fmtNum(p.stock?.puzzles || 0)} 🧩`
+    : '<span style="color:#6b7280">Скрыто</span>';
+
+  const daysText = def.daysWithoutEvents !== null && def.daysWithoutEvents !== undefined
+    ? `~${fmtNum(def.daysWithoutEvents)} дн.`
+    : (def.dateWithoutEvents || '—');
+
+  return `
+    <div class="tma-card tma-card-clickable" onclick="openTmaSectorDetail(${p.id})" style="padding:12px;margin-bottom:8px;${isMe ? 'border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.05)' : ''}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:16px">${row.troopIcon}</span>
+          <div>
+            <div style="font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px">
+              ${escapeHtml(cat.name || o.name || 'Офицер')}
+              <span style="font-size:10px;font-weight:700;background:#1f242e;color:#38bdf8;padding:1px 5px;border-radius:4px;border:1px solid rgba(56,189,248,0.25)">
+                G${cat.generation || 1}
+              </span>
+            </div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:1px;display:flex;align-items:center;gap:6px">
+              <span>👤 ${escapeHtml(p.name || 'Сектор')}</span>
+              ${isMe ? '<span style="font-size:9px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.25);padding:0 4px;border-radius:3px">Вы</span>' : ''}
+            </div>
+          </div>
+        </div>
+
+        <span style="font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:6px;white-space:nowrap;${row.recBadge.style}">
+          ${row.recBadge.label}
+        </span>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:11.5px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.06)">
+        <span style="color:#d1d5db;font-weight:700">Ур. ${fmtNum(o.level || 0)} / 180</span>
+        <span style="color:#fbbf24;font-size:11px;letter-spacing:1px">${starsHtml}</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;background:#12161f;padding:7px 8px;border-radius:8px">
+        <div>
+          <span style="color:#9ca3af">Дефицит:</span>
+          <div>${deficitText}</div>
+        </div>
+        <div>
+          <span style="color:#9ca3af">Склад:</span>
+          <div style="font-weight:600;color:#e5e7eb">${stockText}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:10.5px;color:#9ca3af">
+        <span>⏱️ Без ивентов: <strong style="color:#d1d5db">${escapeHtml(daysText)}</strong></span>
+        <span style="color:#38bdf8;font-size:11px">Досье ↗</span>
+      </div>
     </div>
   `;
 }
@@ -1300,70 +1680,122 @@ function renderTmaMatrix() {
   const container = document.getElementById('tma-tab-matrix');
   if (!container) return;
 
-  const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
-    || myCabinetProfile
-    || (currentUser?.player ? currentUser.player : null)
-    || state.players[0]
-    || {};
+  const rows = buildTmaMatrixRows();
+  const totalCount = rows.length;
+  const visibleRows = rows.slice(0, tmaMatrixPage * TMA_MATRIX_PAGE_SIZE);
 
-  const myPlayerId = player.id || currentUser?.playerId;
-  const sorted = [...(state.players || [])].sort((a, b) => {
-    return (b.sector?.power || 0) - (a.sector?.power || 0);
+  let countFirst = 0;
+  let countSecond = 0;
+  let countThird = 0;
+  let countMax = 0;
+  rows.forEach(r => {
+    if (r.recBadge.rank === 1) countFirst++;
+    else if (r.recBadge.rank === 2) countSecond++;
+    else if (r.recBadge.rank === 3) countThird++;
+    else if (r.recBadge.rank === 0) countMax++;
   });
 
-  const rowsHtml = sorted.map((p, idx) => {
-    const isMe = Number(p.id) === Number(myPlayerId) || Number(p.userId) === Number(currentUser?.id);
-    const sec = p.sector || {};
-    const stock = p.stock || {};
-    const updatedAt = stock.updatedAt || p.updatedAt;
-    let daysAgo = 0;
-    if (updatedAt) {
-      daysAgo = Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
-    }
-    const isFresh = daysAgo <= 3;
+  const troopFilters = [
+    { key: 'all', label: 'Все' },
+    { key: 'Танк', label: '🛡️ Танк' },
+    { key: 'Пехота', label: '🪖 Пехота' },
+    { key: 'ПТ-Сау', label: '🎯 ПТ-САУ' },
+    { key: 'Горнизон', label: '🏰 Гарнизон' },
+    { key: 'Осада', label: '💥 Осада' },
+  ];
 
-    return `
-      <div class="tma-card" onclick="openTmaSectorDetail(${p.id})" style="padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;${isMe ? 'border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.06)' : ''}">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:12px;font-weight:800;color:${idx === 0 ? '#fbbf24' : (idx === 1 ? '#d1d5db' : (idx === 2 ? '#b45309' : '#6b7280'))};width:18px;text-align:center">
-            ${idx + 1}
-          </span>
-          <div>
-            <div style="font-size:12.5px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px">
-              ${escapeHtml(p.name || 'Сектор')}
-              ${isMe ? '<span style="font-size:9px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.25);padding:1px 5px;border-radius:4px">Вы</span>' : ''}
-            </div>
-            <div style="font-size:11px;color:#9ca3af">
-              Сила: ${fmtNum(sec.power || 0)} • VIP ${sec.vipLevel || 0}
-            </div>
-          </div>
-        </div>
+  const genFilters = ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-        <div style="text-align:right">
-          <div style="font-size:12.5px;font-weight:700;color:#fbbf24">
-            ${fmtNum(stock.coupons || 0)} 🎟️
-          </div>
-          <div style="font-size:10px;color:${isFresh ? '#34d399' : '#f87171'}">
-            ${isFresh ? '🟢 ' + (daysAgo === 0 ? 'сегодня' : daysAgo + 'д назад') : '🔴 ' + daysAgo + 'д назад'}
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  const sortLabels = {
+    deficit: 'По дефициту',
+    level: 'По уровню',
+    days: 'По дням',
+    officer: 'По офицеру',
+    player: 'По игроку'
+  };
+
+  const cardsHtml = visibleRows.map(renderTmaMatrixCard).join('');
+  const hasMore = visibleRows.length < totalCount;
 
   container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 2px">
-      <span style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
-        Сводка гильдии (Рейтинг)
-      </span>
-      <span style="font-size:11.5px;color:#fbbf24;font-weight:600">
-        ${sorted.length} секторов
-      </span>
+    <!-- Top Search & Stats -->
+    <div style="margin-bottom:10px">
+      <div style="position:relative;display:flex;align-items:center;margin-bottom:8px">
+        <input type="text"
+               id="tma-matrix-search-input"
+               placeholder="🔍 Поиск офицера или игрока..."
+               value="${escapeHtml(tmaMatrixSearch)}"
+               oninput="onTmaMatrixSearchInput(this.value)"
+               style="width:100%;padding:8px 30px 8px 10px;font-size:12.5px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#161a22;color:#fff;box-sizing:border-box">
+        ${tmaMatrixSearch ? `
+          <button type="button" onclick="clearTmaMatrixSearch()" style="position:absolute;right:8px;background:none;border:none;color:#9ca3af;font-size:14px;cursor:pointer;padding:2px 6px">✕</button>
+        ` : ''}
+      </div>
+
+      <!-- Quick chips: Owner -->
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button type="button" onclick="setTmaMatrixFilterOwner('all')" style="flex:1;padding:5px 8px;font-size:11px;font-weight:700;border-radius:8px;border:1px solid;cursor:pointer;${tmaMatrixFilterOwner === 'all' ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
+          👥 Все офицеры
+        </button>
+        <button type="button" onclick="setTmaMatrixFilterOwner('mine')" style="flex:1;padding:5px 8px;font-size:11px;font-weight:700;border-radius:8px;border:1px solid;cursor:pointer;${tmaMatrixFilterOwner === 'mine' ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
+          👤 Только мои
+        </button>
+      </div>
+
+      <!-- Troop Type Chips (Scrollable horizontal, strictly 5 types without aviation) -->
+      <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;margin-bottom:6px;scrollbar-width:none">
+        ${troopFilters.map(tf => {
+          const isSel = tmaMatrixFilterType === tf.key;
+          return `
+            <button type="button" onclick="setTmaMatrixFilterType('${tf.key}')" style="padding:4px 9px;font-size:11px;font-weight:700;border-radius:7px;border:1px solid;white-space:nowrap;cursor:pointer;${isSel ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
+              ${tf.label}
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- Generation Chips (Scrollable horizontal) -->
+      <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;margin-bottom:8px;scrollbar-width:none">
+        ${genFilters.map(g => {
+          const isSel = tmaMatrixFilterGen === g;
+          return `
+            <button type="button" onclick="setTmaMatrixFilterGen('${g}')" style="padding:3px 8px;font-size:10.5px;font-weight:700;border-radius:6px;border:1px solid;white-space:nowrap;cursor:pointer;${isSel ? 'background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
+              ${g === 'all' ? 'Все Gen' : 'G' + g}
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- Stats Bar & Sorting -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px;margin-bottom:8px">
+        <span style="font-size:11px;color:#9ca3af">
+          Найдено: <strong style="color:#fff">${totalCount}</strong>
+          ${countFirst > 0 ? `<span style="color:#fbbf24;margin-left:4px">🥇${countFirst}</span>` : ''}
+          ${countSecond > 0 ? `<span style="color:#cbd5e1;margin-left:4px">🥈${countSecond}</span>` : ''}
+          ${countThird > 0 ? `<span style="color:#f59e0b;margin-left:4px">🥉${countThird}</span>` : ''}
+          ${countMax > 0 ? `<span style="color:#4ade80;margin-left:4px">✓${countMax}</span>` : ''}
+        </span>
+
+        <button type="button" onclick="cycleTmaMatrixSort()" style="background:#161a22;border:1px solid rgba(255,255,255,0.1);color:#d1d5db;padding:3px 8px;border-radius:6px;font-size:10.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+          <span>⇅</span>
+          <span>${sortLabels[tmaMatrixSortCol] || 'Сортировка'}</span>
+          <span>${tmaMatrixSortDir === 'asc' ? '↑' : '↓'}</span>
+        </button>
+      </div>
     </div>
 
-    <div>
-      ${rowsHtml || '<div class="tma-card" style="text-align:center;color:#9ca3af">Нет данных о секторах</div>'}
+    <!-- Cards Stream -->
+    <div id="tma-matrix-cards-container">
+      ${cardsHtml || '<div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">Офицеры по выбранным фильтрам не найдены</div>'}
     </div>
+
+    ${hasMore ? `
+      <div style="text-align:center;margin-top:12px;margin-bottom:16px">
+        <button type="button" onclick="loadMoreTmaMatrixCards()" class="tma-btn-ghost" style="width:100%;padding:10px;font-size:12px;border-radius:10px">
+          Показать ещё (+${Math.min(TMA_MATRIX_PAGE_SIZE, totalCount - visibleRows.length)})
+        </button>
+      </div>
+    ` : ''}
   `;
 }
 

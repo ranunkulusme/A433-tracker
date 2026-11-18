@@ -4475,6 +4475,61 @@
     `</svg>`;
   }
 
+  function getEventStatus(event, now = new Date()) {
+    if (!event) return 'unknown';
+    if (event.status === 'completed') return 'past';
+
+    const currentTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    const startTime = event.startDate ? new Date(event.startDate).getTime() : null;
+    const durationDays = Number(event.durationDays) || 3;
+    const durationMs = durationDays * 24 * 60 * 60 * 1000;
+    const endTime = event.endDate ? new Date(event.endDate).getTime() : (startTime ? startTime + durationMs : null);
+
+    if (startTime && currentTime < startTime) {
+      return 'upcoming';
+    }
+    if (startTime && endTime && currentTime >= startTime && currentTime <= endTime) {
+      return 'active';
+    }
+    if (endTime && currentTime > endTime) {
+      return 'past';
+    }
+    if (event.status === 'active') {
+      return 'active';
+    }
+    return 'upcoming';
+  }
+
+  function classifyEvents(events, now = new Date()) {
+    const active = [];
+    const upcoming = [];
+    const past = [];
+
+    (events || []).forEach(ev => {
+      const status = getEventStatus(ev, now);
+      if (status === 'active') active.push(ev);
+      else if (status === 'upcoming') upcoming.push(ev);
+      else past.push(ev);
+    });
+
+    active.sort((a, b) => {
+      const aEnd = a.endDate ? new Date(a.endDate).getTime() : (a.startDate ? new Date(a.startDate).getTime() + (Number(a.durationDays) || 3) * 86400000 : 0);
+      const bEnd = b.endDate ? new Date(b.endDate).getTime() : (b.startDate ? new Date(b.startDate).getTime() + (Number(b.durationDays) || 3) * 86400000 : 0);
+      return aEnd - bEnd;
+    });
+
+    upcoming.sort((a, b) => new Date(a.startDate || 0).getTime() - new Date(b.startDate || 0).getTime());
+
+    past.sort((a, b) => {
+      const aTime = a.endDate ? new Date(a.endDate).getTime() : (a.startDate ? new Date(a.startDate).getTime() : 0);
+      const bTime = b.endDate ? new Date(b.endDate).getTime() : (b.startDate ? new Date(b.startDate).getTime() : 0);
+      return bTime - aTime;
+    });
+
+    return { active, upcoming, past };
+  }
+
+
   return {
     COUPON_PER_PUZZLE,
     PUZZLES_PER_LEVEL,
@@ -4596,6 +4651,8 @@
     validateTelegramWebAppData,
     formatTmaUrl,
     renderStarCouponIconHtml,
+    getEventStatus,
+    classifyEvents,
     escapeHtml,
   };
 });

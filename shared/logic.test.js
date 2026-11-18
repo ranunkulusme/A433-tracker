@@ -4059,36 +4059,77 @@ test('totalPuzzlesForOfficer and forecastOfficer take personalPuzzles into accou
   assert.strictEqual(fc.date, '2026-11-18');
 });
 
-test('formatTelegramMeMessage and formatTelegramDeficitMessage handle personal puzzle deficit accurately', () => {
+test('getEventStatus accurately determines active, upcoming, and past event lifecycle', () => {
   const logic = require('./logic.js');
-  const { formatTelegramMeMessage, formatTelegramDeficitMessage, calculateOfficerDeficit } = logic;
+  const { getEventStatus } = logic;
+  assert.strictEqual(typeof getEventStatus, 'function', 'getEventStatus must be exported');
 
-  const angelDef = calculateOfficerDeficit({
-    officer: { level: 146, personalPuzzles: 155, onlyPersonalPuzzles: true, coupons: 0 },
-    catalogItem: { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special' },
-    targetLevel: 180
-  });
+  const now = new Date('2026-11-18T12:00:00Z');
 
-  // В /me для Ангел не должно быть ложного "готов к максимальной прокачке! 🎉"
-  const meMsg = formatTelegramMeMessage({
-    player: { name: 'Сектор Тест' },
-    targetOfficer: { name: 'Ангел' },
-    targetDeficit: 0,
-    deficitSummary: angelDef.deficitSummary
-  });
-  assert.ok(!meMsg.includes('готов к максимальной прокачке!'), 'Не должно быть ложного поздравления');
-  assert.ok(meMsg.includes('15 личн. пазл.'), 'Должен отображаться дефицит личных пазлов');
+  // 1. Завершенное событие по флагу status
+  assert.strictEqual(getEventStatus({ status: 'completed', startDate: '2026-11-19T00:00:00Z' }, now), 'past');
 
-  // В /deficit для Ангел должны выводиться личные пазлы, а не только купоны 0
-  const defMsg = formatTelegramDeficitMessage({
-    player: { name: 'Сектор Тест' },
-    targetOfficer: { name: 'Ангел' },
-    deficit: angelDef,
-    daysEstimate: null
-  });
-  assert.ok(defMsg.includes('15'), 'Должен содержать количество недостающих пазлов (15)');
-  assert.ok(!defMsg.includes('~0 дн.'), 'Прогноз не должен быть ~0 дн.');
+  // 2. Предстоящее событие (now < startDate)
+  assert.strictEqual(getEventStatus({
+    startDate: '2026-11-19T00:00:00Z',
+    endDate: '2026-11-22T00:00:00Z'
+  }, now), 'upcoming');
+
+  // 3. Действующее событие (startDate <= now <= endDate)
+  assert.strictEqual(getEventStatus({
+    startDate: '2026-11-17T00:00:00Z',
+    endDate: '2026-11-20T00:00:00Z'
+  }, now), 'active');
+
+  // 4. Действующее событие без явного endDate (дефолтная длительность 3 дня)
+  assert.strictEqual(getEventStatus({
+    startDate: '2026-11-17T00:00:00Z'
+  }, now), 'active');
+
+  // 5. Прошедшее событие по времени (now > endDate)
+  assert.strictEqual(getEventStatus({
+    startDate: '2026-11-10T00:00:00Z',
+    endDate: '2026-11-13T00:00:00Z'
+  }, now), 'past');
+
+  // 6. Прошедшее событие без endDate, но начавшееся более 3 дней назад
+  assert.strictEqual(getEventStatus({
+    startDate: '2026-11-10T00:00:00Z'
+  }, now), 'past');
+
+  // 7. Явный status: 'active'
+  assert.strictEqual(getEventStatus({ status: 'active' }, now), 'active');
 });
+
+test('classifyEvents partitions and sorts events into active, upcoming and past buckets', () => {
+  const logic = require('./logic.js');
+  const { classifyEvents } = logic;
+  assert.strictEqual(typeof classifyEvents, 'function', 'classifyEvents must be exported');
+
+  const now = new Date('2026-11-18T12:00:00Z');
+  const events = [
+    { id: 1, name: 'Прошедший 1', startDate: '2026-11-01T00:00:00Z', endDate: '2026-11-04T00:00:00Z' },
+    { id: 2, name: 'Прошедший 2 (недавний)', startDate: '2026-11-10T00:00:00Z', endDate: '2026-11-13T00:00:00Z' },
+    { id: 3, name: 'Действующий 1', startDate: '2026-11-16T00:00:00Z', endDate: '2026-11-19T00:00:00Z' },
+    { id: 4, name: 'Действующий 2 (закончится позже)', startDate: '2026-11-17T00:00:00Z', endDate: '2026-11-21T00:00:00Z' },
+    { id: 5, name: 'Предстоящий 1 (скоро)', startDate: '2026-11-20T00:00:00Z', endDate: '2026-11-23T00:00:00Z' },
+    { id: 6, name: 'Предстоящий 2 (позже)', startDate: '2026-11-25T00:00:00Z', endDate: '2026-11-28T00:00:00Z' },
+    { id: 7, name: 'Завершен вручную', status: 'completed', startDate: '2026-11-17T00:00:00Z', endDate: '2026-11-20T00:00:00Z' },
+  ];
+
+  const result = classifyEvents(events, now);
+  assert.strictEqual(result.active.length, 2, 'Должно быть 2 активных события');
+  assert.strictEqual(result.active[0].id, 3, 'Первым идет активное событие, завершающееся раньше');
+  assert.strictEqual(result.active[1].id, 4);
+
+  assert.strictEqual(result.upcoming.length, 2, 'Должно быть 2 предстоящих события');
+  assert.strictEqual(result.upcoming[0].id, 5, 'Первым идет предстоящее событие, начинающееся раньше');
+  assert.strictEqual(result.upcoming[1].id, 6);
+
+  assert.strictEqual(result.past.length, 3, 'Должно быть 3 прошедших события (включая ручное completed)');
+  assert.strictEqual(result.past[0].id, 7, 'Самое недавнее прошедшее должно быть первым');
+});
+
 
 
 

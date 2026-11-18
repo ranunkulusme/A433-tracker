@@ -894,3 +894,156 @@ test('apiFetch and initTmaAuth do not kill session or show "Сессия ист�
   assert.equal(unboundMessage, null, 'renderTmaUnboundScreen should not be triggered with session expired');
 });
 
+test('renderTmaCabinetEventBanner distinguishes between active and upcoming events', () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    Telegram: { WebApp: { initData: '', initDataUnsafe: {}, ready: () => {} } },
+    fetch: async () => ({ ok: true, json: async () => ({}) })
+  };
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(tmaCode, context);
+
+  // 1. Когда есть активное (уже идущее) событие
+  const activeEvent = {
+    id: 101,
+    name: 'Битва за Берлин',
+    startDate: new Date(Date.now() - 3600000).toISOString(),
+    endDate: new Date(Date.now() + 86400000).toISOString(),
+    officerCatalogId: 'beatrice'
+  };
+  const activeHtml = context.renderTmaCabinetEventBanner([activeEvent], {});
+  assert.ok(activeHtml.includes('Идёт сейчас'), 'Для идущего события баннер должен содержать "Идёт сейчас"');
+  assert.ok(!activeHtml.includes('Ближайший ивент'), 'Для идущего события баннер НЕ должен называть его "Ближайший ивент"');
+
+  // 2. Когда событие еще только предстоит (в будущем)
+  const upcomingEvent = {
+    id: 102,
+    name: 'Операция Тайфун',
+    startDate: new Date(Date.now() + 86400000).toISOString(),
+    endDate: new Date(Date.now() + 172800000).toISOString(),
+    officerCatalogId: 'rex'
+  };
+  const upcomingHtml = context.renderTmaCabinetEventBanner([upcomingEvent], {});
+  assert.ok(upcomingHtml.includes('Ближайший ивент'), 'Для будущего события баннер должен содержать "Ближайший ивент"');
+  assert.ok(!upcomingHtml.includes('Идёт сейчас'), 'Для будущего события баннер НЕ должен содержать "Идёт сейчас"');
+});
+
+test('renderTmaMatrix renders compact officer cards instead of sector power ranking', () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  let containerHtml = '';
+  const mockContainer = {
+    set innerHTML(val) { containerHtml = val; },
+    get innerHTML() { return containerHtml; }
+  };
+
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    Telegram: { WebApp: { initData: '', initDataUnsafe: {}, ready: () => {} } },
+    fetch: async () => ({ ok: true, json: async () => ({}) })
+  };
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    getElementById: (id) => {
+      if (id === 'tma-tab-matrix') return mockContainer;
+      return null;
+    },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(tmaCode, context);
+
+  context.state = {
+    players: [
+      {
+        id: 1,
+        name: 'Командир Альфа',
+        stock: { coupons: 15000, puzzles: 50, updatedAt: new Date().toISOString() },
+        officers: [
+          { id: 'off-1', catalogId: 'beatrice', level: 120, stars: 5, skills: [5, 5, 5, 5] },
+          { id: 'off-2', catalogId: 'angel', level: 146, stars: 5, skills: [5, 5, 5, 5], personalPuzzles: 155, onlyPersonalPuzzles: true }
+        ]
+      }
+    ],
+    officerCatalog: [
+      { id: 'beatrice', name: 'Беатрис', type: 'Танк', generation: 6, couponPerPuzzle: 500 },
+      { id: 'angel', name: 'Анхель', type: 'Танк', generation: 7, couponPerPuzzle: 0, upgradeType: 'special' }
+    ],
+    events: [],
+    currentRole: 'r5'
+  };
+  context.currentUser = { id: 1, playerId: 1, rank: 'r5' };
+
+  context.renderTmaMatrix();
+
+  // Проверка:
+  // 1. Должна быть карточка для Беатрис и Анхель
+  assert.ok(containerHtml.includes('Беатрис'), 'Матрица должна отображать офицера Беатрис');
+  assert.ok(containerHtml.includes('Анхель'), 'Матрица должна отображать офицера Анхель');
+
+  // 2. Должны быть бейджи рекомендаций
+  assert.ok(containerHtml.includes('Только личные'), 'Для Анхель должен отображаться бейдж Только личные');
+
+  // 3. Не должно быть старой заглушки рейтинга секторов
+  assert.ok(!containerHtml.includes('Сводка гильдии (Рейтинг)'), 'Не должно быть старой заглушки рейтинга');
+
+  // 4. Должны присутствовать чипы фильтра родов войск (строго 5 видов, без Авиации)
+  assert.ok(!containerHtml.includes('Авиация'), 'Авиация должна быть исключена');
+  assert.ok(containerHtml.includes('Танк'), 'Должен присутствовать фильтр Танк');
+  assert.ok(containerHtml.includes('Пехота'), 'Должен присутствовать фильтр Пехота');
+});
+
+
