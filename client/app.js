@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.49.2';
+const APP_VERSION = 'v3.50.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -5045,17 +5045,28 @@ function formatDaysPlural(days) {
   return 'дней';
 }
 function isEventActive(ev) {
+  if (typeof logic !== 'undefined' && typeof logic.getEventStatus === 'function') {
+    return logic.getEventStatus(ev) === 'active';
+  }
   const now = new Date(); now.setHours(0,0,0,0);
-  const f = new Date(ev.dateFrom+'T00:00:00');
-  const t = new Date(ev.dateTo+'T00:00:00');
+  const f = new Date((ev.dateFrom || ev.startDate)+'T00:00:00');
+  const t = new Date((ev.dateTo || ev.endDate)+'T00:00:00');
   return now >= f && now <= t;
 }
 function isEventUpcoming(ev) {
+  if (typeof logic !== 'undefined' && typeof logic.getEventStatus === 'function') {
+    return logic.getEventStatus(ev) === 'upcoming';
+  }
   const now = new Date(); now.setHours(0,0,0,0);
-  const f = new Date(ev.dateFrom+'T00:00:00');
+  const f = new Date((ev.dateFrom || ev.startDate)+'T00:00:00');
   return f > now;
 }
-function isEventPast(ev) { return !isEventActive(ev) && !isEventUpcoming(ev); }
+function isEventPast(ev) {
+  if (typeof logic !== 'undefined' && typeof logic.getEventStatus === 'function') {
+    return logic.getEventStatus(ev) === 'past';
+  }
+  return !isEventActive(ev) && !isEventUpcoming(ev);
+}
 
 // ─── PAGE: NOTIFICATIONS & TEMPLATES (R4, R5) ────────────────
 let notificationTemplatesCache = [];
@@ -6502,15 +6513,20 @@ function setCalendarTab(tab) {
 window.setCalendarTab = setCalendarTab;
 
 function renderCalendar() {
-  const sorted = [...state.events].sort((a,b)=>a.dateFrom.localeCompare(b.dateFrom));
+  const sorted = [...state.events].sort((a,b)=>(a.dateFrom || a.startDate || '').localeCompare(b.dateFrom || b.startDate || ''));
   const active = sorted.filter(isEventActive);
   const upcoming = sorted.filter(isEventUpcoming);
   // Past events sorted descending (most recent first)
-  const past = sorted.filter(isEventPast).sort((a,b)=>b.dateFrom.localeCompare(a.dateFrom));
+  const past = sorted.filter(isEventPast).sort((a,b)=>(b.dateFrom || b.startDate || '').localeCompare(a.dateFrom || a.startDate || ''));
 
-  const upcomingCount = active.length + upcoming.length;
+  const activeCount = active.length;
+  const upcomingCount = upcoming.length;
   const pastCount = past.length;
   const allCount = sorted.length;
+
+  if (calendarActiveTab === 'upcoming' && activeCount > 0 && upcomingCount === 0) {
+    calendarActiveTab = 'active';
+  }
 
   const c = document.getElementById('content');
   c.innerHTML = `
@@ -6524,6 +6540,9 @@ function renderCalendar() {
     </div>
 
     <div class="cal-tabs" style="display:flex;gap:6px;margin-bottom:16px;background:var(--bg2);padding:4px;border-radius:var(--radius);border:1px solid var(--border);width:fit-content;flex-wrap:wrap">
+      <button class="btn btn-sm ${calendarActiveTab === 'active' ? 'btn-primary' : 'btn-ghost'}" onclick="setCalendarTab('active')" style="border-radius:6px;font-size:12px;padding:6px 14px">
+        🟢 ${typeof t === 'function' ? t('events.tab_active', 'Действующие') : 'Действующие'} <span style="opacity:0.75;margin-left:4px">(${activeCount})</span>
+      </button>
       <button class="btn btn-sm ${calendarActiveTab === 'upcoming' ? 'btn-primary' : 'btn-ghost'}" onclick="setCalendarTab('upcoming')" style="border-radius:6px;font-size:12px;padding:6px 14px">
         ◎ ${typeof t === 'function' ? t('events.tab_upcoming') : 'Предстоящие'} <span style="opacity:0.75;margin-left:4px">(${upcomingCount})</span>
       </button>
@@ -6535,9 +6554,12 @@ function renderCalendar() {
       </button>
     </div>
 
-    ${(calendarActiveTab === 'upcoming' || calendarActiveTab === 'all') && active.length ? `
-    <div class="cal-section-label active-label">${typeof t === 'function' ? t('events.active_now') : '● Идут сейчас'}</div>
+    ${(calendarActiveTab === 'active' || calendarActiveTab === 'all') && active.length ? `
+    <div class="cal-section-label active-label">${typeof t === 'function' ? t('events.active_now') : '🟢 Идут сейчас'}</div>
     <div class="cal-cards">${active.map(ev=>calCard(ev,'active')).join('')}</div>` : ''}
+
+    ${calendarActiveTab === 'active' && !activeCount ? `
+    <div class="empty-state"><p>${typeof t === 'function' ? t('events.empty_active_events', 'Сейчас нет действующих ивентов') : 'Сейчас нет действующих ивентов'}</p></div>` : ''}
 
     ${(calendarActiveTab === 'upcoming' || calendarActiveTab === 'all') && upcoming.length ? `
     <div class="cal-section-label upcoming-label">${typeof t === 'function' ? t('events.upcoming') : '◎ Предстоящие'}</div>
