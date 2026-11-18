@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.49.1';
+const APP_VERSION = 'v3.49.2';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -2838,7 +2838,7 @@ function renderCabinetSimulatorHtml() {
           <div class="label">${typeof t === 'function' ? t('game.sim.deficit') : 'Оставшийся дефицит'}</div>
           <div class="value">${fmtNum(sim.remainingDeficitPuzzles)} <span style="font-size:12px;color:var(--text3)">пазлов</span></div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
-            ${costPerPuzzle > 0 ? `${fmtNum(sim.remainingDeficitCoupons)} купонов` : 'Только пазлы'}
+            ${def.isOnlyPersonalPuzzles ? 'Только личные медали' : (costPerPuzzle > 0 ? `${fmtNum(sim.remainingDeficitCoupons)} купонов` : 'Только пазлы')}
           </div>
         </div>
         <div class="stock-card">
@@ -3652,7 +3652,7 @@ function renderCabinetOfficerCardHtml(o, profile, today) {
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px">
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--text3)">${deficitLabel}</span>
-          <strong style="color:var(--text)">${fmtNum(def.deficitPuzzles)} ${def.isOnlyPersonalPuzzles ? 'личных пазл.' : (def.costPerPuzzle > 0 ? `пазл. (${fmtNum(def.deficitCoupons)} куп.)` : 'пазл. (только пазлы)')}</strong>
+          <strong style="color:var(--text)">${def.deficitSummary ? def.deficitSummary.deficitText : (`${fmtNum(def.deficitPuzzles)} ${def.isOnlyPersonalPuzzles ? 'личных пазл.' : (def.costPerPuzzle > 0 ? `пазл. (${fmtNum(def.deficitCoupons)} куп.)` : 'пазл. (только пазлы)')}`)}</strong>
         </div>
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--text3)">${forecastLabel}</span>
@@ -6903,7 +6903,7 @@ function renderEventDetail(eventId) {
         }
 
         const def = off && cat ? calculateOfficerDeficit({ officer: off, catalogItem: cat, player, targetLevel: 180, today: ev.dateFrom }) : null;
-        const deficitCoupons = def ? `${fmtNum(def.deficitCoupons)} куп.` : '—';
+        const deficitCoupons = def ? (def.deficitSummary ? def.deficitSummary.deficitShort : `${fmtNum(def.deficitCoupons)} куп.`) : '—';
         const formattedDate = r.createdAt ? formatDateTime(r.createdAt) : '—';
 
         return `
@@ -7470,16 +7470,21 @@ function updateRegisterModalForSector(sectorId) {
     ? `Изменить заявку (${escapeHtml(targetSector.name)})`
     : `Регистрация на «${et?.name || 'Ивент'}» (${escapeHtml(targetSector.name)})`;
 
-  const eligibleOfficer = targetSector.officers.find(o => !(o.onlyPersonalPuzzles || o.only_personal_puzzles));
+  const isEligibleFn = (o) => {
+    return (typeof logic !== 'undefined' && typeof logic.isOfficerEligibleForEvents === 'function')
+      ? logic.isOfficerEligibleForEvents(o, state.catalog)
+      : (!Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles) && getCatalogOfficer(o.catalogId)?.upgradeType !== 'special' && Number(getCatalogOfficer(o.catalogId)?.couponPerPuzzle) !== 0);
+  };
+  const eligibleOfficer = targetSector.officers.find(isEligibleFn);
   const hasExisting = existingReg && targetSector.officers.some(o => String(o.id) === String(existingReg.officerId));
   const autoSelectedId = hasExisting ? existingReg.officerId : (eligibleOfficer ? eligibleOfficer.id : targetSector.officers[0]?.id);
 
   // populate officers
   offSelect.innerHTML = targetSector.officers.map(o => {
     const c = getCatalogOfficer(o.catalogId);
-    const isOnlyPersonal = Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles);
+    const isEligible = isEligibleFn(o);
     const sel = String(autoSelectedId) === String(o.id);
-    return `<option value="${o.id}" ${sel ? 'selected' : ''} ${isOnlyPersonal ? 'disabled' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})${isOnlyPersonal ? ' [🔒 только личные пазлы — недоступен для ивентов]' : ''}</option>`;
+    return `<option value="${o.id}" ${sel ? 'selected' : ''} ${!isEligible ? 'disabled' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})${!isEligible ? ' [🔒 только личные пазлы — недоступен для ивентов]' : ''}</option>`;
   }).join('');
 
   // populate places
@@ -7527,13 +7532,16 @@ function onRegisterModalChange() {
     return;
   }
 
-  const isOnlyPersonal = Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles);
+  const c = getCatalogOfficer(officer.catalogId);
+  const isEligible = (typeof logic !== 'undefined' && typeof logic.isOfficerEligibleForEvents === 'function')
+    ? logic.isOfficerEligibleForEvents(officer, state.catalog)
+    : (!Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles) && c?.upgradeType !== 'special' && Number(c?.couponPerPuzzle) !== 0);
   const submitBtn = document.getElementById('reg-btn-submit');
-  if (isOnlyPersonal) {
+  if (!isEligible) {
     warningBox.style.display = 'block';
     warningBox.className = 'auth-alert warning';
     warningBox.innerHTML = `
-      🔒 <strong>Офицер недоступен для ивентов:</strong> у офицера <em>${escapeHtml(officerLabel(officer))}</em> указано, что он качается только за счет личных пазлов. Он не участвует в ивентах и автоподборе.
+      🔒 <strong>Офицер недоступен для ивентов:</strong> у офицера <em>${escapeHtml(officerLabel(officer))}</em> указано, что он качается только за счет личных медалей (или спец-тип без купонов). Он не участвует в ивентах и автоподборе.
     `;
     if (submitBtn) submitBtn.disabled = true;
     return;
@@ -7598,8 +7606,12 @@ async function handleSubmitRegistration() {
     || getPlayer(currentUser?.playerId)
     || myCabinetProfile;
   const officer = (sector?.officers || []).find(o => String(o.id) === String(officerId));
-  if (officer && (officer.onlyPersonalPuzzles || officer.only_personal_puzzles)) {
-    toast('Этот офицер качается только за счет личных пазлов и не может участвовать в ивентах', 'error');
+  const c = officer ? getCatalogOfficer(officer.catalogId) : null;
+  const isEligible = officer && ((typeof logic !== 'undefined' && typeof logic.isOfficerEligibleForEvents === 'function')
+    ? logic.isOfficerEligibleForEvents(officer, state.catalog)
+    : (!Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles) && c?.upgradeType !== 'special' && Number(c?.couponPerPuzzle) !== 0));
+  if (officer && !isEligible) {
+    toast('Этот офицер не может участвовать в ивентах на купоны (качается личными медалями или спец-тип)', 'error');
     return;
   }
 
@@ -9706,7 +9718,7 @@ function renderPersonalSimulator() {
           <div class="label">Дефицит до цели</div>
           <div class="value">${fmtNum(def.deficitPuzzles)} <span style="font-size:12px;color:var(--text3)">пазлов</span></div>
           <div style="font-size:12px;color:var(--text2);margin-top:4px">
-            ${def.costPerPuzzle > 0 ? `${fmtNum(def.deficitCoupons)} купонов` : 'Только пазлы'}
+            ${def.deficitSummary ? def.deficitSummary.forecastText : (def.costPerPuzzle > 0 ? `${fmtNum(def.deficitCoupons)} купонов` : (def.isOnlyPersonalPuzzles ? 'Личные медали' : 'Только пазлы'))}
           </div>
         </div>
         <div class="stock-card">
@@ -9989,6 +10001,7 @@ function buildMatrixRows() {
       const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player: p, targetLevel: MAX_LEVEL, includeStock: false });
       let recBadge = '<span class="badge badge-none">4–10 место</span>';
       if (def.deficitPuzzles === 0) recBadge = '<span class="badge badge-success">Максимум ✓</span>';
+      else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) recBadge = '<span class="badge badge-none">Только личные</span>';
       else if (def.costPerPuzzle === 0) recBadge = '<span class="badge badge-none">Только пазлы</span>';
       else if (def.deficitCoupons >= 12500) recBadge = '<span class="badge" style="background:#f59e0b22;color:#d97706">🥇 1 место</span>';
       else if (def.deficitCoupons >= 6500) recBadge = '<span class="badge" style="background:#64748b22;color:#94a3b8">🥈 2 место</span>';
@@ -10064,7 +10077,7 @@ function renderMatrixTableHtml(rows) {
             <td>${renderStars(r.officer.stars)}</td>
             <td style="font-family:var(--mono)">
               ${fmtNum(r.def.deficitPuzzles)} пазл.
-              <div style="font-size:11px;color:var(--text3)">${r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы'}</div>
+              <div style="font-size:11px;color:var(--text3)">${r.def.deficitSummary ? (r.def.deficitSummary.isOnlyPersonalPuzzles ? 'только личные' : (r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы')) : (r.def.costPerPuzzle > 0 ? `${fmtNum(r.def.deficitCoupons)} куп.` : 'только пазлы')}</div>
             </td>
             <td style="font-family:var(--mono);font-size:12px">
               ${canSeeStock(r.player.id) ? `${fmtNum(r.player.stock.coupons)} куп. / ${fmtNum(r.player.stock.puzzles)} пазл.` : 'Скрыто'}
@@ -11466,7 +11479,7 @@ function renderEventRegistrationsBlock() {
           <span style="color:var(--text2)">${escapeHtml(officerLabel(off))} (ур. ${off?.level ?? '?'})</span>
           <span class="badge badge-none" style="font-size:10px">${escapeHtml(placeLabel)}</span>
           ${r.isCooldown ? `<span class="cooldown-badge badge" style="font-size:10px">⏳ Кулдаун</span>` : ''}
-          ${def ? `<span style="font-size:11px;color:var(--text3)">(дефицит: ${fmtNum(def.deficitCoupons)} куп.)</span>` : ''}
+          ${def ? `<span style="font-size:11px;color:var(--text3)">(дефицит: ${def.deficitSummary ? def.deficitSummary.deficitShort : `${fmtNum(def.deficitCoupons)} куп.`})</span>` : ''}
         </div>
         <div>${statusBadge}</div>
       </div>

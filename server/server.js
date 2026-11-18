@@ -1760,9 +1760,25 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const { officerId, desiredPlace } = body;
       if (officerId) {
-        const off = (player.officers || []).find(o => String(o.id) === String(officerId));
-        if (off && Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles)) {
-          return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
+        const off = (player.officers || []).find(o => String(o.id) === String(officerId) || String(o.catalogId) === String(officerId));
+        const catalog = db.getCatalog ? db.getCatalog() : [];
+        if (off) {
+          const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
+            ? logic.isOfficerEligibleForEvents(off, catalog)
+            : !Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
+          if (!isEligible) {
+            return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
+          }
+        } else {
+          const catItem = (catalog || []).find(c => c.id === String(officerId));
+          if (catItem) {
+            const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
+              ? logic.isOfficerEligibleForEvents({ catalogId: catItem.id }, catalog)
+              : (catItem.upgradeType !== 'special' && Number(catItem.couponPerPuzzle) > 0);
+            if (!isEligible) {
+              return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
+            }
+          }
         }
       }
 

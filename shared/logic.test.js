@@ -3905,6 +3905,193 @@ test('formatTmaUrl and getTelegramMainMenuKeyboard enforce TMA URL parameters', 
   assert.equal(webAppBtn.web_app.url, 'https://kow.timeweb.app/?tma=1');
 });
 
+test('formatOfficerDeficitSummary unifies officer deficit and forecast display across TMA, Web, and Bot', () => {
+  const logic = require('./logic.js');
+  assert.equal(typeof logic.formatOfficerDeficitSummary, 'function', 'formatOfficerDeficitSummary must be exported');
+
+  // 1. Анхель: уровень 146, 155 личных пазлов, onlyPersonalPuzzles = true (дефицит 15 личных пазлов)
+  const angelDef = logic.calculateOfficerDeficit({
+    officer: { level: 146, personalPuzzles: 155, onlyPersonalPuzzles: true, coupons: 0 },
+    catalogItem: { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special', generation: 1 },
+    player: { stock: { coupons: 10000, puzzles: 500 } },
+    targetLevel: 180,
+  });
+
+  const angelSummary = logic.formatOfficerDeficitSummary(angelDef);
+  assert.strictEqual(angelSummary.isFull, false);
+  assert.strictEqual(angelSummary.isOnlyPersonalPuzzles, true);
+  assert.strictEqual(angelSummary.deficitPuzzles, 15);
+  assert.strictEqual(angelSummary.deficitCoupons, 0);
+  assert.strictEqual(angelSummary.deficitValue, 15);
+  assert.strictEqual(angelSummary.unit, 'личных пазл.');
+  assert.strictEqual(angelSummary.unitShort, 'личн. пазл.');
+  assert.strictEqual(angelSummary.deficitText, '15 личных пазл.');
+  assert.strictEqual(angelSummary.deficitShort, '15 личн. пазл.');
+  assert.strictEqual(angelSummary.forecastText, '🧩 Только личные медали');
+  assert.strictEqual(angelSummary.forecastShort, '🧩 Личные');
+  assert.strictEqual(angelSummary.daysText, 'Только личные медали');
+
+  // Проверка прямого включения сводки в результат calculateOfficerDeficit
+  assert.ok(angelDef.deficitSummary, 'calculateOfficerDeficit should include deficitSummary');
+  assert.strictEqual(angelDef.deficitSummary.deficitShort, '15 личн. пазл.');
+
+  // 2. Анхель фулл: уровень 180, onlyPersonalPuzzles = true
+  const angelFullDef = logic.calculateOfficerDeficit({
+    officer: { level: 180, personalPuzzles: 0, onlyPersonalPuzzles: true },
+    catalogItem: { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special' },
+    targetLevel: 180,
+  });
+  const angelFullSummary = logic.formatOfficerDeficitSummary(angelFullDef);
+  assert.strictEqual(angelFullSummary.isFull, true);
+  assert.strictEqual(angelFullSummary.deficitPuzzles, 0);
+  assert.strictEqual(angelFullSummary.deficitShort, 'Фулл (0)');
+  assert.strictEqual(angelFullSummary.forecastShort, '✓ Фулл');
+
+  // 3. Стандартный офицер за купоны (дефицит 15 пазлов = 7 500 купонов)
+  const stdDef = logic.calculateOfficerDeficit({
+    officer: { level: 177, personalPuzzles: 0, coupons: 0, onlyPersonalPuzzles: false },
+    catalogItem: { id: 'valkyrie', couponPerPuzzle: 500, upgradeType: 'standard' },
+    player: { stock: { coupons: 0, puzzles: 0 } },
+    targetLevel: 180,
+  });
+  const stdSummary = logic.formatOfficerDeficitSummary(stdDef);
+  assert.strictEqual(stdSummary.isFull, false);
+  assert.strictEqual(stdSummary.isOnlyPersonalPuzzles, false);
+  assert.strictEqual(stdSummary.deficitPuzzles, 15);
+  assert.strictEqual(stdSummary.deficitCoupons, 7500);
+  assert.strictEqual(stdSummary.deficitValue, 7500);
+  assert.strictEqual(stdSummary.unit, 'куп.');
+  assert.strictEqual(stdSummary.unitShort, 'куп.');
+  assert.strictEqual(stdSummary.deficitText, '15 пазл. (7 500 куп.)');
+  assert.strictEqual(stdSummary.deficitShort, '7 500 куп.');
+  assert.strictEqual(stdSummary.forecastShort, '📅 —');
+
+  // 4. Специальный офицер (только универсальные пазлы, costPerPuzzle = 0, no onlyPersonalPuzzles)
+  const specialDef = logic.calculateOfficerDeficit({
+    officer: { level: 177, personalPuzzles: 0, coupons: 0, onlyPersonalPuzzles: false },
+    catalogItem: { id: 'special-hero', couponPerPuzzle: 0, upgradeType: 'special' },
+    player: { stock: { coupons: 0, puzzles: 0 } },
+    targetLevel: 180,
+  });
+  const specialSummary = logic.formatOfficerDeficitSummary(specialDef);
+  assert.strictEqual(specialSummary.isFull, false);
+  assert.strictEqual(specialSummary.isOnlyPersonalPuzzles, false);
+  assert.strictEqual(specialSummary.deficitPuzzles, 15);
+  assert.strictEqual(specialSummary.deficitCoupons, 0);
+  assert.strictEqual(specialSummary.unit, 'пазл.');
+  assert.strictEqual(specialSummary.unitShort, 'пазл.');
+  assert.strictEqual(specialSummary.deficitText, '15 пазл. (только пазлы)');
+  assert.strictEqual(specialSummary.deficitShort, '15 пазл.');
+  assert.strictEqual(specialSummary.forecastText, '🧩 Только пазлы');
+  assert.strictEqual(specialSummary.forecastShort, '🧩 Пазлы');
+
+  // 5. Стандартный офицер фулл (180 ур.)
+  const stdFullDef = logic.calculateOfficerDeficit({
+    officer: { level: 180, personalPuzzles: 0, coupons: 0 },
+    catalogItem: { id: 'valkyrie', couponPerPuzzle: 500, upgradeType: 'standard' },
+    targetLevel: 180,
+  });
+  const stdFullSummary = logic.formatOfficerDeficitSummary(stdFullDef);
+  assert.strictEqual(stdFullSummary.isFull, true);
+  assert.strictEqual(stdFullSummary.deficitShort, 'Фулл (0)');
+  assert.strictEqual(stdFullSummary.forecastShort, '✓ Фулл');
+});
+
+test('isOfficerEligibleForEvents and getEventEligibleOfficers strictly enforce event eligibility', () => {
+  const logic = require('./logic.js');
+  const { isOfficerEligibleForEvents, getEventEligibleOfficers } = logic;
+  assert.strictEqual(typeof isOfficerEligibleForEvents, 'function');
+  assert.strictEqual(typeof getEventEligibleOfficers, 'function');
+
+  const catalog = [
+    { id: 'angel', name: 'Ангел', couponPerPuzzle: 0, upgradeType: 'special' },
+    { id: 'valkyrie', name: 'Валькирия', couponPerPuzzle: 500, upgradeType: 'standard' },
+    { id: 'custom_puzzle', name: 'Командир за пазлы', couponPerPuzzle: 0, upgradeType: 'standard' }
+  ];
+
+  // 1. Стандартный офицер подходит
+  assert.strictEqual(isOfficerEligibleForEvents({ id: 'o1', catalogId: 'valkyrie', level: 100 }, catalog), true);
+
+  // 2. Офицер с onlyPersonalPuzzles = true не подходит
+  assert.strictEqual(isOfficerEligibleForEvents({ id: 'o2', catalogId: 'valkyrie', level: 100, onlyPersonalPuzzles: true }, catalog), false);
+  assert.strictEqual(isOfficerEligibleForEvents({ id: 'o2b', catalogId: 'valkyrie', level: 100, only_personal_puzzles: 1 }, catalog), false);
+
+  // 3. Офицер со специальным типом (Ангел) не подходит даже если на офицере флаг не стоит
+  assert.strictEqual(isOfficerEligibleForEvents({ id: 'o3', catalogId: 'angel', level: 100, onlyPersonalPuzzles: false }, catalog), false);
+
+  // 4. Офицер с couponPerPuzzle === 0 не подходит
+  assert.strictEqual(isOfficerEligibleForEvents({ id: 'o4', catalogId: 'custom_puzzle', level: 100 }, catalog), false);
+
+  // 5. Фильтрация списка офицеров
+  const officers = [
+    { id: 'o1', catalogId: 'valkyrie', level: 100 },
+    { id: 'o2', catalogId: 'angel', level: 140 },
+    { id: 'o3', catalogId: 'valkyrie', level: 80, onlyPersonalPuzzles: true }
+  ];
+  const eligible = getEventEligibleOfficers(officers, catalog);
+  assert.strictEqual(eligible.length, 1);
+  assert.strictEqual(eligible[0].id, 'o1');
+});
+
+test('totalPuzzlesForOfficer and forecastOfficer take personalPuzzles into account', () => {
+  const logic = require('./logic.js');
+  const { totalPuzzlesForOfficer, forecastOfficer } = logic;
+  const angelCatalog = { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special' };
+
+  // Уровень 146 * 5 = 730 пазлов. + 170 личных пазлов = 900 пазлов (цель 180 ур = 900 пазлов)
+  const officerWithPuzzles = {
+    catalogId: 'angel',
+    level: 146,
+    personalPuzzles: 170,
+    onlyPersonalPuzzles: true,
+    coupons: 0
+  };
+  const total = totalPuzzlesForOfficer(officerWithPuzzles, angelCatalog);
+  assert.strictEqual(total, 900, 'totalPuzzlesForOfficer должен учитывать personalPuzzles');
+
+  const fc = forecastOfficer({
+    today: '2026-11-18',
+    officer: officerWithPuzzles,
+    player: { stock: { coupons: 0, puzzles: 0 } },
+    officerCatalog: [angelCatalog]
+  });
+  assert.strictEqual(fc.days, 0, 'При достаточных личных пазлах срок завершения должен быть 0 дней');
+  assert.strictEqual(fc.date, '2026-11-18');
+});
+
+test('formatTelegramMeMessage and formatTelegramDeficitMessage handle personal puzzle deficit accurately', () => {
+  const logic = require('./logic.js');
+  const { formatTelegramMeMessage, formatTelegramDeficitMessage, calculateOfficerDeficit } = logic;
+
+  const angelDef = calculateOfficerDeficit({
+    officer: { level: 146, personalPuzzles: 155, onlyPersonalPuzzles: true, coupons: 0 },
+    catalogItem: { id: 'angel', couponPerPuzzle: 0, upgradeType: 'special' },
+    targetLevel: 180
+  });
+
+  // В /me для Ангел не должно быть ложного "готов к максимальной прокачке! 🎉"
+  const meMsg = formatTelegramMeMessage({
+    player: { name: 'Сектор Тест' },
+    targetOfficer: { name: 'Ангел' },
+    targetDeficit: 0,
+    deficitSummary: angelDef.deficitSummary
+  });
+  assert.ok(!meMsg.includes('готов к максимальной прокачке!'), 'Не должно быть ложного поздравления');
+  assert.ok(meMsg.includes('15 личн. пазл.'), 'Должен отображаться дефицит личных пазлов');
+
+  // В /deficit для Ангел должны выводиться личные пазлы, а не только купоны 0
+  const defMsg = formatTelegramDeficitMessage({
+    player: { name: 'Сектор Тест' },
+    targetOfficer: { name: 'Ангел' },
+    deficit: angelDef,
+    daysEstimate: null
+  });
+  assert.ok(defMsg.includes('15'), 'Должен содержать количество недостающих пазлов (15)');
+  assert.ok(!defMsg.includes('~0 дн.'), 'Прогноз не должен быть ~0 дн.');
+});
+
+
+
 
 
 

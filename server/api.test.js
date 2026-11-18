@@ -4832,6 +4832,46 @@ test('API rejects event registration for officer with onlyPersonalPuzzles and GE
     const regError = await submitRegRes.json();
     assert.equal(regError.error, 'OFFICER_ONLY_PERSONAL_PUZZLES');
 
+    // 5b. Add special catalog officer (Angel) without explicit onlyPersonalPuzzles on instance
+    const addAngelRes = await fetch(`${baseUrl}/api/players/${sector.id}/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogId: 'angel',
+        level: 100,
+        onlyPersonalPuzzles: false
+      })
+    });
+    const angelOfficer = await addAngelRes.json();
+
+    // Try registering Angel by catalogId -> must also be rejected with 400 OFFICER_ONLY_PERSONAL_PUZZLES
+    const submitAngelCatRes = await fetch(`${baseUrl}/api/events/${event.id}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sectorId: sector.id,
+        officerId: 'angel',
+        desiredPlace: 1
+      })
+    });
+    assert.equal(submitAngelCatRes.status, 400);
+    const angelCatErr = await submitAngelCatRes.json();
+    assert.equal(angelCatErr.error, 'OFFICER_ONLY_PERSONAL_PUZZLES');
+
+    // Try registering Angel by officer UUID -> must also be rejected with 400 OFFICER_ONLY_PERSONAL_PUZZLES
+    const submitAngelIdRes = await fetch(`${baseUrl}/api/events/${event.id}/register`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sectorId: sector.id,
+        officerId: angelOfficer.id,
+        desiredPlace: 1
+      })
+    });
+    assert.equal(submitAngelIdRes.status, 400);
+    const angelIdErr = await submitAngelIdRes.json();
+    assert.equal(angelIdErr.error, 'OFFICER_ONLY_PERSONAL_PUZZLES');
+
     // 6. Admin checks GET /api/users: user should have isOnline: true
     const usersRes = await fetch(`${baseUrl}/api/users`, {
       headers: { Authorization: `Bearer ${adminToken}` }

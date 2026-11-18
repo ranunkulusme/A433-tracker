@@ -234,6 +234,19 @@ test('EventOperations: registerForEvent and unregisterFromEvent manage registrat
   assert.equal(regs[0].desiredPlace, 1);
   assert.ok(dispatched.some(d => d.key === 'staff_event_registration'));
 
+  // 1b. Attempt to register an officer with onlyPersonalPuzzles or special officer (Angel)
+  const personalOff = db.addPlayerOfficer(player.id, { catalogId: 'angel', level: 100, onlyPersonalPuzzles: true });
+  const rejRes = await eventOps.registerForEvent({
+    eventId: ev.id,
+    playerId: player.id,
+    officerId: personalOff.id,
+    desiredPlace: 1,
+    user
+  });
+  assert.equal(rejRes.ok, false);
+  assert.equal(rejRes.status, 400);
+  assert.equal(rejRes.error, 'OFFICER_ONLY_PERSONAL_PUZZLES');
+
   // 2. Unregister
   const unregRes = await eventOps.unregisterFromEvent({
     eventId: ev.id,

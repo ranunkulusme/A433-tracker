@@ -239,10 +239,36 @@ function createEventOperations({
       return { ok: false, status: 404, error: 'EVENT_NOT_FOUND', message: 'Событие не найдено' };
     }
 
+    const catalog = db.getCatalog ? db.getCatalog() : [];
     let finalOfficerId = officerId;
-    if (!finalOfficerId) {
+    if (finalOfficerId) {
       const pOfficers = Array.isArray(player.officers) ? player.officers : [];
-      const off = pOfficers.find(o => !o.onlyPersonalPuzzles) || pOfficers[0];
+      const off = pOfficers.find(o => String(o.id) === String(finalOfficerId) || String(o.catalogId) === String(finalOfficerId));
+      if (off) {
+        const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
+          ? logic.isOfficerEligibleForEvents(off, catalog)
+          : !Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
+        if (!isEligible) {
+          return { ok: false, status: 400, error: 'OFFICER_ONLY_PERSONAL_PUZZLES', message: 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов' };
+        }
+      } else {
+        const catItem = (catalog || []).find(c => c.id === String(finalOfficerId));
+        if (catItem) {
+          const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
+            ? logic.isOfficerEligibleForEvents({ catalogId: catItem.id }, catalog)
+            : (catItem.upgradeType !== 'special' && Number(catItem.couponPerPuzzle) > 0);
+          if (!isEligible) {
+            return { ok: false, status: 400, error: 'OFFICER_ONLY_PERSONAL_PUZZLES', message: 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов' };
+          }
+        }
+      }
+    } else {
+      const pOfficers = Array.isArray(player.officers) ? player.officers : [];
+      const off = pOfficers.find(o => {
+        return typeof logic.isOfficerEligibleForEvents === 'function'
+          ? logic.isOfficerEligibleForEvents(o, catalog)
+          : !Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles);
+      }) || pOfficers[0];
       finalOfficerId = (off ? (off.catalogId || off.id) : '') || '';
     }
 
