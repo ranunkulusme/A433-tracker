@@ -187,3 +187,48 @@ test('SmartScannerUI: handleExchangeFileInput extracts files and resets input va
   smartScannerUI.handleExchangeFiles = origHandle;
 });
 
+test('SmartScannerUI: handleScannerFiles supports apiFetch returning parsed JSON object directly', async () => {
+  const mockFile = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  let displayedResult = null;
+
+  global.apiFetch = async (url, options) => {
+    assert.equal(url, '/api/ocr/scan');
+    assert.equal(options.method, 'POST');
+    // apiFetch in app.js returns the parsed JSON payload directly, NOT a fetch Response object!
+    return {
+      success: true,
+      hasRecognizedData: true,
+      imagesProcessed: 1,
+      recognizedFields: ['coupons'],
+      stock: { coupons: 150000 },
+      rawText: 'Купон готовности 150,000'
+    };
+  };
+
+  const origDisplay = smartScannerUI.displayScannerResults;
+  smartScannerUI.displayScannerResults = (res) => {
+    displayedResult = res;
+  };
+
+  // Mock DOM progress elements
+  global.document = {
+    getElementById: (id) => ({
+      style: {},
+      textContent: '',
+      classList: { add: () => {}, remove: () => {} }
+    })
+  };
+
+  await smartScannerUI.handleScannerFiles([mockFile]);
+
+  assert.ok(displayedResult);
+  assert.equal(displayedResult.success, true);
+  assert.equal(displayedResult.hasRecognizedData, true);
+  assert.equal(displayedResult.stock.coupons, 150000);
+
+  delete global.apiFetch;
+  delete global.document;
+  smartScannerUI.displayScannerResults = origDisplay;
+});
+
+

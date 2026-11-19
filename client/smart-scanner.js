@@ -198,7 +198,9 @@
       if (detailsEl) detailsEl.textContent = 'Обработка скриншотов нативным Tesseract...';
 
       let result = null;
-      const fetchFn = (typeof apiFetch === 'function') ? apiFetch : (typeof window !== 'undefined' && window.apiFetch);
+      const fetchFn = (typeof apiFetch === 'function' ? apiFetch : null) ||
+        (typeof window !== 'undefined' ? window.apiFetch : null) ||
+        (typeof globalThis !== 'undefined' ? globalThis.apiFetch : null);
 
       if (fetchFn) {
         const scanRes = await fetchFn('/api/ocr/scan', {
@@ -207,12 +209,20 @@
           body: JSON.stringify({ images: base64Images })
         });
 
-        if (!scanRes || !scanRes.ok) {
-          const errJson = scanRes ? await scanRes.json().catch(() => ({})) : {};
-          throw new Error(errJson.message || 'Ошибка распознавания на сервере');
+        // apiFetch in app.js returns parsed JSON directly; standard fetch returns a Response
+        if (scanRes && typeof scanRes.json === 'function') {
+          if (!scanRes.ok) {
+            const errJson = await scanRes.json().catch(() => ({}));
+            throw new Error(errJson.message || 'Ошибка распознавания на сервере');
+          }
+          result = await scanRes.json();
+        } else {
+          result = scanRes;
         }
 
-        result = await scanRes.json();
+        if (!result || result.success === false) {
+          throw new Error(result?.message || 'Ошибка распознавания на сервере');
+        }
       } else {
         const scanner = (typeof window !== 'undefined' && window.smartScanner) || (typeof smartScanner !== 'undefined' ? smartScanner : null);
         if (scanner && typeof scanner.runSmartOcr === 'function') {
@@ -232,7 +242,7 @@
       }
 
       lastScanResults = result;
-      displayScannerResults(result);
+      ((typeof smartScannerUI !== 'undefined' && smartScannerUI.displayScannerResults) || displayScannerResults)(result);
     } catch (err) {
       if (statusEl) statusEl.textContent = 'Ошибка распознавания';
       if (detailsEl) detailsEl.textContent = err.message || '';
