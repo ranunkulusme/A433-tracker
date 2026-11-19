@@ -1114,6 +1114,97 @@ test('parseProfileScreenshotText recognizes profiles with Cyrillic alliance tags
   assert.strictEqual(parsedPrefix.sector.power, 120000000);
 });
 
+test('parseProfileScreenshotText correctly parses total power, kills and exact killPoints from real-world profile with sub-powers and tier breakdowns', () => {
+  const realProfileText = `
+[A433]ranu
+Сила 165,752,844
+Убито 84,863,033
+Очки за убийство 7.6B
+
+СИЛА
+Сила юнитов 26,788,097
+Сила построек 32,794,324
+Сила исследований 65,476,911
+Сила офицера 4,892,754
+Сила военного корабля 32,179,698
+
+СТАТИСТИКА БОЕВ
+Выиграно боев 958
+Проиграно боев 292
+Уничтожено юнитов 84,863,033
+Количество разведок 885
+Очки за убийство 7,589,192,717
+
+Уничтожен/серьезно ранен Очки за убийство
+1,732,777 1,732,777
+  `;
+
+  const parsed = parseProfileScreenshotText(realProfileText);
+  assert.strictEqual(parsed.isProfile, true);
+  assert.strictEqual(parsed.sector.allianceTag, 'A433');
+  assert.strictEqual(parsed.sector.name, 'ranu');
+  assert.strictEqual(parsed.sector.power, 165752844, 'Total power must be 165,752,844, not 0 and not sub-powers');
+  assert.strictEqual(parsed.sector.kills, 84863033);
+  assert.strictEqual(parsed.sector.killPoints, 7589192717, 'Kill points must be exact total 7,589,192,717, not corrupted concatenated 17,327,771,732,777');
+});
+
+test('parseWarehouseScreenshotText correctly parses real-world two-column warehouse with OCR noise and ignores weapon coupons and chests', () => {
+  const realWarehouseText = `
+=== LEFT COLUMN ===
+5еа War: Raid
+@ 6738M T 9385M
+РЕСУРСЫ УСКОРИТЕЛИ |
+Похвала Таланта
+В наличии: 12
+Купон готовности.
+офицера
+В наличии: 482,611
+neri‘:ﬁfé':om
+офицера
+В наличии: 2253
+Медаль элитного! офицера
+В наличии: 2
+Медаль Дженни
+В наличии: 140
+
+=== RIGHT COLUMN ===
+Медаль Звезда
+В наличии: 672
+Купон готовности
+звезды
+В наличии: 283818
+Медаль эпического офицера
+В наличии: 2,056
+Медаль Марджори
+В наличии: 131
+Медаль Райвен
+В наличии: 693
+
+=== FULL (RAW INTERLEAVED) ===
+Купон готовности Купон готовности
+офицера звезды
+° Вналичии:482.61)
+В наличии: 283818
+Da Mepans эпического
+‘легендарного. ед;
+офицера /›\\ | офицера
+Вналичии: 2.253 <\` Y Вналичии: 2056
+Купон готовности оружия
+В наличии: 67,811
+Сундук выбора медали легендарного офицера
+В наличии: 604
+Сундук медалей легендарного офицера
+В наличии: 3
+  `;
+
+  const parsed = parseWarehouseScreenshotText(realWarehouseText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.coupons, 482611, 'Coupons must be 482,611 from officer coupon, not weapon coupon 67,811');
+  assert.strictEqual(parsed.stock.puzzles, 2253, 'Puzzles must be 2,253 from legendary officer medal, not chests (3 or 604)');
+  assert.strictEqual(parsed.stock.starCoupons, 283818, 'Star coupons must be 283,818');
+});
+
+
 test('parseWarehouseScreenshotText extracts coupons, puzzles, starCoupons and legendary stars 1-3', () => {
   const warehouseTextPart1 = `
 Купон готовности офицера

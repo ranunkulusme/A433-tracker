@@ -305,7 +305,8 @@
       .replace(/(\d)[LlI]/g, '$11')
       .replace(/[LlI](\d)/g, '1$1')
       .replace(/^([LlI])(?=[,.'\s]?\d)/g, '1')
-      .replace(/(\d[,.'\s]?)[Oo]$/g, '$10');
+      .replace(/(\d[,.'\s]?)[Oo]$/g, '$10')
+      .replace(/(\d)[)\]|!](?:\D|$)/g, '$11');
 
     const digits = s.replace(/[^0-9]/g, '');
     if (!digits) return 0;
@@ -342,16 +343,39 @@
       }
     }
 
-    const powerMatch = text.match(/(?:Сила|Мощь|Power|Macht|Kraft)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
-    if (powerMatch) {
-      const powerVal = cleanOcrNumber(powerMatch[1]);
-      if (powerVal > 0) {
-        sector.power = powerVal;
-        recognizedFields.push('power');
+    const NUMBER_PATTERN = '(?:[0-9OoLlI]{1,3}(?:[ \\t][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,\\x27][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,][0-9OoLlI]+)?)(?:[^\\S\\r\\n]*[KkMmBb](?=[^A-Za-z]|$))?';
+
+    // Сила (Мощь): ищем прямое значение силы, исключая подкатегории (юнитов, построек, исследований, офицера, корабля)
+    const powerRegex = new RegExp(`(?:Сила|Мощь|Power|Macht|Kraft)(?!\\s*(?:юнитов|построек|исследований|офицера|военного|корабля|units|buildings|research|hero|officer|ship))[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
+    let bestPower = 0;
+    let pMatch;
+    while ((pMatch = powerRegex.exec(text)) !== null) {
+      const pVal = cleanOcrNumber(pMatch[1]);
+      if (pVal > bestPower) {
+        bestPower = pVal;
       }
     }
 
-    const killsMatch = text.match(/(?:Уничтожено(?:\s+юнитов|\s+войск)?|Убито|Kills|Eliminierungen|Getötet|Besiegt)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+    // Если прямого совпадения нет (например, заголовок "СИЛА" без числа на той же строке) — суммируем подкатегории
+    if (!bestPower) {
+      const subPowerRegex = new RegExp(`Сила\\s+(?:юнитов|построек|исследований|офицера|военного\\s+корабля)[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
+      let subSum = 0;
+      let spMatch;
+      while ((spMatch = subPowerRegex.exec(text)) !== null) {
+        subSum += cleanOcrNumber(spMatch[1]);
+      }
+      if (subSum > 0) {
+        bestPower = subSum;
+      }
+    }
+
+    if (bestPower > 0) {
+      sector.power = bestPower;
+      recognizedFields.push('power');
+    }
+
+    const killsRegex = new RegExp(`(?:Уничтожено(?:\\s+юнитов|\\s+войск)?|Убито|Kills|Eliminierungen|Getötet|Besiegt)[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'i');
+    const killsMatch = text.match(killsRegex);
     if (killsMatch) {
       const killsVal = cleanOcrNumber(killsMatch[1]);
       if (killsVal > 0) {
@@ -360,7 +384,8 @@
       }
     }
 
-    const kpRegex = /(?:Очки\s+(?:за\s+)?убийств[ао]?|Kill\s*Points?|Tötungspunkte|Eliminierungspunkte)\s*[:：]?\s*([0-9OoLlI.,\s']+(?:[KkMmBb])?)/gi;
+    // Очки за убийство: захватываем число СТРОГО на той же строке (без \s захватывающей переводы строк и таблицы T1-T5)
+    const kpRegex = new RegExp(`(?:Очки\\s+(?:за\\s+)?убийств[ао]?|Kill\\s*Points?|Tötungspunkte|Eliminierungspunkte)[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
     let exactKp = 0;
     let roundedKp = 0;
     let match;
@@ -370,13 +395,29 @@
       const cleaned = cleanOcrNumber(rawVal);
       if (cleaned > 0) {
         if (!isSuffix && cleaned > 1000) {
-          exactKp = cleaned;
+          // Выбираем максимальное точное значение (истинный итог из статистики боев, а не меньшие строки разбивки)
+          if (cleaned > exactKp) {
+            exactKp = cleaned;
+          }
         } else if (!roundedKp) {
           roundedKp = cleaned;
         }
       }
     }
-    const finalKp = exactKp || roundedKp;
+
+    let finalKp = exactKp;
+    if (roundedKp > 0) {
+      if (exactKp > 0) {
+        const ratio = exactKp / roundedKp;
+        // Если exactKp кардинально расходится с roundedKp (более чем в 5 раз) — доверяем roundedKp
+        if (ratio < 0.2 || ratio > 5.0) {
+          finalKp = roundedKp;
+        }
+      } else {
+        finalKp = roundedKp;
+      }
+    }
+
     if (finalKp > 0) {
       sector.killPoints = finalKp;
       recognizedFields.push('killPoints');
@@ -397,15 +438,15 @@
   const WAREHOUSE_ITEM_DEFINITIONS = [
     {
       key: 'coupons',
-      pattern: /(?:Купон\s+готовности\s+офицера|Officer\s+Readiness\s+Coupon|Offiziersbereitschafts-Gutschein|Offiziersgutschein)/i,
+      pattern: /(?:Купон\s+готовности[^\w\n\r]*\s*офицера|Купон\s+готовности\S*\s*офицера|Officer\s+Readiness\s+Coupon|Offiziersbereitschafts-Gutschein|Offiziersgutschein|(?:Купон\s+готовности)(?!\s*(?:оружия|звезд|weapon|star|stern)))/i,
     },
     {
       key: 'puzzles',
-      pattern: /(?:Медаль\s+легендарного\s+офицера|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille)/i,
+      pattern: /(?<!сундук[^\n]{0,35})(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\S\r\n]*(?:[.,:;\s]*офицер\S*)?|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille/i,
     },
     {
       key: 'starCoupons',
-      pattern: /(?:Купон\s+готовности\s+звезд[ыае]?|Star\s+Readiness\s+Coupon|Sternbereitschafts-Gutschein|Sterngutschein)/i,
+      pattern: /(?:Купон\s+готовности[^\w\n\r]*\s*звезд[ыае]?|Star\s+Readiness\s+Coupon|Sternbereitschafts-Gutschein|Sterngutschein|(?:Купон\s+готовности[^\n]{0,35}\n[^\n]{0,35}звезд[ыае]?))/i,
     },
     {
       key: 'legendaryStars3',
@@ -413,7 +454,7 @@
     },
     {
       key: 'legendaryStars2',
-      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
     },
     {
       key: 'legendaryStars1',
@@ -436,7 +477,7 @@
       const windowText = text.slice(startIndex, startIndex + 250);
 
       // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>" строго без захвата переводов строк следующей карточки
-      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
+      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
       if (countMatch) {
         const val = cleanOcrNumber(countMatch[1]);
         if (val > 0) {
@@ -445,7 +486,7 @@
       } else {
         const lineMatches = windowText.split(/\r?\n/).slice(0, 4);
         for (const line of lineMatches) {
-          const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27]{1,})/);
+          const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27\)]+)/);
           if (numMatch) {
             const candidate = cleanOcrNumber(numMatch[1]);
             if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {

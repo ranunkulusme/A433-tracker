@@ -75,6 +75,7 @@ async function runOcrOnImageBuffer(imageBuffer, options = {}) {
     }
   }
   const tempPath = path.join(os.tmpdir(), `ocr_scan_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+  const filesToCleanup = [tempPath];
 
   try {
     await fs.promises.writeFile(tempPath, imageBuffer);
@@ -84,14 +85,62 @@ async function runOcrOnImageBuffer(imageBuffer, options = {}) {
         resolve(stdout || '');
       });
     });
-    return { success: true, text: ocrText || '' };
+
+    let extraText = '';
+    // Если доступен ImageMagick (magick/convert), делаем сплит по колонкам (left 52% и right 52%)
+    // Это исключает смешивание строк между двумя колонками в складских сетках и магазинах
+    try {
+      const leftPath = path.join(os.tmpdir(), `ocr_col_left_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+      const rightPath = path.join(os.tmpdir(), `ocr_col_right_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+      filesToCleanup.push(leftPath, rightPath);
+
+      const magickBin = await new Promise(res => {
+        execFile('which', ['magick'], (err, stdout) => {
+          if (!err && stdout && stdout.trim()) return res('magick');
+          execFile('which', ['convert'], (err2, stdout2) => {
+            if (!err2 && stdout2 && stdout2.trim()) return res('convert');
+            res(null);
+          });
+        });
+      });
+
+      if (magickBin) {
+        await Promise.all([
+          new Promise((resolveCrop) => {
+            execFile(magickBin, [tempPath, '-gravity', 'West', '-crop', '52%x100%+0+0', leftPath], { timeout: 10000 }, () => resolveCrop());
+          }),
+          new Promise((resolveCrop) => {
+            execFile(magickBin, [tempPath, '-gravity', 'East', '-crop', '52%x100%+0+0', rightPath], { timeout: 10000 }, () => resolveCrop());
+          })
+        ]);
+
+        const [leftOcr, rightOcr] = await Promise.all([
+          new Promise((resOcr) => {
+            execFile('tesseract', [leftPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 20000 }, (e, out) => resOcr(out || ''));
+          }),
+          new Promise((resOcr) => {
+            execFile('tesseract', [rightPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 20000 }, (e, out) => resOcr(out || ''));
+          })
+        ]);
+
+        if (leftOcr || rightOcr) {
+          extraText = `\n\n=== LEFT COLUMN ===\n${leftOcr}\n\n=== RIGHT COLUMN ===\n${rightOcr}`;
+        }
+      }
+    } catch (_) {
+      // Обработка колонок опциональна — если magick недоступен, продолжаем с полным текстом
+    }
+
+    return { success: true, text: (ocrText || '') + extraText };
   } catch (err) {
     if (err && (err.code === 'ENOENT' || err.message?.includes('not found'))) {
       return { success: false, error: 'tesseract_not_installed', message: 'Tesseract OCR не установлен на сервере' };
     }
     return { success: false, error: 'ocr_failed', message: err.message || 'Ошибка распознавания текста' };
   } finally {
-    fs.promises.unlink(tempPath).catch(() => {});
+    for (const f of filesToCleanup) {
+      fs.promises.unlink(f).catch(() => {});
+    }
   }
 }
 

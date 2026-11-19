@@ -2,8 +2,9 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install system dependencies including Tesseract OCR for server-side screenshot scanning
+# Install system dependencies including Tesseract OCR and ImageMagick for server-side screenshot scanning
 RUN apk add --no-cache ca-certificates tzdata curl \
+    imagemagick \
     tesseract-ocr \
     tesseract-ocr-data-rus \
     tesseract-ocr-data-eng \
