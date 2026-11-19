@@ -305,7 +305,8 @@
       .replace(/(\d)[LlI]/g, '$11')
       .replace(/[LlI](\d)/g, '1$1')
       .replace(/^([LlI])(?=[,.'\s]?\d)/g, '1')
-      .replace(/(\d[,.'\s]?)[Oo]$/g, '$10');
+      .replace(/(\d[,.'\s]?)[Oo]$/g, '$10')
+      .replace(/(\d)[)\]|!](?:\D|$)/g, '$11');
 
     const digits = s.replace(/[^0-9]/g, '');
     if (!digits) return 0;
@@ -315,42 +316,100 @@
 
   function parseProfileScreenshotText(text) {
     if (!text || typeof text !== 'string') {
-      return { isProfile: false, sector: {} };
+      return { isProfile: false, sector: {}, recognizedFields: [] };
+    }
+
+    // Защита от распознавания скриншотов модалки самого приложения Smart Scanner
+    if (/(?:Smart\s*Scanner|Запасы\s*склада|Статистика\s*персонажа|Распознано\s*параметров|Успешно\s*обработано\s*скриншотов|Или\s+вставьте\s+изображение)/i.test(text)) {
+      return { isProfile: false, sector: {}, recognizedFields: [] };
     }
 
     const sector = {};
+    const recognizedFields = [];
 
     const tagMatch = text.match(/\[([A-Za-zА-Яа-яЁё0-9_#]{2,12})\]\s*([^\r\n,;:()]{1,35})/);
     if (tagMatch) {
       sector.allianceTag = tagMatch[1].trim();
       sector.name = tagMatch[2].trim();
+      recognizedFields.push('allianceTag', 'name');
     } else {
-      const nameMatch = text.match(/(?:Ник(?:нейм)?|Имя|Командир)\s*[:：]?\s*([^\r\n,;:()]{1,35})/i);
+      const nameMatch = text.match(/(?:Ник(?:нейм)?|Имя|Командир|Commander|Name|Kommandant)\s*[:：]?\s*([^\r\n,;:()]{1,35})/i);
       if (nameMatch) {
         const rawName = nameMatch[1].trim();
         const innerTag = rawName.match(/^\[([A-Za-zА-Яа-яЁё0-9_#]+)\]\s*(.*)$/);
         if (innerTag) {
           sector.allianceTag = innerTag[1].trim();
           sector.name = innerTag[2].trim();
+          recognizedFields.push('allianceTag', 'name');
         } else {
           sector.name = rawName;
+          recognizedFields.push('name');
         }
       }
     }
 
-    const powerMatch = text.match(/(?:Сила|Мощь|Power)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
-    if (powerMatch) {
-      const powerVal = cleanOcrNumber(powerMatch[1]);
-      if (powerVal > 0) sector.power = powerVal;
+    const NUMBER_PATTERN = '(?:[0-9OoLlI]{1,3}(?:[ \\t][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,\\x27][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,][0-9OoLlI]+)?)(?:[^\\S\\r\\n]*[KkMmBb](?=[^A-Za-z]|$))?';
+
+    // Сила (Мощь): ищем прямое значение силы в заголовке профиля Kiss of War.
+    // Поддерживаем префиксы: Сила, Мощь, ила, ла, па, na, Power, Macht, Kraft
+    // Исключаем под-категории: юниты, постройки, исследования, офицеры, корабль
+    const powerRegex = new RegExp(`(?:[СсCcSsПп]?[иеыu][лпд][аa]|[Ппл][аa]|[HНнn][aа]|Мощь|Power|Macht|Kraft)(?!\\s*(?:юнит\\S*|постро\\S*|исслед\\S*|офицер\\S*|военн\\S*|корабл\\S*|unit\\S*|build\\S*|research|hero|officer|ship))[\\s|:：-]*(?:([0-9OoLlI]{1,3}(?:[\\s.,'’\\x27]+[0-9OoLlI]{2,3}){1,3})|(${NUMBER_PATTERN}))`, 'gi');
+    let bestPower = 0;
+    let pMatch;
+    while ((pMatch = powerRegex.exec(text)) !== null) {
+      const pVal = cleanOcrNumber(pMatch[1] || pMatch[2]);
+      if (pVal > bestPower) {
+        bestPower = pVal;
+      }
     }
 
-    const killsMatch = text.match(/(?:Уничтожено(?:\s+юнитов|\s+войск)?|Убито|Kills)\s*[:：]?\s*([0-9OoLlI.,\s']+)/i);
+    // Извлекаем убийства заранее, чтобы использовать их координаты для верификации Силы
+    const killsRegex = new RegExp(`(?:Уничтожено(?:\\s+юнитов|\\s+войск)?|Убито|[УуYy]?бит[оаы]?|[Тт]о\\b|(?<=[^A-Za-zА-Яа-яЁё0-9]|^)[ТтTt](?=[^A-Za-zА-Яа-яЁё0-9]|$)|Kills|Eliminierungen|Getötet|Besiegt)[^\\S\\r\\n]*[:：|]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'i');
+    const killsMatch = text.match(killsRegex);
+    let killsVal = 0;
     if (killsMatch) {
-      const killsVal = cleanOcrNumber(killsMatch[1]);
-      if (killsVal > 0) sector.kills = killsVal;
+      killsVal = cleanOcrNumber(killsMatch[1]);
+      if (killsVal > 0) {
+        sector.kills = killsVal;
+        recognizedFields.push('kills');
+      }
     }
 
-    const kpRegex = /(?:Очки\s+(?:за\s+)?убийств[ао]?|Kill\s*Points?)\s*[:：]?\s*([0-9OoLlI.,\s']+(?:[KkMmBb])?)/gi;
+    // Если прямого совпадения нет или оно подозрительно мало (< 1000000) — проверяем под-силы
+    if (!bestPower || bestPower < 1000000) {
+      const subPowerRegex = new RegExp(`(?:[СсCcSs]?ила|Мощь|[Ппл][аa]|[HНнn][aа])\\s*(?:юнит\\S*|постро\\S*|исслед\\S*|офицер\\S*|военн\\S*\\s*корабл\\S*)[^\\S\\r\\n]*[:：|]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
+      let subSum = 0;
+      let spMatch;
+      while ((spMatch = subPowerRegex.exec(text)) !== null) {
+        subSum += cleanOcrNumber(spMatch[1]);
+      }
+      if (subSum > bestPower) {
+        bestPower = subSum;
+      }
+    }
+
+    // Дополнительный поиск для случаев, когда заголовок СИЛА оторвался от числа,
+    // но в шапке профиля перед "Убито" стоит крупное число игрока (> 5,000,000 и < 2,000,000,000)
+    if (killsMatch && killsMatch.index !== undefined && (!bestPower || bestPower < 5000000)) {
+      const headerTextBeforeKills = text.slice(Math.max(0, killsMatch.index - 200), killsMatch.index);
+      const largeNumMatches = headerTextBeforeKills.matchAll(new RegExp(`(${NUMBER_PATTERN})`, 'g'));
+      for (const lm of largeNumMatches) {
+        const candidate = cleanOcrNumber(lm[1]);
+        if (candidate > 5000000 && candidate < 2000000000 && candidate !== killsVal) {
+          if (candidate > bestPower) {
+            bestPower = candidate;
+          }
+        }
+      }
+    }
+
+    if (bestPower > 0) {
+      sector.power = bestPower;
+      recognizedFields.push('power');
+    }
+
+    // Очки за убийство: захватываем число СТРОГО на той же строке (без \s захватывающей переводы строк и таблицы T1-T5)
+    const kpRegex = new RegExp(`(?:Очки\\s+(?:за\\s+)?убийств[ао]?|Kill\\s*Points?|Tötungspunkte|Eliminierungspunkte)[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
     let exactKp = 0;
     let roundedKp = 0;
     let match;
@@ -360,94 +419,257 @@
       const cleaned = cleanOcrNumber(rawVal);
       if (cleaned > 0) {
         if (!isSuffix && cleaned > 1000) {
-          exactKp = cleaned;
+          // Выбираем максимальное точное значение (истинный итог из статистики боев, а не меньшие строки разбивки)
+          if (cleaned > exactKp) {
+            exactKp = cleaned;
+          }
         } else if (!roundedKp) {
           roundedKp = cleaned;
         }
       }
     }
-    const finalKp = exactKp || roundedKp;
+
+    let finalKp = exactKp;
+    if (roundedKp > 0) {
+      if (exactKp > 0) {
+        const ratio = exactKp / roundedKp;
+        // Если exactKp кардинально расходится с roundedKp (более чем в 5 раз) — доверяем roundedKp
+        if (ratio < 0.2 || ratio > 5.0) {
+          finalKp = roundedKp;
+        }
+      } else {
+        finalKp = roundedKp;
+      }
+    }
+
     if (finalKp > 0) {
       sector.killPoints = finalKp;
+      recognizedFields.push('killPoints');
     }
 
     const hasStats = Boolean(sector.power || sector.kills || sector.killPoints);
-    const hasWarehouseMarkers = /(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|предмет|звезд|опыт|купон\s+готовност|медал[ья]\s+легендарн)/i.test(text);
+    const hasWarehouseMarkers = /(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|предмет|звезд|опыт|купон\s+готовност|медал[ья]\s+легендарн|officer\s+readiness|in\s*stock|vorhanden|im\s*besitz)/i.test(text);
 
     // Если в скриншоте есть явные складские маркеры и нет боевых параметров (сила, убийства) — это инвентарь/склад, а не профиль
     if (hasWarehouseMarkers && !hasStats) {
-      return { isProfile: false, sector: {} };
+      return { isProfile: false, sector: {}, recognizedFields: [] };
     }
 
     const isProfile = Boolean(hasStats || sector.name || sector.allianceTag);
-    return { isProfile, sector };
+    return { isProfile, sector, recognizedFields };
   }
 
   const WAREHOUSE_ITEM_DEFINITIONS = [
     {
       key: 'coupons',
-      pattern: /Купон\s+готовности\s+офицера/i,
+      pattern: /(?:Купон\s+готовности[^\w\n\r]*\s*офицер\S*|Купон\s+готовности\S*\s*офицер\S*|Officer\s+Readiness\s+Coupon|Offiziersbereitschafts-Gutschein|Offiziersgutschein)/i,
+    },
+    {
+      key: 'chests',
+      pattern: /(?:(?:Сундук(?!\s*(?:выбор|broce))|ee)[^\n]{0,35}(?:медал\S*|[ЭэEe]еда\S*)[^\n]{0,35}(?:офицер\S*)?|(?:Сундук(?!\s*(?:выбор|broce))[^\n]{0,35})?(?:медалей|[ЭэEe]еда\S*)[\s\S]{0,35}?офицера|Legendary\s+Officer\s+Medal\s+Chest|Offiziersmedaillen-Truhe|Truhe\s+mit\s+Offiziersmedaillen)/i,
+      validator: (text, matchIndex) => {
+        const windowAround = text.slice(Math.max(0, matchIndex - 30), matchIndex + 40);
+        return !/(?:выбор|broce|choice|auswahl)/i.test(windowAround);
+      }
     },
     {
       key: 'puzzles',
-      pattern: /Медаль\s+легендарного\s+офицера/i,
+      pattern: /(?:(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\n]{0,20}?офицер\S*|[МмM]едал\S*\s+легендарн\S*|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille)/i,
+      validator: (text, matchIndex) => {
+        const before = text.slice(Math.max(0, matchIndex - 40), matchIndex);
+        if (/(?:сундук|выбор|chest|truhe)/i.test(before)) return false;
+        const matchSegment = text.slice(matchIndex, matchIndex + 35);
+        if (/(?:звезд|star|stern)/i.test(matchSegment)) return false;
+        return true;
+      }
     },
     {
       key: 'starCoupons',
-      pattern: /Купон\s+готовности\s+звезд[ыае]?/i,
+      pattern: /(?:Купон\s+готовности[^\w\n\r]*\s*звезд[ыае]?|Star\s+Readiness\s+Coupon|Sternbereitschafts-Gutschein|Sterngutschein|(?:Купон\s+готовности[^\n]{0,35}\n[^\n]{0,35}звезд[ыае]?))/i,
     },
     {
       key: 'legendaryStars3',
-      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|ш|111|\|\|\||lll|\|I\|)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|960[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*960|960[^\S\r\n]+звезд[аы]/i,
     },
     {
       key: 'legendaryStars2',
-      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|п|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|420[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*420|420[^\S\r\n]+звезд[аы]/i,
     },
     {
       key: 'legendaryStars1',
-      pattern: /(?:110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?звезд[аы]\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:(?:Медаль[^\S\r\n]+Звезд[аы]|110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|Медаль[^\S\r\n]+Звезд[аы]|110[^\S\r\n]+(?:Легендарн[а-я]+|Медаль)[^\r\n]{0,25}звезд[аы]|110[^\S\r\n]+звезд[аы])/i,
     },
   ];
 
-  function parseWarehouseScreenshotText(text) {
-    if (!text || typeof text !== 'string') {
-      return { isWarehouse: false, stock: {} };
-    }
-
+  function extractStockFromTextSlice(text) {
+    if (!text || typeof text !== 'string') return {};
     const stock = {};
 
     for (const def of WAREHOUSE_ITEM_DEFINITIONS) {
-      const match = text.match(def.pattern);
-      if (!match) continue;
-
-      const startIndex = match.index + match[0].length;
-      const windowText = text.slice(startIndex, startIndex + 250);
-
-      // Ищем количество: "В наличии: <число>" строго без захвата переводов строк следующей карточки
-      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27]*)/i);
-      if (countMatch) {
-        const val = cleanOcrNumber(countMatch[1]);
-        if (val > 0) {
-          stock[def.key] = val;
+      const regex = new RegExp(def.pattern.source, def.pattern.flags.includes('g') ? def.pattern.flags : def.pattern.flags + 'g');
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        if (def.validator && !def.validator(text, match.index)) {
+          continue;
         }
-      } else {
-        const lineMatches = windowText.split(/\r?\n/).slice(0, 4);
-        for (const line of lineMatches) {
-          const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27]{1,})/);
-          if (numMatch) {
-            const candidate = cleanOcrNumber(numMatch[1]);
-            if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
-              stock[def.key] = candidate;
-              break;
+
+        const startIndex = match.index + match[0].length;
+        const windowText = text.slice(startIndex, startIndex + 250);
+
+        // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>"
+        // Поддерживаем артефакты OCR: "в aman 6 604", "° Вналичии: 482611", двоеточие как 6, перенос строки
+        const countMatch = windowText.match(/(?:[ВB8]?\s*(?:[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[^\s\d:：;.]*|aman|aлuu|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?)\s*(?:[6°oO]\s+)?([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
+        if (countMatch) {
+          const val = cleanOcrNumber(countMatch[1]);
+          if (val > 0) {
+            stock[def.key] = val;
+            break;
+          }
+        } else {
+          const lineMatches = windowText.split(/\r?\n/).slice(0, 5);
+          let fallbackCandidate = 0;
+          for (const line of lineMatches) {
+            const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27\)]+)/);
+            if (numMatch) {
+              const candidate = cleanOcrNumber(numMatch[1]);
+              if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
+                if (candidate === 1) {
+                  if (!fallbackCandidate) fallbackCandidate = 1;
+                } else {
+                  fallbackCandidate = candidate;
+                  break;
+                }
+              }
             }
+          }
+          if (fallbackCandidate > 0) {
+            stock[def.key] = fallbackCandidate;
+            break;
           }
         }
       }
     }
+    return stock;
+  }
 
-    const isWarehouse = Object.keys(stock).length > 0;
-    return { isWarehouse, stock };
+  function parseWarehouseScreenshotText(text) {
+    if (!text || typeof text !== 'string') {
+      return { isWarehouse: false, stock: {}, recognizedFields: [] };
+    }
+
+    // Защита от распознавания скриншотов модалки самого приложения Smart Scanner
+    if (/(?:Smart\s*Scanner|Запасы\s*склада|Статистика\s*персонажа|Распознано\s*параметров|Успешно\s*обработано\s*скриншотов|Или\s+вставьте\s+изображение)/i.test(text)) {
+      return { isWarehouse: false, stock: {}, recognizedFields: [] };
+    }
+
+    let stock = {};
+
+    // Если есть колонки, распознанные изолированно, парсим колонки сначала,
+    // чтобы устранить взаимное влияние строк между левой и правой карточками
+    if (text.includes('=== LEFT COLUMN ===') && text.includes('=== RIGHT COLUMN ===')) {
+      const leftText = text.split('=== LEFT COLUMN ===')[1]?.split('=== RIGHT COLUMN ===')[0] || '';
+      const rightText = text.split('=== RIGHT COLUMN ===')[1] || '';
+      const leftStock = extractStockFromTextSlice(leftText);
+      const rightStock = extractStockFromTextSlice(rightText);
+      stock = { ...leftStock, ...rightStock };
+
+      // Дополняем тем, что могло быть обнаружено в общем тексте (например, сундуки выбора)
+      const fullStock = extractStockFromTextSlice(text);
+      for (const [k, v] of Object.entries(fullStock)) {
+        if (stock[k] === undefined && v !== undefined) {
+          stock[k] = v;
+        }
+      }
+    } else {
+      stock = extractStockFromTextSlice(text);
+    }
+
+    const recognizedFields = Object.keys(stock).filter(k => typeof stock[k] === 'number');
+    const isWarehouse = recognizedFields.length > 0;
+    return { isWarehouse, stock, recognizedFields };
+  }
+
+  function classifyScreenshotText(text) {
+    if (!text || typeof text !== 'string') return 'unknown';
+    if (/(?:Smart\s*Scanner|Запасы\s*склада|Статистика\s*персонажа|Распознано\s*параметров|Успешно\s*обработано\s*скриншотов|Или\s+вставьте\s+изображение)/i.test(text)) {
+      return 'app_ui';
+    }
+    const whParsed = parseWarehouseScreenshotText(text);
+    if (whParsed && whParsed.isWarehouse) return 'warehouse';
+    const profParsed = parseProfileScreenshotText(text);
+    if (profParsed && profParsed.isProfile) return 'profile';
+    const shopParsed = parseExchangeShopScreenshotText(text);
+    if (shopParsed && shopParsed.length > 0) return 'exchange_shop';
+    return 'unknown';
+  }
+
+  function parseSmartScanText(text) {
+    if (!text || typeof text !== 'string') {
+      return {
+        detectedType: 'unknown',
+        hasRecognizedData: false,
+        isWarehouse: false,
+        isProfile: false,
+        isExchangeShop: false,
+        sector: {},
+        stock: {},
+        officers: [],
+        recognizedFields: [],
+        rawText: text || '',
+      };
+    }
+    const detectedType = classifyScreenshotText(text);
+    if (detectedType === 'app_ui') {
+      return {
+        detectedType: 'app_ui',
+        hasRecognizedData: false,
+        isWarehouse: false,
+        isProfile: false,
+        isExchangeShop: false,
+        sector: {},
+        stock: {},
+        officers: [],
+        recognizedFields: [],
+        rawText: text,
+      };
+    }
+    const profParsed = parseProfileScreenshotText(text);
+    const whParsed = parseWarehouseScreenshotText(text);
+    const shopParsed = parseExchangeShopScreenshotText(text);
+
+    const isWarehouse = whParsed.isWarehouse;
+    const isProfile = isWarehouse ? false : profParsed.isProfile;
+    const isExchangeShop = (!isWarehouse && !isProfile) && (detectedType === 'exchange_shop');
+
+    const sector = isProfile ? profParsed.sector : {};
+    const stock = whParsed.stock || {};
+    const officers = isExchangeShop ? shopParsed : [];
+
+    const recognizedFields = [];
+    if (isWarehouse && whParsed.recognizedFields) {
+      recognizedFields.push(...whParsed.recognizedFields);
+    }
+    if (isProfile && profParsed.recognizedFields) {
+      recognizedFields.push(...profParsed.recognizedFields);
+    }
+    if (isExchangeShop && officers.length > 0) {
+      recognizedFields.push('exchange_shop_officers');
+    }
+
+    const hasRecognizedData = recognizedFields.length > 0;
+
+    return {
+      detectedType,
+      hasRecognizedData,
+      isWarehouse,
+      isProfile,
+      isExchangeShop,
+      sector,
+      stock,
+      officers,
+      recognizedFields,
+      rawText: text,
+    };
   }
 
   function mergeScanResults(accumulated = {}, nextScan = {}) {
@@ -4623,6 +4845,8 @@
     cleanOcrNumber,
     parseProfileScreenshotText,
     parseWarehouseScreenshotText,
+    classifyScreenshotText,
+    parseSmartScanText,
     mergeScanResults,
     normalizeStock,
     OFFICER_TYPES,

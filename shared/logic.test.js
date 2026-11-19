@@ -46,6 +46,8 @@ const {
   cleanOcrNumber,
   parseProfileScreenshotText,
   parseWarehouseScreenshotText,
+  classifyScreenshotText,
+  parseSmartScanText,
   mergeScanResults,
   normalizeStock,
   USER_PERMISSIONS,
@@ -1112,6 +1114,259 @@ test('parseProfileScreenshotText recognizes profiles with Cyrillic alliance tags
   assert.strictEqual(parsedPrefix.sector.power, 120000000);
 });
 
+test('parseProfileScreenshotText correctly parses total power, kills and exact killPoints from real-world profile with sub-powers and tier breakdowns', () => {
+  const realProfileText = `
+[A433]ranu
+Сила 165,752,844
+Убито 84,863,033
+Очки за убийство 7.6B
+
+СИЛА
+Сила юнитов 26,788,097
+Сила построек 32,794,324
+Сила исследований 65,476,911
+Сила офицера 4,892,754
+Сила военного корабля 32,179,698
+
+СТАТИСТИКА БОЕВ
+Выиграно боев 958
+Проиграно боев 292
+Уничтожено юнитов 84,863,033
+Количество разведок 885
+Очки за убийство 7,589,192,717
+
+Уничтожен/серьезно ранен Очки за убийство
+1,732,777 1,732,777
+  `;
+
+  const parsed = parseProfileScreenshotText(realProfileText);
+  assert.strictEqual(parsed.isProfile, true);
+  assert.strictEqual(parsed.sector.allianceTag, 'A433');
+  assert.strictEqual(parsed.sector.name, 'ranu');
+  assert.strictEqual(parsed.sector.power, 165752844, 'Total power must be 165,752,844, not 0 and not sub-powers');
+  assert.strictEqual(parsed.sector.kills, 84863033);
+  assert.strictEqual(parsed.sector.killPoints, 7589192717, 'Kill points must be exact total 7,589,192,717, not corrupted concatenated 17,327,771,732,777');
+
+  const noisyProfileText = `
+[A433]ranu
+ила | 165752844 3
+Убито 84,863,033
+Очки за убийство 7.6B
+СИЛА
+Сила исследований 65,476,911
+Сила офицера 4,892,754
+Сила военного корабля 32,179,698
+Очки за убийство 7,589,192,717
+  `;
+  const parsedNoisy = parseProfileScreenshotText(noisyProfileText);
+  assert.strictEqual(parsedNoisy.sector.power, 165752844, 'Should parse power even when label has OCR noise "ила | "');
+});
+
+test('parseProfileScreenshotText extracts true total power (165,752,844) from noisy real-world OCR profile even with sub-powers summing to 102M', () => {
+  const noisyRealWorldProfile = `
+=== RIGHT COLUMN ===
+‚© © Снимок экрана — 2028-11-19 в 12.55.68 ® © — Отрытьв приложения «Просмотр»
+
+na 165752844 |
+т 84,863,033 lig
+ila 7.68 Г.
+ила юнит 26788097
+ила 32794324
+ила исследовани: 65,476,911
+ила офицер: 4,892,754
+ила военного корабл: 32,179,698
+Очки за убийство 7,589,192,717
+  `;
+
+  const parsed = parseProfileScreenshotText(noisyRealWorldProfile);
+  assert.strictEqual(parsed.isProfile, true);
+  assert.strictEqual(parsed.sector.power, 165752844, 'Power must be 165,752,844 (not 102,549,363 partial sub-power sum and not 32,794,324)');
+  assert.strictEqual(parsed.sector.kills, 84863033, 'Kills must be 84,863,033 even with noisy label "т 84,863,033"');
+  assert.strictEqual(parsed.sector.killPoints, 7589192717, 'Kill points must be 7,589,192,717');
+});
+
+test('parseWarehouseScreenshotText recognizes real-world noisy chests and rejects choice chest', () => {
+  const realChestsNoise = `
+=== LEFT COLUMN ===
+Sea War: Raid
+@ 6738M T 9385M T7748 2438M £2 7.5M
+Fe / вещи
+РЕСУРСЫ УСКОРИТЕЛИ | УС
+
+ee
+Эедаото,
+офицера
+В наличии: 3
+
+=== RIGHT COLUMN ===
+‘Сундук. Broce
+легендарного
+вналичии: 604
+  `;
+
+  const parsed = parseWarehouseScreenshotText(realChestsNoise);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.chests, 3, 'Must recognize chests = 3 from "Эедаото, офицера В наличии: 3" and ignore choice chest 604');
+});
+
+test('parseWarehouseScreenshotText does not drop puzzles when "Звезда" appears on the same line in parallel column', () => {
+  const multiColText = `
+=== LEFT COLUMN ===
+Купон готовности офицера
+В наличии: 482,611
+‘легендарного. ед; офицера
+В наличии: 2.253
+
+=== RIGHT COLUMN ===
+Купон готовности звезды
+В наличии: 283,818
+Медаль Звезда
+В наличии: 672
+  `;
+
+  const parsed = parseWarehouseScreenshotText(multiColText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.coupons, 482611);
+  assert.strictEqual(parsed.stock.starCoupons, 283818);
+  assert.strictEqual(parsed.stock.puzzles, 2253, 'Puzzles must not be rejected due to "Звезда" in parallel column');
+  assert.strictEqual(parsed.stock.legendaryStars1, 672);
+});
+
+test('parseSmartScanText and warehouse/profile parsers reject app UI modal screenshots to avoid data pollution', () => {
+  const appUiModalText = `
+о Smart Scanner (OCR) x
+@ Или вставьте изображение из буфера обмена: Ctrl+V / Cmd+V
++ Готово! 100%
+Распознано параметров: 8
+Успешно обработано скриншотов: 3. Распознано параметров: 8. Проверьте:
+подсвеченные поля перед применением:
+Никнейм | Со скриншота
+Сила (Мощь) (Со скриншота) Убито (Со скриншота) Очки за убийство
+102 549 363 | 84 863 033 | 7 589 192 717
+Запасы склада
+Купон готовности офицера: 48261 | Медаль легендарного офицера: 2253
+Легендарная звезда I (110) Легендарная звезда II (420) Легендарная звезда III (960)
+101 | 9601 | 0
+  `;
+
+  const wh = parseWarehouseScreenshotText(appUiModalText);
+  assert.strictEqual(wh.isWarehouse, false, 'App UI modal must not be recognized as warehouse');
+  assert.deepStrictEqual(wh.stock, {});
+
+  const prof = parseProfileScreenshotText(appUiModalText);
+  assert.strictEqual(prof.isProfile, false, 'App UI modal must not be recognized as profile');
+  assert.deepStrictEqual(prof.sector, {});
+
+  const smart = parseSmartScanText(appUiModalText);
+  assert.strictEqual(smart.detectedType, 'app_ui');
+  assert.strictEqual(smart.hasRecognizedData, false);
+});
+
+test('parseWarehouseScreenshotText correctly parses real-world two-column warehouse with OCR noise and ignores weapon coupons and chests', () => {
+  const realWarehouseText = `
+=== LEFT COLUMN ===
+5еа War: Raid
+@ 6738M T 9385M
+РЕСУРСЫ УСКОРИТЕЛИ |
+Похвала Таланта
+В наличии: 12
+Купон готовности.
+офицера
+В наличии: 482,611
+neri‘:ﬁfé':om
+офицера
+В наличии: 2253
+Медаль элитного! офицера
+В наличии: 2
+Медаль Дженни
+В наличии: 140
+
+=== RIGHT COLUMN ===
+Медаль Звезда
+В наличии: 672
+Купон готовности
+звезды
+В наличии: 283818
+Медаль эпического офицера
+В наличии: 2,056
+Медаль Марджори
+В наличии: 131
+Медаль Райвен
+В наличии: 693
+
+=== FULL (RAW INTERLEAVED) ===
+Купон готовности Купон готовности
+офицера звезды
+° Вналичии:482.61)
+В наличии: 283818
+Da Mepans эпического
+‘легендарного. ед;
+офицера /›\\ | офицера
+Вналичии: 2.253 <\` Y Вналичии: 2056
+Купон готовности оружия
+В наличии: 67,811
+Сундук выбора медали легендарного офицера
+В наличии: 604
+Сундук медалей легендарного офицера
+В наличии: 3
+  `;
+
+  const parsed = parseWarehouseScreenshotText(realWarehouseText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.coupons, 482611, 'Coupons must be 482,611 from officer coupon, not weapon coupon 67,811');
+  assert.strictEqual(parsed.stock.puzzles, 2253, 'Puzzles must be 2,253 from legendary officer medal, not chests (3 or 604)');
+  assert.strictEqual(parsed.stock.starCoupons, 283818, 'Star coupons must be 283,818');
+  assert.strictEqual(parsed.stock.chests, 3, 'Chests must be 3 from Legendary Officer Medal Chest (Сундук медалей легендарного офицера), not choice chest');
+  assert.strictEqual(parsed.stock.legendaryStars1, 672, 'Legendary Star 1 must be 672 from Medal Star');
+});
+
+test('parseWarehouseScreenshotText correctly recognizes Legendary Officer Medal Chest (3) and Stars II (104) and III (27)', () => {
+  const userWarehouseWithStarsAndChests = `
+=== LEFT COLUMN ===
+Сундук медалей
+легендарного
+офицера
+В наличии: 3
+Легендарная звезда II
+420
+1
+В наличии: 104
+
+=== RIGHT COLUMN ===
+Сундук выбора
+медали
+легендарного
+офицера
+В наличии: 604
+Легендарная звезда III
+960
+В наличии: 27
+  `;
+
+  const parsed = parseWarehouseScreenshotText(userWarehouseWithStarsAndChests);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.chests, 3, 'Chests must be 3 from Legendary Officer Medal Chest, ignoring choice chest 604');
+  assert.strictEqual(parsed.stock.legendaryStars2, 104, 'Legendary Star II must be 104, not overridden by 1 or 420');
+  assert.strictEqual(parsed.stock.legendaryStars3, 27, 'Legendary Star III must be 27');
+  assert.strictEqual(parsed.stock.puzzles, undefined, 'Puzzles must not falsely match "Легендарная звезда"');
+});
+
+test('parseWarehouseScreenshotText recognizes Star II and III when Roman numerals are noisy or missing but points (420 / 960) exist', () => {
+  const noisyStarsText = `
+420 Легендарная звезда
+В наличии: 104
+960 Легендарная звезда
+В наличии: 27
+  `;
+
+  const parsed = parseWarehouseScreenshotText(noisyStarsText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.legendaryStars2, 104, 'Must recognize Star II by 420 points anchor');
+  assert.strictEqual(parsed.stock.legendaryStars3, 27, 'Must recognize Star III by 960 points anchor');
+  assert.strictEqual(parsed.stock.puzzles, undefined, 'Puzzles must not falsely match "Легендарная звезда"');
+});
+
+
 test('parseWarehouseScreenshotText extracts coupons, puzzles, starCoupons and legendary stars 1-3', () => {
   const warehouseTextPart1 = `
 Купон готовности офицера
@@ -1243,6 +1498,125 @@ TERT звезда!
 
   const profileCheck = parseProfileScreenshotText(realOcrText);
   assert.strictEqual(profileCheck.isProfile, false, 'Warehouse with exclusive star Natalia must not be parsed as player profile');
+});
+
+test('parseWarehouseScreenshotText recognizes English and German game localization', () => {
+  // English warehouse inventory
+  const enWarehouseText = `
+Officer Readiness Coupon
+In Stock: 520,100
+Legendary Officer Medal
+Owned: 3,450
+Star Readiness Coupon
+In Stock: 88,200
+Legendary Star I
+Owned: 1,230
+Legendary Star II
+Owned: 140
+Legendary Star III
+Owned: 35
+  `;
+  const enParsed = parseWarehouseScreenshotText(enWarehouseText);
+  assert.strictEqual(enParsed.isWarehouse, true);
+  assert.strictEqual(enParsed.stock.coupons, 520100);
+  assert.strictEqual(enParsed.stock.puzzles, 3450);
+  assert.strictEqual(enParsed.stock.starCoupons, 88200);
+  assert.strictEqual(enParsed.stock.legendaryStars1, 1230);
+  assert.strictEqual(enParsed.stock.legendaryStars2, 140);
+  assert.strictEqual(enParsed.stock.legendaryStars3, 35);
+  assert.ok(Array.isArray(enParsed.recognizedFields));
+  assert.strictEqual(enParsed.recognizedFields.includes('coupons'), true);
+  assert.strictEqual(enParsed.recognizedFields.includes('puzzles'), true);
+
+  // German warehouse inventory
+  const deWarehouseText = `
+Offiziersbereitschafts-Gutschein
+Vorhanden: 15,200
+Legendäre Offiziersmedaille
+Im Besitz: 820
+Sternbereitschafts-Gutschein
+Vorhanden: 4,500
+Legendärer Stern I
+110
+Im Besitz: 310
+Legendärer Stern II
+420
+Im Besitz: 45
+Legendärer Stern III
+960
+Im Besitz: 12
+  `;
+  const deParsed = parseWarehouseScreenshotText(deWarehouseText);
+  assert.strictEqual(deParsed.isWarehouse, true);
+  assert.strictEqual(deParsed.stock.coupons, 15200);
+  assert.strictEqual(deParsed.stock.puzzles, 820);
+  assert.strictEqual(deParsed.stock.starCoupons, 4500);
+  assert.strictEqual(deParsed.stock.legendaryStars1, 310);
+  assert.strictEqual(deParsed.stock.legendaryStars2, 45);
+  assert.strictEqual(deParsed.stock.legendaryStars3, 12);
+  assert.strictEqual(deParsed.recognizedFields.includes('coupons'), true);
+});
+
+test('parseProfileScreenshotText recognizes English and German player profiles', () => {
+  // English profile
+  const enProfileText = `
+[USA]EagleOne
+Power: 145,200,300
+VIP 14
+Kills: 65,400,200
+Kill Points: 5,120,400,000
+  `;
+  const enProfile = parseProfileScreenshotText(enProfileText);
+  assert.strictEqual(enProfile.isProfile, true);
+  assert.strictEqual(enProfile.sector.allianceTag, 'USA');
+  assert.strictEqual(enProfile.sector.name, 'EagleOne');
+  assert.strictEqual(enProfile.sector.power, 145200300);
+  assert.strictEqual(enProfile.sector.kills, 65400200);
+  assert.strictEqual(enProfile.sector.killPoints, 5120400000);
+  assert.ok(Array.isArray(enProfile.recognizedFields));
+  assert.strictEqual(enProfile.recognizedFields.includes('power'), true);
+
+  // German profile
+  const deProfileText = `
+[GER]Kaiser
+Macht: 88,100,500
+Eliminierungen: 32,400,000
+Tötungspunkte: 3.5B
+  `;
+  const deProfile = parseProfileScreenshotText(deProfileText);
+  assert.strictEqual(deProfile.isProfile, true);
+  assert.strictEqual(deProfile.sector.allianceTag, 'GER');
+  assert.strictEqual(deProfile.sector.name, 'Kaiser');
+  assert.strictEqual(deProfile.sector.power, 88100500);
+  assert.strictEqual(deProfile.sector.kills, 32400000);
+  assert.strictEqual(deProfile.sector.killPoints, 3500000000);
+  assert.strictEqual(deProfile.recognizedFields.includes('power'), true);
+});
+
+test('parseSmartScanText classifies screenshots and returns recognized fields report', () => {
+  assert.strictEqual(typeof parseSmartScanText, 'function');
+  assert.strictEqual(typeof classifyScreenshotText, 'function');
+
+  // Blank / noisy image
+  const blankScan = parseSmartScanText('случайный текст без игровых данных и цифр');
+  assert.strictEqual(blankScan.hasRecognizedData, false);
+  assert.strictEqual(blankScan.detectedType, 'unknown');
+  assert.deepStrictEqual(blankScan.recognizedFields, []);
+
+  // Warehouse scan
+  const whScan = parseSmartScanText(`Купон готовности офицера\nВ наличии: 10,000`);
+  assert.strictEqual(whScan.hasRecognizedData, true);
+  assert.strictEqual(whScan.detectedType, 'warehouse');
+  assert.strictEqual(whScan.stock.coupons, 10000);
+  assert.deepStrictEqual(whScan.recognizedFields, ['coupons']);
+
+  // Profile scan
+  const profScan = parseSmartScanText(`[RUS]Лидер\nСила: 50,000,000\nУбито: 10,000,000`);
+  assert.strictEqual(profScan.hasRecognizedData, true);
+  assert.strictEqual(profScan.detectedType, 'profile');
+  assert.strictEqual(profScan.sector.power, 50000000);
+  assert.strictEqual(profScan.sector.kills, 10000000);
+  assert.strictEqual(profScan.recognizedFields.includes('power'), true);
 });
 
 test('mergeScanResults combines multiple screenshots without losing or overwriting data', () => {

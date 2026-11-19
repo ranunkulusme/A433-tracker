@@ -20,6 +20,8 @@
     lastScanResults = null;
     isScannerRunning = false;
 
+    initSmartScanner();
+
     const btnApply = document.getElementById('scanner-btn-apply');
     if (btnApply) btnApply.disabled = true;
 
@@ -78,10 +80,85 @@
     }
   }
 
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      if (typeof file === 'string') return resolve(file);
+      if (!file) return resolve('');
+
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения'));
+
+      // If outside a DOM browser or Image/canvas unsupported, read file directly
+      if (typeof Image === 'undefined' || typeof document === 'undefined' || !document.createElement) {
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        if (!dataUrl || typeof dataUrl !== 'string') return resolve(dataUrl);
+
+        try {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 2200;
+            let w = img.width;
+            let h = img.height;
+            // If already within reasonable dimensions and size, keep original bytes
+            if (w <= maxDim && h <= maxDim && (!file.size || file.size < 3 * 1024 * 1024)) {
+              return resolve(dataUrl);
+            }
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(dataUrl);
+            ctx.drawImage(img, 0, 0, w, h);
+            const optimizedUrl = canvas.toDataURL('image/jpeg', 0.90);
+            resolve(optimizedUrl || dataUrl);
+          };
+          img.onerror = () => resolve(dataUrl);
+          img.src = dataUrl;
+        } catch (_) {
+          resolve(dataUrl);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function handleScannerFileInput(event) {
+    const files = Array.from(event?.target?.files || []);
+    if (event?.target) event.target.value = '';
+    if (files.length > 0) {
+      const runner = (typeof smartScannerUI !== 'undefined' && smartScannerUI.handleScannerFiles) || handleScannerFiles;
+      runner(files);
+    }
+  }
+
+  function handleExchangeFileInput(event) {
+    const files = Array.from(event?.target?.files || []);
+    if (event?.target) event.target.value = '';
+    if (files.length > 0) {
+      const runner = (typeof smartScannerUI !== 'undefined' && smartScannerUI.handleExchangeFiles) || handleExchangeFiles;
+      runner(files);
+    }
+  }
+
   async function handleScannerFiles(fileList) {
     if (isScannerRunning) return;
     const files = Array.from(fileList || []).filter(f => {
-      return f && (f.type?.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name || ''));
+      return f && (typeof f === 'string' || f.type?.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name || ''));
     });
 
     if (!files.length) {
@@ -104,34 +181,77 @@
     isScannerRunning = true;
 
     try {
-      const scanner = (typeof window !== 'undefined' && window.smartScanner) || (typeof smartScanner !== 'undefined' ? smartScanner : null);
-      if (!scanner || typeof scanner.runSmartOcr !== 'function') {
-        throw new Error('Модуль Smart Scanner (ocr.js) не загружен. Проверьте подключение скрипта.');
+      if (statusEl) statusEl.textContent = 'Подготовка скриншотов...';
+      if (percentEl) percentEl.textContent = '20%';
+      if (barEl) barEl.style.width = '20%';
+      if (detailsEl) detailsEl.textContent = `Загрузка ${files.length} скриншот(ов)...`;
+
+      const base64Images = [];
+      for (const file of files) {
+        const b64 = await readFileAsBase64(file);
+        base64Images.push(b64);
       }
 
-      const onProgress = (info) => {
-        const pct = Math.min(100, Math.max(0, Number(info.percent) || 0));
-        if (barEl) barEl.style.width = `${pct}%`;
-        if (percentEl) percentEl.textContent = `${pct}%`;
-        if (statusEl) statusEl.textContent = info.stage === 'done' ? '✓ Готово!' : (info.details || 'Распознавание...');
-        if (detailsEl) {
-          if (info.total && info.total > 1) {
-            detailsEl.textContent = `Обработка скриншота ${info.current || 1} из ${info.total}`;
-          } else {
-            detailsEl.textContent = info.stage === 'done' ? 'Данные успешно извлечены' : '';
+      if (statusEl) statusEl.textContent = 'Распознавание на сервере (OCR rus+eng+deu)...';
+      if (percentEl) percentEl.textContent = '60%';
+      if (barEl) barEl.style.width = '60%';
+      if (detailsEl) detailsEl.textContent = 'Обработка скриншотов нативным Tesseract...';
+
+      let result = null;
+      const fetchFn = (typeof apiFetch === 'function' ? apiFetch : null) ||
+        (typeof window !== 'undefined' ? window.apiFetch : null) ||
+        (typeof globalThis !== 'undefined' ? globalThis.apiFetch : null);
+
+      if (fetchFn) {
+        const scanRes = await fetchFn('/api/ocr/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: base64Images })
+        });
+
+        // apiFetch in app.js returns parsed JSON directly; standard fetch returns a Response
+        if (scanRes && typeof scanRes.json === 'function') {
+          if (!scanRes.ok) {
+            const errJson = await scanRes.json().catch(() => ({}));
+            throw new Error(errJson.message || 'Ошибка распознавания на сервере');
           }
+          result = await scanRes.json();
+        } else if (typeof scanRes === 'string') {
+          try {
+            result = JSON.parse(scanRes);
+          } catch (_) {
+            result = { success: false, message: scanRes };
+          }
+        } else {
+          result = scanRes;
         }
-      };
 
-      const activeLogic = (typeof logic !== 'undefined' ? logic : null) ||
-        (typeof window !== 'undefined' && (window.logic || (typeof window.parseProfileScreenshotText === 'function' ? window : null))) ||
-        (typeof globalThis !== 'undefined' && (globalThis.logic || (typeof globalThis.parseProfileScreenshotText === 'function' ? globalThis : null)));
+        if (!result || result.success === false) {
+          throw new Error(result?.message || 'Ошибка распознавания на сервере');
+        }
+      } else {
+        const scanner = (typeof window !== 'undefined' && window.smartScanner) || (typeof smartScanner !== 'undefined' ? smartScanner : null);
+        if (scanner && typeof scanner.runSmartOcr === 'function') {
+          result = await scanner.runSmartOcr(files);
+        } else {
+          throw new Error('Модуль распознавания недоступен');
+        }
+      }
 
-      const result = await scanner.runSmartOcr(files, onProgress, { logic: activeLogic });
+      if (percentEl) percentEl.textContent = '100%';
+      if (barEl) barEl.style.width = '100%';
+      if (statusEl) statusEl.textContent = result.hasRecognizedData ? '✓ Готово!' : '⚠️ Данные не найдены';
+      if (detailsEl) {
+        detailsEl.textContent = result.hasRecognizedData
+          ? `Распознано параметров: ${result.recognizedFields?.length || 0}`
+          : 'На скриншотах не обнаружены параметры склада или профиля';
+      }
+
       lastScanResults = result;
-      displayScannerResults(result);
+      ((typeof smartScannerUI !== 'undefined' && smartScannerUI.displayScannerResults) || displayScannerResults)(result);
     } catch (err) {
       if (statusEl) statusEl.textContent = 'Ошибка распознавания';
+      if (detailsEl) detailsEl.textContent = err.message || '';
       if (typeof toast === 'function') toast('Ошибка сканера: ' + (err.message || 'не удалось распознать скриншоты'), 'error');
     } finally {
       isScannerRunning = false;
@@ -144,11 +264,44 @@
 
     resultsCont.style.display = 'flex';
 
+    const recognizedFields = Array.isArray(result?.recognizedFields) ? result.recognizedFields : [];
+    const hasRecognizedData = Boolean(result?.hasRecognizedData && recognizedFields.length > 0);
+
     const summaryEl = document.getElementById('scanner-results-summary');
     if (summaryEl) {
-      const count = result.imagesProcessed || 1;
-      summaryEl.className = 'scanner-results-summary';
-      summaryEl.textContent = `✓ Успешно обработано скриншотов: ${count}. Проверьте значения перед применением:`;
+      const count = result?.imagesProcessed || 1;
+      if (hasRecognizedData) {
+        summaryEl.className = 'scanner-results-summary';
+        summaryEl.textContent = `✓ Успешно обработано скриншотов: ${count}. Распознано параметров: ${recognizedFields.length}. Проверьте подсвеченные поля перед применением:`;
+      } else {
+        summaryEl.className = 'scanner-results-summary error';
+        summaryEl.textContent = `⚠️ На скриншотах не удалось обнаружить данные склада или профиля. Поля остались со старыми значениями. Проверьте скриншоты или введите значения вручную.`;
+      }
+    }
+
+    function markField(inputEl, fieldKey) {
+      if (!inputEl) return;
+      const isRecognized = recognizedFields.includes(fieldKey);
+      const parent = inputEl.closest ? (inputEl.closest('.form-group') || inputEl.parentElement) : inputEl.parentElement;
+      const existingBadge = parent?.querySelector ? parent.querySelector('.ocr-detected-badge') : null;
+
+      if (isRecognized) {
+        inputEl.classList?.add('ocr-detected-input');
+        if (!existingBadge && parent && typeof document !== 'undefined') {
+          const label = parent.querySelector ? parent.querySelector('label') : null;
+          if (label && typeof document.createElement === 'function') {
+            const badge = document.createElement('span');
+            badge.className = 'ocr-detected-badge';
+            badge.textContent = '✓ Со скриншота';
+            label.appendChild(badge);
+          }
+        }
+      } else {
+        inputEl.classList?.remove('ocr-detected-input');
+        if (existingBadge && typeof existingBadge.remove === 'function') {
+          existingBadge.remove();
+        }
+      }
     }
 
     let currentSector = {};
@@ -179,8 +332,8 @@
       currentName = document.getElementById('fp-name')?.value || '';
     }
 
-    const s = result.sector || {};
-    const st = result.stock || {};
+    const s = result?.sector || {};
+    const st = result?.stock || {};
 
     const nickInput = document.getElementById('scanner-preview-nickname');
     const updateNickCheck = document.getElementById('scanner-preview-update-nickname');
@@ -191,6 +344,7 @@
     if (updateNickCheck) {
       updateNickCheck.checked = Boolean(detectedName);
     }
+    markField(nickInput, 'name');
 
     const fmt = typeof formatInputNumber === 'function' ? formatInputNumber : (n => String(n));
 
@@ -199,46 +353,81 @@
       const val = s.power !== undefined ? s.power : (currentSector.power || 0);
       powerInput.value = fmt(val);
     }
+    markField(powerInput, 'power');
+
     const killsInput = document.getElementById('scanner-preview-kills');
     if (killsInput) {
       const val = s.kills !== undefined ? s.kills : (currentSector.kills || 0);
       killsInput.value = fmt(val);
     }
+    markField(killsInput, 'kills');
+
     const kpInput = document.getElementById('scanner-preview-kill-points');
     if (kpInput) {
       const val = s.killPoints !== undefined ? s.killPoints : (currentSector.killPoints || 0);
       kpInput.value = fmt(val, true);
     }
+    markField(kpInput, 'killPoints');
 
     const couponsInput = document.getElementById('scanner-preview-coupons');
     if (couponsInput) {
       const val = st.coupons !== undefined ? st.coupons : (currentStock.coupons || 0);
       couponsInput.value = fmt(val);
     }
+    markField(couponsInput, 'coupons');
+
     const puzzlesInput = document.getElementById('scanner-preview-puzzles');
     if (puzzlesInput) {
       const val = st.puzzles !== undefined ? st.puzzles : (currentStock.puzzles || 0);
       puzzlesInput.value = fmt(val);
     }
+    markField(puzzlesInput, 'puzzles');
+
+    const chestsInput = document.getElementById('scanner-preview-chests');
+    if (chestsInput) {
+      const val = st.chests !== undefined ? st.chests : (currentStock.chests || 0);
+      chestsInput.value = fmt(val);
+    }
+    markField(chestsInput, 'chests');
+
     const starCouponsInput = document.getElementById('scanner-preview-star-coupons');
     if (starCouponsInput) {
       const val = st.starCoupons !== undefined ? st.starCoupons : (currentStock.starCoupons || 0);
       starCouponsInput.value = fmt(val);
     }
+    markField(starCouponsInput, 'starCoupons');
+
     const stars1Input = document.getElementById('scanner-preview-stars-1');
     if (stars1Input) {
       const val = st.legendaryStars1 !== undefined ? st.legendaryStars1 : (currentStock.legendaryStars1 || 0);
       stars1Input.value = fmt(val);
     }
+    markField(stars1Input, 'legendaryStars1');
+
     const stars2Input = document.getElementById('scanner-preview-stars-2');
     if (stars2Input) {
       const val = st.legendaryStars2 !== undefined ? st.legendaryStars2 : (currentStock.legendaryStars2 || 0);
       stars2Input.value = fmt(val);
     }
+    markField(stars2Input, 'legendaryStars2');
+
     const stars3Input = document.getElementById('scanner-preview-stars-3');
     if (stars3Input) {
       const val = st.legendaryStars3 !== undefined ? st.legendaryStars3 : (currentStock.legendaryStars3 || 0);
       stars3Input.value = fmt(val);
+    }
+    markField(stars3Input, 'legendaryStars3');
+
+    // Injected OCR raw text display
+    const rawDetailsEl = document.getElementById('scanner-raw-details');
+    const rawPreEl = document.getElementById('scanner-raw-text-pre');
+    if (rawDetailsEl && rawPreEl) {
+      if (result?.rawText && String(result.rawText).trim()) {
+        rawPreEl.textContent = String(result.rawText).trim();
+        rawDetailsEl.style.display = 'block';
+      } else {
+        rawDetailsEl.style.display = 'none';
+      }
     }
 
     if (typeof bindAllNumericInputs === 'function') {
@@ -248,7 +437,14 @@
     updateScannerPreviewStarPoints();
 
     const btnApply = document.getElementById('scanner-btn-apply');
-    if (btnApply) btnApply.disabled = false;
+    if (btnApply) {
+      btnApply.disabled = false;
+      if (!hasRecognizedData) {
+        btnApply.textContent = '✓ Сохранить текущие значения';
+      } else {
+        btnApply.textContent = '✓ Применить в профиль';
+      }
+    }
   }
 
   async function applyScanResultsToProfile() {
@@ -265,6 +461,7 @@
 
     const coupons = Math.max(0, parseNum(document.getElementById('scanner-preview-coupons')?.value || 0));
     const puzzles = Math.max(0, parseNum(document.getElementById('scanner-preview-puzzles')?.value || 0));
+    const chests = Math.max(0, parseNum(document.getElementById('scanner-preview-chests')?.value || 0));
     const starCoupons = Math.max(0, parseNum(document.getElementById('scanner-preview-star-coupons')?.value || 0));
     const legendaryStars1 = Math.max(0, parseNum(document.getElementById('scanner-preview-stars-1')?.value || 0));
     const legendaryStars2 = Math.max(0, parseNum(document.getElementById('scanner-preview-stars-2')?.value || 0));
@@ -279,6 +476,7 @@
 
       if (document.getElementById('my-stock-coupons')) document.getElementById('my-stock-coupons').value = fmt(coupons);
       if (document.getElementById('my-stock-puzzles')) document.getElementById('my-stock-puzzles').value = fmt(puzzles);
+      if (document.getElementById('my-stock-chests')) document.getElementById('my-stock-chests').value = fmt(chests);
       if (document.getElementById('my-stock-star-coupons')) document.getElementById('my-stock-star-coupons').value = fmt(starCoupons);
       if (document.getElementById('my-stock-legendary-stars-1')) document.getElementById('my-stock-legendary-stars-1').value = fmt(legendaryStars1);
       if (document.getElementById('my-stock-legendary-stars-2')) document.getElementById('my-stock-legendary-stars-2').value = fmt(legendaryStars2);
@@ -290,7 +488,6 @@
       const vipLevel = myCabinet?.sector?.vipLevel || 0;
       const vipPoints = myCabinet?.sector?.vipPoints || 0;
       const confidentialityLevel = myCabinet?.sector?.confidentialityLevel || 0;
-      const chests = myCabinet?.stock?.chests || 0;
 
       const activeSectorId = myCabinet?.id || myCabinet?.activeSectorId;
       const currentStock = myCabinet?.stock ? { ...myCabinet.stock } : {};
@@ -359,6 +556,7 @@
 
       if (document.getElementById('fp-stock-coupons')) document.getElementById('fp-stock-coupons').value = fmt(coupons);
       if (document.getElementById('fp-stock-puzzles')) document.getElementById('fp-stock-puzzles').value = fmt(puzzles);
+      if (document.getElementById('fp-stock-chests')) document.getElementById('fp-stock-chests').value = fmt(chests);
       if (document.getElementById('fp-stock-star-coupons')) document.getElementById('fp-stock-star-coupons').value = fmt(starCoupons);
       if (document.getElementById('fp-stock-legendary-stars-1')) document.getElementById('fp-stock-legendary-stars-1').value = fmt(legendaryStars1);
       if (document.getElementById('fp-stock-legendary-stars-2')) document.getElementById('fp-stock-legendary-stars-2').value = fmt(legendaryStars2);
@@ -382,7 +580,7 @@
           legendaryStars1,
           legendaryStars2,
           legendaryStars3,
-          chests: p?.stock?.chests || 0
+          chests: chests !== undefined ? chests : (p?.stock?.chests || 0)
         };
         try {
           await apiFetch(`/api/players/${activeEditId}/stock-history`, {
@@ -447,6 +645,7 @@
   function initSmartScanner() {
     const dropzone = document.getElementById('scanner-dropzone');
     const fileInput = document.getElementById('scanner-file-input');
+    const modal = document.getElementById('modal-smart-scanner');
 
     if (dropzone && !dropzone.dataset.initialized) {
       dropzone.dataset.initialized = 'true';
@@ -480,15 +679,25 @@
       });
     }
 
-    if (fileInput && !fileInput.dataset.initialized) {
-      fileInput.dataset.initialized = 'true';
-      fileInput.addEventListener('change', (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
-        if (files.length > 0) {
+    if (modal && !modal.dataset.dropInitialized) {
+      modal.dataset.dropInitialized = 'true';
+      modal.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      modal.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const files = e.dataTransfer ? e.dataTransfer.files : null;
+        if (files && files.length > 0) {
           handleScannerFiles(files);
         }
       });
+    }
+
+    if (fileInput && !fileInput.dataset.initialized) {
+      fileInput.dataset.initialized = 'true';
+      fileInput.addEventListener('change', handleScannerFileInput);
     }
 
     if (typeof window !== 'undefined' && !window.__scannerPasteInitialized) {
@@ -580,15 +789,26 @@
       });
     }
 
-    if (fileInput && !fileInput.dataset.initialized) {
-      fileInput.dataset.initialized = 'true';
-      fileInput.addEventListener('change', (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
-        if (files.length > 0) {
+    const modal = document.getElementById('modal-exchange-ocr');
+    if (modal && !modal.dataset.dropInitialized) {
+      modal.dataset.dropInitialized = 'true';
+      modal.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      modal.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const files = e.dataTransfer ? e.dataTransfer.files : null;
+        if (files && files.length > 0) {
           handleExchangeFiles(files);
         }
       });
+    }
+
+    if (fileInput && !fileInput.dataset.initialized) {
+      fileInput.dataset.initialized = 'true';
+      fileInput.addEventListener('change', handleExchangeFileInput);
     }
   }
 
@@ -856,6 +1076,7 @@
     closeSmartScannerModal,
     updateScannerPreviewStarPoints,
     handleScannerFiles,
+    handleScannerFileInput,
     displayScannerResults,
     applyScanResultsToProfile,
     handleScannerGlobalPaste,
@@ -864,6 +1085,7 @@
     closeExchangeOcrModal,
     initExchangeOcr,
     handleExchangeFiles,
+    handleExchangeFileInput,
     renderExchangeOcrTable,
     recalcExchangeRowTotal,
     removeExchangeRow,
@@ -878,6 +1100,7 @@
   root.closeSmartScannerModal = closeSmartScannerModal;
   root.updateScannerPreviewStarPoints = updateScannerPreviewStarPoints;
   root.handleScannerFiles = handleScannerFiles;
+  root.handleScannerFileInput = handleScannerFileInput;
   root.displayScannerResults = displayScannerResults;
   root.applyScanResultsToProfile = applyScanResultsToProfile;
   root.initSmartScanner = initSmartScanner;
@@ -886,11 +1109,29 @@
   root.closeExchangeOcrModal = closeExchangeOcrModal;
   root.initExchangeOcr = initExchangeOcr;
   root.handleExchangeFiles = handleExchangeFiles;
+  root.handleExchangeFileInput = handleExchangeFileInput;
   root.renderExchangeOcrTable = renderExchangeOcrTable;
   root.recalcExchangeRowTotal = recalcExchangeRowTotal;
   root.removeExchangeRow = removeExchangeRow;
   root.addManualExchangeRow = addManualExchangeRow;
   root.submitBatchExchangeOfficers = submitBatchExchangeOfficers;
+
+  // Auto-initialize when loaded in browser
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        initSmartScanner();
+        initExchangeOcr();
+      });
+    } else {
+      initSmartScanner();
+      initExchangeOcr();
+    }
+    window.addEventListener('load', () => {
+      initSmartScanner();
+      initExchangeOcr();
+    });
+  }
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = smartScannerUI;
