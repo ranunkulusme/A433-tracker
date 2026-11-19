@@ -136,3 +136,54 @@ test('SmartScannerUI: displayScannerResults highlights recognized fields and sho
   delete global.document;
   delete global.formatInputNumber;
 });
+
+test('SmartScannerUI: handleScannerFileInput extracts files and resets input value', async () => {
+  let processedFiles = null;
+  const mockFile = { name: 'screenshot.png', type: 'image/png' };
+  const mockEvent = {
+    target: {
+      files: [mockFile],
+      value: 'C:\\fakepath\\screenshot.png'
+    }
+  };
+
+  const origHandle = smartScannerUI.handleScannerFiles;
+  smartScannerUI.handleScannerFiles = (files) => {
+    processedFiles = files;
+  };
+
+  assert.equal(typeof smartScannerUI.handleScannerFileInput, 'function');
+  smartScannerUI.handleScannerFileInput(mockEvent);
+
+  assert.equal(mockEvent.target.value, '');
+  assert.equal(processedFiles.length, 1);
+  assert.equal(processedFiles[0].name, 'screenshot.png');
+
+  smartScannerUI.handleScannerFiles = origHandle;
+});
+
+test('SmartScannerUI: handleExchangeFileInput extracts files and resets input value', async () => {
+  let processedFiles = null;
+  const mockFile = { name: 'exchange.png', type: 'image/png' };
+  const mockEvent = {
+    target: {
+      files: [mockFile],
+      value: 'C:\\fakepath\\exchange.png'
+    }
+  };
+
+  const origHandle = smartScannerUI.handleExchangeFiles;
+  smartScannerUI.handleExchangeFiles = (files) => {
+    processedFiles = files;
+  };
+
+  assert.equal(typeof smartScannerUI.handleExchangeFileInput, 'function');
+  smartScannerUI.handleExchangeFileInput(mockEvent);
+
+  assert.equal(mockEvent.target.value, '');
+  assert.equal(processedFiles.length, 1);
+  assert.equal(processedFiles[0].name, 'exchange.png');
+
+  smartScannerUI.handleExchangeFiles = origHandle;
+});
+

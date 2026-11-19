@@ -525,7 +525,7 @@
   </nav>
 
   <!-- Hidden OCR input for TMA -->
-  <input type="file" id="tma-ocr-input" accept="image/*" style="display:none" onchange="handleTmaOcrFileInput(event)">
+  <input type="file" id="tma-ocr-input" accept="image/*,.png,.jpg,.jpeg,.webp" style="display:none" onchange="handleTmaOcrFileInput(event)">
 
   <!-- TMA Event Detail Modal / Bottom Sheet -->
   <div id="tma-event-modal" class="tma-modal" style="display:none" onclick="closeTmaEventModal()">
@@ -1278,7 +1278,7 @@
 
     <!-- Dropzone -->
     <div id="exchange-dropzone" class="scanner-dropzone" onclick="document.getElementById('exchange-file-input').click()">
-      <input type="file" id="exchange-file-input" multiple accept="image/*" style="display:none">
+      <input type="file" id="exchange-file-input" multiple accept="image/*,.png,.jpg,.jpeg,.webp" style="display:none" onchange="handleExchangeFileInput(event)" onclick="event.stopPropagation()">
       <div class="scanner-dropzone-icon">📷</div>
       <div class="scanner-dropzone-title">Перетащите скриншот магазина сюда или нажмите для выбора</div>
       <div class="scanner-dropzone-hint">Поддерживаются PNG, JPG, WebP. Вы можете загрузить сразу несколько скриншотов.</div>
@@ -1799,7 +1799,7 @@
 
     <!-- Dropzone -->
     <div id="scanner-dropzone" class="scanner-dropzone" onclick="document.getElementById('scanner-file-input').click()">
-      <input type="file" id="scanner-file-input" multiple accept="image/*" style="display:none">
+      <input type="file" id="scanner-file-input" multiple accept="image/*,.png,.jpg,.jpeg,.webp" style="display:none" onchange="handleScannerFileInput(event)" onclick="event.stopPropagation()">
       <div class="scanner-dropzone-icon">📷</div>
       <div class="scanner-dropzone-title">Перетащите скриншоты сюда или нажмите для выбора</div>
       <div class="scanner-dropzone-hint">Поддерживаются PNG, JPG, WebP. Вы можете загрузить сразу несколько скриншотов.</div>
@@ -2217,8 +2217,8 @@
 <div class="toast-container" id="toasts"></div>
 <script src="logic.js?v=3.50.1"></script>
 <script src="/ocr.js?v=3.50.1"></script>
+<script src="smart-scanner.js?v=3.50.1"></script>
 <script src="app.js?v=3.50.1"></script>
 <script src="tma.js?v=3.50.1"></script>
-<script src="smart-scanner.js?v=3.50.1"></script>
 </body>
 </html>

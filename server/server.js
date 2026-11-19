@@ -64,7 +64,17 @@ async function runOcrOnImageBuffer(imageBuffer, options = {}) {
 
   const { execFile } = require('node:child_process');
   const os = require('node:os');
-  const tempPath = path.join(os.tmpdir(), `ocr_scan_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
+  let ext = '.png';
+  if (imageBuffer && imageBuffer.length >= 4) {
+    if (imageBuffer[0] === 0xFF && imageBuffer[1] === 0xD8 && imageBuffer[2] === 0xFF) {
+      ext = '.jpg';
+    } else if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50 && imageBuffer[2] === 0x4E && imageBuffer[3] === 0x47) {
+      ext = '.png';
+    } else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49 && imageBuffer[2] === 0x46 && imageBuffer[3] === 0x46) {
+      ext = '.webp';
+    }
+  }
+  const tempPath = path.join(os.tmpdir(), `ocr_scan_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
 
   try {
     await fs.promises.writeFile(tempPath, imageBuffer);

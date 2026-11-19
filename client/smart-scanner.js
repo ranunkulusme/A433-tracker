@@ -20,6 +20,8 @@
     lastScanResults = null;
     isScannerRunning = false;
 
+    initSmartScanner();
+
     const btnApply = document.getElementById('scanner-btn-apply');
     if (btnApply) btnApply.disabled = true;
 
@@ -81,11 +83,76 @@
   function readFileAsBase64(file) {
     return new Promise((resolve, reject) => {
       if (typeof file === 'string') return resolve(file);
+      if (!file) return resolve('');
+
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
       reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения'));
+
+      // If outside a DOM browser or Image/canvas unsupported, read file directly
+      if (typeof Image === 'undefined' || typeof document === 'undefined' || !document.createElement) {
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        if (!dataUrl || typeof dataUrl !== 'string') return resolve(dataUrl);
+
+        try {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 2200;
+            let w = img.width;
+            let h = img.height;
+            // If already within reasonable dimensions and size, keep original bytes
+            if (w <= maxDim && h <= maxDim && (!file.size || file.size < 3 * 1024 * 1024)) {
+              return resolve(dataUrl);
+            }
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(dataUrl);
+            ctx.drawImage(img, 0, 0, w, h);
+            const optimizedUrl = canvas.toDataURL('image/jpeg', 0.90);
+            resolve(optimizedUrl || dataUrl);
+          };
+          img.onerror = () => resolve(dataUrl);
+          img.src = dataUrl;
+        } catch (_) {
+          resolve(dataUrl);
+        }
+      };
       reader.readAsDataURL(file);
     });
+  }
+
+  function handleScannerFileInput(event) {
+    const files = Array.from(event?.target?.files || []);
+    if (event?.target) event.target.value = '';
+    if (files.length > 0) {
+      const runner = (typeof smartScannerUI !== 'undefined' && smartScannerUI.handleScannerFiles) || handleScannerFiles;
+      runner(files);
+    }
+  }
+
+  function handleExchangeFileInput(event) {
+    const files = Array.from(event?.target?.files || []);
+    if (event?.target) event.target.value = '';
+    if (files.length > 0) {
+      const runner = (typeof smartScannerUI !== 'undefined' && smartScannerUI.handleExchangeFiles) || handleExchangeFiles;
+      runner(files);
+    }
   }
 
   async function handleScannerFiles(fileList) {
@@ -553,6 +620,7 @@
   function initSmartScanner() {
     const dropzone = document.getElementById('scanner-dropzone');
     const fileInput = document.getElementById('scanner-file-input');
+    const modal = document.getElementById('modal-smart-scanner');
 
     if (dropzone && !dropzone.dataset.initialized) {
       dropzone.dataset.initialized = 'true';
@@ -586,15 +654,25 @@
       });
     }
 
-    if (fileInput && !fileInput.dataset.initialized) {
-      fileInput.dataset.initialized = 'true';
-      fileInput.addEventListener('change', (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
-        if (files.length > 0) {
+    if (modal && !modal.dataset.dropInitialized) {
+      modal.dataset.dropInitialized = 'true';
+      modal.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      modal.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const files = e.dataTransfer ? e.dataTransfer.files : null;
+        if (files && files.length > 0) {
           handleScannerFiles(files);
         }
       });
+    }
+
+    if (fileInput && !fileInput.dataset.initialized) {
+      fileInput.dataset.initialized = 'true';
+      fileInput.addEventListener('change', handleScannerFileInput);
     }
 
     if (typeof window !== 'undefined' && !window.__scannerPasteInitialized) {
@@ -686,15 +764,26 @@
       });
     }
 
-    if (fileInput && !fileInput.dataset.initialized) {
-      fileInput.dataset.initialized = 'true';
-      fileInput.addEventListener('change', (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
-        if (files.length > 0) {
+    const modal = document.getElementById('modal-exchange-ocr');
+    if (modal && !modal.dataset.dropInitialized) {
+      modal.dataset.dropInitialized = 'true';
+      modal.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      modal.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const files = e.dataTransfer ? e.dataTransfer.files : null;
+        if (files && files.length > 0) {
           handleExchangeFiles(files);
         }
       });
+    }
+
+    if (fileInput && !fileInput.dataset.initialized) {
+      fileInput.dataset.initialized = 'true';
+      fileInput.addEventListener('change', handleExchangeFileInput);
     }
   }
 
@@ -962,6 +1051,7 @@
     closeSmartScannerModal,
     updateScannerPreviewStarPoints,
     handleScannerFiles,
+    handleScannerFileInput,
     displayScannerResults,
     applyScanResultsToProfile,
     handleScannerGlobalPaste,
@@ -970,6 +1060,7 @@
     closeExchangeOcrModal,
     initExchangeOcr,
     handleExchangeFiles,
+    handleExchangeFileInput,
     renderExchangeOcrTable,
     recalcExchangeRowTotal,
     removeExchangeRow,
@@ -984,6 +1075,7 @@
   root.closeSmartScannerModal = closeSmartScannerModal;
   root.updateScannerPreviewStarPoints = updateScannerPreviewStarPoints;
   root.handleScannerFiles = handleScannerFiles;
+  root.handleScannerFileInput = handleScannerFileInput;
   root.displayScannerResults = displayScannerResults;
   root.applyScanResultsToProfile = applyScanResultsToProfile;
   root.initSmartScanner = initSmartScanner;
@@ -992,11 +1084,29 @@
   root.closeExchangeOcrModal = closeExchangeOcrModal;
   root.initExchangeOcr = initExchangeOcr;
   root.handleExchangeFiles = handleExchangeFiles;
+  root.handleExchangeFileInput = handleExchangeFileInput;
   root.renderExchangeOcrTable = renderExchangeOcrTable;
   root.recalcExchangeRowTotal = recalcExchangeRowTotal;
   root.removeExchangeRow = removeExchangeRow;
   root.addManualExchangeRow = addManualExchangeRow;
   root.submitBatchExchangeOfficers = submitBatchExchangeOfficers;
+
+  // Auto-initialize when loaded in browser
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        initSmartScanner();
+        initExchangeOcr();
+      });
+    } else {
+      initSmartScanner();
+      initExchangeOcr();
+    }
+    window.addEventListener('load', () => {
+      initSmartScanner();
+      initExchangeOcr();
+    });
+  }
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = smartScannerUI;
