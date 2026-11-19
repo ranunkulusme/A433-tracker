@@ -346,7 +346,8 @@
     const NUMBER_PATTERN = '(?:[0-9OoLlI]{1,3}(?:[ \\t][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,\\x27][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,][0-9OoLlI]+)?)(?:[^\\S\\r\\n]*[KkMmBb](?=[^A-Za-z]|$))?';
 
     // Сила (Мощь): ищем прямое значение силы, исключая подкатегории (юнитов, построек, исследований, офицера, корабля)
-    const powerRegex = new RegExp(`(?:Сила|Мощь|Power|Macht|Kraft)(?!\\s*(?:юнитов|построек|исследований|офицера|военного|корабля|units|buildings|research|hero|officer|ship))[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
+    // Поддерживаем как слитное, так и раздельное написание, а также шумы OCR вроде "ила | 165752844"
+    const powerRegex = new RegExp(`(?:[СсCcSs]?ила|Мощь|Power|Macht|Kraft)(?!\\s*(?:юнитов|построек|исследований|офицера|военного|корабля|units|buildings|research|hero|officer|ship))[\\s|:：-]*(${NUMBER_PATTERN})`, 'gi');
     let bestPower = 0;
     let pMatch;
     while ((pMatch = powerRegex.exec(text)) !== null) {
@@ -358,7 +359,7 @@
 
     // Если прямого совпадения нет (например, заголовок "СИЛА" без числа на той же строке) — суммируем подкатегории
     if (!bestPower) {
-      const subPowerRegex = new RegExp(`Сила\\s+(?:юнитов|построек|исследований|офицера|военного\\s+корабля)[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
+      const subPowerRegex = new RegExp(`(?:[СсCcSs]?ила|Мощь)?\\s*(?:юнитов|построек|исследований|офицера|военного\\s+корабля)[^\\S\\r\\n]*[:：|]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
       let subSum = 0;
       let spMatch;
       while ((spMatch = subPowerRegex.exec(text)) !== null) {
@@ -438,11 +439,19 @@
   const WAREHOUSE_ITEM_DEFINITIONS = [
     {
       key: 'coupons',
-      pattern: /(?:Купон\s+готовности[^\w\n\r]*\s*офицера|Купон\s+готовности\S*\s*офицера|Officer\s+Readiness\s+Coupon|Offiziersbereitschafts-Gutschein|Offiziersgutschein|(?:Купон\s+готовности)(?!\s*(?:оружия|звезд|weapon|star|stern)))/i,
+      pattern: /(?:Купон\s+готовности[^\w\n\r]*\s*офицер\S*|Купон\s+готовности\S*\s*офицер\S*|Officer\s+Readiness\s+Coupon|Offiziersbereitschafts-Gutschein|Offiziersgutschein)/i,
+    },
+    {
+      key: 'chests',
+      pattern: /(?:Сундук[^\n]{0,30}выбор\S*|Сундук[^\n]{0,30}медал\S*(?:\s+легендарн\S*)?|Choice\s*(?:Officer\s*)?Chest|Auswahltruhe)/i,
     },
     {
       key: 'puzzles',
-      pattern: /(?<!сундук[^\n]{0,35})(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\S\r\n]*(?:[.,:;\s]*офицер\S*)?|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille/i,
+      pattern: /(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\S\r\n]*(?:[.,:;\s]*офицер\S*)?|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille/i,
+      validator: (text, matchIndex) => {
+        const before = text.slice(Math.max(0, matchIndex - 60), matchIndex);
+        return !/(?:сундук|выбор|chest|truhe)/i.test(before);
+      }
     },
     {
       key: 'starCoupons',
@@ -458,26 +467,28 @@
     },
     {
       key: 'legendaryStars1',
-      pattern: /(?:110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:(?:Медаль[^\S\r\n]+Звезд[аы]|110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|Медаль[^\S\r\n]+Звезд[аы])/i,
     },
   ];
 
-  function parseWarehouseScreenshotText(text) {
-    if (!text || typeof text !== 'string') {
-      return { isWarehouse: false, stock: {}, recognizedFields: [] };
-    }
-
+  function extractStockFromTextSlice(text) {
+    if (!text || typeof text !== 'string') return {};
     const stock = {};
 
     for (const def of WAREHOUSE_ITEM_DEFINITIONS) {
       const match = text.match(def.pattern);
       if (!match) continue;
 
+      if (def.validator && !def.validator(text, match.index)) {
+        continue;
+      }
+
       const startIndex = match.index + match[0].length;
       const windowText = text.slice(startIndex, startIndex + 250);
 
-      // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>" строго без захвата переводов строк следующей карточки
-      const countMatch = windowText.match(/(?:[ВB8]?\s*[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?(?:\r?\n)?[^\S\r\n]*([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
+      // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>"
+      // Поддерживаем артефакты OCR: "в aman 6 604", "° Вналичии: 482611", двоеточие как 6
+      const countMatch = windowText.match(/(?:[ВB8]?\s*(?:[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|aman|aлuu|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?)[^\S\r\n]*(?:[6°oO]\s+)?([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
       if (countMatch) {
         const val = cleanOcrNumber(countMatch[1]);
         if (val > 0) {
@@ -497,6 +508,35 @@
         }
       }
     }
+    return stock;
+  }
+
+  function parseWarehouseScreenshotText(text) {
+    if (!text || typeof text !== 'string') {
+      return { isWarehouse: false, stock: {}, recognizedFields: [] };
+    }
+
+    let stock = {};
+
+    // Если есть колонки, распознанные изолированно, парсим колонки сначала,
+    // чтобы устранить взаимное влияние строк между левой и правой карточками
+    if (text.includes('=== LEFT COLUMN ===') && text.includes('=== RIGHT COLUMN ===')) {
+      const leftText = text.split('=== LEFT COLUMN ===')[1]?.split('=== RIGHT COLUMN ===')[0] || '';
+      const rightText = text.split('=== RIGHT COLUMN ===')[1] || '';
+      const leftStock = extractStockFromTextSlice(leftText);
+      const rightStock = extractStockFromTextSlice(rightText);
+      stock = { ...leftStock, ...rightStock };
+
+      // Дополняем тем, что могло быть обнаружено в общем тексте (например, сундуки выбора)
+      const fullStock = extractStockFromTextSlice(text);
+      for (const [k, v] of Object.entries(fullStock)) {
+        if (stock[k] === undefined && v !== undefined) {
+          stock[k] = v;
+        }
+      }
+    } else {
+      stock = extractStockFromTextSlice(text);
+    }
 
     const recognizedFields = Object.keys(stock).filter(k => typeof stock[k] === 'number');
     const isWarehouse = recognizedFields.length > 0;
@@ -505,12 +545,12 @@
 
   function classifyScreenshotText(text) {
     if (!text || typeof text !== 'string') return 'unknown';
-    const shopParsed = parseExchangeShopScreenshotText(text);
-    if (shopParsed && shopParsed.length > 0) return 'exchange_shop';
     const whParsed = parseWarehouseScreenshotText(text);
     if (whParsed && whParsed.isWarehouse) return 'warehouse';
     const profParsed = parseProfileScreenshotText(text);
     if (profParsed && profParsed.isProfile) return 'profile';
+    const shopParsed = parseExchangeShopScreenshotText(text);
+    if (shopParsed && shopParsed.length > 0) return 'exchange_shop';
     return 'unknown';
   }
 
@@ -536,7 +576,7 @@
 
     const isWarehouse = whParsed.isWarehouse;
     const isProfile = isWarehouse ? false : profParsed.isProfile;
-    const isExchangeShop = detectedType === 'exchange_shop';
+    const isExchangeShop = (!isWarehouse && !isProfile) && (detectedType === 'exchange_shop');
 
     const sector = isProfile ? profParsed.sector : {};
     const stock = whParsed.stock || {};

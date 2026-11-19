@@ -377,6 +377,13 @@
     }
     markField(puzzlesInput, 'puzzles');
 
+    const chestsInput = document.getElementById('scanner-preview-chests');
+    if (chestsInput) {
+      const val = st.chests !== undefined ? st.chests : (currentStock.chests || 0);
+      chestsInput.value = fmt(val);
+    }
+    markField(chestsInput, 'chests');
+
     const starCouponsInput = document.getElementById('scanner-preview-star-coupons');
     if (starCouponsInput) {
       const val = st.starCoupons !== undefined ? st.starCoupons : (currentStock.starCoupons || 0);
@@ -448,6 +455,7 @@
 
     const coupons = Math.max(0, parseNum(document.getElementById('scanner-preview-coupons')?.value || 0));
     const puzzles = Math.max(0, parseNum(document.getElementById('scanner-preview-puzzles')?.value || 0));
+    const chests = Math.max(0, parseNum(document.getElementById('scanner-preview-chests')?.value || 0));
     const starCoupons = Math.max(0, parseNum(document.getElementById('scanner-preview-star-coupons')?.value || 0));
     const legendaryStars1 = Math.max(0, parseNum(document.getElementById('scanner-preview-stars-1')?.value || 0));
     const legendaryStars2 = Math.max(0, parseNum(document.getElementById('scanner-preview-stars-2')?.value || 0));
@@ -462,6 +470,7 @@
 
       if (document.getElementById('my-stock-coupons')) document.getElementById('my-stock-coupons').value = fmt(coupons);
       if (document.getElementById('my-stock-puzzles')) document.getElementById('my-stock-puzzles').value = fmt(puzzles);
+      if (document.getElementById('my-stock-chests')) document.getElementById('my-stock-chests').value = fmt(chests);
       if (document.getElementById('my-stock-star-coupons')) document.getElementById('my-stock-star-coupons').value = fmt(starCoupons);
       if (document.getElementById('my-stock-legendary-stars-1')) document.getElementById('my-stock-legendary-stars-1').value = fmt(legendaryStars1);
       if (document.getElementById('my-stock-legendary-stars-2')) document.getElementById('my-stock-legendary-stars-2').value = fmt(legendaryStars2);
@@ -473,7 +482,6 @@
       const vipLevel = myCabinet?.sector?.vipLevel || 0;
       const vipPoints = myCabinet?.sector?.vipPoints || 0;
       const confidentialityLevel = myCabinet?.sector?.confidentialityLevel || 0;
-      const chests = myCabinet?.stock?.chests || 0;
 
       const activeSectorId = myCabinet?.id || myCabinet?.activeSectorId;
       const currentStock = myCabinet?.stock ? { ...myCabinet.stock } : {};
@@ -542,6 +550,7 @@
 
       if (document.getElementById('fp-stock-coupons')) document.getElementById('fp-stock-coupons').value = fmt(coupons);
       if (document.getElementById('fp-stock-puzzles')) document.getElementById('fp-stock-puzzles').value = fmt(puzzles);
+      if (document.getElementById('fp-stock-chests')) document.getElementById('fp-stock-chests').value = fmt(chests);
       if (document.getElementById('fp-stock-star-coupons')) document.getElementById('fp-stock-star-coupons').value = fmt(starCoupons);
       if (document.getElementById('fp-stock-legendary-stars-1')) document.getElementById('fp-stock-legendary-stars-1').value = fmt(legendaryStars1);
       if (document.getElementById('fp-stock-legendary-stars-2')) document.getElementById('fp-stock-legendary-stars-2').value = fmt(legendaryStars2);
@@ -565,7 +574,7 @@
           legendaryStars1,
           legendaryStars2,
           legendaryStars3,
-          chests: p?.stock?.chests || 0
+          chests: chests !== undefined ? chests : (p?.stock?.chests || 0)
         };
         try {
           await apiFetch(`/api/players/${activeEditId}/stock-history`, {

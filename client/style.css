@@ -1495,6 +1495,44 @@ select option { background: var(--bg3); }
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
+.scanner-section .form-row-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: flex-end;
+}
+.scanner-section .form-row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: flex-end;
+}
+.scanner-section .form-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.scanner-section .form-group label {
+  white-space: normal;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11.5px;
+  line-height: 1.25;
+  margin-bottom: 5px;
+}
+.scanner-section .form-group input {
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  .scanner-section .form-row-2,
+  .scanner-section .form-row-3 {
+    grid-template-columns: 1fr;
+  }
+}
 
 .cabinet-sectors-bar {
   display: flex;

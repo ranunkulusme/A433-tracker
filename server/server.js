@@ -107,10 +107,10 @@ async function runOcrOnImageBuffer(imageBuffer, options = {}) {
       if (magickBin) {
         await Promise.all([
           new Promise((resolveCrop) => {
-            execFile(magickBin, [tempPath, '-gravity', 'West', '-crop', '52%x100%+0+0', leftPath], { timeout: 10000 }, () => resolveCrop());
+            execFile(magickBin, [tempPath, '-gravity', 'West', '-crop', '56%x100%+0+0', leftPath], { timeout: 10000 }, () => resolveCrop());
           }),
           new Promise((resolveCrop) => {
-            execFile(magickBin, [tempPath, '-gravity', 'East', '-crop', '52%x100%+0+0', rightPath], { timeout: 10000 }, () => resolveCrop());
+            execFile(magickBin, [tempPath, '-gravity', 'East', '-crop', '56%x100%+0+0', rightPath], { timeout: 10000 }, () => resolveCrop());
           })
         ]);
 

@@ -1146,6 +1146,20 @@ test('parseProfileScreenshotText correctly parses total power, kills and exact k
   assert.strictEqual(parsed.sector.power, 165752844, 'Total power must be 165,752,844, not 0 and not sub-powers');
   assert.strictEqual(parsed.sector.kills, 84863033);
   assert.strictEqual(parsed.sector.killPoints, 7589192717, 'Kill points must be exact total 7,589,192,717, not corrupted concatenated 17,327,771,732,777');
+
+  const noisyProfileText = `
+[A433]ranu
+ила | 165752844 3
+Убито 84,863,033
+Очки за убийство 7.6B
+СИЛА
+Сила исследований 65,476,911
+Сила офицера 4,892,754
+Сила военного корабля 32,179,698
+Очки за убийство 7,589,192,717
+  `;
+  const parsedNoisy = parseProfileScreenshotText(noisyProfileText);
+  assert.strictEqual(parsedNoisy.sector.power, 165752844, 'Should parse power even when label has OCR noise "ила | "');
 });
 
 test('parseWarehouseScreenshotText correctly parses real-world two-column warehouse with OCR noise and ignores weapon coupons and chests', () => {
@@ -1202,6 +1216,8 @@ Da Mepans эпического
   assert.strictEqual(parsed.stock.coupons, 482611, 'Coupons must be 482,611 from officer coupon, not weapon coupon 67,811');
   assert.strictEqual(parsed.stock.puzzles, 2253, 'Puzzles must be 2,253 from legendary officer medal, not chests (3 or 604)');
   assert.strictEqual(parsed.stock.starCoupons, 283818, 'Star coupons must be 283,818');
+  assert.strictEqual(parsed.stock.chests, 604, 'Chests must be 604 from choice chest');
+  assert.strictEqual(parsed.stock.legendaryStars1, 672, 'Legendary Star 1 must be 672 from Medal Star');
 });
 
 

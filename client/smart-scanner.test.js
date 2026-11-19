@@ -85,6 +85,7 @@ test('SmartScannerUI: displayScannerResults highlights recognized fields and sho
     'scanner-preview-kill-points': makeMockElement('scanner-preview-kill-points', '0'),
     'scanner-preview-coupons': makeMockElement('scanner-preview-coupons', '0'),
     'scanner-preview-puzzles': makeMockElement('scanner-preview-puzzles', '0'),
+    'scanner-preview-chests': makeMockElement('scanner-preview-chests', '0'),
     'scanner-preview-star-coupons': makeMockElement('scanner-preview-star-coupons', '0'),
     'scanner-preview-stars-1': makeMockElement('scanner-preview-stars-1', '0'),
     'scanner-preview-stars-2': makeMockElement('scanner-preview-stars-2', '0'),
