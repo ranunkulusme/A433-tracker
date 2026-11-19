@@ -1162,6 +1162,106 @@ test('parseProfileScreenshotText correctly parses total power, kills and exact k
   assert.strictEqual(parsedNoisy.sector.power, 165752844, 'Should parse power even when label has OCR noise "ила | "');
 });
 
+test('parseProfileScreenshotText extracts true total power (165,752,844) from noisy real-world OCR profile even with sub-powers summing to 102M', () => {
+  const noisyRealWorldProfile = `
+=== RIGHT COLUMN ===
+‚© © Снимок экрана — 2028-11-19 в 12.55.68 ® © — Отрытьв приложения «Просмотр»
+
+na 165752844 |
+т 84,863,033 lig
+ila 7.68 Г.
+ила юнит 26788097
+ила 32794324
+ила исследовани: 65,476,911
+ила офицер: 4,892,754
+ила военного корабл: 32,179,698
+Очки за убийство 7,589,192,717
+  `;
+
+  const parsed = parseProfileScreenshotText(noisyRealWorldProfile);
+  assert.strictEqual(parsed.isProfile, true);
+  assert.strictEqual(parsed.sector.power, 165752844, 'Power must be 165,752,844 (not 102,549,363 partial sub-power sum and not 32,794,324)');
+  assert.strictEqual(parsed.sector.kills, 84863033, 'Kills must be 84,863,033 even with noisy label "т 84,863,033"');
+  assert.strictEqual(parsed.sector.killPoints, 7589192717, 'Kill points must be 7,589,192,717');
+});
+
+test('parseWarehouseScreenshotText recognizes real-world noisy chests and rejects choice chest', () => {
+  const realChestsNoise = `
+=== LEFT COLUMN ===
+Sea War: Raid
+@ 6738M T 9385M T7748 2438M £2 7.5M
+Fe / вещи
+РЕСУРСЫ УСКОРИТЕЛИ | УС
+
+ee
+Эедаото,
+офицера
+В наличии: 3
+
+=== RIGHT COLUMN ===
+‘Сундук. Broce
+легендарного
+вналичии: 604
+  `;
+
+  const parsed = parseWarehouseScreenshotText(realChestsNoise);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.chests, 3, 'Must recognize chests = 3 from "Эедаото, офицера В наличии: 3" and ignore choice chest 604');
+});
+
+test('parseWarehouseScreenshotText does not drop puzzles when "Звезда" appears on the same line in parallel column', () => {
+  const multiColText = `
+=== LEFT COLUMN ===
+Купон готовности офицера
+В наличии: 482,611
+‘легендарного. ед; офицера
+В наличии: 2.253
+
+=== RIGHT COLUMN ===
+Купон готовности звезды
+В наличии: 283,818
+Медаль Звезда
+В наличии: 672
+  `;
+
+  const parsed = parseWarehouseScreenshotText(multiColText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.coupons, 482611);
+  assert.strictEqual(parsed.stock.starCoupons, 283818);
+  assert.strictEqual(parsed.stock.puzzles, 2253, 'Puzzles must not be rejected due to "Звезда" in parallel column');
+  assert.strictEqual(parsed.stock.legendaryStars1, 672);
+});
+
+test('parseSmartScanText and warehouse/profile parsers reject app UI modal screenshots to avoid data pollution', () => {
+  const appUiModalText = `
+о Smart Scanner (OCR) x
+@ Или вставьте изображение из буфера обмена: Ctrl+V / Cmd+V
++ Готово! 100%
+Распознано параметров: 8
+Успешно обработано скриншотов: 3. Распознано параметров: 8. Проверьте:
+подсвеченные поля перед применением:
+Никнейм | Со скриншота
+Сила (Мощь) (Со скриншота) Убито (Со скриншота) Очки за убийство
+102 549 363 | 84 863 033 | 7 589 192 717
+Запасы склада
+Купон готовности офицера: 48261 | Медаль легендарного офицера: 2253
+Легендарная звезда I (110) Легендарная звезда II (420) Легендарная звезда III (960)
+101 | 9601 | 0
+  `;
+
+  const wh = parseWarehouseScreenshotText(appUiModalText);
+  assert.strictEqual(wh.isWarehouse, false, 'App UI modal must not be recognized as warehouse');
+  assert.deepStrictEqual(wh.stock, {});
+
+  const prof = parseProfileScreenshotText(appUiModalText);
+  assert.strictEqual(prof.isProfile, false, 'App UI modal must not be recognized as profile');
+  assert.deepStrictEqual(prof.sector, {});
+
+  const smart = parseSmartScanText(appUiModalText);
+  assert.strictEqual(smart.detectedType, 'app_ui');
+  assert.strictEqual(smart.hasRecognizedData, false);
+});
+
 test('parseWarehouseScreenshotText correctly parses real-world two-column warehouse with OCR noise and ignores weapon coupons and chests', () => {
   const realWarehouseText = `
 === LEFT COLUMN ===

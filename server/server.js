@@ -178,12 +178,7 @@ async function tryServerOcr(imageBufferOrPath) {
   if (ocrRes.stock) return ocrRes.stock;
   if (!ocrRes.text || !ocrRes.text.trim()) return null;
   const parsedStock = logic.parseWarehouseScreenshotText(ocrRes.text);
-  if (parsedStock && parsedStock.stock && (
-    parsedStock.stock.coupons > 0 ||
-    parsedStock.stock.puzzles > 0 ||
-    parsedStock.stock.starCoupons > 0 ||
-    parsedStock.stock.legendaryStars1 > 0
-  )) {
+  if (parsedStock && parsedStock.stock && Object.keys(parsedStock.stock).length > 0) {
     return parsedStock.stock;
   }
   return null;

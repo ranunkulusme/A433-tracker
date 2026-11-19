@@ -319,6 +319,11 @@
       return { isProfile: false, sector: {}, recognizedFields: [] };
     }
 
+    // Защита от распознавания скриншотов модалки самого приложения Smart Scanner
+    if (/(?:Smart\s*Scanner|Запасы\s*склада|Статистика\s*персонажа|Распознано\s*параметров|Успешно\s*обработано\s*скриншотов|Или\s+вставьте\s+изображение)/i.test(text)) {
+      return { isProfile: false, sector: {}, recognizedFields: [] };
+    }
+
     const sector = {};
     const recognizedFields = [];
 
@@ -345,44 +350,62 @@
 
     const NUMBER_PATTERN = '(?:[0-9OoLlI]{1,3}(?:[ \\t][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,\\x27][0-9OoLlI]{3})+|[0-9OoLlI]+(?:[.,][0-9OoLlI]+)?)(?:[^\\S\\r\\n]*[KkMmBb](?=[^A-Za-z]|$))?';
 
-    // Сила (Мощь): ищем прямое значение силы, исключая подкатегории (юнитов, построек, исследований, офицера, корабля)
-    // Поддерживаем как слитное, так и раздельное написание, а также шумы OCR вроде "ила | 165752844"
-    const powerRegex = new RegExp(`(?:[СсCcSs]?ила|Мощь|Power|Macht|Kraft)(?!\\s*(?:юнитов|построек|исследований|офицера|военного|корабля|units|buildings|research|hero|officer|ship))[\\s|:：-]*(${NUMBER_PATTERN})`, 'gi');
+    // Сила (Мощь): ищем прямое значение силы в заголовке профиля Kiss of War.
+    // Поддерживаем префиксы: Сила, Мощь, ила, ла, па, na, Power, Macht, Kraft
+    // Исключаем под-категории: юниты, постройки, исследования, офицеры, корабль
+    const powerRegex = new RegExp(`(?:[СсCcSsПп]?[иеыu][лпд][аa]|[Ппл][аa]|[HНнn][aа]|Мощь|Power|Macht|Kraft)(?!\\s*(?:юнит\\S*|постро\\S*|исслед\\S*|офицер\\S*|военн\\S*|корабл\\S*|unit\\S*|build\\S*|research|hero|officer|ship))[\\s|:：-]*(?:([0-9OoLlI]{1,3}(?:[\\s.,'’\\x27]+[0-9OoLlI]{2,3}){1,3})|(${NUMBER_PATTERN}))`, 'gi');
     let bestPower = 0;
     let pMatch;
     while ((pMatch = powerRegex.exec(text)) !== null) {
-      const pVal = cleanOcrNumber(pMatch[1]);
+      const pVal = cleanOcrNumber(pMatch[1] || pMatch[2]);
       if (pVal > bestPower) {
         bestPower = pVal;
       }
     }
 
-    // Если прямого совпадения нет (например, заголовок "СИЛА" без числа на той же строке) — суммируем подкатегории
-    if (!bestPower) {
-      const subPowerRegex = new RegExp(`(?:[СсCcSs]?ила|Мощь)?\\s*(?:юнитов|построек|исследований|офицера|военного\\s+корабля)[^\\S\\r\\n]*[:：|]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
+    // Извлекаем убийства заранее, чтобы использовать их координаты для верификации Силы
+    const killsRegex = new RegExp(`(?:Уничтожено(?:\\s+юнитов|\\s+войск)?|Убито|[УуYy]?бит[оаы]?|[Тт]о\\b|(?<=[^A-Za-zА-Яа-яЁё0-9]|^)[ТтTt](?=[^A-Za-zА-Яа-яЁё0-9]|$)|Kills|Eliminierungen|Getötet|Besiegt)[^\\S\\r\\n]*[:：|]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'i');
+    const killsMatch = text.match(killsRegex);
+    let killsVal = 0;
+    if (killsMatch) {
+      killsVal = cleanOcrNumber(killsMatch[1]);
+      if (killsVal > 0) {
+        sector.kills = killsVal;
+        recognizedFields.push('kills');
+      }
+    }
+
+    // Если прямого совпадения нет или оно подозрительно мало (< 1000000) — проверяем под-силы
+    if (!bestPower || bestPower < 1000000) {
+      const subPowerRegex = new RegExp(`(?:[СсCcSs]?ила|Мощь|[Ппл][аa]|[HНнn][aа])\\s*(?:юнит\\S*|постро\\S*|исслед\\S*|офицер\\S*|военн\\S*\\s*корабл\\S*)[^\\S\\r\\n]*[:：|]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'gi');
       let subSum = 0;
       let spMatch;
       while ((spMatch = subPowerRegex.exec(text)) !== null) {
         subSum += cleanOcrNumber(spMatch[1]);
       }
-      if (subSum > 0) {
+      if (subSum > bestPower) {
         bestPower = subSum;
+      }
+    }
+
+    // Дополнительный поиск для случаев, когда заголовок СИЛА оторвался от числа,
+    // но в шапке профиля перед "Убито" стоит крупное число игрока (> 5,000,000 и < 2,000,000,000)
+    if (killsMatch && killsMatch.index !== undefined && (!bestPower || bestPower < 5000000)) {
+      const headerTextBeforeKills = text.slice(Math.max(0, killsMatch.index - 200), killsMatch.index);
+      const largeNumMatches = headerTextBeforeKills.matchAll(new RegExp(`(${NUMBER_PATTERN})`, 'g'));
+      for (const lm of largeNumMatches) {
+        const candidate = cleanOcrNumber(lm[1]);
+        if (candidate > 5000000 && candidate < 2000000000 && candidate !== killsVal) {
+          if (candidate > bestPower) {
+            bestPower = candidate;
+          }
+        }
       }
     }
 
     if (bestPower > 0) {
       sector.power = bestPower;
       recognizedFields.push('power');
-    }
-
-    const killsRegex = new RegExp(`(?:Уничтожено(?:\\s+юнитов|\\s+войск)?|Убито|Kills|Eliminierungen|Getötet|Besiegt)[^\\S\\r\\n]*[:：]?[^\\S\\r\\n]*(${NUMBER_PATTERN})`, 'i');
-    const killsMatch = text.match(killsRegex);
-    if (killsMatch) {
-      const killsVal = cleanOcrNumber(killsMatch[1]);
-      if (killsVal > 0) {
-        sector.kills = killsVal;
-        recognizedFields.push('kills');
-      }
     }
 
     // Очки за убийство: захватываем число СТРОГО на той же строке (без \s захватывающей переводы строк и таблицы T1-T5)
@@ -443,21 +466,20 @@
     },
     {
       key: 'chests',
-      pattern: /(?:Сундук(?!\s+выбор)[^\n]{0,35}(?:медал\S*|[Ээ]еда\S*)[^\n]{0,35}(?:офицер\S*)?|(?:Сундук(?!\s+выбор)[^\n]{0,35})?медалей\s+(?:легендарного\s+)?офицера|Legendary\s+Officer\s+Medal\s+Chest|Offiziersmedaillen-Truhe|Truhe\s+mit\s+Offiziersmedaillen)/i,
+      pattern: /(?:(?:Сундук(?!\s*(?:выбор|broce))|ee)[^\n]{0,35}(?:медал\S*|[ЭэEe]еда\S*)[^\n]{0,35}(?:офицер\S*)?|(?:Сундук(?!\s*(?:выбор|broce))[^\n]{0,35})?(?:медалей|[ЭэEe]еда\S*)[\s\S]{0,35}?офицера|Legendary\s+Officer\s+Medal\s+Chest|Offiziersmedaillen-Truhe|Truhe\s+mit\s+Offiziersmedaillen)/i,
       validator: (text, matchIndex) => {
-        const windowAround = text.slice(Math.max(0, matchIndex - 40), matchIndex + 70);
-        return !/(?:выбор|choice|auswahl)/i.test(windowAround);
+        const windowAround = text.slice(Math.max(0, matchIndex - 30), matchIndex + 40);
+        return !/(?:выбор|broce|choice|auswahl)/i.test(windowAround);
       }
     },
     {
       key: 'puzzles',
-      pattern: /(?:(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\S\r\n]*[.,:;\s]*офицер\S*|[МмM]едал\S*\s+легендарн\S*|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille)/i,
+      pattern: /(?:(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\n]{0,20}?офицер\S*|[МмM]едал\S*\s+легендарн\S*|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille)/i,
       validator: (text, matchIndex) => {
-        const before = text.slice(Math.max(0, matchIndex - 60), matchIndex);
+        const before = text.slice(Math.max(0, matchIndex - 40), matchIndex);
         if (/(?:сундук|выбор|chest|truhe)/i.test(before)) return false;
-        const lineEnd = text.indexOf('\n', matchIndex);
-        const lineText = text.slice(matchIndex, lineEnd > -1 ? lineEnd : matchIndex + 30);
-        if (/(?:звезд|star|stern)/i.test(lineText)) return false;
+        const matchSegment = text.slice(matchIndex, matchIndex + 35);
+        if (/(?:звезд|star|stern)/i.test(matchSegment)) return false;
         return true;
       }
     },
@@ -467,15 +489,15 @@
     },
     {
       key: 'legendaryStars3',
-      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|ш|111|\|\|\||lll|\|I\|)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|960[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*960/i,
+      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|ш|111|\|\|\||lll|\|I\|)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|960[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*960|960[^\S\r\n]+звезд[аы]/i,
     },
     {
       key: 'legendaryStars2',
-      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|п|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|420[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*420/i,
+      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|п|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|420[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*420|420[^\S\r\n]+звезд[аы]/i,
     },
     {
       key: 'legendaryStars1',
-      pattern: /(?:(?:Медаль[^\S\r\n]+Звезд[аы]|110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|Медаль[^\S\r\n]+Звезд[аы]|110[^\S\r\n]+(?:Легендарн[а-я]+|Медаль)[^\r\n]{0,25}звезд[аы])/i,
+      pattern: /(?:(?:Медаль[^\S\r\n]+Звезд[аы]|110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|Медаль[^\S\r\n]+Звезд[аы]|110[^\S\r\n]+(?:Легендарн[а-я]+|Медаль)[^\r\n]{0,25}звезд[аы]|110[^\S\r\n]+звезд[аы])/i,
     },
   ];
 
@@ -496,7 +518,7 @@
 
         // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>"
         // Поддерживаем артефакты OCR: "в aman 6 604", "° Вналичии: 482611", двоеточие как 6, перенос строки
-        const countMatch = windowText.match(/(?:[ВB8]?\s*(?:[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|aman|aлuu|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?)\s*(?:[6°oO]\s+)?([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
+        const countMatch = windowText.match(/(?:[ВB8]?\s*(?:[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[^\s\d:：;.]*|aman|aлuu|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?)\s*(?:[6°oO]\s+)?([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
         if (countMatch) {
           const val = cleanOcrNumber(countMatch[1]);
           if (val > 0) {
@@ -512,7 +534,7 @@
               const candidate = cleanOcrNumber(numMatch[1]);
               if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
                 if (candidate === 1) {
-                  fallbackCandidate = candidate;
+                  if (!fallbackCandidate) fallbackCandidate = 1;
                 } else {
                   fallbackCandidate = candidate;
                   break;
@@ -532,6 +554,11 @@
 
   function parseWarehouseScreenshotText(text) {
     if (!text || typeof text !== 'string') {
+      return { isWarehouse: false, stock: {}, recognizedFields: [] };
+    }
+
+    // Защита от распознавания скриншотов модалки самого приложения Smart Scanner
+    if (/(?:Smart\s*Scanner|Запасы\s*склада|Статистика\s*персонажа|Распознано\s*параметров|Успешно\s*обработано\s*скриншотов|Или\s+вставьте\s+изображение)/i.test(text)) {
       return { isWarehouse: false, stock: {}, recognizedFields: [] };
     }
 
@@ -564,6 +591,9 @@
 
   function classifyScreenshotText(text) {
     if (!text || typeof text !== 'string') return 'unknown';
+    if (/(?:Smart\s*Scanner|Запасы\s*склада|Статистика\s*персонажа|Распознано\s*параметров|Успешно\s*обработано\s*скриншотов|Или\s+вставьте\s+изображение)/i.test(text)) {
+      return 'app_ui';
+    }
     const whParsed = parseWarehouseScreenshotText(text);
     if (whParsed && whParsed.isWarehouse) return 'warehouse';
     const profParsed = parseProfileScreenshotText(text);
@@ -589,6 +619,20 @@
       };
     }
     const detectedType = classifyScreenshotText(text);
+    if (detectedType === 'app_ui') {
+      return {
+        detectedType: 'app_ui',
+        hasRecognizedData: false,
+        isWarehouse: false,
+        isProfile: false,
+        isExchangeShop: false,
+        sector: {},
+        stock: {},
+        officers: [],
+        recognizedFields: [],
+        rawText: text,
+      };
+    }
     const profParsed = parseProfileScreenshotText(text);
     const whParsed = parseWarehouseScreenshotText(text);
     const shopParsed = parseExchangeShopScreenshotText(text);

@@ -1477,6 +1477,8 @@ select option { background: var(--bg3); }
   border-radius: 4px;
   margin-left: 6px;
   vertical-align: middle;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .scanner-section {
