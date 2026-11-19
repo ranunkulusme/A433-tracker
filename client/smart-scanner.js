@@ -216,6 +216,12 @@
             throw new Error(errJson.message || 'Ошибка распознавания на сервере');
           }
           result = await scanRes.json();
+        } else if (typeof scanRes === 'string') {
+          try {
+            result = JSON.parse(scanRes);
+          } catch (_) {
+            result = { success: false, message: scanRes };
+          }
         } else {
           result = scanRes;
         }

@@ -227,6 +227,35 @@ test('SmartScannerUI: handleScannerFiles supports apiFetch returning parsed JSON
   assert.equal(displayedResult.hasRecognizedData, true);
   assert.equal(displayedResult.stock.coupons, 150000);
 
+  // Test case 2: apiFetch or fetch returns a standard Response object with .json()
+  displayedResult = null;
+  global.apiFetch = async () => ({
+    ok: true,
+    json: async () => ({
+      success: true,
+      hasRecognizedData: true,
+      imagesProcessed: 1,
+      recognizedFields: ['chests'],
+      stock: { chests: 3 }
+    })
+  });
+  await smartScannerUI.handleScannerFiles([mockFile]);
+  assert.ok(displayedResult);
+  assert.equal(displayedResult.stock.chests, 3);
+
+  // Test case 3: apiFetch returns a JSON string
+  displayedResult = null;
+  global.apiFetch = async () => JSON.stringify({
+    success: true,
+    hasRecognizedData: true,
+    imagesProcessed: 1,
+    recognizedFields: ['legendaryStars2'],
+    stock: { legendaryStars2: 104 }
+  });
+  await smartScannerUI.handleScannerFiles([mockFile]);
+  assert.ok(displayedResult);
+  assert.equal(displayedResult.stock.legendaryStars2, 104);
+
   delete global.apiFetch;
   delete global.document;
   smartScannerUI.displayScannerResults = origDisplay;

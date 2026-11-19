@@ -5,7 +5,7 @@
  * сквозной пропуск API-запросов напрямую в сеть.
  */
 
-const CACHE_NAME = 'kow-cache-v3.50.1';
+const CACHE_NAME = 'kow-cache-v3.50.2';
 
 const STATIC_ASSETS = [
   '/',
@@ -79,13 +79,16 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // 4. Network-First стратегия для HTML/навигации (гарантирует получение актуальной версии приложения)
-  const isNavigation = request.mode === 'navigate' ||
-                       url.pathname === '/' ||
-                       url.pathname === '/index.html' ||
-                       url.pathname.endsWith('.html');
+  // 4. Network-First стратегия для HTML/навигации, скриптов и стилей (гарантирует получение актуальной версии приложения)
+  const isNetworkFirst = request.mode === 'navigate' ||
+                         url.pathname === '/' ||
+                         url.pathname === '/index.html' ||
+                         url.pathname.endsWith('.html') ||
+                         url.pathname.endsWith('.js') ||
+                         url.pathname.endsWith('.css') ||
+                         url.searchParams.has('v');
 
-  if (isNavigation) {
+  if (isNetworkFirst) {
     event.respondWith(
       fetch(request)
         .then(networkResponse => {
@@ -99,7 +102,10 @@ self.addEventListener('fetch', event => {
           // Fallback на кэшированную версию только при отсутствии сети
           const cached = await caches.match(request);
           if (cached) return cached;
-          return caches.match('/index.html');
+          if (request.mode === 'navigate' || url.pathname.endsWith('.html')) {
+            return caches.match('/index.html');
+          }
+          return null;
         })
     );
     return;
