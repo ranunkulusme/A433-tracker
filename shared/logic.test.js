@@ -1216,8 +1216,54 @@ Da Mepans эпического
   assert.strictEqual(parsed.stock.coupons, 482611, 'Coupons must be 482,611 from officer coupon, not weapon coupon 67,811');
   assert.strictEqual(parsed.stock.puzzles, 2253, 'Puzzles must be 2,253 from legendary officer medal, not chests (3 or 604)');
   assert.strictEqual(parsed.stock.starCoupons, 283818, 'Star coupons must be 283,818');
-  assert.strictEqual(parsed.stock.chests, 604, 'Chests must be 604 from choice chest');
+  assert.strictEqual(parsed.stock.chests, 3, 'Chests must be 3 from Legendary Officer Medal Chest (Сундук медалей легендарного офицера), not choice chest');
   assert.strictEqual(parsed.stock.legendaryStars1, 672, 'Legendary Star 1 must be 672 from Medal Star');
+});
+
+test('parseWarehouseScreenshotText correctly recognizes Legendary Officer Medal Chest (3) and Stars II (104) and III (27)', () => {
+  const userWarehouseWithStarsAndChests = `
+=== LEFT COLUMN ===
+Сундук медалей
+легендарного
+офицера
+В наличии: 3
+Легендарная звезда II
+420
+1
+В наличии: 104
+
+=== RIGHT COLUMN ===
+Сундук выбора
+медали
+легендарного
+офицера
+В наличии: 604
+Легендарная звезда III
+960
+В наличии: 27
+  `;
+
+  const parsed = parseWarehouseScreenshotText(userWarehouseWithStarsAndChests);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.chests, 3, 'Chests must be 3 from Legendary Officer Medal Chest, ignoring choice chest 604');
+  assert.strictEqual(parsed.stock.legendaryStars2, 104, 'Legendary Star II must be 104, not overridden by 1 or 420');
+  assert.strictEqual(parsed.stock.legendaryStars3, 27, 'Legendary Star III must be 27');
+  assert.strictEqual(parsed.stock.puzzles, undefined, 'Puzzles must not falsely match "Легендарная звезда"');
+});
+
+test('parseWarehouseScreenshotText recognizes Star II and III when Roman numerals are noisy or missing but points (420 / 960) exist', () => {
+  const noisyStarsText = `
+420 Легендарная звезда
+В наличии: 104
+960 Легендарная звезда
+В наличии: 27
+  `;
+
+  const parsed = parseWarehouseScreenshotText(noisyStarsText);
+  assert.strictEqual(parsed.isWarehouse, true);
+  assert.strictEqual(parsed.stock.legendaryStars2, 104, 'Must recognize Star II by 420 points anchor');
+  assert.strictEqual(parsed.stock.legendaryStars3, 27, 'Must recognize Star III by 960 points anchor');
+  assert.strictEqual(parsed.stock.puzzles, undefined, 'Puzzles must not falsely match "Легендарная звезда"');
 });
 
 

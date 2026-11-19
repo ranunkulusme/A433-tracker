@@ -443,14 +443,22 @@
     },
     {
       key: 'chests',
-      pattern: /(?:Сундук[^\n]{0,30}выбор\S*|Сундук[^\n]{0,30}медал\S*(?:\s+легендарн\S*)?|Choice\s*(?:Officer\s*)?Chest|Auswahltruhe)/i,
+      pattern: /(?:Сундук(?!\s+выбор)[^\n]{0,35}(?:медал\S*|[Ээ]еда\S*)[^\n]{0,35}(?:офицер\S*)?|(?:Сундук(?!\s+выбор)[^\n]{0,35})?медалей\s+(?:легендарного\s+)?офицера|Legendary\s+Officer\s+Medal\s+Chest|Offiziersmedaillen-Truhe|Truhe\s+mit\s+Offiziersmedaillen)/i,
+      validator: (text, matchIndex) => {
+        const windowAround = text.slice(Math.max(0, matchIndex - 40), matchIndex + 70);
+        return !/(?:выбор|choice|auswahl)/i.test(windowAround);
+      }
     },
     {
       key: 'puzzles',
-      pattern: /(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\S\r\n]*(?:[.,:;\s]*офицер\S*)?|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille/i,
+      pattern: /(?:(?:[МмM]едал\S*\s*)?[‘\x27\"`]?легендарн\S*(?:[^\n]{0,25}\n)?[^\S\r\n]*[.,:;\s]*офицер\S*|[МмM]едал\S*\s+легендарн\S*|Legendary\s+Officer\s+Medal|Legendäre\s+Offiziersmedaille)/i,
       validator: (text, matchIndex) => {
         const before = text.slice(Math.max(0, matchIndex - 60), matchIndex);
-        return !/(?:сундук|выбор|chest|truhe)/i.test(before);
+        if (/(?:сундук|выбор|chest|truhe)/i.test(before)) return false;
+        const lineEnd = text.indexOf('\n', matchIndex);
+        const lineText = text.slice(matchIndex, lineEnd > -1 ? lineEnd : matchIndex + 30);
+        if (/(?:звезд|star|stern)/i.test(lineText)) return false;
+        return true;
       }
     },
     {
@@ -459,15 +467,15 @@
     },
     {
       key: 'legendaryStars3',
-      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|111|\|\|\||lll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:960[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:III|iii|3|Ⅲ|ІІІ|Ш|ш|111|\|\|\||lll|\|I\|)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|960[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*960/i,
     },
     {
       key: 'legendaryStars2',
-      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)/i,
+      pattern: /(?:420[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:II|ii|2|Ⅱ|ІІ|П|п|11|\|\||ll)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|420[^\S\r\n]+(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы]|(?:Легендарн[а-я]+|Пегендарн[а-я]+)[^\r\n]{0,25}звезд[аы][^\r\n]{0,15}\n[^\S\r\n]*420/i,
     },
     {
       key: 'legendaryStars1',
-      pattern: /(?:(?:Медаль[^\S\r\n]+Звезд[аы]|110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|Медаль[^\S\r\n]+Звезд[аы])/i,
+      pattern: /(?:(?:Медаль[^\S\r\n]+Звезд[аы]|110[^\w\n]*\n?)?(?:Легендарн[а-я]+|Пегендарн[а-я]+|Legendary|Legendäre[rs]?)[^\r\n]{0,25}(?:\r?\n[^\r\n]{0,15})?[‘'\x27\"\`]?(?:звезд[аы]|Star|Stern)\s*[‘'\x27\"\`]?(?:I|i|1|Ⅰ|І|l|\||!)(?=[^A-Za-zА-Яа-яЁё0-9]|$)|Медаль[^\S\r\n]+Звезд[аы]|110[^\S\r\n]+(?:Легендарн[а-я]+|Медаль)[^\r\n]{0,25}звезд[аы])/i,
     },
   ];
 
@@ -476,34 +484,45 @@
     const stock = {};
 
     for (const def of WAREHOUSE_ITEM_DEFINITIONS) {
-      const match = text.match(def.pattern);
-      if (!match) continue;
-
-      if (def.validator && !def.validator(text, match.index)) {
-        continue;
-      }
-
-      const startIndex = match.index + match[0].length;
-      const windowText = text.slice(startIndex, startIndex + 250);
-
-      // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>"
-      // Поддерживаем артефакты OCR: "в aman 6 604", "° Вналичии: 482611", двоеточие как 6
-      const countMatch = windowText.match(/(?:[ВB8]?\s*(?:[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|aman|aлuu|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?)[^\S\r\n]*(?:[6°oO]\s+)?([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
-      if (countMatch) {
-        const val = cleanOcrNumber(countMatch[1]);
-        if (val > 0) {
-          stock[def.key] = val;
+      const regex = new RegExp(def.pattern.source, def.pattern.flags.includes('g') ? def.pattern.flags : def.pattern.flags + 'g');
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        if (def.validator && !def.validator(text, match.index)) {
+          continue;
         }
-      } else {
-        const lineMatches = windowText.split(/\r?\n/).slice(0, 4);
-        for (const line of lineMatches) {
-          const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27\)]+)/);
-          if (numMatch) {
-            const candidate = cleanOcrNumber(numMatch[1]);
-            if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
-              stock[def.key] = candidate;
-              break;
+
+        const startIndex = match.index + match[0].length;
+        const windowText = text.slice(startIndex, startIndex + 250);
+
+        // Ищем количество: "В наличии / In Stock / Vorhanden / Im Besitz: <число>"
+        // Поддерживаем артефакты OCR: "в aman 6 604", "° Вналичии: 482611", двоеточие как 6, перенос строки
+        const countMatch = windowText.match(/(?:[ВB8]?\s*(?:[HНнh][аa][лпдnu]+[иеыкum]+|на[лпд]ич[иеык]+|aman|aлuu|In\s*Stock|Owned|Available|Amount|Vorhanden|Im\s*Besitz|Bestand)[^\S\r\n]*[:：;.]?)\s*(?:[6°oO]\s+)?([0-9OoLlI][0-9OoLlI., \t\x27\)]*)/i);
+        if (countMatch) {
+          const val = cleanOcrNumber(countMatch[1]);
+          if (val > 0) {
+            stock[def.key] = val;
+            break;
+          }
+        } else {
+          const lineMatches = windowText.split(/\r?\n/).slice(0, 5);
+          let fallbackCandidate = 0;
+          for (const line of lineMatches) {
+            const numMatch = line.match(/(?:^|[^\d])([0-9OoLlI][0-9OoLlI., \t\x27\)]+)/);
+            if (numMatch) {
+              const candidate = cleanOcrNumber(numMatch[1]);
+              if (candidate > 0 && candidate !== 110 && candidate !== 420 && candidate !== 960) {
+                if (candidate === 1) {
+                  fallbackCandidate = candidate;
+                } else {
+                  fallbackCandidate = candidate;
+                  break;
+                }
+              }
             }
+          }
+          if (fallbackCandidate > 0) {
+            stock[def.key] = fallbackCandidate;
+            break;
           }
         }
       }
