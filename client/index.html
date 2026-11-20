@@ -504,7 +504,7 @@
   <div class="tma-action-bar" id="tma-action-bar">
     <button id="tma-main-btn" class="tma-main-btn" onclick="handleTmaMainAction()" type="button">
       <span id="tma-main-btn-icon" style="display:inline-flex;align-items:center"></span>
-      <span id="tma-main-btn-text">Сканировать склад (OCR)</span>
+      <span id="tma-main-btn-text">Изменить склад</span>
     </button>
   </div>
 
@@ -523,9 +523,6 @@
       <span>Матрица</span>
     </button>
   </nav>
-
-  <!-- Hidden OCR input for TMA -->
-  <input type="file" id="tma-ocr-input" accept="image/*,.png,.jpg,.jpeg,.webp" style="display:none" onchange="handleTmaOcrFileInput(event)">
 
   <!-- TMA Event Detail Modal / Bottom Sheet -->
   <div id="tma-event-modal" class="tma-modal" style="display:none" onclick="closeTmaEventModal()">
@@ -962,10 +959,7 @@
 <div class="modal" id="modal-player">
   <div class="modal-header">
     <h3 id="modal-player-title">Параметры сектора</h3>
-    <div style="display:flex;align-items:center;gap:8px">
-      <button type="button" class="btn btn-secondary btn-sm btn-scanner" onclick="openSmartScannerModal('player')">📷 Smart Scanner</button>
-      <button class="modal-close" onclick="closeAllModals()">✕</button>
-    </div>
+    <button class="modal-close" onclick="closeAllModals()">✕</button>
   </div>
   <div class="modal-body">
     <div class="form-group">
@@ -1785,8 +1779,8 @@
   </div>
 </div>
 
-<!-- Modal: Smart Scanner (OCR) -->
-<div class="modal modal-lg" id="modal-smart-scanner">
+<!-- Modal: Smart Scanner (OCR - disabled) -->
+<div class="modal modal-lg" id="modal-smart-scanner" style="display:none !important">
   <div class="modal-header">
     <h3 id="modal-smart-scanner-title">📷 Smart Scanner (OCR)</h3>
     <button class="modal-close" onclick="closeSmartScannerModal()">✕</button>

@@ -1895,7 +1895,6 @@ async function renderMyCabinet() {
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button type="button" class="btn btn-secondary btn-sm btn-history-trigger" onclick="openStockHistoryModal(${profile.id})">📜 ${typeof t === 'function' ? t('audit.btn_history') : 'История склада'}</button>
-        <button type="button" class="btn btn-secondary btn-scanner" onclick="openSmartScannerModal('my_cabinet')">📷 Smart Scanner</button>
         <button type="button" class="btn-ghost btn-sm" onclick="openChangePasswordModal()">🔑 ${typeof t === 'function' ? t('common.change_password') : 'Сменить пароль'}</button>
         <button class="btn-ghost btn-sm" onclick="renderMyCabinet()">🔄 ${typeof t === 'function' ? t('common.refresh') : 'Обновить'}</button>
       </div>
