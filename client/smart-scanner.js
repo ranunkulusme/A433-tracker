@@ -14,8 +14,15 @@
   let activeScannerContext = 'my_cabinet'; // 'my_cabinet' | 'player'
   let lastScanResults = null;
   let isScannerRunning = false;
+  const IS_SMART_SCANNER_ENABLED = false;
 
   function openSmartScannerModal(targetContext = 'my_cabinet') {
+    if (!IS_SMART_SCANNER_ENABLED) {
+      if (typeof toast === 'function') {
+        toast('Смарт-сканер отключен. Используйте форму ручного ввода данных.', 'info');
+      }
+      return;
+    }
     activeScannerContext = targetContext || 'my_cabinet';
     lastScanResults = null;
     isScannerRunning = false;
