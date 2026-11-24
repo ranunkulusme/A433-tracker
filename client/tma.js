@@ -261,9 +261,133 @@ function enableTmaView() {
   }
 }
 
+// ─── TMA MULTI-LANGUAGE & LOCALIZATION HELPERS ───────────────────────
+function tmaT(key, opt) {
+  if (typeof t === 'function') {
+    return t(key, opt);
+  }
+  if (typeof window !== 'undefined' && typeof window.t === 'function') {
+    return window.t(key, opt);
+  }
+  if (typeof opt === 'string') return opt;
+  if (opt && typeof opt === 'object' && opt.defaultValue) return opt.defaultValue;
+  return key;
+}
+
+function updateTmaLanguageUI(lang) {
+  const currentLang = (lang || (typeof getAppLanguage === 'function' ? getAppLanguage() : (typeof window !== 'undefined' && typeof window.getAppLanguage === 'function' ? window.getAppLanguage() : 'ru')) || 'ru').toLowerCase();
+
+  const langMap = {
+    ru: { code: 'RU', flag: '🇷🇺' },
+    en: { code: 'EN', flag: '🇬🇧' },
+    de: { code: 'DE', flag: '🇩🇪' }
+  };
+  const info = langMap[currentLang] || langMap.ru;
+
+  const codeEl = document.getElementById('tma-current-lang-code');
+  if (codeEl) codeEl.textContent = info.code;
+
+  const flagEl = document.getElementById('tma-current-lang-flag');
+  if (flagEl) flagEl.textContent = info.flag;
+
+  const getSubKey = (subKey, fallbackRu, fallbackEn, fallbackDe) => {
+    if (typeof I18N_RESOURCES !== 'undefined' && I18N_RESOURCES[currentLang]?.translation?.tma?.[subKey]) {
+      return I18N_RESOURCES[currentLang].translation.tma[subKey];
+    }
+    const val = tmaT('tma.' + subKey);
+    if (val && val !== 'tma.' + subKey) return val;
+    if (currentLang === 'en') return fallbackEn;
+    if (currentLang === 'de') return fallbackDe;
+    return fallbackRu;
+  };
+
+  const navCabinet = document.getElementById('tma-nav-label-cabinet');
+  if (navCabinet) navCabinet.textContent = getSubKey('nav_cabinet', 'Кабинет', 'Cabinet', 'Kabinett');
+
+  const navEvents = document.getElementById('tma-nav-label-events');
+  if (navEvents) navEvents.textContent = getSubKey('nav_events', 'События', 'Events', 'Events');
+
+  const navMatrix = document.getElementById('tma-nav-label-matrix');
+  if (navMatrix) navMatrix.textContent = getSubKey('nav_matrix', 'Матрица', 'Matrix', 'Matrix');
+
+  ['ru', 'en', 'de'].forEach(l => {
+    const checkEl = document.getElementById('tma-lang-check-' + l);
+    if (checkEl) {
+      checkEl.style.display = (l === currentLang) ? 'inline' : 'none';
+    }
+  });
+
+  if (typeof updateStaticDOMTranslations === 'function') {
+    updateStaticDOMTranslations();
+  } else if (typeof window !== 'undefined' && typeof window.updateStaticDOMTranslations === 'function') {
+    window.updateStaticDOMTranslations();
+  }
+}
+
+function openTmaLangModal() {
+  const modal = document.getElementById('tma-lang-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.add('open');
+  }
+  const currentLang = typeof getAppLanguage === 'function' ? getAppLanguage() : (typeof window !== 'undefined' && typeof window.getAppLanguage === 'function' ? window.getAppLanguage() : 'ru');
+  updateTmaLanguageUI(currentLang);
+  tmaHaptic('light');
+}
+
+function closeTmaLangModal() {
+  const modal = document.getElementById('tma-lang-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('open');
+  }
+}
+
+async function selectTmaLanguage(lang) {
+  const targetLang = (lang || 'ru').toLowerCase();
+  if (typeof setAppLanguage === 'function') {
+    await setAppLanguage(targetLang);
+  } else if (typeof window !== 'undefined' && typeof window.setAppLanguage === 'function') {
+    await window.setAppLanguage(targetLang);
+  } else if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('kow_lang', targetLang);
+  }
+
+  updateTmaLanguageUI(targetLang);
+  closeTmaLangModal();
+  tmaHaptic('light');
+
+  // If unbound screen is visible, re-render it
+  const unboundEl = document.getElementById('tma-unbound-screen');
+  if (unboundEl && unboundEl.style.display !== 'none' && typeof renderTmaUnboundScreen === 'function') {
+    renderTmaUnboundScreen();
+  } else {
+    // Re-render active tab
+    if (activeTmaTab === 'cabinet' && typeof renderTmaCabinet === 'function') {
+      renderTmaCabinet();
+    } else if (activeTmaTab === 'events' && typeof renderTmaEvents === 'function') {
+      renderTmaEvents();
+    } else if (activeTmaTab === 'matrix' && typeof renderTmaMatrix === 'function') {
+      renderTmaMatrix();
+    }
+  }
+
+  updateTmaMainButton();
+
+  const toastMsg = tmaT('tma.toast_lang_changed', 'Язык изменен');
+  if (typeof toast === 'function') {
+    toast(toastMsg, 'success');
+  } else if (typeof window !== 'undefined' && typeof window.toast === 'function') {
+    window.toast(toastMsg, 'success');
+  }
+}
+
 function setupTmaEnvironment() {
   const tg = window.Telegram?.WebApp;
-  if (!tg) return;
+  if (!tg) {
+    updateTmaLanguageUI();
+    return;
+  }
   try {
     if (typeof tg.ready === 'function') tg.ready();
     if (typeof tg.expand === 'function') tg.expand();
@@ -273,6 +397,7 @@ function setupTmaEnvironment() {
   } catch (err) {
     console.warn('TMA SDK init error:', err);
   }
+  updateTmaLanguageUI();
 }
 
 function tmaHaptic(type = 'light') {
@@ -423,17 +548,21 @@ function renderTmaUnboundScreen(err = null) {
     unboundEl.innerHTML = `
       <div class="tma-card tma-card-gold" style="text-align:center;padding:28px 16px">
         <div style="font-size:44px;margin-bottom:12px">⏳</div>
-        <h3 style="font-size:16px;font-weight:700;color:#fff;margin-bottom:8px">Аккаунт ожидает подтверждения</h3>
+        <h3 style="font-size:16px;font-weight:700;color:#fff;margin-bottom:8px">${escapeHtml(tmaT('tma.unbound_pending_title', 'Аккаунт ожидает подтверждения'))}</h3>
         <p style="font-size:13px;color:#9ca3af;line-height:1.5;margin-bottom:20px">
-          Ваша заявка зарегистрирована и находится на рассмотрении офицеров штаба (Р4/Р5). Пожалуйста, свяжитесь с руководством альянса.
+          ${escapeHtml(tmaT('tma.unbound_pending_desc', 'Ваша заявка зарегистрирована и находится на рассмотрении офицеров штаба (Р4/Р5). Пожалуйста, свяжитесь с руководством альянса.'))}
         </p>
         <button class="tma-main-btn" onclick="initTmaAuth()" type="button" style="margin-bottom:8px">
-          🔄 Проверить статус
+          🔄 ${escapeHtml(tmaT('tma.btn_check_status', 'Проверить статус'))}
         </button>
       </div>
     `;
     return;
   }
+
+  const subtitleStr = tgUser
+    ? tmaT('tma.unbound_subtitle_you', { name: escapeHtml(tgUser.first_name || ''), username: escapeHtml(tgUser.username || String(tgUser.id)) })
+    : tmaT('tma.unbound_subtitle_guest', 'Войдите для доступа к KoW Tracker');
 
   unboundEl.innerHTML = `
     <div class="tma-card tma-card-gold" style="padding:20px 16px;position:relative">
@@ -442,15 +571,15 @@ function renderTmaUnboundScreen(err = null) {
           🔗
         </div>
         <div>
-          <h3 style="font-size:15px;font-weight:700;color:#fff;margin:0">Привязка Telegram</h3>
+          <h3 style="font-size:15px;font-weight:700;color:#fff;margin:0">${escapeHtml(tmaT('tma.unbound_title', 'Привязка Telegram'))}</h3>
           <p style="font-size:11.5px;color:#9ca3af;margin:2px 0 0 0">
-            ${tgUser ? `Вы: ${escapeHtml(tgUser.first_name || '')} (@${escapeHtml(tgUser.username || String(tgUser.id))})` : 'Войдите для доступа к KoW Tracker'}
+            ${subtitleStr}
           </p>
         </div>
       </div>
 
       <p style="font-size:12.5px;color:#d1d5db;margin-bottom:14px;line-height:1.45">
-        Ваш аккаунт Telegram еще не привязан к профилю в <strong>KoW Tracker</strong>. Войдите, указав логин аккаунта (или название вашего сектора) и пароль для привязки.
+        ${escapeHtml(tmaT('tma.unbound_desc', 'Ваш аккаунт Telegram еще не привязан к профилю в KoW Tracker. Войдите, указав логин аккаунта (или название вашего сектора) и пароль для привязки.'))}
       </p>
 
       <div id="tma-auth-alert" style="${err && (err.message || typeof err === 'string') ? 'display:block;' : 'display:none;'}padding:10px 12px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;font-size:12px;border-radius:10px;margin-bottom:12px">${err ? escapeHtml(typeof err === 'string' ? err : err.message || '') : ''}</div>
@@ -458,48 +587,48 @@ function renderTmaUnboundScreen(err = null) {
       <!-- Quick Login Form -->
       <form id="tma-login-form" onsubmit="handleTmaLoginSubmit(event)" style="display:flex;flex-direction:column;gap:10px">
         <div>
-          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЛОГИН ИЛИ ИМЯ СЕКТОРА</label>
-          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="Логин аккаунта или название сектора" class="tma-input" style="padding:10px 12px">
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">${escapeHtml(tmaT('tma.login_user_label', 'ЛОГИН ИЛИ ИМЯ СЕКТОРА'))}</label>
+          <input type="text" id="tma-login-user" required autocomplete="username" placeholder="${escapeHtml(tmaT('tma.login_user_placeholder', 'Логин аккаунта или название сектора'))}" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
-          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
-          <input type="password" id="tma-login-pass" required autocomplete="current-password" placeholder="Пароль" class="tma-input" style="padding:10px 12px">
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">${escapeHtml(tmaT('tma.login_pass_label', 'ПАРОЛЬ'))}</label>
+          <input type="password" id="tma-login-pass" required autocomplete="current-password" placeholder="${escapeHtml(tmaT('tma.login_pass_placeholder', 'Пароль'))}" class="tma-input" style="padding:10px 12px">
         </div>
         <button type="submit" id="tma-login-btn" class="tma-main-btn" style="margin-top:4px">
-          🔑 Войти и привязать Telegram
+          🔑 ${escapeHtml(tmaT('tma.btn_login_bind', 'Войти и привязать Telegram'))}
         </button>
       </form>
 
       <!-- Toggle registration -->
       <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08);text-align:center">
         <button type="button" onclick="toggleTmaRegisterSection()" style="background:none;border:none;color:#fbbf24;font-size:12px;font-weight:600;cursor:pointer">
-          ✨ Новый игрок? Создать аккаунт
+          ✨ ${escapeHtml(tmaT('tma.new_player_toggle', 'Новый игрок? Создать аккаунт'))}
         </button>
       </div>
 
       <!-- Registration Form (Hidden by default) -->
       <form id="tma-register-form" onsubmit="handleTmaRegisterSubmit(event)" style="display:none;flex-direction:column;gap:10px;margin-top:12px">
         <div>
-          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ЖЕЛАЕМЫЙ ЛОГИН</label>
-          <input type="text" id="tma-reg-user" required placeholder="Например, Commander7" class="tma-input" style="padding:10px 12px">
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">${escapeHtml(tmaT('tma.reg_user_label', 'ЖЕЛАЕМЫЙ ЛОГИН'))}</label>
+          <input type="text" id="tma-reg-user" required placeholder="${escapeHtml(tmaT('tma.reg_user_placeholder', 'Например, Commander7'))}" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
-          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ПАРОЛЬ</label>
-          <input type="password" id="tma-reg-pass" required placeholder="Придумайте пароль" class="tma-input" style="padding:10px 12px">
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">${escapeHtml(tmaT('tma.reg_pass_label', 'ПАРОЛЬ'))}</label>
+          <input type="password" id="tma-reg-pass" required placeholder="${escapeHtml(tmaT('tma.reg_pass_placeholder', 'Придумайте пароль'))}" class="tma-input" style="padding:10px 12px">
         </div>
         <div>
-          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">ИМЯ ПЕРСОНАЖА / СЕКТОРА</label>
-          <input type="text" id="tma-reg-player" required placeholder="Например, Sector 7" class="tma-input" style="padding:10px 12px">
+          <label style="display:block;font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:600">${escapeHtml(tmaT('tma.reg_player_label', 'ИМЯ ПЕРСОНАЖА / СЕКТОРА'))}</label>
+          <input type="text" id="tma-reg-player" required placeholder="${escapeHtml(tmaT('tma.reg_player_placeholder', 'Например, Sector 7'))}" class="tma-input" style="padding:10px 12px">
         </div>
         <button type="submit" id="tma-reg-btn" class="tma-main-btn" style="margin-top:4px">
-          📝 Зарегистрироваться
+          📝 ${escapeHtml(tmaT('tma.btn_register', 'Зарегистрироваться'))}
         </button>
       </form>
     </div>
 
     <!-- Bot instruction hint -->
     <div class="tma-card" style="font-size:12px;color:#9ca3af;line-height:1.45">
-      💡 <strong>Совет:</strong> Вы также можете привязать аккаунт прямо в чате с ботом, отправив команду:<br>
+      💡 <strong>Совет:</strong> ${escapeHtml(tmaT('tma.bot_instruction_hint', 'Вы также можете привязать аккаунт через бота командой /bind'))}<br>
       <code style="display:inline-block;margin-top:6px;padding:4px 8px;background:#1f242e;border-radius:6px;color:#fbbf24;font-family:monospace;font-size:12px">/bind ваш_логин ваш_пароль</code>
     </div>
   `;
@@ -572,7 +701,7 @@ async function handleTmaLoginSubmit(event) {
       tmaAuthPromise = null;
       await doTmaLoadData();
       tmaHaptic('success');
-      toast('Вход успешно выполнен!', 'success');
+      toast(tmaT('tma.toast_login_success', 'Вход успешно выполнен!'), 'success');
       renderTmaApp();
     } else {
       throw new Error(res?.message || 'Неверный логин или пароль');
@@ -662,7 +791,7 @@ async function handleTmaRegisterSubmit(event) {
       tmaAuthPromise = null;
       await doTmaLoadData();
       tmaHaptic('success');
-      toast('Регистрация завершена!', 'success');
+      toast(tmaT('tma.toast_reg_success', 'Регистрация завершена!'), 'success');
       renderTmaApp();
     }
   } catch (err) {
@@ -713,18 +842,18 @@ function updateTmaMainButton() {
 
   if (activeTmaTab === 'cabinet') {
     mainBtnIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
-    mainBtnText.textContent = 'Изменить склад';
+    mainBtnText.textContent = tmaT('tma.btn_edit_stock', 'Изменить склад');
   } else if (activeTmaTab === 'events') {
     if (tmaEventsSubTab === 'upcoming') {
       mainBtnIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
-      mainBtnText.textContent = 'Подать заявку на событие';
+      mainBtnText.textContent = tmaT('tma.btn_register_event', 'Записаться');
     } else {
       mainBtnIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`;
-      mainBtnText.textContent = 'Сетка результатов';
+      mainBtnText.textContent = tmaT('tma.btn_results_grid', 'Сетка результатов');
     }
   } else if (activeTmaTab === 'matrix') {
     mainBtnIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
-    mainBtnText.textContent = 'Обновить сводку гильдии';
+    mainBtnText.textContent = tmaT('tma.btn_refresh_matrix', 'Обновить сводку гильдии');
   }
 }
 
@@ -825,17 +954,18 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
   if (!targetEvent) {
     return `
       <div class="tma-card" style="font-size:12.5px;color:#9ca3af;text-align:center;padding:16px">
-        Нет активных или запланированных событий
+        ${escapeHtml(tmaT('tma.no_events', 'Нет активных или запланированных событий'))}
       </div>
     `;
   }
 
   const isActive = !!currentEvent;
+  const currentLocale = typeof getAppLanguage === 'function' && getAppLanguage() === 'en' ? 'en-US' : (typeof getAppLanguage === 'function' && getAppLanguage() === 'de' ? 'de-DE' : 'ru-RU');
   const evDateStr = (targetEvent.startDate || targetEvent.dateStart)
     ? (isActive
-        ? 'Идёт сейчас'
-        : 'Старт: ' + new Date(targetEvent.startDate || targetEvent.dateStart).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ', 00:00 UTC')
-    : (isActive ? 'Идёт сейчас' : 'Скоро');
+        ? tmaT('tma.event_active', 'Идёт сейчас')
+        : 'Старт: ' + new Date(targetEvent.startDate || targetEvent.dateStart).toLocaleDateString(currentLocale, { day: 'numeric', month: 'short' }) + ', 00:00 UTC')
+    : (isActive ? tmaT('tma.event_active', 'Идёт сейчас') : 'Скоро');
 
   const myReg = (targetEvent.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
 
@@ -846,7 +976,7 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
       <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:16px">🥇</span>
-          <span style="font-size:12px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeText}</span>
+          <span style="font-size:12px;font-weight:700;color:#fde68a">${escapeHtml(tmaT('tma.your_registration', { place: placeText }))}</span>
         </div>
         <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">Записан</span>
       </div>
@@ -854,9 +984,9 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
   } else {
     regStatusSnippet = `
       <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
-        <span style="font-size:12px;color:#9ca3af">Регистрация открыта</span>
+        <span style="font-size:12px;color:#9ca3af">${escapeHtml(tmaT('tma.event_open_reg', 'Регистрация открыта'))}</span>
         <button type="button" onclick="event.stopPropagation();openTmaEventDetail(${targetEvent.id})" class="tma-event-reg-btn" style="padding:4px 12px;font-size:11.5px">
-          Записаться
+          ${escapeHtml(tmaT('tma.btn_register_event', 'Записаться'))}
         </button>
       </div>
     `;
@@ -865,7 +995,9 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
   const badgeBg = isActive ? 'rgba(34,197,94,0.2)' : 'rgba(14,165,233,0.2)';
   const badgeColor = isActive ? '#4ade80' : '#38bdf8';
   const badgeBorder = isActive ? 'rgba(34,197,94,0.3)' : 'rgba(14,165,233,0.3)';
-  const badgeLabel = isActive ? '🟢 Идёт сейчас • Подробнее ↗' : '◎ Ближайший ивент • Подробнее ↗';
+  const badgeLabel = isActive
+    ? `🟢 ${tmaT('tma.events_active', 'Идёт сейчас')} • Подробнее ↗`
+    : `◎ ${tmaT('tma.events_upcoming', 'Ближайший ивент')} • Подробнее ↗`;
 
   return `
     <!-- Next/Active Event Quick Card -->
@@ -942,7 +1074,7 @@ function renderTmaCabinet() {
   if (targetOfficer) {
     const cat = getCatalogOfficer(targetOfficer.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
     officerName = targetOfficer.name || cat?.name || 'Офицер';
-    offType = cat?.type || 'Пехота';
+    offType = (typeof getLocalizedOfficerType === 'function') ? getLocalizedOfficerType(cat?.type || 'Пехота') : (cat?.type || 'Пехота');
     offGen = cat?.generation ? `G${cat.generation}` : '';
     offLevel = Math.max(0, Number(targetOfficer.level) || 0);
 
@@ -1059,27 +1191,27 @@ function renderTmaCabinet() {
 
         <span style="padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;display:inline-flex;align-items:center;gap:4px;border:1px solid;${isFresh ? 'background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3)' : 'background:rgba(239,68,68,0.15);color:#f87171;border-color:rgba(239,68,68,0.3)'}">
           <span style="width:6px;height:6px;border-radius:999px;background:currentColor"></span>
-          ${isFresh ? (daysAgo === 0 ? 'Свежий' : `${daysAgo}д назад`) : `Устарел (${daysAgo}д)`}
+          ${isFresh ? (daysAgo === 0 ? escapeHtml(tmaT('tma.freshness_fresh', 'Свежий')) : escapeHtml(tmaT('tma.freshness_days', { days: daysAgo }))) : `${escapeHtml(tmaT('tma.freshness_stale', 'Устарел'))} (${daysAgo}д)`}
         </span>
       </div>
 
       <!-- Stock Grid: click to edit stock reserves -->
       <div class="tma-card-clickable" onclick="openTmaStockEditModal()" title="Нажмите для изменения запасов склада" style="padding-top:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <span style="font-size:10.5px;color:#9ca3af;font-weight:600">Складские запасы</span>
-          <span style="font-size:10.5px;color:#fbbf24;font-weight:600">✏️ Изменить</span>
+          <span style="font-size:10.5px;color:#9ca3af;font-weight:600">${escapeHtml(tmaT('tma.warehouse_title', 'Складские запасы'))}</span>
+          <span style="font-size:10.5px;color:#fbbf24;font-weight:600">✏️ ${escapeHtml(tmaT('tma.btn_edit_stock', 'Изменить'))}</span>
         </div>
         <div class="tma-stock-grid">
           <div class="tma-stock-cell">
-            <div class="tma-stock-label">🎟️ Купон офицера</div>
+            <div class="tma-stock-label">🎟️ ${escapeHtml(tmaT('tma.coupons', 'Купон офицера'))}</div>
             <div class="tma-stock-val" style="color:#fbbf24">${fmtNum(stock.coupons || 0)}</div>
           </div>
           <div class="tma-stock-cell">
-            <div class="tma-stock-label">🧩 Медаль офицера</div>
+            <div class="tma-stock-label">🧩 ${escapeHtml(tmaT('tma.puzzles', 'Медаль офицера'))}</div>
             <div class="tma-stock-val" style="color:#38bdf8">${fmtNum(stock.puzzles || 0)}</div>
           </div>
           <div class="tma-stock-cell">
-            <div class="tma-stock-label">🌟 Звезды I / II / III</div>
+            <div class="tma-stock-label">🌟 ${escapeHtml(tmaT('tma.stars_1', 'Звезды I'))} / II / III</div>
             <div class="tma-stock-val" style="color:#c084fc">
               ${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}
             </div>
@@ -1099,7 +1231,7 @@ function renderTmaCabinet() {
           <div>
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:13.5px;font-weight:800;color:#fff">${escapeHtml(officerName)}</span>
-              <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3);font-weight:700">★ Цель</span>
+              <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3);font-weight:700">★ ${escapeHtml(tmaT('tma.target_officer_title', 'Цель'))}</span>
             </div>
             <span style="font-size:11px;color:#9ca3af;margin-top:1px;display:block">
               ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''} • Ур. ${offLevel} (${escapeHtml(skillsStr)})
@@ -1424,13 +1556,13 @@ function renderTmaEvents() {
       </div>
       <div style="display:inline-flex;padding:2px;background:#161a22;border:1px solid rgba(255,255,255,0.08);border-radius:10px">
         <button id="tma-events-subtab-active" onclick="switchTmaEventsSubTab('active')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isAct ? 'background:rgba(34,197,94,0.2);color:#4ade80;border-color:rgba(34,197,94,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
-          🟢 Идут (${activeEvents.length})
+          🟢 ${escapeHtml(tmaT('tma.events_active', 'Идут'))} (${activeEvents.length})
         </button>
         <button id="tma-events-subtab-upcoming" onclick="switchTmaEventsSubTab('upcoming')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isUp ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
-          ◎ Скоро (${upcomingEvents.length})
+          ◎ ${escapeHtml(tmaT('tma.events_upcoming', 'Скоро'))} (${upcomingEvents.length})
         </button>
         <button id="tma-events-subtab-past" onclick="switchTmaEventsSubTab('past')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isPast ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
-          ◌ Архив (${pastEvents.length})
+          ◌ ${escapeHtml(tmaT('tma.events_past', 'Архив'))} (${pastEvents.length})
         </button>
       </div>
     </div>
@@ -1735,11 +1867,11 @@ function renderTmaMatrix() {
   const genFilters = ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   const sortLabels = {
-    deficit: 'По дефициту',
-    level: 'По уровню',
-    days: 'По дням',
-    officer: 'По офицеру',
-    player: 'По игроку'
+    deficit: tmaT('tma.sort_kp', 'По дефициту'),
+    level: tmaT('tma.sort_power', 'По уровню'),
+    days: tmaT('tma.sort_freshness', 'По дням'),
+    officer: tmaT('tma.sort_name', 'По офицеру'),
+    player: tmaT('tma.sort_name', 'По игроку')
   };
 
   const cardsHtml = visibleRows.map(renderTmaMatrixCard).join('');
@@ -1751,7 +1883,7 @@ function renderTmaMatrix() {
       <div style="position:relative;display:flex;align-items:center;margin-bottom:8px">
         <input type="text"
                id="tma-matrix-search-input"
-               placeholder="🔍 Поиск офицера или игрока..."
+               placeholder="${escapeHtml(tmaT('tma.matrix_search_placeholder', '🔍 Поиск офицера или игрока...'))}"
                value="${escapeHtml(tmaMatrixSearch)}"
                oninput="onTmaMatrixSearchInput(this.value)"
                style="width:100%;padding:8px 30px 8px 10px;font-size:12.5px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#161a22;color:#fff;box-sizing:border-box">
@@ -1852,7 +1984,7 @@ async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
       body: { desiredPlace, sectorId, ...(officerId ? { officerId } : {}) }
     });
     tmaHaptic('success');
-    toast('Заявка на ивент успешно принята!', 'success');
+    toast(tmaT('tma.toast_event_reg_success', 'Заявка на ивент успешно принята!'), 'success');
     await doTmaLoadData();
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
@@ -1885,7 +2017,7 @@ async function handleTmaUnregisterEvent(eventId) {
       : `/api/events/${eventId}/register`;
     await doTmaApiFetch(url, { method: 'DELETE' });
     tmaHaptic('success');
-    toast('Заявка отменена', 'info');
+    toast(tmaT('tma.toast_event_unreg_success', 'Заявка отменена'), 'info');
     await doTmaLoadData();
     renderTmaEvents();
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
@@ -2800,7 +2932,7 @@ async function submitTmaSectorEdit() {
 
     tmaHaptic('success');
     closeTmaModals();
-    toast('Параметры сектора сохранены', 'success');
+    toast(tmaT('tma.toast_profile_saved', 'Параметры сектора сохранены'), 'success');
     renderTmaCabinet();
     if (activeTmaTab === 'matrix') renderTmaMatrix();
     if (typeof renderMyCabinet === 'function') {
@@ -2924,7 +3056,7 @@ async function submitTmaStockEdit() {
 
     tmaHaptic('success');
     closeTmaModals();
-    toast('Запасы склада успешно обновлены', 'success');
+    toast(tmaT('tma.toast_stock_saved', 'Запасы склада успешно обновлены'), 'success');
     renderTmaCabinet();
     if (typeof renderMyCabinet === 'function') {
       renderMyCabinet().catch(() => {});
@@ -3895,6 +4027,12 @@ if (typeof window !== "undefined") {
   window.openTmaSectorDetail = openTmaSectorDetail;
   window.closeTmaEventEditorModal = closeTmaEventEditorModal;
   window.closeTmaSectorDetailModal = closeTmaSectorDetailModal;
+
+  window.tmaT = tmaT;
+  window.updateTmaLanguageUI = updateTmaLanguageUI;
+  window.openTmaLangModal = openTmaLangModal;
+  window.closeTmaLangModal = closeTmaLangModal;
+  window.selectTmaLanguage = selectTmaLanguage;
 }
 
 // Auto-initialize TMA if launched inside Telegram WebApp

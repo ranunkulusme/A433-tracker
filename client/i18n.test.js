@@ -437,6 +437,74 @@ async function runTests() {
     await setAppLanguage('ru');
   });
 
+  await test('tma namespace provides full key parity and localization across ru, en, de', async () => {
+    await setAppLanguage('ru');
+    assert.equal(t('tma.nav_cabinet'), 'Кабинет');
+    assert.equal(t('tma.nav_events'), 'События');
+    assert.equal(t('tma.nav_matrix'), 'Матрица');
+    assert.equal(t('tma.btn_edit_stock'), 'Изменить склад');
+    assert.equal(t('tma.unbound_title'), 'Привязка Telegram');
+    assert.equal(t('tma.target_officer_title'), 'Целевой офицер');
+    assert.equal(t('tma.events_active'), 'Идут сейчас');
+
+    await setAppLanguage('en');
+    assert.equal(t('tma.nav_cabinet'), 'Cabinet');
+    assert.equal(t('tma.nav_events'), 'Events');
+    assert.equal(t('tma.nav_matrix'), 'Matrix');
+    assert.equal(t('tma.btn_edit_stock'), 'Edit warehouse');
+    assert.equal(t('tma.unbound_title'), 'Telegram Binding');
+    assert.equal(t('tma.target_officer_title'), 'Target Officer');
+    assert.equal(t('tma.events_active'), 'Active now');
+
+    await setAppLanguage('de');
+    assert.equal(t('tma.nav_cabinet'), 'Kabinett');
+    assert.equal(t('tma.nav_events'), 'Events');
+    assert.equal(t('tma.nav_matrix'), 'Matrix');
+    assert.equal(t('tma.btn_edit_stock'), 'Lager bearbeiten');
+    assert.equal(t('tma.unbound_title'), 'Telegram-Verknüpfung');
+    assert.equal(t('tma.target_officer_title'), 'Zieloffizier');
+    assert.equal(t('tma.events_active'), 'Jetzt aktiv');
+
+    await setAppLanguage('ru');
+  });
+
+  await test('initI18n auto-detects language from Telegram WebApp initDataUnsafe', async () => {
+    const origTelegram = global.window ? global.window.Telegram : undefined;
+    const origStorage = global.localStorage;
+
+    try {
+      global.window = global.window || {};
+      global.window.Telegram = {
+        WebApp: {
+          initDataUnsafe: {
+            user: { language_code: 'de' }
+          }
+        }
+      };
+
+      // Mock storage without saved kow_lang
+      const store = new Map();
+      global.localStorage = {
+        getItem: (k) => store.get(k) || null,
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k)
+      };
+
+      await initI18n();
+      assert.equal(getAppLanguage(), 'de', 'Should detect de from Telegram user.language_code');
+
+      // Now set en in telegram
+      global.window.Telegram.WebApp.initDataUnsafe.user.language_code = 'en';
+      await initI18n();
+      assert.equal(getAppLanguage(), 'en', 'Should detect en from Telegram user.language_code');
+    } finally {
+      if (origTelegram === undefined && global.window) delete global.window.Telegram;
+      else if (global.window) global.window.Telegram = origTelegram;
+      global.localStorage = origStorage;
+      await setAppLanguage('ru');
+    }
+  });
+
   console.log(`\nTests finished. Passed: ${passed}, Failed: ${failed}`);
   if (failed > 0) {
     process.exit(1);
