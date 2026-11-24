@@ -477,8 +477,13 @@
       </div>
       <p id="tma-header-subtitle" style="font-size:11px;color:#9ca3af;margin:0">bot • Kiss of War</p>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <button class="tma-icon-btn" onclick="refreshTmaCurrentTab()" title="Обновить" type="button">
+    <div style="display:flex;align-items:center;gap:6px">
+      <!-- TMA Language Selector Button -->
+      <button class="tma-icon-btn tma-lang-btn" id="tma-lang-btn" onclick="openTmaLangModal()" type="button" title="Выбор языка / Language" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:11px;font-weight:700;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#e2e8f0;cursor:pointer">
+        <span id="tma-current-lang-flag">🇷🇺</span>
+        <span id="tma-current-lang-code" style="font-size:10px;letter-spacing:0.5px">RU</span>
+      </button>
+      <button class="tma-icon-btn" onclick="refreshTmaCurrentTab()" title="Обновить" data-i18n-attr="title:common.refresh" type="button">
         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       </button>
       <span id="tma-user-role-badge" class="badge badge-warning" style="font-size:10px;font-weight:700">Р3</span>
@@ -512,15 +517,15 @@
   <nav class="tma-bottom-nav" id="tma-bottom-nav">
     <button onclick="switchTmaTab('cabinet')" id="tma-tab-btn-cabinet" class="tma-nav-btn active" type="button">
       <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-      <span>Кабинет</span>
+      <span id="tma-nav-label-cabinet" data-i18n="tma.nav_cabinet">Кабинет</span>
     </button>
     <button onclick="switchTmaTab('events')" id="tma-tab-btn-events" class="tma-nav-btn" type="button">
       <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-      <span>События</span>
+      <span id="tma-nav-label-events" data-i18n="tma.nav_events">События</span>
     </button>
     <button onclick="switchTmaTab('matrix')" id="tma-tab-btn-matrix" class="tma-nav-btn" type="button">
       <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-      <span>Матрица</span>
+      <span id="tma-nav-label-matrix" data-i18n="tma.nav_matrix">Матрица</span>
     </button>
   </nav>
 
@@ -892,6 +897,33 @@
       </div>
       <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px" id="tma-sd-content">
         <!-- Rendered dynamically by openTmaSectorDetail(playerId) -->
+      </div>
+    </div>
+  </div>
+
+  <!-- TMA Language Selector Modal / Bottom Sheet -->
+  <div id="tma-lang-modal" class="tma-modal" style="display:none;z-index:150" onclick="closeTmaLangModal()">
+    <div class="tma-modal-sheet" id="tma-lang-modal-sheet" style="max-height:80vh" onclick="event.stopPropagation()">
+      <div class="tma-modal-header">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">KoW Tracker</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-lang-modal-title" data-i18n="tma.choose_language">Выбор языка</h3>
+        </div>
+        <button type="button" class="tma-modal-close-btn" onclick="closeTmaLangModal()">✕</button>
+      </div>
+      <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:8px">
+        <button type="button" class="tma-lang-choice-btn" data-lang="ru" onclick="selectTmaLanguage('ru')" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+          <span style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">🇷🇺</span> Русский (RU)</span>
+          <span class="tma-lang-check" id="tma-lang-check-ru" style="color:#fbbf24;font-size:16px;display:none">✓</span>
+        </button>
+        <button type="button" class="tma-lang-choice-btn" data-lang="en" onclick="selectTmaLanguage('en')" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+          <span style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">🇬🇧</span> English (EN)</span>
+          <span class="tma-lang-check" id="tma-lang-check-en" style="color:#fbbf24;font-size:16px;display:none">✓</span>
+        </button>
+        <button type="button" class="tma-lang-choice-btn" data-lang="de" onclick="selectTmaLanguage('de')" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+          <span style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">🇩🇪</span> Deutsch (DE)</span>
+          <span class="tma-lang-check" id="tma-lang-check-de" style="color:#fbbf24;font-size:16px;display:none">✓</span>
+        </button>
       </div>
     </div>
   </div>

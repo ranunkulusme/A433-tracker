@@ -1223,6 +1223,116 @@ test('web app renderEventDetail and calCard handle TMA edited event with clean d
   assert.ok(contentHtml.includes('Сектор 42'), 'Must render assigned player without throwing');
 });
 
+test('tma.js supports multi-language switching, Telegram language autodetection, and localized UI', async () => {
+  const i18nCode = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  const elements = {};
+  function getMockEl(id) {
+    if (!elements[id]) {
+      elements[id] = {
+        id,
+        style: {},
+        classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+        textContent: '',
+        innerHTML: '',
+        value: '',
+        addEventListener: () => {}
+      };
+    }
+    return elements[id];
+  }
+
+  const mockStorage = {};
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '' },
+    localStorage: {
+      getItem: (k) => mockStorage[k] || null,
+      setItem: (k, v) => { mockStorage[k] = String(v); },
+      removeItem: (k) => { delete mockStorage[k]; }
+    },
+    Telegram: {
+      WebApp: {
+        initData: 'query_id=test&user=%7B%22id%22%3A123%2C%22language_code%22%3A%22en%22%7D',
+        initDataUnsafe: { user: { id: 123, language_code: 'en' } },
+        platform: 'ios',
+        ready: () => {},
+        expand: () => {},
+        setHeaderColor: () => {},
+        setBackgroundColor: () => {},
+        enableClosingConfirmation: () => {},
+        HapticFeedback: { impactOccurred: () => {}, notificationOccurred: () => {} }
+      }
+    },
+    toast: () => {},
+    fetch: async () => ({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ ok: true })
+    })
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { lang: 'en', classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    body: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    getElementById: (id) => getMockEl(id),
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout: (id) => clearTimeout(id)
+  });
+
+  // Load i18n.js then tma.js
+  vm.runInContext(i18nCode, context);
+  vm.runInContext('initI18n();', context);
+  vm.runInContext(tmaCode, context);
+
+  // 1. Check auto-detection from Telegram language_code ('en')
+  assert.equal(vm.runInContext('getAppLanguage()', context), 'en', 'Should autodetect en from Telegram');
+
+  // 2. Test updateTmaLanguageUI updates elements
+  vm.runInContext('updateTmaLanguageUI("en");', context);
+  assert.equal(elements['tma-current-lang-code']?.textContent, 'EN');
+  assert.equal(elements['tma-current-lang-flag']?.textContent, '🇬🇧');
+  assert.equal(elements['tma-nav-label-cabinet']?.textContent, 'Cabinet');
+  assert.equal(elements['tma-nav-label-events']?.textContent, 'Events');
+  assert.equal(elements['tma-nav-label-matrix']?.textContent, 'Matrix');
+
+  // 3. Switch language to German ('de')
+  await vm.runInContext('selectTmaLanguage("de");', context);
+  assert.equal(vm.runInContext('getAppLanguage()', context), 'de');
+  assert.equal(mockStorage['kow_lang'], 'de');
+  assert.equal(elements['tma-current-lang-code']?.textContent, 'DE');
+  assert.equal(elements['tma-current-lang-flag']?.textContent, '🇩🇪');
+  assert.equal(elements['tma-nav-label-cabinet']?.textContent, 'Kabinett');
+  assert.equal(elements['tma-nav-label-events']?.textContent, 'Events');
+  assert.equal(elements['tma-nav-label-matrix']?.textContent, 'Matrix');
+
+  // 4. Test main button text localization
+  vm.runInContext('activeTmaTab = "cabinet"; updateTmaMainButton();', context);
+  assert.equal(elements['tma-main-btn-text']?.textContent, 'Lager bearbeiten');
+
+  // 5. Switch to Russian ('ru')
+  await vm.runInContext('selectTmaLanguage("ru");', context);
+  assert.equal(elements['tma-current-lang-code']?.textContent, 'RU');
+  assert.equal(elements['tma-nav-label-cabinet']?.textContent, 'Кабинет');
+  vm.runInContext('activeTmaTab = "cabinet"; updateTmaMainButton();', context);
+  assert.equal(elements['tma-main-btn-text']?.textContent, 'Изменить склад');
+});
+
 
 
 
