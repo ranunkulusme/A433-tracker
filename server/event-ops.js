@@ -263,13 +263,18 @@ function createEventOperations({
         }
       }
     } else {
-      const pOfficers = Array.isArray(player.officers) ? player.officers : [];
-      const off = pOfficers.find(o => {
-        return typeof logic.isOfficerEligibleForEvents === 'function'
-          ? logic.isOfficerEligibleForEvents(o, catalog)
-          : !Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles);
-      }) || pOfficers[0];
-      finalOfficerId = (off ? (off.catalogId || off.id) : '') || '';
+      if (typeof logic.selectOptimalEventOfficer === 'function') {
+        const optimal = logic.selectOptimalEventOfficer({ player, catalog, eventDate: ev.dateFrom });
+        finalOfficerId = optimal.officerId || (optimal.officer ? (optimal.officer.catalogId || optimal.officer.id) : '');
+      } else {
+        const pOfficers = Array.isArray(player.officers) ? player.officers : [];
+        const off = pOfficers.find(o => {
+          return typeof logic.isOfficerEligibleForEvents === 'function'
+            ? logic.isOfficerEligibleForEvents(o, catalog)
+            : !Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles);
+        }) || pOfficers[0];
+        finalOfficerId = (off ? (off.catalogId || off.id) : '') || '';
+      }
     }
 
     db.registerForEvent({

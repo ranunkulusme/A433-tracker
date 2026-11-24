@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.51.1';
+const APP_VERSION = 'v3.52.0';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -7511,7 +7511,12 @@ function updateRegisterModalForSector(sectorId) {
       ? logic.isOfficerEligibleForEvents(o, state.catalog)
       : (!Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles) && getCatalogOfficer(o.catalogId)?.upgradeType !== 'special' && Number(getCatalogOfficer(o.catalogId)?.couponPerPuzzle) !== 0);
   };
-  const eligibleOfficer = targetSector.officers.find(isEligibleFn);
+  let optimalOfficer = null;
+  if (typeof logic !== 'undefined' && typeof logic.selectOptimalEventOfficer === 'function') {
+    const optRes = logic.selectOptimalEventOfficer({ player: targetSector, catalog: state.catalog, eventDate: ev.dateFrom });
+    optimalOfficer = optRes?.officer || null;
+  }
+  const eligibleOfficer = optimalOfficer || targetSector.officers.find(isEligibleFn);
   const hasExisting = existingReg && targetSector.officers.some(o => String(o.id) === String(existingReg.officerId));
   const autoSelectedId = hasExisting ? existingReg.officerId : (eligibleOfficer ? eligibleOfficer.id : targetSector.officers[0]?.id);
 
@@ -7520,7 +7525,33 @@ function updateRegisterModalForSector(sectorId) {
     const c = getCatalogOfficer(o.catalogId);
     const isEligible = isEligibleFn(o);
     const sel = String(autoSelectedId) === String(o.id);
-    return `<option value="${o.id}" ${sel ? 'selected' : ''} ${!isEligible ? 'disabled' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})${!isEligible ? ' [🔒 только личные пазлы — недоступен для ивентов]' : ''}</option>`;
+
+    let badge = '';
+    const isMaxed = (typeof logic !== 'undefined' && typeof logic.isOfficerMaxed === 'function')
+      ? logic.isOfficerMaxed(o, c, targetSector, ev.dateFrom)
+      : Boolean(o.isMaxed || (o.stars >= 5 && o.level >= 180));
+
+    const isTarget = Boolean(
+      o.isTarget || o.is_target || o.priority ||
+      (targetSector.targetOfficerId && String(targetSector.targetOfficerId) === String(o.id))
+    );
+
+    if (isTarget) {
+      badge += ' [🎯 Целевой]';
+    } else if (isMaxed) {
+      badge += ' [✅ Прокачан]';
+    }
+
+    let defText = '';
+    if (isEligible && !isMaxed && typeof calculateOfficerDeficit === 'function') {
+      const def = calculateOfficerDeficit({ officer: o, catalogItem: c, player: targetSector, targetLevel: 180, today: ev.dateFrom, includeStock: true });
+      if (def?.deficitCoupons > 0) {
+        defText = ` · дефицит: ${fmtNum(def.deficitCoupons)}`;
+      }
+    }
+
+    const note = !isEligible ? ' [🔒 только личные пазлы — недоступен для ивентов]' : `${badge}${defText}`;
+    return `<option value="${o.id}" ${sel ? 'selected' : ''} ${!isEligible ? 'disabled' : ''}>${escapeHtml(officerLabel(o))} (ур. ${o.level}, ${c?.type || '—'})${escapeHtml(note)}</option>`;
   }).join('');
 
   // populate places
@@ -7586,6 +7617,15 @@ function onRegisterModalChange() {
 
   const cat = getCatalogOfficer(officer.catalogId);
   const def = calculateOfficerDeficit({ officer, catalogItem: cat, player, targetLevel: 180, today: ev.dateFrom });
+
+  if (def && def.deficitCoupons !== undefined && def.deficitCoupons <= 0) {
+    warningBox.style.display = 'block';
+    warningBox.className = 'auth-alert warning';
+    warningBox.innerHTML = `
+      ⚠️ <strong>Офицер уже прокачан:</strong> у офицера <em>${escapeHtml(officerLabel(officer))}</em> нулевой дефицит купонов (готов к максимальной прокачке). Награды за событие не ускорят развитие офицера. Рекомендуется выбрать непрокачанного офицера.
+    `;
+    return;
+  }
 
   if (desiredPlace === 0) {
     warningBox.style.display = 'block';

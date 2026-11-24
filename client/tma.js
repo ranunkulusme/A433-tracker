@@ -1835,10 +1835,18 @@ async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
     || state.players[0];
 
   const sectorId = player ? player.id : currentUser?.playerId;
+  let officerId = undefined;
+  if (player && typeof logic !== 'undefined' && typeof logic.selectOptimalEventOfficer === 'function') {
+    const ev = (state.events || []).find(e => Number(e.id) === Number(eventId));
+    const opt = logic.selectOptimalEventOfficer({ player, catalog: state.catalog, eventDate: ev?.dateFrom });
+    if (opt?.officerId) {
+      officerId = opt.officerId;
+    }
+  }
   try {
     await doTmaApiFetch(`/api/events/${eventId}/register`, {
       method: 'POST',
-      body: { desiredPlace, sectorId }
+      body: { desiredPlace, sectorId, ...(officerId ? { officerId } : {}) }
     });
     tmaHaptic('success');
     toast('Заявка на ивент успешно принята!', 'success');

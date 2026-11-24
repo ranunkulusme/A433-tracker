@@ -4529,6 +4529,118 @@ test('classifyEvents partitions and sorts events into active, upcoming and past 
   assert.strictEqual(result.past[0].id, 7, 'Самое недавнее прошедшее должно быть первым');
 });
 
+test('isOfficerMaxed and selectOptimalEventOfficer accurately detect maxed officers and prioritize optimal event candidates', () => {
+  const logic = require('./logic.js');
+  const { isOfficerMaxed, selectOptimalEventOfficer } = logic;
+  assert.strictEqual(typeof isOfficerMaxed, 'function', 'isOfficerMaxed must be exported');
+  assert.strictEqual(typeof selectOptimalEventOfficer, 'function', 'selectOptimalEventOfficer must be exported');
+
+  const catalog = [
+    { id: 'admiral', name: 'Адмирал Нейтон', generation: 8, couponPerPuzzle: 720, type: 'Пехота', upgradeType: 'standard' },
+    { id: 'rex', name: 'Генерал Рекс', generation: 7, couponPerPuzzle: 600, type: 'Танк', upgradeType: 'standard' },
+    { id: 'black', name: 'Капитан Блэк', generation: 7, couponPerPuzzle: 600, type: 'ПТ-Сау', upgradeType: 'standard' },
+    { id: 'personal_only', name: 'Личный Офицер', generation: 8, couponPerPuzzle: 0, onlyPersonalPuzzles: true, upgradeType: 'special' }
+  ];
+
+  const maxedOfficer = {
+    id: 'off_maxed',
+    catalogId: 'admiral',
+    name: 'Адмирал Нейтон',
+    level: 180,
+    stars: 5,
+    skills: [5, 5, 5, 5]
+  };
+
+  const progressOfficer = {
+    id: 'off_progress',
+    catalogId: 'rex',
+    name: 'Генерал Рекс',
+    level: 100,
+    stars: 3,
+    skills: [3, 2, 1, 1]
+  };
+
+  const highGenOfficer = {
+    id: 'off_high_gen',
+    catalogId: 'admiral',
+    name: 'Адмирал Нейтон',
+    level: 120,
+    stars: 4,
+    skills: [4, 3, 2, 1]
+  };
+
+  const player = {
+    id: 1,
+    name: 'Commander',
+    stock: { coupons: 1000, puzzles: 10 },
+    officers: [maxedOfficer, progressOfficer]
+  };
+
+  // 1. isOfficerMaxed checks
+  assert.strictEqual(isOfficerMaxed(maxedOfficer, catalog[0], player), true, 'Full 180 lvl + 5 stars + 5/5/5/5 skills should be maxed');
+  assert.strictEqual(isOfficerMaxed({ ...progressOfficer, isMaxed: true }, catalog[1], player), true, 'Explicit isMaxed flag should be respected');
+  assert.strictEqual(isOfficerMaxed(progressOfficer, catalog[1], player), false, 'Officer with deficit should not be maxed');
+
+  // 2. selectOptimalEventOfficer skips maxed first officer and selects unmaxed officer
+  const res1 = selectOptimalEventOfficer({ player, catalog });
+  assert.strictEqual(res1.officerId, 'rex', 'Should skip maxed admiral and choose rex');
+  assert.strictEqual(res1.isMaxed, false);
+  assert.strictEqual(res1.isAllMaxed, false);
+  assert.ok(res1.deficitCoupons > 0);
+
+  // 3. Priority to user-selected target officer if not maxed
+  const playerWithTarget = {
+    id: 2,
+    name: 'TargetPlayer',
+    stock: { coupons: 0, puzzles: 0 },
+    officers: [
+      maxedOfficer,
+      { ...progressOfficer, id: 'rex_not_target' },
+      { ...highGenOfficer, id: 'admiral_target', isTarget: true }
+    ]
+  };
+  const resTarget = selectOptimalEventOfficer({ player: playerWithTarget, catalog });
+  assert.strictEqual(resTarget.officer.id, 'admiral_target', 'Should select officer explicitly marked as target');
+  assert.strictEqual(resTarget.isTarget, true);
+
+  // 4. Generation priority: higher generation is prioritized among unmaxed non-target officers
+  const playerGen = {
+    id: 3,
+    name: 'GenPlayer',
+    stock: { coupons: 0, puzzles: 0 },
+    officers: [
+      maxedOfficer, // Admiral (maxed)
+      progressOfficer, // Rex (Gen 7)
+      { id: 'off_gen8', catalogId: 'admiral', level: 100, stars: 3, skills: [2, 2, 2, 2] } // Admiral (Gen 8, unmaxed)
+    ]
+  };
+  const resGen = selectOptimalEventOfficer({ player: playerGen, catalog });
+  assert.strictEqual(resGen.officer.id, 'off_gen8', 'Higher generation officer (Gen 8) should beat Gen 7');
+
+  // 5. Fallback when all available officers are fully maxed
+  const allMaxedPlayer = {
+    id: 4,
+    name: 'AllMaxedPlayer',
+    stock: { coupons: 100000, puzzles: 5000 },
+    officers: [
+      maxedOfficer,
+      { id: 'rex_maxed', catalogId: 'rex', level: 180, stars: 5, skills: [5, 5, 5, 5] },
+      { id: 'personal_off', catalogId: 'personal_only', level: 100, stars: 2, skills: [1, 1, 1, 1], onlyPersonalPuzzles: true }
+    ]
+  };
+  const resAllMaxed = selectOptimalEventOfficer({ player: allMaxedPlayer, catalog });
+  assert.strictEqual(resAllMaxed.isAllMaxed, true, 'isAllMaxed flag must be true');
+  assert.strictEqual(resAllMaxed.isMaxed, true);
+  assert.ok(resAllMaxed.officer, 'Should still return best fallback officer');
+  assert.strictEqual(resAllMaxed.officerId, 'admiral', 'Fallback should pick higher generation');
+
+  // 6. Graceful handling of empty officers or sectors
+  const emptyRes = selectOptimalEventOfficer({ player: { officers: [] }, catalog });
+  assert.strictEqual(emptyRes.officer, null);
+  assert.strictEqual(emptyRes.officerId, '');
+});
+
+
 
 
 
