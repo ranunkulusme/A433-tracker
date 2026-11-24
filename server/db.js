@@ -1324,8 +1324,8 @@ function getEvents() {
   return rows.map(r => ({
     id: r.id,
     typeId: r.type_id,
-    dateFrom: r.date_from,
-    dateTo: r.date_to,
+    dateFrom: String(r.date_from || '').slice(0, 10),
+    dateTo: String(r.date_to || '').slice(0, 10),
     note: r.note || '',
     assignments: JSON.parse(r.assignments_json || '[]')
   }));
@@ -1338,8 +1338,8 @@ function getEventById(id) {
   return {
     id: r.id,
     typeId: r.type_id,
-    dateFrom: r.date_from,
-    dateTo: r.date_to,
+    dateFrom: String(r.date_from || '').slice(0, 10),
+    dateTo: String(r.date_to || '').slice(0, 10),
     note: r.note || '',
     assignments: JSON.parse(r.assignments_json || '[]')
   };
@@ -1348,6 +1348,8 @@ function getEventById(id) {
 function saveEvent(data) {
   const db = getDb();
   const assignmentsJson = JSON.stringify(data.assignments || []);
+  const dateFrom = String(data.dateFrom || '').slice(0, 10);
+  const dateTo = String(data.dateTo || '').slice(0, 10);
   if (data.id) {
     db.prepare(`
       INSERT INTO events (id, type_id, date_from, date_to, note, assignments_json)
@@ -1358,14 +1360,14 @@ function saveEvent(data) {
         date_to = excluded.date_to,
         note = excluded.note,
         assignments_json = excluded.assignments_json
-    `).run(data.id, data.typeId, data.dateFrom, data.dateTo, data.note || '', assignmentsJson);
-    return data;
+    `).run(data.id, data.typeId, dateFrom, dateTo, data.note || '', assignmentsJson);
+    return { ...data, dateFrom, dateTo };
   } else {
     const res = db.prepare(`
       INSERT INTO events (type_id, date_from, date_to, note, assignments_json)
       VALUES (?, ?, ?, ?, ?)
-    `).run(data.typeId, data.dateFrom, data.dateTo, data.note || '', assignmentsJson);
-    return { ...data, id: Number(res.lastInsertRowid) };
+    `).run(data.typeId, dateFrom, dateTo, data.note || '', assignmentsJson);
+    return { ...data, id: Number(res.lastInsertRowid), dateFrom, dateTo };
   }
 }
 
@@ -2505,6 +2507,14 @@ function initDb(filePath) {
       UPDATE users
       SET player_id = (SELECT id FROM players WHERE players.user_id = users.id ORDER BY id ASC LIMIT 1)
       WHERE player_id IS NULL AND id IN (SELECT user_id FROM players WHERE user_id IS NOT NULL);
+
+      UPDATE events
+      SET date_from = substr(date_from, 1, 10)
+      WHERE date_from LIKE '%T%';
+
+      UPDATE events
+      SET date_to = substr(date_to, 1, 10)
+      WHERE date_to LIKE '%T%';
     `);
   } catch (e) {}
 

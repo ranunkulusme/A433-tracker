@@ -1059,4 +1059,170 @@ test('renderTmaMatrix renders compact officer cards instead of sector power rank
   assert.ok(containerHtml.includes('Пехота'), 'Должен присутствовать фильтр Пехота');
 });
 
+test('submitTmaEventEditor normalizes dates to YYYY-MM-DD and preserves officerId/rsvpStatus', async () => {
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  let savedPayload = null;
+  const mockElements = {
+    'tma-ee-type': { value: '1' },
+    'tma-event-editor-title': { textContent: '' },
+    'tma-ee-date-from': { value: '2026-11-25T14:30' },
+    'tma-ee-date-to': { value: '2026-11-28T18:00' },
+    'tma-ee-note': { value: 'Test Event' },
+    'tma-ee-save-btn': { disabled: false },
+    'tma-ee-places-list': { innerHTML: '' },
+    'tma-ee-places-count': { textContent: '' },
+    'tma-event-editor-modal': { style: {}, querySelector: () => null }
+  };
+
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    Telegram: { WebApp: { initData: '', initDataUnsafe: {}, ready: () => {} } },
+    fetch: async () => ({ ok: true, json: async () => ({}) })
+  };
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => true, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => true, add: () => {}, remove: () => {} }, appendChild: () => {} },
+    getElementById: (id) => mockElements[id] || null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    createElement: () => ({ classList: { add: () => {} }, appendChild: () => {}, setAttribute: () => {} }),
+    addEventListener: () => {}
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+
+  vm.runInContext(tmaCode, context);
+
+  // Set existing event with assignments having officerId and rsvpStatus
+  context.state = {
+    eventTypes: [{ id: 1, name: 'Король Войны', places: [{ place: 1, coupons: 30000 }] }],
+    players: [{ id: 42, name: 'Сектор 42', officers: [{ id: 'off-42', name: 'Офицер 42' }] }],
+    events: [{
+      id: 99,
+      typeId: 1,
+      dateFrom: '2026-11-25',
+      dateTo: '2026-11-28',
+      places: [{ place: 1, coupons: 30000 }],
+      assignments: [{ place: 1, playerId: 42, officerId: 'off-42', rsvpStatus: 'confirmed' }]
+    }]
+  };
+
+  context.doTmaApiFetch = async (url, opts) => {
+    if (url === '/api/events' && opts.method === 'POST') {
+      savedPayload = opts.body;
+      return { id: 99, ...opts.body };
+    }
+    return { ok: true };
+  };
+
+  context.openTmaEventEditor(99);
+  // Simulate user changing date to datetime-local values
+  mockElements['tma-ee-date-from'].value = '2026-11-25T14:30';
+  mockElements['tma-ee-date-to'].value = '2026-11-28T18:00';
+
+  await context.submitTmaEventEditor();
+
+  assert.ok(savedPayload, 'Event payload must be submitted');
+  assert.equal(savedPayload.dateFrom, '2026-11-25', 'dateFrom must be normalized to YYYY-MM-DD without timestamp');
+  assert.equal(savedPayload.dateTo, '2026-11-28', 'dateTo must be normalized to YYYY-MM-DD without timestamp');
+  assert.equal(savedPayload.assignments.length, 1);
+  assert.equal(savedPayload.assignments[0].officerId, 'off-42', 'Existing officerId must be preserved');
+  assert.equal(savedPayload.assignments[0].rsvpStatus, 'confirmed', 'Existing rsvpStatus must be preserved');
+});
+
+test('web app renderEventDetail and calCard handle TMA edited event with clean dates and safe officers', () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '..', 'shared', 'logic.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+
+  let contentHtml = '';
+  const mockElements = {
+    content: {
+      set innerHTML(val) { contentHtml = val; },
+      get innerHTML() { return contentHtml; }
+    },
+    'page-title': { textContent: '' },
+    'role-switch': { value: '' }
+  };
+
+  const mockWindow = {
+    location: { hash: '#event/99', search: '' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    navigator: { standalone: false, userAgent: 'test' },
+    addEventListener: () => {},
+    matchMedia: () => ({ matches: false }),
+    fetch: async () => ({ ok: true, json: async () => ({}) })
+  };
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { contains: () => false, add: () => {}, remove: () => {} } },
+    body: { classList: { contains: () => false, add: () => {}, remove: () => {} } },
+    getElementById: (id) => mockElements[id] || null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    navigator: mockWindow.navigator,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    setInterval: () => 0,
+    clearInterval: () => {},
+    fetch: mockWindow.fetch
+  });
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(appCode, context);
+
+  // Event edited in TMA before normalization fix (or with ISO timestamp)
+  const tmaEvent = {
+    id: 99,
+    typeId: 1,
+    dateFrom: '2026-11-25T14:30',
+    dateTo: '2026-11-28T18:00',
+    note: 'TMA Note',
+    assignments: [
+      { place: 1, playerId: 42, actualCoupons: 30000 }
+    ]
+  };
+
+  vm.runInContext(`
+    state.eventTypes = [{ id: 1, name: 'Король Войны', places: [{ place: 1, coupons: 30000 }] }];
+    // Player without officers to ensure crash-resistance
+    state.players = [{ id: 42, name: 'Сектор 42' }];
+    state.events = [${JSON.stringify(tmaEvent)}];
+    renderEventDetail(99);
+  `, context);
+
+  assert.ok(contentHtml.includes('Король Войны'), 'Must render event type name');
+  assert.ok(!contentHtml.includes('Invalid Date'), 'Must never render Invalid Date');
+  assert.ok(contentHtml.includes('25 нояб. 2026 г.'), 'Must render properly formatted Russian start date');
+  assert.ok(contentHtml.includes('28 нояб. 2026 г.'), 'Must render properly formatted Russian end date');
+  assert.ok(contentHtml.includes('Сектор 42'), 'Must render assigned player without throwing');
+});
+
+
+
 

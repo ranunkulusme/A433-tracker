@@ -2374,6 +2374,53 @@ test('setUserActiveSector claims sector if players.user_id was NULL and links it
   assert.equal(dbModule.getPlayerById(p.id).userId, reg.userId);
 });
 
+test('saveEvent normalizes dateFrom and dateTo to YYYY-MM-DD format', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+
+  const et = dbModule.saveEventType({ name: 'KW', places: [{ place: 1, coupons: 10000 }] });
+  const saved = dbModule.saveEvent({
+    typeId: et.id,
+    dateFrom: '2026-11-25T14:30',
+    dateTo: '2026-11-28T00:00:00.000Z',
+    assignments: []
+  });
+
+  assert.equal(saved.dateFrom, '2026-11-25');
+  assert.equal(saved.dateTo, '2026-11-28');
+
+  const retrieved = dbModule.getEventById(saved.id);
+  assert.equal(retrieved.dateFrom, '2026-11-25');
+  assert.equal(retrieved.dateTo, '2026-11-28');
+});
+
+test('initDb auto-heals corrupted event date_from and date_to containing timestamp', () => {
+  const dbModule = require('./db.js');
+  const tempDbPath = path.join('/tmp', `test-kow-heal-${Date.now()}.db`);
+  try {
+    const db = dbModule.initDb(tempDbPath);
+
+    const et = dbModule.saveEventType({ name: 'KW', places: [{ place: 1, coupons: 10000 }] });
+    // Manually insert raw timestamp
+    db.prepare(`
+      INSERT INTO events (type_id, date_from, date_to, note, assignments_json)
+      VALUES (?, '2026-11-25T14:30', '2026-11-28T18:00', 'corrupted', '[]')
+    `).run(et.id);
+
+    // Re-run initDb migration on the same db file
+    dbModule.initDb(tempDbPath);
+
+    const events = dbModule.getEvents();
+    const corrupted = events.find(e => e.note === 'corrupted');
+    assert.ok(corrupted, 'Corrupted event must exist');
+    assert.equal(corrupted.dateFrom, '2026-11-25');
+    assert.equal(corrupted.dateTo, '2026-11-28');
+  } finally {
+    try { fs.unlinkSync(tempDbPath); } catch (_) {}
+  }
+});
+
+
 
 
 

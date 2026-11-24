@@ -1,5 +1,5 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.51.0';
+const APP_VERSION = 'v3.51.1';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
@@ -5027,12 +5027,16 @@ async function submitDeleteUser() {
 
 function formatDate(s) {
   if (!s) return '—';
-  const d = new Date(s + 'T00:00:00');
+  const clean = String(s).split('T')[0];
+  const d = new Date(clean + 'T00:00:00');
+  if (isNaN(d.getTime())) return String(s);
   return d.toLocaleDateString('ru',{day:'numeric',month:'short',year:'numeric'});
 }
 function formatDateShort(s) {
   if (!s) return '—';
-  const d = new Date(s + 'T00:00:00');
+  const clean = String(s).split('T')[0];
+  const d = new Date(clean + 'T00:00:00');
+  if (isNaN(d.getTime())) return String(s);
   return d.toLocaleDateString('ru',{day:'numeric',month:'short'});
 }
 function formatDaysPlural(days) {
@@ -6590,20 +6594,21 @@ function renderCalendar() {
 function calCard(ev, status) {
   const et = getEventType(ev.typeId);
   const color = et?.color || '#888';
-  const assigned = ev.assignments.length;
+  const assignments = Array.isArray(ev.assignments) ? ev.assignments : [];
+  const assigned = assignments.length;
   const totalPlaces = et ? et.places.length : 0;
   const statusLabels = {
     active: typeof t === 'function' ? t('events.status_active') : '● Идёт',
     upcoming: typeof t === 'function' ? t('events.status_upcoming') : '◎ Скоро',
     past: typeof t === 'function' ? t('events.status_past') : '◌ Завершён'
   };
-  const totalCoupons = ev.assignments.reduce((s,a)=>{
+  const totalCoupons = assignments.reduce((s,a)=>{
     const pi = placeInfo(et, a.place, ev.dateFrom);
     return s + (a.actualCoupons ?? pi?.coupons ?? 0);
   }, 0);
 
   // top 3 assigned players
-  const top3 = ev.assignments.slice(0,3).map(a=>{
+  const top3 = assignments.slice(0,3).map(a=>{
     const p = getPlayer(a.playerId);
     const pi = placeInfo(et, a.place, ev.dateFrom);
     const placeTitle = pi?.label || (typeof t === 'function' ? t('events.place_num', { place: a.place }) : `Место ${a.place}`);
@@ -6676,7 +6681,7 @@ function calCard(ev, status) {
 
   const assignedStr = typeof t === 'function' ? t('events.assignments_count', { count: fmtNum(assigned) }) : `${fmtNum(assigned)} назначений`;
   const couponsStr = typeof t === 'function' ? t('events.coupons_count', { count: fmtNum(totalCoupons) }) : `${fmtNum(totalCoupons)} купонов`;
-  const moreAssignedStr = typeof t === 'function' ? t('events.more_assignments', { count: fmtNum(ev.assignments.length - 3) }) : `+ ещё ${fmtNum(ev.assignments.length - 3)} назначений`;
+  const moreAssignedStr = typeof t === 'function' ? t('events.more_assignments', { count: fmtNum(assignments.length - 3) }) : `+ ещё ${fmtNum(assignments.length - 3)} назначений`;
   const noAssignedStr = typeof t === 'function' ? t('events.no_assignments') : 'Назначений нет';
 
   return `<div class="cal-card" onclick="navigate('event_detail',{id:${ev.id}})" style="--ev-color:${color}">
@@ -6690,7 +6695,7 @@ function calCard(ev, status) {
         <div class="cal-card-meta">${assignedStr} · ${couponsStr}</div>
       </div>
     </div>
-    ${top3 ? `<div class="cal-assigns">${top3}${ev.assignments.length > 3 ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">${moreAssignedStr}</div>` : ''}</div>` : `<div class="slot-empty">${noAssignedStr}</div>`}
+    ${top3 ? `<div class="cal-assigns">${top3}${assignments.length > 3 ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">${moreAssignedStr}</div>` : ''}</div>` : `<div class="slot-empty">${noAssignedStr}</div>`}
     ${regHtml}
     <div class="cal-card-footer">
       <span style="font-size:12px;color:var(--text3)">${ev.note || ''}</span>
@@ -6733,23 +6738,24 @@ function renderEventDetail(eventId) {
   const isPast = isEventPast(ev);
 
   const assignMap = {};
-  ev.assignments.forEach(a => assignMap[a.place] = a);
+  const assignments = Array.isArray(ev.assignments) ? ev.assignments : [];
+  assignments.forEach(a => assignMap[a.place] = a);
 
   // Build full place table from eventType places
-  const maxPlace = Math.max(...(et?.places||[]).map(p=>p.place), ...ev.assignments.map(a=>a.place), 0);
+  const maxPlace = Math.max(...(et?.places||[]).map(p=>p.place), ...assignments.map(a=>a.place), 0);
   const rows = [];
   const seen = new Set();
   // All assignments
   const allPlaces = [...new Set([
     ...(et?.places||[]).map(p=>p.place),
-    ...ev.assignments.map(a=>a.place)
+    ...assignments.map(a=>a.place)
   ])].sort((a,b)=>a-b);
 
   for (const pl of allPlaces) {
     const a = assignMap[pl];
     const pi = placeInfo(et, pl, ev.dateFrom);
     const p = a ? getPlayer(a.playerId) : null;
-    const officer = a && p ? p.officers.find(o=>o.id===a.officerId) : null;
+    const officer = a && p ? (p.officers || []).find(o=>o.id===a.officerId) : null;
     const isResultConfirmed = Boolean(a && a.resultStatus === 'confirmed');
     const coupons = (a && a.actualCoupons !== undefined && a.actualCoupons !== null)
       ? a.actualCoupons
@@ -6833,7 +6839,7 @@ function renderEventDetail(eventId) {
     </tr>`);
   }
 
-  const totalCoupons = ev.assignments.reduce((s,a)=>{
+  const totalCoupons = assignments.reduce((s,a)=>{
     const pi = placeInfo(et,a.place, ev.dateFrom);
     return s + (a.actualCoupons ?? pi?.coupons ?? 0);
   },0);
@@ -6900,7 +6906,7 @@ function renderEventDetail(eventId) {
         ev.registrations = fresh.registrations;
         const localEv = getEvent(eventId);
         if (localEv) localEv.registrations = fresh.registrations;
-        if (currentPage === 'event_detail' && String(pageParams) === String(eventId)) {
+        if (currentPage === 'event_detail' && String(pageParams?.id) === String(eventId)) {
           renderEventDetail(eventId);
         }
       }
@@ -6922,8 +6928,8 @@ function renderEventDetail(eventId) {
         const cat = off ? getCatalogOfficer(off.catalogId) : null;
         const desired = Number(r.desiredPlace) || 0;
         const placeLabel = desired === 0 ? 'Любое подходящее' : (placeInfo(et, desired, ev.dateFrom)?.label || `Место ${desired}`);
-        const isAssignedToDesired = ev.assignments.some(a => Number(a.playerId) === Number(r.playerId) && (Number(a.place) === desired || desired === 0));
-        const isAssignedOther = !isAssignedToDesired && ev.assignments.some(a => Number(a.playerId) === Number(r.playerId));
+        const isAssignedToDesired = assignments.some(a => Number(a.playerId) === Number(r.playerId) && (Number(a.place) === desired || desired === 0));
+        const isAssignedOther = !isAssignedToDesired && assignments.some(a => Number(a.playerId) === Number(r.playerId));
 
         let statusBadge = `<span class="badge badge-none" style="font-size:11px">Не назначен</span>`;
         if (isAssignedToDesired) {
@@ -6989,9 +6995,9 @@ function renderEventDetail(eventId) {
       </div>
       <div class="edh-right">
         <span class="cal-status ${status}">${statusLabels[status]}</span>
-        <div class="edh-stat">${fmtNum(ev.assignments.length)} назначений</div>
+        <div class="edh-stat">${fmtNum(assignments.length)} назначений</div>
         ${isPast ? `
-          <div class="edh-stat">Итоги подтвердили: <strong>${ev.assignments.filter(x => x.resultStatus === 'confirmed').length}</strong> из ${ev.assignments.length}</div>
+          <div class="edh-stat">Итоги подтвердили: <strong>${assignments.filter(x => x.resultStatus === 'confirmed').length}</strong> из ${assignments.length}</div>
         ` : ''}
         <div class="edh-stat">Итого купонов: <strong>${fmtNum(totalCoupons)}</strong></div>
       </div>
@@ -7038,9 +7044,9 @@ function renderEventDetail(eventId) {
       <table>
         <thead><tr><th>Игрок</th><th>Офицер</th><th>Уровень до</th><th>Купонов</th><th>Пазлов</th><th>Уровень после</th></tr></thead>
         <tbody>
-          ${ev.assignments.map(a=>{
+          ${assignments.map(a=>{
             const p = getPlayer(a.playerId);
-            const o = p?.officers.find(x=>x.id===a.officerId);
+            const o = (p?.officers || []).find(x=>x.id===a.officerId);
             const pi = placeInfo(et, a.place, ev.dateFrom);
             const coupons = a.actualCoupons ?? pi?.coupons ?? 0;
             if (!o) return '';
@@ -11404,10 +11410,10 @@ function openEventModal(eventId=null) {
   if (eventId) {
     const ev = getEvent(eventId);
     sel.value = ev.typeId;
-    document.getElementById('fe-from').value = ev.dateFrom;
-    document.getElementById('fe-to').value = ev.dateTo;
+    document.getElementById('fe-from').value = (ev.dateFrom || '').slice(0, 10);
+    document.getElementById('fe-to').value = (ev.dateTo || '').slice(0, 10);
     document.getElementById('fe-note').value = ev.note || '';
-    eventAssignments = ev.assignments.map(a=>({...a}));
+    eventAssignments = (ev.assignments || []).map(a=>({...a}));
     if (ev.registrations) {
       currentEventRegistrations = ev.registrations;
     }
@@ -11527,7 +11533,7 @@ function renderEventAssignments() {
   document.getElementById('fe-assignments').innerHTML = eventAssignments.map((a,i)=>{
     const pi = placeInfo(et, a.place, document.getElementById('fe-from')?.value);
     const player = a.playerId ? getPlayer(a.playerId) : null;
-    const officerOptions = player
+    const officerOptions = player && Array.isArray(player.officers)
       ? player.officers.map(o=>{
           const c = getCatalogOfficer(o.catalogId);
           const typeStr = c?.type ? `${c.type}, ` : '';
