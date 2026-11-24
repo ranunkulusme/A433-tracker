@@ -509,7 +509,7 @@
   <div class="tma-action-bar" id="tma-action-bar">
     <button id="tma-main-btn" class="tma-main-btn" onclick="handleTmaMainAction()" type="button">
       <span id="tma-main-btn-icon" style="display:inline-flex;align-items:center"></span>
-      <span id="tma-main-btn-text">Изменить склад</span>
+      <span id="tma-main-btn-text" data-i18n="tma.btn_edit_stock">Изменить склад</span>
     </button>
   </div>
 
@@ -541,53 +541,53 @@
     <div class="tma-modal-sheet" id="tma-sector-modal-sheet" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
-          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Личный кабинет</div>
-          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0">👑 Параметры сектора</h3>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" data-i18n="tma.personal_cabinet">Личный кабинет</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" data-i18n="tma.modal_sector_params_title">👑 Параметры сектора</h3>
         </div>
         <button type="button" class="tma-modal-close-btn" onclick="closeTmaModals()">✕</button>
       </div>
       <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px">
         <div class="form-group" style="margin-bottom:0">
-          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Ник в игре (Название сектора) *</label>
-          <input type="text" id="tma-sec-name" class="tma-input" placeholder="Никнейм в игре">
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_name_label">Ник в игре (Название сектора) *</label>
+          <input type="text" id="tma-sec-name" class="tma-input" placeholder="Никнейм в игре" data-i18n-attr="placeholder:tma.sec_name_placeholder">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Уровень VIP (0-17)</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_vip_label">Уровень VIP (0-17)</label>
             <input type="number" id="tma-sec-vip" min="0" max="17" class="tma-input" placeholder="13">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Очки VIP</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_vip_points_label">Очки VIP</label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-sec-vip-points" class="tma-input" placeholder="0">
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Ур. штаба (1-50)</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_hq_label">Ур. штаба (1-50)</label>
             <input type="number" id="tma-sec-hq" min="1" max="50" class="tma-input" placeholder="не указан">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Конфиденциальность</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_conf_label">Конфиденциальность</label>
             <input type="number" id="tma-sec-conf" min="0" class="tma-input" placeholder="0">
           </div>
         </div>
         <div class="form-group" style="margin-bottom:0">
-          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Мощь / Сила</label>
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_power_label">Мощь / Сила</label>
           <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-sec-power" class="tma-input" style="font-family:var(--mono);font-weight:700" placeholder="0">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Убито</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_kills_label">Убито</label>
             <input type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" id="tma-sec-kills" class="tma-input" style="font-family:var(--mono)" placeholder="0">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Очки за убийство</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.sec_kill_points_label">Очки за убийство</label>
             <input type="text" inputmode="decimal" autocomplete="off" id="tma-sec-kill-points" class="tma-input" style="font-family:var(--mono)" placeholder="0">
           </div>
         </div>
         <div style="display:flex;gap:8px;padding-top:8px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08)">
-          <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
-          <button type="button" class="tma-btn-primary" onclick="submitTmaSectorEdit()" style="flex:2;padding:10px;font-size:12.5px">💾 Сохранить параметры</button>
+          <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px" data-i18n="tma.btn_cancel">Отмена</button>
+          <button type="button" class="tma-btn-primary" onclick="submitTmaSectorEdit()" style="flex:2;padding:10px;font-size:12.5px" data-i18n="tma.btn_save_params">💾 Сохранить параметры</button>
         </div>
       </div>
     </div>
@@ -598,8 +598,8 @@
     <div class="tma-modal-sheet" id="tma-stock-modal-sheet" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
-          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Личный кабинет</div>
-          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0">📦 Запасы гильдейца</h3>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" data-i18n="tma.personal_cabinet">Личный кабинет</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" data-i18n="tma.modal_stock_title">📦 Запасы гильдейца</h3>
         </div>
         <button type="button" class="tma-modal-close-btn" onclick="closeTmaModals()">✕</button>
       </div>
@@ -607,13 +607,13 @@
         <!-- Freshness confirmation button -->
         <button type="button" onclick="confirmTmaStockFreshness()" class="tma-stock-confirm-btn" style="width:100%;padding:10px 14px;border-radius:12px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer">
           <span>✅</span>
-          <span>Данные актуальны (подтвердить свежесть на сегодня)</span>
+          <span data-i18n="tma.confirm_freshness_today">Данные актуальны (подтвердить свежесть на сегодня)</span>
         </button>
 
         <!-- 1. Купон офицера -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:12px;font-weight:700;color:#fbbf24">🎟️ Купон офицера</span>
+            <span style="font-size:12px;font-weight:700;color:#fbbf24" data-i18n="tma.coupons">🎟️ Купон офицера</span>
             <div style="display:flex;gap:4px">
               <button type="button" onclick="adjustTmaStockValue('coupons', 1000)" class="tma-quick-btn">+1к</button>
               <button type="button" onclick="adjustTmaStockValue('coupons', 10000)" class="tma-quick-btn">+10к</button>
@@ -626,7 +626,7 @@
         <!-- 2. Медаль офицера -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:12px;font-weight:700;color:#38bdf8">🧩 Медаль офицера</span>
+            <span style="font-size:12px;font-weight:700;color:#38bdf8" data-i18n="tma.puzzles">🧩 Медаль офицера</span>
             <div style="display:flex;gap:4px">
               <button type="button" onclick="adjustTmaStockValue('puzzles', 100)" class="tma-quick-btn">+100</button>
               <button type="button" onclick="adjustTmaStockValue('puzzles', 500)" class="tma-quick-btn">+500</button>
@@ -638,7 +638,7 @@
         <!-- 3. Сундук выбора -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:12px;font-weight:700;color:#fde68a">📦 Сундук выбора</span>
+            <span style="font-size:12px;font-weight:700;color:#fde68a" data-i18n="tma.chests">📦 Сундук выбора</span>
             <div style="display:flex;gap:4px">
               <button type="button" onclick="adjustTmaStockValue('chests', 50)" class="tma-quick-btn">+50</button>
               <button type="button" onclick="adjustTmaStockValue('chests', 200)" class="tma-quick-btn">+200</button>
@@ -663,7 +663,7 @@
 
         <!-- 5. Звезды I / II / III -->
         <div class="tma-stock-edit-card">
-          <div style="font-size:12px;font-weight:700;color:#c084fc;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:700;color:#c084fc;margin-bottom:6px" data-i18n="tma.stars_full_label">
             🌟 Звезды I (110) / II (420) / III (960)
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
@@ -686,8 +686,8 @@
         </div>
 
         <div style="display:flex;gap:8px;padding-top:8px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08)">
-          <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
-          <button type="button" class="tma-btn-primary" onclick="submitTmaStockEdit()" style="flex:2;padding:10px;font-size:12.5px">💾 Сохранить запасы</button>
+          <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px" data-i18n="tma.btn_cancel">Отмена</button>
+          <button type="button" class="tma-btn-primary" onclick="submitTmaStockEdit()" style="flex:2;padding:10px;font-size:12.5px" data-i18n="tma.btn_save_stock">💾 Сохранить запасы</button>
         </div>
       </div>
     </div>
@@ -698,11 +698,11 @@
     <div class="tma-modal-sheet" id="tma-officers-picker-sheet" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
-          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Калькулятор прокачки</div>
-          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0">🎖️ Офицеры сектора</h3>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" data-i18n="tma.calc_title">Калькулятор прокачки</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" data-i18n="tma.officers_summary">🎖️ Офицеры сектора</h3>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <button type="button" class="tma-btn-add" onclick="openTmaAddOfficerModal()">
+          <button type="button" class="tma-btn-add" onclick="openTmaAddOfficerModal()" data-i18n="tma.btn_add_officer">
             + Добавить
           </button>
           <button type="button" class="tma-modal-close-btn" onclick="closeTmaModals()">✕</button>
@@ -710,13 +710,13 @@
       </div>
       <div style="padding:8px 16px;background:rgba(245,158,11,0.1);border-bottom:1px solid rgba(245,158,11,0.2);color:#fbbf24;font-size:11px;display:flex;align-items:center;gap:6px">
         <span>💡</span>
-        <span>Нажмите звезду ⭐ или карточку, чтобы выбрать офицера целью в калькуляторе</span>
+        <span data-i18n="tma.picker_modal_hint">Нажмите звезду ⭐ или карточку, чтобы выбрать офицера целью в калькуляторе</span>
       </div>
       <div class="tma-modal-body" id="tma-officers-picker-list" style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto">
         <!-- Dynamically rendered by renderTmaOfficersPickerList() -->
       </div>
       <div style="padding:10px 16px;border-top:1px solid rgba(255,255,255,0.08);background:#161a22">
-        <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="width:100%;padding:10px;font-size:12.5px">Готово</button>
+        <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="width:100%;padding:10px;font-size:12.5px" data-i18n="tma.btn_done">Готово</button>
       </div>
     </div>
   </div>
@@ -726,8 +726,8 @@
     <div class="tma-modal-sheet" id="tma-officer-modal-sheet" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
-          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" id="tma-officer-modal-subtitle">Офицер сектора</div>
-          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-officer-modal-title">🎖️ Редактировать офицера</h3>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" id="tma-officer-modal-subtitle" data-i18n="tma.add_officer_subtitle">Офицер сектора</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-officer-modal-title" data-i18n="tma.edit_officer_title">🎖️ Редактировать офицера</h3>
         </div>
         <button type="button" class="tma-modal-close-btn" onclick="closeTmaModals()">✕</button>
       </div>
@@ -735,7 +735,7 @@
         
         <!-- Catalog Select (only for adding) -->
         <div id="tma-off-catalog-group" class="form-group" style="margin-bottom:0">
-          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Офицер из каталога *</label>
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.catalog_select_label">Офицер из каталога *</label>
           <select id="tma-off-catalog-select" class="tma-input" onchange="onTmaOfficerCatalogChange()">
             <!-- Loaded dynamically from state.officerCatalog -->
           </select>
@@ -744,17 +744,17 @@
         <!-- Mode selector: Retro vs Normal (списание со склада) -->
         <div class="tma-stock-edit-card" style="padding:10px 12px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:11.5px;font-weight:700;color:#fbbf24">Режим изменений</span>
+            <span style="font-size:11.5px;font-weight:700;color:#fbbf24" data-i18n="tma.edit_mode_label">Режим изменений</span>
             <span style="font-size:10px;color:#9ca3af" id="tma-off-mode-hint">Без списания ресурсов</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <label id="tma-off-lbl-retro" class="tma-mode-radio-label active" style="padding:8px 10px;border-radius:10px;background:#1f242e;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;font-weight:600;color:#fff">
               <input type="radio" name="tma_off_mode" id="tma-off-mode-retro" value="retro" checked onchange="onTmaOfficerModeChange('retro')">
-              <span>📜 Ретро</span>
+              <span data-i18n="tma.mode_retro_short">📜 Ретро</span>
             </label>
             <label id="tma-off-lbl-normal" class="tma-mode-radio-label" style="padding:8px 10px;border-radius:10px;background:#1f242e;border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;font-weight:600;color:#fff">
               <input type="radio" name="tma_off_mode" id="tma-off-mode-normal" value="normal" onchange="onTmaOfficerModeChange('normal')">
-              <span>⚡ Со склада</span>
+              <span data-i18n="tma.mode_stock_short">⚡ Со склада</span>
             </label>
           </div>
         </div>
@@ -762,7 +762,7 @@
         <!-- Level (0-180) -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:11.5px;font-weight:700;color:#38bdf8">Уровень офицера (0-180)</span>
+            <span style="font-size:11.5px;font-weight:700;color:#38bdf8" data-i18n="tma.officer_level_label">Уровень офицера (0-180)</span>
             <div style="display:flex;gap:4px">
               <button type="button" onclick="setTmaOfficerModalLevel(60)" class="tma-quick-btn">60</button>
               <button type="button" onclick="setTmaOfficerModalLevel(120)" class="tma-quick-btn">120</button>
@@ -775,7 +775,7 @@
         <!-- Stars (0-5★) -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:11.5px;font-weight:700;color:#c084fc">Звёзды (0–5★)</span>
+            <span style="font-size:11.5px;font-weight:700;color:#c084fc" data-i18n="tma.officer_stars_label">Звёзды (0–5★)</span>
             <span id="tma-off-stars-label" style="font-size:11px;font-weight:700;color:#fbbf24">0★</span>
           </div>
           <div style="display:flex;gap:6px;justify-content:space-between" id="tma-off-stars-container">
@@ -786,7 +786,7 @@
         <!-- Skills 1-4 -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <span style="font-size:11.5px;font-weight:700;color:#34d399">Навыки офицера (1–5)</span>
+            <span style="font-size:11.5px;font-weight:700;color:#34d399" data-i18n="tma.officer_skills_label">Навыки офицера (1–5)</span>
             <span id="tma-off-skills-medals" style="font-size:10.5px;font-weight:700;color:#fbbf24">0 / 690 медалей</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:8px" id="tma-off-skills-container">
@@ -797,20 +797,20 @@
         <!-- Personal puzzles & Only personal -->
         <div class="tma-stock-edit-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:11.5px;font-weight:700;color:#fde68a">🧩 Личные медали</span>
+            <span style="font-size:11.5px;font-weight:700;color:#fde68a" data-i18n="tma.personal_medals">🧩 Личные медали</span>
           </div>
           <input type="number" id="tma-off-personal-puzzles" min="0" class="tma-input" placeholder="0" style="font-family:var(--mono);font-weight:700">
           <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:#d1d5db;cursor:pointer">
             <input type="checkbox" id="tma-off-only-personal" style="width:16px;height:16px;accent-color:#fbbf24">
-            <span>Использовать только личные медали (не списывать со склада)</span>
+            <span data-i18n="tma.only_personal_desc">Использовать только личные медали (не списывать со склада)</span>
           </label>
         </div>
 
         <!-- Modal Actions Footer -->
         <div style="display:flex;gap:8px;padding-top:8px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08)">
-          <button type="button" id="tma-off-delete-btn" class="tma-btn-danger" onclick="deleteTmaCurrentOfficer()" style="padding:10px 14px;display:none">🗑️ Удалить</button>
-          <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
-          <button type="button" class="tma-btn-primary" onclick="submitTmaOfficerEdit()" style="flex:2;padding:10px;font-size:12.5px">💾 Сохранить</button>
+          <button type="button" id="tma-off-delete-btn" class="tma-btn-danger" onclick="deleteTmaCurrentOfficer()" style="padding:10px 14px;display:none" data-i18n="tma.btn_delete">🗑️ Удалить</button>
+          <button type="button" class="tma-btn-ghost" onclick="closeTmaModals()" style="flex:1;padding:10px;font-size:12.5px" data-i18n="tma.btn_cancel">Отмена</button>
+          <button type="button" class="tma-btn-primary" onclick="submitTmaOfficerEdit()" style="flex:2;padding:10px;font-size:12.5px" data-i18n="tma.btn_save">💾 Сохранить</button>
         </div>
 
       </div>
@@ -822,15 +822,15 @@
     <div class="tma-modal-sheet" id="tma-event-editor-sheet" style="max-height:92vh" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
-          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Управление событиями (Р4/Р5)</div>
-          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-event-editor-title">✨ Создать событие</h3>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" data-i18n="tma.manage_events_sub">Управление событиями (Р4/Р5)</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-event-editor-title" data-i18n="tma.create_event_title">✨ Создать событие</h3>
         </div>
         <button type="button" class="tma-modal-close-btn" onclick="closeTmaEventEditorModal()">✕</button>
       </div>
       <div class="tma-modal-body" style="display:flex;flex-direction:column;gap:12px">
         <!-- Event Type -->
         <div class="form-group" style="margin-bottom:0">
-          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Тип события *</label>
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.event_type_label">Тип события *</label>
           <select id="tma-ee-type" class="tma-input" onchange="onTmaEventTypeChange()">
             <!-- Populated from state.eventTypes -->
           </select>
@@ -839,33 +839,33 @@
         <!-- Dates: From and To -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Дата начала *</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.date_from_label">Дата начала *</label>
             <input type="date" id="tma-ee-date-from" class="tma-input" style="font-size:11.5px">
           </div>
           <div class="form-group" style="margin-bottom:0">
-            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Дата окончания *</label>
+            <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.date_to_label">Дата окончания *</label>
             <input type="date" id="tma-ee-date-to" class="tma-input" style="font-size:11.5px">
           </div>
         </div>
 
         <!-- Note -->
         <div class="form-group" style="margin-bottom:0">
-          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px">Примечание (необязательно)</label>
-          <input type="text" id="tma-ee-note" class="tma-input" placeholder="Например: запись до среды 21:00 UTC">
+          <label style="font-size:11.5px;color:#9ca3af;font-weight:600;display:block;margin-bottom:4px" data-i18n="tma.event_note_label">Примечание (необязательно)</label>
+          <input type="text" id="tma-ee-note" class="tma-input" placeholder="Например: запись до среды 21:00 UTC" data-i18n-attr="placeholder:tma.event_note_placeholder">
         </div>
 
         <!-- Places Management -->
         <div class="tma-stock-edit-card" style="padding:10px 12px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:12px;font-weight:700;color:#fbbf24">🏆 Призовые места</span>
+              <span style="font-size:12px;font-weight:700;color:#fbbf24" data-i18n="tma.prizes_title">🏆 Призовые места</span>
               <span id="tma-ee-places-count" style="font-size:10px;font-weight:700;color:#9ca3af;background:#1f242e;padding:1px 6px;border-radius:6px">0</span>
             </div>
             <div style="display:flex;gap:6px">
-              <button type="button" onclick="runTmaEventAutopick()" class="tma-quick-btn" style="background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.4)">
+              <button type="button" onclick="runTmaEventAutopick()" class="tma-quick-btn" style="background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.4)" data-i18n="tma.btn_autopick">
                 ⚡ Автоподбор
               </button>
-              <button type="button" onclick="addTmaEventPlaceRow()" class="tma-quick-btn">
+              <button type="button" onclick="addTmaEventPlaceRow()" class="tma-quick-btn" data-i18n="tma.btn_add_place">
                 + Место
               </button>
             </div>
@@ -879,8 +879,8 @@
       <!-- Pinned Footer Actions -->
       <div class="tma-modal-footer">
         <button type="button" id="tma-ee-delete-btn" class="tma-btn-danger" onclick="deleteTmaCurrentEvent()" style="padding:10px 14px;display:none">🗑️</button>
-        <button type="button" class="tma-btn-ghost" onclick="closeTmaEventEditorModal()" style="flex:1;padding:10px;font-size:12.5px">Отмена</button>
-        <button type="button" class="tma-btn-primary" onclick="submitTmaEventEditor()" style="flex:2;padding:10px;font-size:12.5px" id="tma-ee-save-btn">💾 Опубликовать</button>
+        <button type="button" class="tma-btn-ghost" onclick="closeTmaEventEditorModal()" style="flex:1;padding:10px;font-size:12.5px" data-i18n="tma.btn_cancel">Отмена</button>
+        <button type="button" class="tma-btn-primary" onclick="submitTmaEventEditor()" style="flex:2;padding:10px;font-size:12.5px" id="tma-ee-save-btn" data-i18n="tma.btn_publish">💾 Опубликовать</button>
       </div>
     </div>
   </div>
@@ -890,8 +890,8 @@
     <div class="tma-modal-sheet" id="tma-sector-detail-sheet" style="max-height:92vh" onclick="event.stopPropagation()">
       <div class="tma-modal-header">
         <div>
-          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Досье сектора</div>
-          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-sd-name">Сектор</h3>
+          <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px" data-i18n="tma.dossier_title">Досье сектора</div>
+          <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0" id="tma-sd-name" data-i18n="tma.sector_short">Сектор</h3>
         </div>
         <button type="button" class="tma-modal-close-btn" onclick="closeTmaSectorDetailModal()">✕</button>
       </div>

@@ -162,6 +162,23 @@ if (typeof window !== 'undefined' && typeof window.parseEventBoundary === 'undef
   window.parseEventBoundary = doTmaParseEventBoundary;
 }
 
+// Safe fallback for getLocalizedOfficerType
+function doTmaGetLocalizedOfficerType(type) {
+  if (typeof window !== 'undefined' && typeof window.getLocalizedOfficerType === 'function' && window.getLocalizedOfficerType !== doTmaGetLocalizedOfficerType) {
+    return window.getLocalizedOfficerType(type);
+  }
+  if (typeof logic !== 'undefined' && typeof logic.getLocalizedOfficerType === 'function') {
+    return logic.getLocalizedOfficerType(type);
+  }
+  return type || '';
+}
+if (_tmaGlobal && typeof _tmaGlobal.getLocalizedOfficerType === 'undefined') {
+  _tmaGlobal.getLocalizedOfficerType = doTmaGetLocalizedOfficerType;
+}
+if (typeof window !== 'undefined' && typeof window.getLocalizedOfficerType === 'undefined') {
+  window.getLocalizedOfficerType = doTmaGetLocalizedOfficerType;
+}
+
 function isTmaMode() {
   if (typeof window === 'undefined') return false;
   if (window.TelegramWebviewProxy) {
@@ -964,21 +981,21 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
   const evDateStr = (targetEvent.startDate || targetEvent.dateStart)
     ? (isActive
         ? tmaT('tma.event_active', 'Идёт сейчас')
-        : 'Старт: ' + new Date(targetEvent.startDate || targetEvent.dateStart).toLocaleDateString(currentLocale, { day: 'numeric', month: 'short' }) + ', 00:00 UTC')
-    : (isActive ? tmaT('tma.event_active', 'Идёт сейчас') : 'Скоро');
+        : tmaT('tma.start_prefix', 'Старт: ') + new Date(targetEvent.startDate || targetEvent.dateStart).toLocaleDateString(currentLocale, { day: 'numeric', month: 'short' }) + ', 00:00 UTC')
+    : (isActive ? tmaT('tma.event_active', 'Идёт сейчас') : tmaT('tma.event_soon', 'Скоро'));
 
   const myReg = (targetEvent.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
 
   let regStatusSnippet = '';
   if (myReg) {
-    const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+    const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? tmaT('tma.any_place_short', 'Любое') : `#${myReg.desiredPlace}`;
     regStatusSnippet = `
       <div style="display:flex;align-items:center;justify-content:space-between;padding-top:6px">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:16px">🥇</span>
           <span style="font-size:12px;font-weight:700;color:#fde68a">${escapeHtml(tmaT('tma.your_registration', { place: placeText }))}</span>
         </div>
-        <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">Записан</span>
+        <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">${escapeHtml(tmaT('tma.assigned_label', 'Записан'))}</span>
       </div>
     `;
   } else {
@@ -996,8 +1013,8 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
   const badgeColor = isActive ? '#4ade80' : '#38bdf8';
   const badgeBorder = isActive ? 'rgba(34,197,94,0.3)' : 'rgba(14,165,233,0.3)';
   const badgeLabel = isActive
-    ? `🟢 ${tmaT('tma.events_active', 'Идёт сейчас')} • Подробнее ↗`
-    : `◎ ${tmaT('tma.events_upcoming', 'Ближайший ивент')} • Подробнее ↗`;
+    ? `🟢 ${tmaT('tma.events_active', 'Идёт сейчас')} • ${tmaT('tma.more_details', 'Подробнее ↗')}`
+    : `◎ ${tmaT('tma.events_upcoming', 'Ближайший ивент')} • ${tmaT('tma.more_details', 'Подробнее ↗')}`;
 
   return `
     <!-- Next/Active Event Quick Card -->
@@ -1009,7 +1026,7 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
         <span style="font-size:11.5px;color:#9ca3af">${escapeHtml(evDateStr)}</span>
       </div>
       <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">
-        ${escapeHtml(targetEvent.title || targetEvent.name || 'Событие #' + targetEvent.id)}
+        ${escapeHtml(targetEvent.title || targetEvent.name || (tmaT('tma.event_prefix', 'Событие') + ' #' + targetEvent.id))}
       </div>
       ${regStatusSnippet}
     </div>
@@ -1059,8 +1076,8 @@ function renderTmaCabinet() {
       || officers[0]
       || null;
   }
-  let officerName = 'Офицер';
-  let offType = 'Пехота';
+  let officerName = tmaT('tma.officer_default', 'Офицер');
+  let offType = tmaT('tma.filter_all', 'Все');
   let offGen = '';
   let offLevel = 0;
   let skillsStr = '1-1-1-1';
@@ -1068,12 +1085,12 @@ function renderTmaCabinet() {
   let remainingCoupons = 0;
   let remainingDays = 0;
   let isFull = false;
-  let targetDeficitFormatted = '0 куп.';
+  let targetDeficitFormatted = '0 ' + tmaT('tma.coupons_short', 'куп.');
   let targetDaysFormatted = '—';
 
   if (targetOfficer) {
     const cat = getCatalogOfficer(targetOfficer.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
-    officerName = targetOfficer.name || cat?.name || 'Офицер';
+    officerName = targetOfficer.name || cat?.name || tmaT('tma.officer_default', 'Офицер');
     offType = (typeof getLocalizedOfficerType === 'function') ? getLocalizedOfficerType(cat?.type || 'Пехота') : (cat?.type || 'Пехота');
     offGen = cat?.generation ? `G${cat.generation}` : '';
     offLevel = Math.max(0, Number(targetOfficer.level) || 0);
@@ -1107,15 +1124,15 @@ function renderTmaCabinet() {
       if (summary) {
         isFull = summary.isFull;
         targetDeficitFormatted = summary.deficitShort;
-        targetDaysFormatted = summary.isOnlyPersonalPuzzles ? '🧩 Личные медали' : summary.daysText;
+        targetDaysFormatted = summary.isOnlyPersonalPuzzles ? tmaT('tma.personal_medals', '🧩 Личные медали') : summary.daysText;
       } else if (def.isOnlyPersonalPuzzles) {
         isFull = (def.deficitPuzzles === 0);
-        targetDeficitFormatted = isFull ? '0' : `${fmtNum(def.deficitPuzzles)} личн. пазл.`;
-        targetDaysFormatted = '🧩 Личные медали';
+        targetDeficitFormatted = isFull ? '0' : `${fmtNum(def.deficitPuzzles)} ${tmaT('tma.personal_puzzles_short', 'личн. пазл.')}`;
+        targetDaysFormatted = tmaT('tma.personal_medals', '🧩 Личные медали');
       } else {
         isFull = (def.deficitPuzzles === 0 && (def.deficitCoupons || 0) === 0);
-        targetDeficitFormatted = isFull ? '0' : `${fmtNum(def.deficitCoupons || 0)} куп.`;
-        targetDaysFormatted = def.daysWithoutEvents !== null ? `~${def.daysWithoutEvents} дней` : '—';
+        targetDeficitFormatted = isFull ? '0' : `${fmtNum(def.deficitCoupons || 0)} ${tmaT('tma.coupons_short', 'куп.')}`;
+        targetDaysFormatted = def.daysWithoutEvents !== null ? `~${def.daysWithoutEvents} ${tmaT('tma.days_suffix', 'дней')}` : '—';
       }
 
       if (def.isOnlyPersonalPuzzles) {
@@ -1134,8 +1151,8 @@ function renderTmaCabinet() {
     } else {
       isFull = (offLevel >= 180 && skillsFull);
       progressPct = isFull ? 100 : Math.min(100, Math.max(0, Math.round((offLevel / 180) * 100)));
-      targetDeficitFormatted = isFull ? '0 (готов к прокачке! 🎉)' : '—';
-      targetDaysFormatted = isFull ? 'Фулл прокачка! 🎉' : '—';
+      targetDeficitFormatted = isFull ? ('0 (' + tmaT('tma.ready_to_upgrade', 'готов к прокачке!') + ' 🎉)') : '—';
+      targetDaysFormatted = isFull ? (tmaT('tma.full_upgrade', 'Фулл прокачка!') + ' 🎉') : '—';
     }
   }
 
@@ -1155,7 +1172,7 @@ function renderTmaCabinet() {
           return `
             <button type="button" class="tma-sector-chip ${isActive ? 'active' : ''}" onclick="handleTmaSwitchSector(${sId})">
               <span>👑</span>
-              <span>${escapeHtml(s.name || 'Сектор #' + sId)}</span>
+              <span>${escapeHtml(s.name || (tmaT('tma.sector_short', 'Сектор') + ' #' + sId))}</span>
               <span style="opacity:0.75;font-size:10px">(VIP ${sVip})</span>
             </button>
           `;
@@ -1172,7 +1189,7 @@ function renderTmaCabinet() {
       <div style="position:absolute;right:-20px;bottom:-20px;width:100px;height:100px;background:rgba(245,158,11,0.1);border-radius:999px;filter:blur(24px);pointer-events:none"></div>
       
       <!-- Upper part: click to edit sector parameters -->
-      <div class="tma-card-clickable" onclick="openTmaSectorEditModal()" title="Нажмите для редактирования параметров сектора" style="display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08)">
+      <div class="tma-card-clickable" onclick="openTmaSectorEditModal()" title="${escapeHtml(tmaT('tma.click_edit_sector_title', 'Нажмите для редактирования параметров сектора'))}" style="display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08)">
         <div style="display:flex;align-items:center;gap:12px">
           <div class="tma-gold-gradient" style="width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#000;font-weight:900;font-size:15px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">
             KOW
@@ -1181,22 +1198,22 @@ function renderTmaCabinet() {
             <div style="display:flex;align-items:center;gap:8px">
               <h2 style="font-size:14.5px;font-weight:700;color:#fff;margin:0">${escapeHtml(playerName)}</h2>
               <span class="tma-badge-rank">${escapeHtml(role)}</span>
-              <span style="font-size:11px;opacity:0.75" title="Редактировать параметры сектора">✏️</span>
+              <span style="font-size:11px;opacity:0.75" title="${escapeHtml(tmaT('tma.edit_sector_title', 'Редактировать параметры сектора'))}">✏️</span>
             </div>
             <p style="font-size:12px;color:#9ca3af;margin:2px 0 0 0">
-              Сила: <strong style="color:#fff">${fmtNum(playerPower)}</strong> • VIP: <strong style="color:#fbbf24">${playerVip}</strong>
+              ${escapeHtml(tmaT('tma.power', 'Сила'))}: <strong style="color:#fff">${fmtNum(playerPower)}</strong> • VIP: <strong style="color:#fbbf24">${playerVip}</strong>
             </p>
           </div>
         </div>
 
         <span style="padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;display:inline-flex;align-items:center;gap:4px;border:1px solid;${isFresh ? 'background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3)' : 'background:rgba(239,68,68,0.15);color:#f87171;border-color:rgba(239,68,68,0.3)'}">
           <span style="width:6px;height:6px;border-radius:999px;background:currentColor"></span>
-          ${isFresh ? (daysAgo === 0 ? escapeHtml(tmaT('tma.freshness_fresh', 'Свежий')) : escapeHtml(tmaT('tma.freshness_days', { days: daysAgo }))) : `${escapeHtml(tmaT('tma.freshness_stale', 'Устарел'))} (${daysAgo}д)`}
+          ${isFresh ? (daysAgo === 0 ? escapeHtml(tmaT('tma.freshness_fresh', 'Свежий')) : escapeHtml(tmaT('tma.freshness_days', { days: daysAgo }))) : `${escapeHtml(tmaT('tma.freshness_stale', 'Устарел'))} (${daysAgo}${escapeHtml(tmaT('tma.days_short', 'д'))})`}
         </span>
       </div>
 
       <!-- Stock Grid: click to edit stock reserves -->
-      <div class="tma-card-clickable" onclick="openTmaStockEditModal()" title="Нажмите для изменения запасов склада" style="padding-top:10px">
+      <div class="tma-card-clickable" onclick="openTmaStockEditModal()" title="${escapeHtml(tmaT('tma.click_edit_stock_title', 'Нажмите для изменения запасов склада'))}" style="padding-top:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <span style="font-size:10.5px;color:#9ca3af;font-weight:600">${escapeHtml(tmaT('tma.warehouse_title', 'Складские запасы'))}</span>
           <span style="font-size:10.5px;color:#fbbf24;font-weight:600">✏️ ${escapeHtml(tmaT('tma.btn_edit_stock', 'Изменить'))}</span>
@@ -1222,7 +1239,7 @@ function renderTmaCabinet() {
 
     <!-- Target Officer Progression Simulator -->
     ${targetOfficer ? `
-    <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer" title="Нажмите, чтобы выбрать офицера в калькулятор">
+    <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer" title="${escapeHtml(tmaT('tma.click_pick_officer_title', 'Нажмите, чтобы выбрать офицера в калькулятор'))}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px">
           <div style="width:36px;height:36px;border-radius:10px;background:#fbbf24;color:#000;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;box-shadow:0 2px 8px rgba(245,158,11,0.4)">
@@ -1234,17 +1251,17 @@ function renderTmaCabinet() {
               <span style="font-size:10px;color:#fbbf24;background:rgba(245,158,11,0.15);padding:1px 6px;border-radius:4px;border:1px solid rgba(245,158,11,0.3);font-weight:700">★ ${escapeHtml(tmaT('tma.target_officer_title', 'Цель'))}</span>
             </div>
             <span style="font-size:11px;color:#9ca3af;margin-top:1px;display:block">
-              ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''} • Ур. ${offLevel} (${escapeHtml(skillsStr)})
+              ${escapeHtml(offType)}${offGen ? ` • ${offGen}` : ''} • ${escapeHtml(tmaT('tma.level_short', 'Ур.'))} ${offLevel} (${escapeHtml(skillsStr)})
             </span>
           </div>
         </div>
-        <span style="font-size:11px;color:#fbbf24;font-weight:700;background:rgba(245,158,11,0.1);padding:3px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.2)">Сменить ⭐</span>
+        <span style="font-size:11px;color:#fbbf24;font-weight:700;background:rgba(245,158,11,0.1);padding:3px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.2)">${escapeHtml(tmaT('tma.btn_change_officer', 'Сменить'))} ⭐</span>
       </div>
 
       <!-- Progress Track -->
       <div style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-          <span style="color:#9ca3af;font-weight:600">Прогресс прокачки (Ур. ${offLevel}/180)</span>
+          <span style="color:#9ca3af;font-weight:600">${escapeHtml(tmaT('tma.progression_progress', 'Прогресс прокачки'))} (${escapeHtml(tmaT('tma.level_short', 'Ур.'))} ${offLevel}/180)</span>
           <span style="color:#fff;font-weight:800">${progressPct}%</span>
         </div>
         <div class="tma-progress-track">
@@ -1254,27 +1271,27 @@ function renderTmaCabinet() {
 
       <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;background:#1f242e;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.04)">
         <div>
-          <div style="font-size:10px;color:#9ca3af">Остаточный дефицит:</div>
+          <div style="font-size:10px;color:#9ca3af">${escapeHtml(tmaT('tma.remaining_deficit', 'Остаточный дефицит'))}:</div>
           <div style="font-weight:800;color:${isFull ? '#34d399' : '#fbbf24'};font-size:13px;margin-top:1px">
-            ${isFull ? '0 (готов к прокачке! 🎉)' : targetDeficitFormatted}
+            ${isFull ? `0 (${escapeHtml(tmaT('tma.ready_to_upgrade', 'готов к прокачке!'))} 🎉)` : targetDeficitFormatted}
           </div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:10px;color:#9ca3af">${isFull ? 'Статус:' : (targetOfficer?.onlyPersonalPuzzles || targetOfficer?.only_personal_puzzles ? 'Режим:' : `Срок (с VIP ${playerVip}):`)}</div>
+          <div style="font-size:10px;color:#9ca3af">${isFull ? `${escapeHtml(tmaT('tma.status_label', 'Статус'))}:` : (targetOfficer?.onlyPersonalPuzzles || targetOfficer?.only_personal_puzzles ? `${escapeHtml(tmaT('tma.mode_label', 'Режим'))}:` : escapeHtml(tmaT('tma.time_label', { vip: playerVip }, `Срок (с VIP ${playerVip}):`)))}</div>
           <div style="font-weight:800;color:#34d399;font-size:13px;margin-top:1px">
-            ${isFull ? 'Фулл прокачка! 🎉' : targetDaysFormatted}
+            ${isFull ? `${escapeHtml(tmaT('tma.full_upgrade', 'Фулл прокачка!'))} 🎉` : targetDaysFormatted}
           </div>
         </div>
       </div>
     </div>
     ` : `
-    <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer;padding:16px;text-align:center" title="Нажмите, чтобы выбрать офицера в калькулятор">
+    <div class="tma-card tma-card-clickable" onclick="openTmaOfficersPickerModal()" style="border-color:rgba(245,158,11,0.25);cursor:pointer;padding:16px;text-align:center" title="${escapeHtml(tmaT('tma.click_pick_officer_title', 'Нажмите, чтобы выбрать офицера в калькулятор'))}">
       <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:8px">
-        <span style="color:#9ca3af;font-weight:600">🎯 Калькулятор прокачки</span>
-        <span style="font-size:11px;color:#fbbf24;font-weight:700">+ Выбрать офицера</span>
+        <span style="color:#9ca3af;font-weight:600">🎯 ${escapeHtml(tmaT('tma.calc_title', 'Калькулятор прокачки'))}</span>
+        <span style="font-size:11px;color:#fbbf24;font-weight:700">+ ${escapeHtml(tmaT('tma.btn_pick_officer', 'Выбрать офицера'))}</span>
       </div>
       <p style="font-size:12px;color:#9ca3af;margin:6px 0 0 0">
-        Добавьте или выберите офицера для расчета дефицита и срока прокачки ⭐
+        ${escapeHtml(tmaT('tma.calc_desc', 'Добавьте или выберите офицера для расчета дефицита и срока прокачки ⭐'))}
       </p>
     </div>
     `}
@@ -1339,22 +1356,23 @@ function renderTmaEvents() {
 
   function renderEventCard(ev, mode = 'upcoming') {
     const myReg = (ev.registrations || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
-    const evTitle = ev.title || ev.name || ('Событие #' + ev.id);
+    const evTitle = ev.title || ev.name || (`${tmaT('tma.event_prefix', 'Событие')} #${ev.id}`);
     const evIcon = getTmaEventIcon(evTitle);
 
     const dStart = ev.startDate || ev.dateStart || ev.dateFrom;
     const dEnd = ev.endDate || ev.dateEnd || ev.dateTo;
+    const currentLocale = typeof getAppLanguage === 'function' && getAppLanguage() === 'en' ? 'en-US' : (typeof getAppLanguage === 'function' && getAppLanguage() === 'de' ? 'de-DE' : 'ru-RU');
     let evDateRange = '';
     if (dStart) {
-      const sStr = new Date(dStart).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+      const sStr = new Date(dStart).toLocaleDateString(currentLocale, { weekday: 'short', day: 'numeric', month: 'short' });
       if (dEnd) {
-        const eStr = new Date(dEnd).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+        const eStr = new Date(dEnd).toLocaleDateString(currentLocale, { weekday: 'short', day: 'numeric', month: 'short' });
         evDateRange = `${sStr} — ${eStr}`;
       } else {
         evDateRange = sStr;
       }
     } else {
-      evDateRange = 'Дата уточняется';
+      evDateRange = tmaT('tma.date_tbd', 'Дата уточняется');
     }
 
     const maxPlaces = (ev.places && ev.places.length) || ev.placesCount || ev.maxPlaces || 5;
@@ -1362,16 +1380,16 @@ function renderTmaEvents() {
     let statusBadgeHtml = '';
     if (mode === 'active') {
       statusBadgeHtml = myReg
-        ? `<span class="tma-badge-status is-gold">Вы записаны (${(myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : '#' + myReg.desiredPlace})</span>`
-        : `<span class="tma-badge-status is-green" style="background:rgba(34,197,94,0.2);color:#4ade80;border-color:rgba(34,197,94,0.3)">🟢 Идёт сейчас</span>`;
+        ? `<span class="tma-badge-status is-gold">${escapeHtml(tmaT('tma.you_are_registered', 'Вы записаны'))} (${(myReg.desiredPlace === 0 || !myReg.desiredPlace) ? escapeHtml(tmaT('tma.any_place_short', 'Любое')) : '#' + myReg.desiredPlace})</span>`
+        : `<span class="tma-badge-status is-green" style="background:rgba(34,197,94,0.2);color:#4ade80;border-color:rgba(34,197,94,0.3)">🟢 ${escapeHtml(tmaT('tma.events_active', 'Идёт сейчас'))}</span>`;
     } else {
       statusBadgeHtml = myReg
-        ? `<span class="tma-badge-status is-gold">Вы записаны (${(myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : '#' + myReg.desiredPlace})</span>`
-        : `<span class="tma-badge-status is-green">Запись</span>`;
+        ? `<span class="tma-badge-status is-gold">${escapeHtml(tmaT('tma.you_are_registered', 'Вы записаны'))} (${(myReg.desiredPlace === 0 || !myReg.desiredPlace) ? escapeHtml(tmaT('tma.any_place_short', 'Любое')) : '#' + myReg.desiredPlace})</span>`
+        : `<span class="tma-badge-status is-green">${escapeHtml(tmaT('tma.record_status', 'Запись'))}</span>`;
     }
 
     const staffPencilHtml = isStaff ? `
-      <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать событие">
+      <button type="button" onclick="event.stopPropagation();openTmaEventEditor(${ev.id})" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="${escapeHtml(tmaT('tma.edit_event_title', 'Редактировать событие'))}">
         ✏️
       </button>
     ` : '';
@@ -1384,7 +1402,7 @@ function renderTmaEvents() {
         <div style="display:grid;grid-template-columns:repeat(${Math.min(3, top3.length)}, 1fr);gap:6px;margin:10px 0">
           ${top3.map(p => `
             <div style="background:#1f242e;padding:6px;border-radius:8px;text-align:center;border:1px solid rgba(255,255,255,0.04)">
-              <span style="font-size:9.5px;color:#9ca3af;display:block">#${p.place} место</span>
+              <span style="font-size:9.5px;color:#9ca3af;display:block">${escapeHtml(tmaT('tma.place_num', { place: p.place }, `#${p.place} место`))}</span>
               <span style="font-size:11.5px;font-weight:800;color:#fbbf24">${fmtNum(p.coupons || 0)} 🎟️</span>
             </div>
           `).join('')}
@@ -1394,15 +1412,15 @@ function renderTmaEvents() {
 
     let myRegBanner = '';
     if (myReg) {
-      const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое' : `#${myReg.desiredPlace}`;
+      const placeStr = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? tmaT('tma.any_place_short', 'Любое') : `#${myReg.desiredPlace}`;
       myRegBanner = `
         <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:6px 10px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:13px">🎯</span>
-            <span style="font-size:11px;font-weight:700;color:#fde68a">Ваша заявка: Место ${placeStr}</span>
+            <span style="font-size:11px;font-weight:700;color:#fde68a">${escapeHtml(tmaT('tma.your_application_place', { place: placeStr }, `Ваша заявка: Место ${placeStr}`))}</span>
           </div>
           <button type="button" onclick="event.stopPropagation();handleTmaUnregisterEvent(${ev.id})" style="background:none;border:none;color:#ef4444;font-size:10.5px;font-weight:700;cursor:pointer;padding:2px 4px">
-            ✕ Отменить
+            ✕ ${escapeHtml(tmaT('tma.cancel_reg', 'Отменить'))}
           </button>
         </div>
       `;
@@ -1418,7 +1436,7 @@ function renderTmaEvents() {
               <span style="font-size:14px">${evIcon}</span>
               <h3 style="font-size:13px;font-weight:800;color:#fff;margin:0">${escapeHtml(evTitle)}</h3>
             </div>
-            <p style="font-size:11px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDateRange)} • ${maxPlaces} призовых мест</p>
+            <p style="font-size:11px;color:#9ca3af;margin:2px 0 0 0">${escapeHtml(evDateRange)} • ${maxPlaces} ${escapeHtml(tmaT('tma.prizes_places_suffix', 'призовых мест'))}</p>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             ${staffPencilHtml}
@@ -1430,9 +1448,9 @@ function renderTmaEvents() {
         ${myRegBanner}
 
         <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#9ca3af;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
-          <span>Заявок бойцов: <strong style="color:#fff">${regCount}</strong></span>
+          <span>${escapeHtml(tmaT('tma.fighters_applications', 'Заявок бойцов'))}: <strong style="color:#fff">${regCount}</strong></span>
           <span style="color:#fbbf24;font-weight:700;display:flex;align-items:center;gap:2px">
-            Участники и назначения ↗
+            ${escapeHtml(tmaT('tma.participants_and_assignments', 'Участники и назначения ↗'))}
           </span>
         </div>
       </div>
@@ -1444,7 +1462,7 @@ function renderTmaEvents() {
     ? `
       <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
         <div style="font-size:32px;margin-bottom:8px">🟢</div>
-        Нет активных событий, идущих прямо сейчас
+        ${escapeHtml(tmaT('tma.no_active_events_now', 'Нет активных событий, идущих прямо сейчас'))}
       </div>
     `
     : activeEvents.map(ev => renderEventCard(ev, 'active')).join('');
@@ -1454,7 +1472,7 @@ function renderTmaEvents() {
     ? `
       <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
         <div style="font-size:32px;margin-bottom:8px">📅</div>
-        Нет запланированных предстоящих событий
+        ${escapeHtml(tmaT('tma.no_upcoming_events', 'Нет запланированных предстоящих событий'))}
       </div>
     `
     : upcomingEvents.map(ev => renderEventCard(ev, 'upcoming')).join('');
@@ -1465,15 +1483,16 @@ function renderTmaEvents() {
     pastHtml = `
       <div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">
         <div style="font-size:32px;margin-bottom:8px">📜</div>
-        Нет завершенных событий
+        ${escapeHtml(tmaT('tma.no_past_events', 'Нет завершенных событий'))}
       </div>
     `;
   } else {
     pastHtml = pastEvents.map(ev => {
-      const evTitle = ev.title || ev.name || ('Событие #' + ev.id);
+      const evTitle = ev.title || ev.name || (`${tmaT('tma.event_prefix', 'Событие')} #${ev.id}`);
       const evIcon = getTmaEventIcon(evTitle);
+      const currentLocale = typeof getAppLanguage === 'function' && getAppLanguage() === 'en' ? 'en-US' : (typeof getAppLanguage === 'function' && getAppLanguage() === 'de' ? 'de-DE' : 'ru-RU');
       const evDate = (ev.startDate || ev.dateStart || ev.dateFrom)
-        ? new Date(ev.startDate || ev.dateStart || ev.dateFrom).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+        ? new Date(ev.startDate || ev.dateStart || ev.dateFrom).toLocaleDateString(currentLocale, { day: 'numeric', month: 'short' })
         : '';
       const myRes = (ev.results || []).find(r => Number(r.playerId || r.sectorId) === Number(myPlayerId));
 
@@ -1484,7 +1503,7 @@ function renderTmaEvents() {
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-size:15px">🎯</span>
               <div>
-                <div style="font-size:11.5px;font-weight:700;color:#fde68a">Ваш результат: Место #${myRes.place || myRes.actualPlace || 1}</div>
+                <div style="font-size:11.5px;font-weight:700;color:#fde68a">${escapeHtml(tmaT('tma.your_result_place', { place: myRes.place || myRes.actualPlace || 1 }, `Ваш результат: Место #${myRes.place || myRes.actualPlace || 1}`))}</div>
               </div>
             </div>
             <span style="font-size:11.5px;font-weight:800;color:#fbbf24">
@@ -1500,7 +1519,7 @@ function renderTmaEvents() {
         const pName = first.playerName || first.sectorName || `Sector ${first.playerId || first.sectorId}`;
         winnerHtml = `
           <div style="margin-top:6px;font-size:11.5px;color:#fbbf24;font-weight:700">
-            🏆 Победитель: ${escapeHtml(pName)} (+${fmtNum(first.couponsWon || 30000)} 🎟️)
+            🏆 ${escapeHtml(tmaT('tma.winner_label', 'Победитель'))}: ${escapeHtml(pName)} (+${fmtNum(first.couponsWon || 30000)} 🎟️)
           </div>
         `;
       }
@@ -1516,13 +1535,13 @@ function renderTmaEvents() {
               </div>
             </div>
             <span style="font-size:10px;padding:2px 6px;background:#1f242e;color:#9ca3af;border-radius:4px;border:1px solid rgba(255,255,255,0.04)">
-              Архив
+              ${escapeHtml(tmaT('tma.archive_badge', 'Архив'))}
             </span>
           </div>
           ${winnerHtml}
           ${myResBlock}
           <div style="display:flex;align-items:center;justify-content:flex-end;font-size:11px;color:#fbbf24;font-weight:700;padding-top:6px;margin-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
-            <span>Результаты и участники ↗</span>
+            <span>${escapeHtml(tmaT('tma.results_and_participants', 'Результаты и участники ↗'))}</span>
           </div>
         </div>
       `;
@@ -1542,17 +1561,17 @@ function renderTmaEvents() {
     ${isStaff ? `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
         <span style="font-size:11px;font-weight:800;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
-          Управление событиями (Р4/Р5)
+          ${escapeHtml(tmaT('tma.manage_events_sub', 'Управление событиями (Р4/Р5)'))}
         </span>
         <button type="button" onclick="openTmaEventEditor(null)" class="tma-btn-primary" style="padding:6px 14px;font-size:11.5px">
-          <span style="font-size:13px;font-weight:900;line-height:1">+</span> Создать событие
+          <span style="font-size:13px;font-weight:900;line-height:1">+</span> ${escapeHtml(tmaT('tma.create_event_title', 'Создать событие'))}
         </button>
       </div>
     ` : ''}
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:0 2px">
       <div style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">
-        Календарь событий
+        ${escapeHtml(tmaT('tma.event_calendar_title', 'Календарь событий'))}
       </div>
       <div style="display:inline-flex;padding:2px;background:#161a22;border:1px solid rgba(255,255,255,0.08);border-radius:10px">
         <button id="tma-events-subtab-active" onclick="switchTmaEventsSubTab('active')" type="button" style="padding:4px 8px;border-radius:8px;font-size:10.5px;font-weight:700;border:1px solid;cursor:pointer;transition:all 0.15s;${isAct ? 'background:rgba(34,197,94,0.2);color:#4ade80;border-color:rgba(34,197,94,0.3)' : 'background:transparent;color:#9ca3af;border-color:transparent'}">
@@ -1700,19 +1719,19 @@ function buildTmaMatrixRows() {
       }
 
       // Recommendation badge
-      let recBadge = { label: '4–10 место', style: 'background:rgba(107,114,128,0.18);color:#9ca3af;border:1px solid rgba(107,114,128,0.25)', rank: 4 };
+      let recBadge = { label: tmaT('tma.badge_4_10_place', '4–10 место'), style: 'background:rgba(107,114,128,0.18);color:#9ca3af;border:1px solid rgba(107,114,128,0.25)', rank: 4 };
       if (def.deficitPuzzles === 0) {
-        recBadge = { label: 'Максимум ✓', style: 'background:rgba(34,197,94,0.18);color:#4ade80;border:1px solid rgba(34,197,94,0.3)', rank: 0 };
+        recBadge = { label: tmaT('tma.badge_max', 'Максимум ✓'), style: 'background:rgba(34,197,94,0.18);color:#4ade80;border:1px solid rgba(34,197,94,0.3)', rank: 0 };
       } else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) {
-        recBadge = { label: 'Только личные', style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
+        recBadge = { label: tmaT('tma.badge_only_personal', 'Только личные'), style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
       } else if (def.costPerPuzzle === 0) {
-        recBadge = { label: 'Только пазлы', style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
+        recBadge = { label: tmaT('tma.badge_only_puzzles', 'Только пазлы'), style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
       } else if (def.deficitCoupons >= 12500) {
-        recBadge = { label: '🥇 1 место', style: 'background:rgba(245,158,11,0.22);color:#fbbf24;border:1px solid rgba(245,158,11,0.35)', rank: 1 };
+        recBadge = { label: '🥇 ' + tmaT('tma.place_num', { place: 1 }, '1 место'), style: 'background:rgba(245,158,11,0.22);color:#fbbf24;border:1px solid rgba(245,158,11,0.35)', rank: 1 };
       } else if (def.deficitCoupons >= 6500) {
-        recBadge = { label: '🥈 2 место', style: 'background:rgba(148,163,184,0.2);color:#cbd5e1;border:1px solid rgba(148,163,184,0.3)', rank: 2 };
+        recBadge = { label: '🥈 ' + tmaT('tma.place_num', { place: 2 }, '2 место'), style: 'background:rgba(148,163,184,0.2);color:#cbd5e1;border:1px solid rgba(148,163,184,0.3)', rank: 2 };
       } else if (def.deficitCoupons >= 3500) {
-        recBadge = { label: '🥉 3 место', style: 'background:rgba(180,83,9,0.25);color:#f59e0b;border:1px solid rgba(180,83,9,0.35)', rank: 3 };
+        recBadge = { label: '🥉 ' + tmaT('tma.place_num', { place: 3 }, '3 место'), style: 'background:rgba(180,83,9,0.25);color:#f59e0b;border:1px solid rgba(180,83,9,0.35)', rank: 3 };
       }
 
       // Troop emoji icon (strictly 5 types)
@@ -1771,21 +1790,21 @@ function renderTmaMatrixCard(row) {
 
   let deficitText = '';
   if (def.deficitPuzzles === 0) {
-    deficitText = '<span style="color:#4ade80;font-weight:700">0 пазл. (Фулл)</span>';
+    deficitText = `<span style="color:#4ade80;font-weight:700">0 ${escapeHtml(tmaT('tma.puzzles_short', 'пазл.'))} (${escapeHtml(tmaT('tma.full_short', 'Фулл'))})</span>`;
   } else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) {
-    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} личн. пазл.</span>`;
+    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} ${escapeHtml(tmaT('tma.personal_puzzles_short', 'личн. пазл.'))}</span>`;
   } else if (def.costPerPuzzle === 0) {
-    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} пазл. (только пазлы)</span>`;
+    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} ${escapeHtml(tmaT('tma.puzzles_short', 'пазл.'))} (${escapeHtml(tmaT('tma.only_puzzles', 'только пазлы'))})</span>`;
   } else {
-    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} пазл.</span> <span style="font-size:10.5px;color:#9ca3af">(${fmtNum(def.deficitCoupons)} куп.)</span>`;
+    deficitText = `<span style="color:#fbbf24;font-weight:700">${fmtNum(def.deficitPuzzles)} ${escapeHtml(tmaT('tma.puzzles_short', 'пазл.'))}</span> <span style="font-size:10.5px;color:#9ca3af">(${fmtNum(def.deficitCoupons)} ${escapeHtml(tmaT('tma.coupons_short', 'куп.'))})</span>`;
   }
 
   const stockText = canViewStock
     ? `${fmtNum(p.stock?.coupons || 0)} 🎟️ / ${fmtNum(p.stock?.puzzles || 0)} 🧩`
-    : '<span style="color:#6b7280">Скрыто</span>';
+    : `<span style="color:#6b7280">${escapeHtml(tmaT('tma.hidden_stock', 'Скрыто'))}</span>`;
 
   const daysText = def.daysWithoutEvents !== null && def.daysWithoutEvents !== undefined
-    ? `~${fmtNum(def.daysWithoutEvents)} дн.`
+    ? `~${fmtNum(def.daysWithoutEvents)} ${tmaT('tma.days_short', 'дн.')}`
     : (def.dateWithoutEvents || '—');
 
   return `
@@ -1795,14 +1814,14 @@ function renderTmaMatrixCard(row) {
           <span style="font-size:16px">${row.troopIcon}</span>
           <div>
             <div style="font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px">
-              ${escapeHtml(cat.name || o.name || 'Офицер')}
+              ${escapeHtml(cat.name || o.name || tmaT('tma.officer_default', 'Офицер'))}
               <span style="font-size:10px;font-weight:700;background:#1f242e;color:#38bdf8;padding:1px 5px;border-radius:4px;border:1px solid rgba(56,189,248,0.25)">
                 G${cat.generation || 1}
               </span>
             </div>
             <div style="font-size:11px;color:#9ca3af;margin-top:1px;display:flex;align-items:center;gap:6px">
-              <span>👤 ${escapeHtml(p.name || 'Сектор')}</span>
-              ${isMe ? '<span style="font-size:9px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.25);padding:0 4px;border-radius:3px">Вы</span>' : ''}
+              <span>👤 ${escapeHtml(p.name || (tmaT('tma.sector_short', 'Сектор') + ' #' + p.id))}</span>
+              ${isMe ? `<span style="font-size:9px;font-weight:800;color:#fbbf24;background:rgba(245,158,11,0.25);padding:0 4px;border-radius:3px">${escapeHtml(tmaT('tma.you_badge', 'Вы'))}</span>` : ''}
             </div>
           </div>
         </div>
@@ -1813,24 +1832,24 @@ function renderTmaMatrixCard(row) {
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;font-size:11.5px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.06)">
-        <span style="color:#d1d5db;font-weight:700">Ур. ${fmtNum(o.level || 0)} / 180</span>
+        <span style="color:#d1d5db;font-weight:700">${escapeHtml(tmaT('tma.level_short', 'Ур.'))} ${fmtNum(o.level || 0)} / 180</span>
         <span style="color:#fbbf24;font-size:11px;letter-spacing:1px">${starsHtml}</span>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;background:#12161f;padding:7px 8px;border-radius:8px">
         <div>
-          <span style="color:#9ca3af">Дефицит:</span>
+          <span style="color:#9ca3af">${escapeHtml(tmaT('tma.deficit_label', 'Дефицит'))}:</span>
           <div>${deficitText}</div>
         </div>
         <div>
-          <span style="color:#9ca3af">Склад:</span>
+          <span style="color:#9ca3af">${escapeHtml(tmaT('tma.stock_label', 'Склад'))}:</span>
           <div style="font-weight:600;color:#e5e7eb">${stockText}</div>
         </div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:10.5px;color:#9ca3af">
-        <span>⏱️ Без ивентов: <strong style="color:#d1d5db">${escapeHtml(daysText)}</strong></span>
-        <span style="color:#38bdf8;font-size:11px">Досье ↗</span>
+        <span>⏱️ ${escapeHtml(tmaT('tma.no_events_time', 'Без ивентов:'))} <strong style="color:#d1d5db">${escapeHtml(daysText)}</strong></span>
+        <span style="color:#38bdf8;font-size:11px">${escapeHtml(tmaT('tma.view_dossier', 'Досье ↗'))}</span>
       </div>
     </div>
   `;
@@ -1856,12 +1875,12 @@ function renderTmaMatrix() {
   });
 
   const troopFilters = [
-    { key: 'all', label: 'Все' },
-    { key: 'Танк', label: '🛡️ Танк' },
-    { key: 'Пехота', label: '🪖 Пехота' },
-    { key: 'ПТ-Сау', label: '🎯 ПТ-САУ' },
-    { key: 'Горнизон', label: '🏰 Гарнизон' },
-    { key: 'Осада', label: '💥 Осада' },
+    { key: 'all', label: tmaT('tma.filter_all', 'Все') },
+    { key: 'Танк', label: '🛡️ ' + getLocalizedOfficerType('Танк') },
+    { key: 'Пехота', label: '🪖 ' + getLocalizedOfficerType('Пехота') },
+    { key: 'ПТ-Сау', label: '🎯 ' + getLocalizedOfficerType('ПТ-Сау') },
+    { key: 'Горнизон', label: '🏰 ' + getLocalizedOfficerType('Горнизон') },
+    { key: 'Осада', label: '💥 ' + getLocalizedOfficerType('Осада') },
   ];
 
   const genFilters = ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -1895,10 +1914,10 @@ function renderTmaMatrix() {
       <!-- Quick chips: Owner -->
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <button type="button" onclick="setTmaMatrixFilterOwner('all')" style="flex:1;padding:5px 8px;font-size:11px;font-weight:700;border-radius:8px;border:1px solid;cursor:pointer;${tmaMatrixFilterOwner === 'all' ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
-          👥 Все офицеры
+          👥 ${escapeHtml(tmaT('tma.filter_all_officers', 'Все офицеры'))}
         </button>
         <button type="button" onclick="setTmaMatrixFilterOwner('mine')" style="flex:1;padding:5px 8px;font-size:11px;font-weight:700;border-radius:8px;border:1px solid;cursor:pointer;${tmaMatrixFilterOwner === 'mine' ? 'background:rgba(245,158,11,0.2);color:#fbbf24;border-color:rgba(245,158,11,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
-          👤 Только мои
+          👤 ${escapeHtml(tmaT('tma.filter_my_officers', 'Только мои'))}
         </button>
       </div>
 
@@ -1920,7 +1939,7 @@ function renderTmaMatrix() {
           const isSel = tmaMatrixFilterGen === g;
           return `
             <button type="button" onclick="setTmaMatrixFilterGen('${g}')" style="padding:3px 8px;font-size:10.5px;font-weight:700;border-radius:6px;border:1px solid;white-space:nowrap;cursor:pointer;${isSel ? 'background:rgba(56,189,248,0.2);color:#38bdf8;border-color:rgba(56,189,248,0.3)' : 'background:#161a22;color:#9ca3af;border-color:rgba(255,255,255,0.08)'}">
-              ${g === 'all' ? 'Все Gen' : 'G' + g}
+              ${g === 'all' ? escapeHtml(tmaT('tma.filter_all_gen', 'Все Gen')) : 'G' + g}
             </button>
           `;
         }).join('')}
@@ -1929,7 +1948,7 @@ function renderTmaMatrix() {
       <!-- Stats Bar & Sorting -->
       <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px;margin-bottom:8px">
         <span style="font-size:11px;color:#9ca3af">
-          Найдено: <strong style="color:#fff">${totalCount}</strong>
+          ${escapeHtml(tmaT('tma.found_count', 'Найдено:'))} <strong style="color:#fff">${totalCount}</strong>
           ${countFirst > 0 ? `<span style="color:#fbbf24;margin-left:4px">🥇${countFirst}</span>` : ''}
           ${countSecond > 0 ? `<span style="color:#cbd5e1;margin-left:4px">🥈${countSecond}</span>` : ''}
           ${countThird > 0 ? `<span style="color:#f59e0b;margin-left:4px">🥉${countThird}</span>` : ''}
@@ -1938,7 +1957,7 @@ function renderTmaMatrix() {
 
         <button type="button" onclick="cycleTmaMatrixSort()" style="background:#161a22;border:1px solid rgba(255,255,255,0.1);color:#d1d5db;padding:3px 8px;border-radius:6px;font-size:10.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
           <span>⇅</span>
-          <span>${sortLabels[tmaMatrixSortCol] || 'Сортировка'}</span>
+          <span>${sortLabels[tmaMatrixSortCol] || escapeHtml(tmaT('tma.sort_label', 'Сортировка'))}</span>
           <span>${tmaMatrixSortDir === 'asc' ? '↑' : '↓'}</span>
         </button>
       </div>
@@ -1946,13 +1965,13 @@ function renderTmaMatrix() {
 
     <!-- Cards Stream -->
     <div id="tma-matrix-cards-container">
-      ${cardsHtml || '<div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">Офицеры по выбранным фильтрам не найдены</div>'}
+      ${cardsHtml || `<div class="tma-card" style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:13px">${escapeHtml(tmaT('tma.no_officers_filtered', 'Офицеры по выбранным фильтрам не найдены'))}</div>`}
     </div>
 
     ${hasMore ? `
       <div style="text-align:center;margin-top:12px;margin-bottom:16px">
         <button type="button" onclick="loadMoreTmaMatrixCards()" class="tma-btn-ghost" style="width:100%;padding:10px;font-size:12px;border-radius:10px">
-          Показать ещё (+${Math.min(TMA_MATRIX_PAGE_SIZE, totalCount - visibleRows.length)})
+          ${escapeHtml(tmaT('tma.show_more', 'Показать ещё'))} (+${Math.min(TMA_MATRIX_PAGE_SIZE, totalCount - visibleRows.length)})
         </button>
       </div>
     ` : ''}
@@ -2063,10 +2082,11 @@ async function openTmaEventDetail(eventId) {
     || {};
   const myPlayerId = player.id || currentUser?.playerId;
 
-  const evTitle = ev.title || ev.name || `Событие #${ev.id}`;
+  const evTitle = ev.title || ev.name || `${tmaT('tma.event_prefix', 'Событие')} #${ev.id}`;
+  const currentLocale = typeof getAppLanguage === 'function' && getAppLanguage() === 'en' ? 'en-US' : (typeof getAppLanguage === 'function' && getAppLanguage() === 'de' ? 'de-DE' : 'ru-RU');
   const evDateStr = (ev.startDate || ev.dateStart || ev.dateFrom)
-    ? new Date(ev.startDate || ev.dateStart || ev.dateFrom).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
-    : 'Дата уточняется';
+    ? new Date(ev.startDate || ev.dateStart || ev.dateFrom).toLocaleDateString(currentLocale, { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+    : tmaT('tma.date_tbd', 'Дата уточняется');
 
   const places = (ev.places && ev.places.length > 0) ? ev.places : (ev.eventType?.places || []);
   const registrations = Array.isArray(ev.registrations) ? ev.registrations : [];
@@ -2082,7 +2102,7 @@ async function openTmaEventDetail(eventId) {
       reg,
       player: p,
       playerId: pId,
-      name: p.name || `Сектор #${pId}`,
+      name: p.name || `${tmaT('tma.sector_short', 'Сектор')} #${pId}`,
       power: p.sector?.power ?? p.power ?? 0,
       vip: p.sector?.vipLevel ?? p.vip ?? '—',
       desiredPlace: reg.desiredPlace,
@@ -2102,14 +2122,14 @@ async function openTmaEventDetail(eventId) {
     placesTableHtml = `
       <div style="margin-bottom:14px">
         <div style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;margin-bottom:6px">
-          🏆 Призовые места и награды:
+          🏆 ${escapeHtml(tmaT('tma.prizes_title', 'Призовые места и награды:'))}
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(105px, 1fr));gap:6px">
           ${places.map(p => `
             <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:8px 10px;text-align:center">
-              <div style="font-size:11px;color:#9ca3af">Место #${p.place}</div>
+              <div style="font-size:11px;color:#9ca3af">${escapeHtml(tmaT('tma.place_num', { place: p.place }, `Место #${p.place}`))}</div>
               <div style="font-size:13px;font-weight:800;color:#fbbf24">${fmtNum(p.coupons || 0)} 🎟️</div>
-              ${p.points ? `<div style="font-size:9.5px;color:#38bdf8">${fmtNum(p.points)} очков</div>` : ''}
+              ${p.points ? `<div style="font-size:9.5px;color:#38bdf8">${fmtNum(p.points)} ${escapeHtml(tmaT('tma.points_suffix', 'очков'))}</div>` : ''}
             </div>
           `).join('')}
         </div>
@@ -2119,17 +2139,17 @@ async function openTmaEventDetail(eventId) {
 
   let regActionHtml = '';
   if (myReg) {
-    const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? 'Любое место' : `Место #${myReg.desiredPlace}`;
-    const assignText = myAssignment ? ` (Назначено: #${myAssignment.place})` : ' (Ожидает распределения)';
+    const placeText = (myReg.desiredPlace === 0 || !myReg.desiredPlace) ? tmaT('tma.any_place', 'Любое место') : tmaT('tma.place_num', { place: myReg.desiredPlace }, `Место #${myReg.desiredPlace}`);
+    const assignText = myAssignment ? ` (${tmaT('tma.assigned_label', 'Назначено')}: #${myAssignment.place})` : ` (${tmaT('tma.pending_assignment', 'Ожидает распределения')})`;
     regActionHtml = `
       <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:12px;margin-bottom:14px">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div>
-            <div style="font-size:12.5px;font-weight:700;color:#fde68a">✅ Вы записаны на событие</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:2px">Желаемое: <strong>${placeText}</strong>${assignText}</div>
+            <div style="font-size:12.5px;font-weight:700;color:#fde68a">✅ ${escapeHtml(tmaT('tma.you_are_registered', 'Вы записаны на событие'))}</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px">${escapeHtml(tmaT('tma.desired_label', 'Желаемое'))}: <strong>${placeText}</strong>${assignText}</div>
           </div>
           <button type="button" onclick="handleTmaUnregisterEvent(${ev.id})" class="tma-btn-danger" style="padding:6px 12px;font-size:11px">
-            ✕ Отозвать
+            ✕ ${escapeHtml(tmaT('tma.btn_revoke', 'Отозвать'))}
           </button>
         </div>
       </div>
@@ -2139,11 +2159,11 @@ async function openTmaEventDetail(eventId) {
       const cStr = p.coupons ? ` (${formatTmaCouponsShort(p.coupons)})` : '';
       return `<button type="button" onclick="handleTmaRegisterEvent(${ev.id}, ${p.place})" class="tma-event-reg-btn">#${p.place}${cStr}</button>`;
     });
-    placesButtons.push(`<button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 0)" class="tma-event-reg-btn">Любое</button>`);
+    placesButtons.push(`<button type="button" onclick="handleTmaRegisterEvent(${ev.id}, 0)" class="tma-event-reg-btn">${escapeHtml(tmaT('tma.any_place_short', 'Любое'))}</button>`);
 
     regActionHtml = `
       <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:8px">Подать заявку на участие:</div>
+        <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:8px">${escapeHtml(tmaT('tma.apply_participation', 'Подать заявку на участие:'))}</div>
         <div style="display:grid;grid-template-columns:repeat(${Math.min(4, placesButtons.length)}, 1fr);gap:6px">
           ${placesButtons.join('')}
         </div>
@@ -2155,36 +2175,36 @@ async function openTmaEventDetail(eventId) {
   if (registeredSectors.length === 0) {
     rosterHtml = `
       <div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;background:#1f242e;border-radius:12px;border:1px solid rgba(255,255,255,0.08)">
-        Пока нет поданных заявок на это событие
+        ${escapeHtml(tmaT('tma.no_applications_yet', 'Пока нет поданных заявок на это событие'))}
       </div>
     `;
   } else {
     rosterHtml = registeredSectors.map((item, idx) => {
       const isMe = Number(item.playerId) === Number(myPlayerId);
-      const placeText = (item.desiredPlace === 0 || !item.desiredPlace) ? 'Любое' : `#${item.desiredPlace}`;
+      const placeText = (item.desiredPlace === 0 || !item.desiredPlace) ? tmaT('tma.any_place_short', 'Любое') : `#${item.desiredPlace}`;
 
       let staffControlsHtml = '';
       if (isStaff) {
         const maxPlaceNum = places.length > 0 ? places.length : 5;
-        let placeOptions = `<option value="0" ${!item.assignedPlace ? 'selected' : ''}>Не назначено</option>`;
+        let placeOptions = `<option value="0" ${!item.assignedPlace ? 'selected' : ''}>${escapeHtml(tmaT('tma.not_assigned', 'Не назначено'))}</option>`;
         for (let pNum = 1; pNum <= maxPlaceNum; pNum++) {
           const isSelected = Number(item.assignedPlace) === pNum;
-          placeOptions += `<option value="${pNum}" ${isSelected ? 'selected' : ''}>Место #${pNum}</option>`;
+          placeOptions += `<option value="${pNum}" ${isSelected ? 'selected' : ''}>${escapeHtml(tmaT('tma.place_num', { place: pNum }, `Место #${pNum}`))}</option>`;
         }
 
         staffControlsHtml = `
           <div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
-            <label style="font-size:10.5px;color:#9ca3af;white-space:nowrap">Назначить:</label>
+            <label style="font-size:10.5px;color:#9ca3af;white-space:nowrap">${escapeHtml(tmaT('tma.assign_label', 'Назначить'))}:</label>
             <select onchange="handleTmaAssignPlace(${ev.id}, ${item.playerId}, this.value)" style="background:#1f242e;color:#fbbf24;border:1px solid rgba(245,158,11,0.3);border-radius:6px;font-size:11px;padding:3px 6px;cursor:pointer">
               ${placeOptions}
             </select>
             ${item.assignedPlace ? `
               <button type="button" onclick="handleTmaConfirmRsvp(${ev.id}, ${item.assignedPlace})" style="background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.3);border-radius:6px;font-size:10.5px;font-weight:700;padding:3px 6px;cursor:pointer">
-                ✓ Подтвердить
+                ✓ ${escapeHtml(tmaT('tma.btn_confirm', 'Подтвердить'))}
               </button>
             ` : ''}
             <button type="button" onclick="handleTmaStaffRemoveParticipant(${ev.id}, ${item.playerId})" style="background:none;border:none;color:#ef4444;font-size:10.5px;cursor:pointer;padding:3px 6px;margin-left:auto">
-              ✕ Снять
+              ✕ ${escapeHtml(tmaT('tma.btn_remove', 'Снять'))}
             </button>
           </div>
         `;
@@ -2196,19 +2216,19 @@ async function openTmaEventDetail(eventId) {
             <div>
               <div style="font-size:12.5px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px">
                 ${idx + 1}. ${escapeHtml(item.name)}
-                ${isMe ? '<span style="font-size:9px;color:#fbbf24;background:rgba(245,158,11,0.25);padding:1px 5px;border-radius:4px">Вы</span>' : ''}
+                ${isMe ? `<span style="font-size:9px;color:#fbbf24;background:rgba(245,158,11,0.25);padding:1px 5px;border-radius:4px">${escapeHtml(tmaT('tma.you_badge', 'Вы'))}</span>` : ''}
               </div>
               <div style="font-size:11px;color:#9ca3af;margin-top:1px">
-                Сила: ${fmtNum(item.power)} • VIP ${item.vip}
+                ${escapeHtml(tmaT('tma.power', 'Сила'))}: ${fmtNum(item.power)} • VIP ${item.vip}
               </div>
             </div>
             <div style="text-align:right">
               <span style="font-size:11px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,0.15);padding:2px 8px;border-radius:6px;border:1px solid rgba(245,158,11,0.25)">
-                Заявка: ${placeText}
+                ${escapeHtml(tmaT('tma.application_label', 'Заявка'))}: ${placeText}
               </span>
               ${item.assignedPlace ? `
                 <div style="font-size:10px;font-weight:700;color:#34d399;margin-top:2px">
-                  Назначено: #${item.assignedPlace} ${item.rsvpStatus === 'confirmed' ? '✓' : ''}
+                  ${escapeHtml(tmaT('tma.assigned_label', 'Назначено'))}: #${item.assignedPlace} ${item.rsvpStatus === 'confirmed' ? '✓' : ''}
                 </div>
               ` : ''}
             </div>
@@ -2224,12 +2244,12 @@ async function openTmaEventDetail(eventId) {
     notRegisteredHtml = `
       <details style="margin-top:12px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:10px 12px">
         <summary style="font-size:11.5px;font-weight:700;color:#9ca3af;cursor:pointer;user-select:none">
-          Не подали заявку (${unRegisteredSectors.length} секторов)
+          ${escapeHtml(tmaT('tma.not_applied_sectors', { count: unRegisteredSectors.length }))}
         </summary>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">
           ${unRegisteredSectors.map(p => `
             <span style="font-size:10.5px;background:#1f242e;color:#d1d5db;padding:3px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.04)">
-              ${escapeHtml(p.name || `Сектор #${p.id}`)}
+              ${escapeHtml(p.name || `${tmaT('tma.sector_short', 'Сектор')} #${p.id}`)}
             </span>
           `).join('')}
         </div>
@@ -2240,7 +2260,7 @@ async function openTmaEventDetail(eventId) {
   sheet.innerHTML = `
     <div class="tma-modal-header">
       <div>
-        <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">Событие альянса</div>
+        <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px">${escapeHtml(tmaT('tma.alliance_event', 'Событие альянса'))}</div>
         <h3 style="font-size:15px;font-weight:800;color:#fff;margin:2px 0 0 0">${escapeHtml(evTitle)}</h3>
       </div>
       <button type="button" onclick="closeTmaEventModal()" class="tma-modal-close-btn">✕</button>
@@ -2249,23 +2269,23 @@ async function openTmaEventDetail(eventId) {
       ${isStaff ? `
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08)">
           <button type="button" onclick="openTmaEventEditor(${ev.id})" class="tma-btn-ghost" style="flex:1;padding:7px 10px;font-size:11.5px;color:#fbbf24;border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.15)">
-            ✏️ Редактировать
+            ✏️ ${escapeHtml(tmaT('tma.btn_edit', 'Редактировать'))}
           </button>
           <button type="button" onclick="handleTmaRunAutopick(${ev.id})" class="tma-btn-ghost" style="flex:1;padding:7px 10px;font-size:11.5px;color:#38bdf8;border-color:rgba(56,189,248,0.35);background:rgba(56,189,248,0.15)">
-            ⚡ Автоподбор
+            ⚡ ${escapeHtml(tmaT('tma.btn_autopick', 'Автоподбор'))}
           </button>
-          <button type="button" onclick="handleTmaDeleteEvent(${ev.id})" class="tma-btn-danger" style="padding:7px 10px;font-size:11.5px" title="Удалить событие">
+          <button type="button" onclick="handleTmaDeleteEvent(${ev.id})" class="tma-btn-danger" style="padding:7px 10px;font-size:11.5px" title="${escapeHtml(tmaT('tma.delete_event_title', 'Удалить событие'))}">
             🗑️
           </button>
         </div>
       ` : ''}
       <div style="font-size:11.5px;color:#9ca3af;margin-bottom:12px">
-        📅 ${escapeHtml(evDateStr)} • Мест: <strong style="color:#fff">${places.length || 5}</strong>
+        📅 ${escapeHtml(evDateStr)} • ${escapeHtml(tmaT('tma.places_count_label', 'Мест'))}: <strong style="color:#fff">${places.length || 5}</strong>
       </div>
       ${placesTableHtml}
       ${regActionHtml}
       <div style="font-size:11.5px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
-        Заявки и участники (${registeredSectors.length})
+        ${escapeHtml(tmaT('tma.roster_summary', { count: registeredSectors.length }))}
       </div>
       ${rosterHtml}
       ${notRegisteredHtml}
@@ -2321,8 +2341,8 @@ function openTmaEventEditor(eventId = null) {
 
   if (tmaEditEventId) {
     const ev = (state.events || []).find(e => Number(e.id) === tmaEditEventId);
-    if (!ev) { toast('Событие не найдено', 'error'); return; }
-    title.textContent = '✏️ Редактировать событие';
+    if (!ev) { toast(tmaT('tma.toast_event_not_found', 'Событие не найдено'), 'error'); return; }
+    title.textContent = '✏️ ' + tmaT('tma.edit_event_title', 'Редактировать событие');
     typeSelect.value = ev.typeId || (types[0]?.id || 1);
 
     const fromDate = ev.startDate || ev.dateStart || ev.dateFrom;
@@ -2343,7 +2363,7 @@ function openTmaEventEditor(eventId = null) {
       };
     });
   } else {
-    title.textContent = '✨ Создать событие';
+    title.textContent = '✨ ' + tmaT('tma.create_event_title', 'Создать событие');
     const now = new Date();
     const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
     const dayAfter = new Date(tomorrow.getTime() + 48 * 3600 * 1000);
@@ -2398,9 +2418,9 @@ function renderTmaEventEditorPlaces() {
     return `
       <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:12px;font-weight:800;color:#fbbf24">Место #${p.place}</span>
+          <span style="font-size:12px;font-weight:800;color:#fbbf24">${escapeHtml(tmaT('tma.place_num', { place: p.place }, `Место #${p.place}`))}</span>
           <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:11px;color:#9ca3af">Купоны:</span>
+            <span style="font-size:11px;color:#9ca3af">${escapeHtml(tmaT('tma.coupons_label', 'Купоны'))}:</span>
             <input type="number" min="0" value="${p.coupons || 0}" onchange="tmaEventEditorPlaces[${idx}].coupons = Number(this.value)" style="width:75px;background:#1f242e;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 6px;color:#fff;font-size:11.5px;font-weight:700;text-align:right">
             ${tmaEventEditorPlaces.length > 1 ? `
               <button type="button" onclick="removeTmaEventPlaceRow(${idx})" style="background:none;border:none;color:#ef4444;font-size:13px;cursor:pointer;padding:2px 4px">✕</button>
@@ -2408,12 +2428,12 @@ function renderTmaEventEditorPlaces() {
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:6px">
-          <label style="font-size:10.5px;color:#9ca3af;white-space:nowrap">Назначен:</label>
+          <label style="font-size:10.5px;color:#9ca3af;white-space:nowrap">${escapeHtml(tmaT('tma.assigned_player_label', 'Назначен'))}:</label>
           <select onchange="tmaEventEditorPlaces[${idx}].playerId = this.value ? Number(this.value) : null" style="flex:1;background:#1f242e;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:4px 6px;color:#fff;font-size:11px">
-            <option value="" ${!p.playerId ? 'selected' : ''}>— Не назначен —</option>
+            <option value="" ${!p.playerId ? 'selected' : ''}>${escapeHtml(tmaT('tma.not_assigned_dash', '— Не назначен —'))}</option>
             ${(state.players || []).map(pl => {
               const sel = Number(pl.id) === Number(p.playerId) ? 'selected' : '';
-              return `<option value="${pl.id}" ${sel}>${escapeHtml(pl.name || 'Сектор #' + pl.id)} (VIP ${pl.sector?.vipLevel || pl.vip || 0})</option>`;
+              return `<option value="${pl.id}" ${sel}>${escapeHtml(pl.name || (tmaT('tma.sector_short', 'Сектор') + ' #' + pl.id))} (VIP ${pl.sector?.vipLevel || pl.vip || 0})</option>`;
             }).join('')}
           </select>
         </div>
@@ -2561,12 +2581,12 @@ async function submitTmaEventEditor() {
 }
 
 async function handleTmaDeleteEvent(eventId) {
-  if (!confirm('Удалить это событие альянса?')) return;
+  if (!confirm(tmaT('tma.confirm_delete_event', 'Удалить это событие альянса?'))) return;
   tmaHaptic('medium');
   try {
     await doTmaApiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
     tmaHaptic('success');
-    toast('🗑️ Событие удалено', 'info');
+    toast(tmaT('tma.toast_event_deleted', '🗑️ Событие удалено'), 'info');
     closeTmaEventEditorModal();
     closeTmaEventModal();
     await doTmaLoadData();
@@ -2574,7 +2594,7 @@ async function handleTmaDeleteEvent(eventId) {
     if (activeTmaTab === 'cabinet') renderTmaCabinet();
   } catch (err) {
     tmaHaptic('error');
-    toast('Ошибка удаления: ' + (err.message || 'попробуйте позже'), 'error');
+    toast(tmaT('tma.toast_delete_error', 'Ошибка удаления') + ': ' + (err.message || 'попробуйте позже'), 'error');
   }
 }
 
@@ -2607,9 +2627,9 @@ async function openTmaSectorDetail(playerId) {
   modal.style.zIndex = '120';
 
   const p = (state.players || []).find(pl => Number(pl.id) === Number(playerId));
-  if (!p) { toast('Сектор не найден', 'error'); return; }
+  if (!p) { toast(tmaT('tma.toast_sector_not_found', 'Сектор не найден'), 'error'); return; }
 
-  if (nameEl) nameEl.textContent = p.name || `Сектор #${p.id}`;
+  if (nameEl) nameEl.textContent = p.name || `${tmaT('tma.sector_short', 'Сектор')} #${p.id}`;
 
   const sec = p.sector || {};
   const stock = p.stock || {};
@@ -2621,7 +2641,7 @@ async function openTmaSectorDetail(playerId) {
   const vip = (sec.vipLevel !== undefined && sec.vipLevel !== null) ? sec.vipLevel : (p.vip || 0);
   const hq = sec.hqLevel || p.hq || '—';
   const kp = sec.killPoints || p.killPoints || 0;
-  const ownerStr = p.username ? `@${escapeHtml(p.username)}` : 'Без владельца';
+  const ownerStr = p.username ? `@${escapeHtml(p.username)}` : tmaT('tma.no_owner', 'Без владельца');
   const rankStr = p.rank || 'Р3';
 
   // Stock Freshness
@@ -2632,8 +2652,8 @@ async function openTmaSectorDetail(playerId) {
   }
   const isFresh = daysAgo <= 3;
   const freshnessText = isFresh
-    ? `🟢 Свежий (${daysAgo === 0 ? 'сегодня' : daysAgo + 'д назад'})`
-    : `🔴 Устарел (${daysAgo}д назад)`;
+    ? `🟢 ${daysAgo === 0 ? tmaT('tma.freshness_fresh', 'Свежий') : tmaT('tma.freshness_days', { days: daysAgo })}`
+    : `🔴 ${tmaT('tma.freshness_stale', 'Устарел')} (${daysAgo}${tmaT('tma.days_short', 'д')})`;
 
   // Officers list in dossier
   const officers = p.officers || [];
@@ -2642,7 +2662,7 @@ async function openTmaSectorDetail(playerId) {
   if (!officers.length) {
     officersListHtml = `
       <div style="text-align:center;padding:12px;color:#9ca3af;font-size:11.5px;background:#1f242e;border:1px solid rgba(255,255,255,0.08);border-radius:10px">
-        Офицеры не добавлены
+        ${escapeHtml(tmaT('tma.no_officers_added', 'Офицеры не добавлены'))}
       </div>
     `;
   } else {
@@ -2650,12 +2670,12 @@ async function openTmaSectorDetail(playerId) {
       const cat = getCatalogOfficer(off.catalogId) || { couponPerPuzzle: 500, generation: 7, type: 'Пехота' };
       const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
       const offSkills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
-      const offName = off.name || cat?.name || 'Офицер #' + off.id;
-      const offType = cat?.type || 'Пехота';
+      const offName = off.name || cat?.name || `${tmaT('tma.officer_default', 'Офицер')} #${off.id}`;
+      const offType = (typeof getLocalizedOfficerType === 'function') ? getLocalizedOfficerType(cat?.type || 'Пехота') : (cat?.type || 'Пехота');
       const offGen = cat?.generation ? `G${cat.generation}` : '';
 
-      let deficitStr = '0 куп.';
-      let forecastStr = '✓ Фулл';
+      let deficitStr = `0 ${tmaT('tma.coupons_short', 'куп.')}`;
+      let forecastStr = `✓ ${tmaT('tma.full_short', 'Фулл')}`;
       let isFull = true;
       try {
         const calcDefFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
@@ -2669,14 +2689,15 @@ async function openTmaSectorDetail(playerId) {
             isFull = summary.isFull;
           } else if (def.isOnlyPersonalPuzzles) {
             isFull = def.deficitPuzzles === 0;
-            deficitStr = isFull ? 'Фулл (0)' : `${fmtNum(def.deficitPuzzles)} личн. пазл.`;
-            forecastStr = isFull ? '✓ Фулл' : '🧩 Личные';
+            deficitStr = isFull ? `${tmaT('tma.full_short', 'Фулл')} (0)` : `${fmtNum(def.deficitPuzzles)} ${tmaT('tma.personal_puzzles_short', 'личн. пазл.')}`;
+            forecastStr = isFull ? `✓ ${tmaT('tma.full_short', 'Фулл')}` : `🧩 ${tmaT('tma.personal_short', 'Личные')}`;
           } else if (def.deficitCoupons > 0) {
-            deficitStr = `${fmtNum(def.deficitCoupons)} куп.`;
+            deficitStr = `${fmtNum(def.deficitCoupons)} ${tmaT('tma.coupons_short', 'куп.')}`;
             isFull = false;
             if (def.forecastDate) {
+              const currentLocale = typeof getAppLanguage === 'function' && getAppLanguage() === 'en' ? 'en-US' : (typeof getAppLanguage === 'function' && getAppLanguage() === 'de' ? 'de-DE' : 'ru-RU');
               const d = new Date(def.forecastDate);
-              forecastStr = `📅 ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`;
+              forecastStr = `📅 ${d.toLocaleDateString(currentLocale, { day: 'numeric', month: 'short' })}`;
             } else {
               forecastStr = '📅 —';
             }
@@ -2697,7 +2718,7 @@ async function openTmaSectorDetail(playerId) {
                   <span class="tma-badge-troop">${escapeHtml(offType)}</span>
                 </div>
                 <div style="font-size:10.5px;color:#9ca3af;margin-top:1px">
-                  Ур. ${off.level || 0} • ${'★'.repeat(offStars)}${'☆'.repeat(5 - offStars)}
+                  ${escapeHtml(tmaT('tma.level_short', 'Ур.'))} ${off.level || 0} • ${'★'.repeat(offStars)}${'☆'.repeat(5 - offStars)}
                 </div>
               </div>
             </div>
@@ -2706,7 +2727,7 @@ async function openTmaSectorDetail(playerId) {
                 [${offSkills.join('-')}]
               </span>
               <div style="font-size:10px;color:#9ca3af;margin-top:2px">
-                Дефицит: <strong style="color:${isFull ? '#34d399' : '#fbbf24'}">${deficitStr}</strong>
+                ${escapeHtml(tmaT('tma.deficit_label', 'Дефицит'))}: <strong style="color:${isFull ? '#34d399' : '#fbbf24'}">${deficitStr}</strong>
               </div>
             </div>
           </div>
@@ -2720,32 +2741,32 @@ async function openTmaSectorDetail(playerId) {
     stockSectionHtml = `
       <div class="tma-stock-edit-card" style="padding:10px 12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:700;color:#fbbf24">📦 Складские запасы</span>
+          <span style="font-size:12px;font-weight:700;color:#fbbf24">📦 ${escapeHtml(tmaT('tma.warehouse_title', 'Складские запасы'))}</span>
           <span style="font-size:10px;font-weight:700;color:${isFresh ? '#34d399' : '#f87171'}">${freshnessText}</span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
           <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
-            <div style="font-size:9.5px;color:#9ca3af">Купоны офицера</div>
+            <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.coupons', 'Купон офицера'))}</div>
             <div style="font-size:12.5px;font-weight:800;color:#fbbf24;margin-top:1px">${fmtNum(stock.coupons || 0)} 🎟️</div>
           </div>
           <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
-            <div style="font-size:9.5px;color:#9ca3af">Медали офицера</div>
+            <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.puzzles', 'Медаль офицера'))}</div>
             <div style="font-size:12.5px;font-weight:800;color:#38bdf8;margin-top:1px">${fmtNum(stock.puzzles || 0)} 🧩</div>
           </div>
           <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
-            <div style="font-size:9.5px;color:#9ca3af">Сундуки выбора</div>
+            <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.chests', 'Сундуки выбора'))}</div>
             <div style="font-size:12.5px;font-weight:800;color:#fde68a;margin-top:1px">${fmtNum(stock.chests || 0)} 📦</div>
           </div>
           <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
-            <div style="font-size:9.5px;color:#9ca3af">Купоны звезды</div>
+            <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.star_coupon', 'Купон звезды'))}</div>
             <div style="font-size:12.5px;font-weight:800;color:#fbbf24;margin-top:1px">${fmtNum(stock.starCoupons || 0)} 🎟️⭐</div>
           </div>
           <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
-            <div style="font-size:9.5px;color:#9ca3af">Звезды I / II / III</div>
+            <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.stars_title', 'Звезды I / II / III'))}</div>
             <div style="font-size:11.5px;font-weight:800;color:#c084fc;margin-top:1px">${stock.legendaryStars1 || 0} / ${stock.legendaryStars2 || 0} / ${stock.legendaryStars3 || 0}</div>
           </div>
           <div style="background:#1f242e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:6px 8px">
-            <div style="font-size:9.5px;color:#9ca3af">Очки звезд</div>
+            <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.star_points', 'Очки звезд'))}</div>
             <div style="font-size:12.5px;font-weight:800;color:#c084fc;margin-top:1px">${fmtNum(stock.starPoints || 0)} ✨</div>
           </div>
         </div>
@@ -2754,7 +2775,7 @@ async function openTmaSectorDetail(playerId) {
   } else {
     stockSectionHtml = `
       <div style="text-align:center;padding:16px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.1);border-radius:12px;color:#9ca3af;font-size:11.5px">
-        🔒 Запасы склада скрыты настройками приватности альянса
+        🔒 ${escapeHtml(tmaT('tma.stock_hidden_desc', 'Запасы склада скрыты настройками приватности альянса'))}
       </div>
     `;
   }
@@ -2768,19 +2789,19 @@ async function openTmaSectorDetail(playerId) {
             ${escapeHtml(rankStr)}
           </span>
           <span style="font-size:12px;color:#9ca3af">
-            👤 Владелец: <strong style="color:#fff">${ownerStr}</strong>
+            👤 ${escapeHtml(tmaT('tma.owner_label', 'Владелец'))}: <strong style="color:#fff">${ownerStr}</strong>
           </span>
         </div>
         ${(isStaff || isSelf) ? `
           <button type="button" onclick="closeTmaModals();openTmaSectorEditModal(${p.id})" class="tma-quick-btn" style="padding:4px 10px;font-size:11px">
-            ✏️ Изменить
+            ✏️ ${escapeHtml(tmaT('tma.btn_edit_stock', 'Изменить'))}
           </button>
         ` : ''}
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;text-align:center">
         <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
-          <div style="font-size:9.5px;color:#9ca3af">Мощь</div>
+          <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.power', 'Мощь'))}</div>
           <div style="font-size:11.5px;font-weight:800;color:#fff;margin-top:2px">${fmtNum(power)}</div>
         </div>
         <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
@@ -2788,11 +2809,11 @@ async function openTmaSectorDetail(playerId) {
           <div style="font-size:11.5px;font-weight:800;color:#fbbf24;margin-top:2px">${vip}</div>
         </div>
         <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
-          <div style="font-size:9.5px;color:#9ca3af">Штаб</div>
+          <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.hq_level', 'Штаб'))}</div>
           <div style="font-size:11.5px;font-weight:800;color:#38bdf8;margin-top:2px">${hq}</div>
         </div>
         <div style="background:#1f242e;border-radius:8px;padding:6px 4px">
-          <div style="font-size:9.5px;color:#9ca3af">Очки за уб.</div>
+          <div style="font-size:9.5px;color:#9ca3af">${escapeHtml(tmaT('tma.kill_points', 'Очки за уб.'))}</div>
           <div style="font-size:11.5px;font-weight:800;color:#c084fc;margin-top:2px">${fmtNum(kp)}</div>
         </div>
       </div>
@@ -2804,7 +2825,7 @@ async function openTmaSectorDetail(playerId) {
     <!-- Officers Section -->
     <div class="tma-stock-edit-card" style="padding:10px 12px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <span style="font-size:12px;font-weight:700;color:#fbbf24">🎖️ Офицеры сектора (${officers.length})</span>
+        <span style="font-size:12px;font-weight:700;color:#fbbf24">🎖️ ${escapeHtml(tmaT('tma.officers_summary', 'Офицеры сектора'))} (${officers.length})</span>
       </div>
       <div>
         ${officersListHtml}
@@ -2976,7 +2997,7 @@ function openTmaStockEditModal() {
 
   const lblEl = document.getElementById('tma-stock-star-coupon-label');
   if (lblEl) {
-    lblEl.innerHTML = `${renderStarCouponIconHtml(16)} Купон звезды`;
+    lblEl.innerHTML = `${renderStarCouponIconHtml(16)} ${escapeHtml(tmaT('tma.star_coupon', 'Купон звезды'))}`;
   }
 
   updateTmaLiveStarPoints();
@@ -3010,7 +3031,7 @@ function updateTmaLiveStarPoints() {
   const total = calcFn ? calcFn({ legendaryStars1: s1, legendaryStars2: s2, legendaryStars3: s3 }) : ((s1 * 110) + (s2 * 420) + (s3 * 960));
   const badge = document.getElementById('tma-stock-star-points-badge');
   if (badge) {
-    badge.textContent = `✨ Итого очков звезд: ${fmtNum(total)}`;
+    badge.textContent = `✨ ${tmaT('tma.total_stars', 'Итого очков звезд:')} ${fmtNum(total)}`;
   }
 }
 
@@ -3094,10 +3115,10 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
     cardsHtml = `
       <div style="background:#1f242e;border:1px dashed rgba(255,255,255,0.15);border-radius:14px;padding:20px;text-align:center;color:#9ca3af">
         <div style="font-size:28px;margin-bottom:6px">🎖️</div>
-        <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">Нет офицеров в секторе</div>
-        <div style="font-size:11.5px;margin-bottom:12px">Добавьте офицеров для отслеживания прокачки и расчета дефицита</div>
+        <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">${escapeHtml(tmaT('tma.no_officers_in_sector', 'Нет офицеров в секторе'))}</div>
+        <div style="font-size:11.5px;margin-bottom:12px">${escapeHtml(tmaT('tma.no_officers_desc', 'Добавьте офицеров для отслеживания прокачки и расчета дефицита'))}</div>
         <button type="button" class="tma-btn-primary" onclick="openTmaAddOfficerModal()" style="padding:8px 16px">
-          + Добавить первого офицера
+          + ${escapeHtml(tmaT('tma.btn_add_first_officer', 'Добавить первого офицера'))}
         </button>
       </div>
     `;
@@ -3109,12 +3130,12 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
       const isRetro = offMode === 'retro';
       const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
       const offSkills = Array.isArray(off.skills) && off.skills.length === 4 ? off.skills : [1, 1, 1, 1];
-      const offName = off.name || cat?.name || 'Офицер #' + off.id;
-      const offType = cat?.type || 'Пехота';
+      const offName = off.name || cat?.name || `${tmaT('tma.officer_default', 'Офицер')} #${off.id}`;
+      const offType = (typeof getLocalizedOfficerType === 'function') ? getLocalizedOfficerType(cat?.type || 'Пехота') : (cat?.type || 'Пехота');
       const offGen = cat?.generation ? `G${cat.generation}` : '';
 
-      let deficitStr = '0 куп.';
-      let forecastStr = '✓ Фулл';
+      let deficitStr = `0 ${tmaT('tma.coupons_short', 'куп.')}`;
+      let forecastStr = `✓ ${tmaT('tma.full_short', 'Фулл')}`;
       let isFull = true;
       try {
         const calcDefFn = (typeof logic !== 'undefined' && logic.calculateOfficerDeficit) || (typeof calculateOfficerDeficit === 'function' ? calculateOfficerDeficit : null);
@@ -3128,14 +3149,15 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
             isFull = summary.isFull;
           } else if (def.isOnlyPersonalPuzzles) {
             isFull = def.deficitPuzzles === 0;
-            deficitStr = isFull ? 'Фулл (0)' : `${fmtNum(def.deficitPuzzles)} личн. пазл.`;
-            forecastStr = isFull ? '✓ Фулл' : '🧩 Личные';
+            deficitStr = isFull ? `${tmaT('tma.full_short', 'Фулл')} (0)` : `${fmtNum(def.deficitPuzzles)} ${tmaT('tma.personal_puzzles_short', 'личн. пазл.')}`;
+            forecastStr = isFull ? `✓ ${tmaT('tma.full_short', 'Фулл')}` : `🧩 ${tmaT('tma.personal_short', 'Личные')}`;
           } else if (def.deficitCoupons > 0) {
-            deficitStr = `${fmtNum(def.deficitCoupons)} куп.`;
+            deficitStr = `${fmtNum(def.deficitCoupons)} ${tmaT('tma.coupons_short', 'куп.')}`;
             isFull = false;
             if (def.forecastDate) {
+              const currentLocale = typeof getAppLanguage === 'function' && getAppLanguage() === 'en' ? 'en-US' : (typeof getAppLanguage === 'function' && getAppLanguage() === 'de' ? 'de-DE' : 'ru-RU');
               const d = new Date(def.forecastDate);
-              forecastStr = `📅 ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`;
+              forecastStr = `📅 ${d.toLocaleDateString(currentLocale, { day: 'numeric', month: 'short' })}`;
             } else {
               forecastStr = '📅 —';
             }
@@ -3171,7 +3193,7 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
                   ${(off.personalPuzzles || off.personal_puzzles) ? `<span style="font-size:9.5px;color:#fde68a;background:rgba(245,158,11,0.1);padding:1px 4px;border-radius:4px">🧩 ${off.personalPuzzles || off.personal_puzzles}</span>` : ''}
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
-                  <span style="font-size:11px;color:#38bdf8;font-weight:700">Ур. ${off.level || 0}</span>
+                  <span style="font-size:11px;color:#38bdf8;font-weight:700">${escapeHtml(tmaT('tma.level_short', 'Ур.'))} ${off.level || 0}</span>
                   <span style="color:#6b7280;font-size:10px">•</span>
                   <span style="color:#fbbf24;font-size:11px;letter-spacing:1px">${starsGold}${starsGray}</span>
                   <span style="font-size:10px;color:#9ca3af;font-weight:700">${offStars}★</span>
@@ -3183,15 +3205,15 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
             <div style="display:flex;align-items:center;gap:6px">
               <button type="button" onclick="event.stopPropagation();toggleTmaOfficerMode('${off.id}')" style="font-size:10px;padding:2px 7px;border-radius:6px;font-weight:800;cursor:pointer;${
                 isRetro ? 'background:rgba(156,163,175,0.15);color:#9ca3af;border:1px solid rgba(156,163,175,0.25)' : 'background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)'
-              }" title="Режим: ${isRetro ? 'Ретро (без списания)' : 'Списание со склада'}">
-                ${isRetro ? '📜 Ретро' : '⚡ Склад'}
+              }" title="${escapeHtml(tmaT('tma.mode_label', 'Режим'))}: ${isRetro ? escapeHtml(tmaT('tma.mode_retro_title', 'Ретро (без списания)')) : escapeHtml(tmaT('tma.mode_stock_title', 'Списание со склада'))}">
+                ${isRetro ? ('📜 ' + escapeHtml(tmaT('tma.mode_retro_short', 'Ретро'))) : ('⚡ ' + escapeHtml(tmaT('tma.mode_stock_short', 'Склад')))}
               </button>
 
-              <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
+              <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? escapeHtml(tmaT('tma.target_active_title', 'Текущая цель в калькуляторе')) : escapeHtml(tmaT('tma.target_set_title', 'Сделать целью в калькуляторе'))}">
                 ${isTarget ? '⭐' : '☆'}
               </button>
 
-              <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать параметры офицера">
+              <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="${escapeHtml(tmaT('tma.edit_officer_title', 'Редактировать параметры офицера'))}">
                 ✏️
               </button>
             </div>
@@ -3200,13 +3222,13 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
           <!-- Bottom Row: Skills, Deficit, Forecast -->
           <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:space-between;font-size:11px">
             <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-size:9.5px;color:#9ca3af;font-weight:600">Навыки:</span>
+              <span style="font-size:9.5px;color:#9ca3af;font-weight:600">${escapeHtml(tmaT('tma.skills_label', 'Навыки'))}:</span>
               <span class="tma-badge-skills">
                 [${offSkills.join('-')}]
               </span>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-              <span style="color:#9ca3af;font-size:10.5px">Дефицит: <strong style="color:${isFull ? '#34d399' : '#fbbf24'}">${deficitStr}</strong></span>
+              <span style="color:#9ca3af;font-size:10.5px">${escapeHtml(tmaT('tma.deficit_label', 'Дефицит'))}: <strong style="color:${isFull ? '#34d399' : '#fbbf24'}">${deficitStr}</strong></span>
               <span style="color:#34d399;font-weight:700;font-size:10.5px">${forecastStr}</span>
             </div>
           </div>
@@ -3220,12 +3242,12 @@ function renderTmaOfficersSectionHtml(officers, targetOfficer, player) {
       <!-- Accordion Header -->
       <div onclick="toggleTmaOfficersAccordion()" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer;user-select:none">
         <div style="font-size:13.5px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px">
-          <span>🎖️ Офицеры сектора</span>
+          <span>🎖️ ${escapeHtml(tmaT('tma.officers_summary', 'Офицеры сектора'))}</span>
           <span style="font-size:11px;color:#fbbf24;background:rgba(245,158,11,0.2);padding:1px 7px;border-radius:6px;font-weight:700">${count}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <button type="button" class="tma-btn-add" onclick="event.stopPropagation();openTmaAddOfficerModal()">
-            + Добавить
+            + ${escapeHtml(tmaT('tma.btn_add_officer', 'Добавить'))}
           </button>
           <span id="tma-officers-arrow" style="font-size:12px;color:#fbbf24;font-weight:800;transition:transform 0.2s">
             ${isTmaOfficersCollapsed ? '▶' : '▼'}
@@ -3275,10 +3297,10 @@ function renderTmaOfficersPickerList() {
     container.innerHTML = `
       <div style="text-align:center;padding:24px 16px;color:#9ca3af;font-size:12.5px">
         <div style="font-size:28px;margin-bottom:6px">🎖️</div>
-        <p style="font-weight:700;color:#fff;margin:0 0 4px 0">Нет офицеров в секторе</p>
-        <p style="font-size:11.5px;color:#9ca3af;margin:0 0 12px 0">Нажмите «+ Добавить», чтобы добавить первого офицера</p>
+        <p style="font-weight:700;color:#fff;margin:0 0 4px 0">${escapeHtml(tmaT('tma.no_officers_in_sector', 'Нет офицеров в секторе'))}</p>
+        <p style="font-size:11.5px;color:#9ca3af;margin:0 0 12px 0">${escapeHtml(tmaT('tma.no_officers_desc', 'Добавьте офицеров для отслеживания прокачки и расчета дефицита'))}</p>
         <button type="button" class="tma-btn-primary" onclick="openTmaAddOfficerModal()" style="padding:8px 16px">
-          + Добавить офицера
+          + ${escapeHtml(tmaT('tma.btn_add_officer', 'Добавить офицера'))}
         </button>
       </div>
     `;
@@ -3288,8 +3310,8 @@ function renderTmaOfficersPickerList() {
   container.innerHTML = officers.map(off => {
     const isTarget = targetOfficer && String(targetOfficer.id) === String(off.id);
     const cat = getCatalogOfficer(off.catalogId);
-    const offName = off.name || cat?.name || 'Офицер #' + off.id;
-    const offType = cat?.type || 'Пехота';
+    const offName = off.name || cat?.name || `${tmaT('tma.officer_default', 'Офицер')} #${off.id}`;
+    const offType = (typeof getLocalizedOfficerType === 'function') ? getLocalizedOfficerType(cat?.type || 'Пехота') : (cat?.type || 'Пехота');
     const offGen = cat?.generation ? `G${cat.generation}` : '';
     const offStars = Math.max(0, Math.min(5, Number(off.stars) || 0));
     const starsGold = '★'.repeat(offStars);
@@ -3319,7 +3341,7 @@ function renderTmaOfficersPickerList() {
       : (def ? (def.deficitPuzzles === 0 && (def.deficitCoupons || 0) === 0) : ((off.level || 0) >= 180 && skills.every(s => Number(s) >= 5)));
     const deficitDisplay = summary
       ? summary.deficitShort
-      : (isFull ? 'Фулл (0)' : `${fmtNum(def?.deficitCoupons ?? def?.remainingCoupons ?? 0)} куп.`);
+      : (isFull ? `${tmaT('tma.full_short', 'Фулл')} (0)` : `${fmtNum(def?.deficitCoupons ?? def?.remainingCoupons ?? 0)} ${tmaT('tma.coupons_short', 'куп.')}`);
 
     return `
       <div class="tma-officer-card-compact tma-card-clickable" onclick="selectTmaTargetOfficer('${off.id}')" style="margin-bottom:8px;padding:10px 12px;background:#1f242e;border:1px solid ${
@@ -3346,7 +3368,7 @@ function renderTmaOfficersPickerList() {
               <div style="display:flex;align-items:center;gap:8px;margin-top:2px;font-size:11px">
                 <span class="tma-badge-skills">[${skillsStr}]</span>
                 <span style="color:#fbbf24;letter-spacing:1px">${starsGold}${starsGray}</span>
-                <span style="color:#38bdf8;font-weight:700">Ур. ${off.level || 0}</span>
+                <span style="color:#38bdf8;font-weight:700">${escapeHtml(tmaT('tma.level_short', 'Ур.'))} ${off.level || 0}</span>
               </div>
             </div>
           </div>
@@ -3356,16 +3378,16 @@ function renderTmaOfficersPickerList() {
               <div style="font-size:11.5px;font-weight:700;color:${isFull ? '#34d399' : '#fbbf24'}">
                 ${deficitDisplay}
               </div>
-              <div style="font-size:10px;color:#9ca3af">дефицит</div>
+              <div style="font-size:10px;color:#9ca3af">${escapeHtml(tmaT('tma.deficit_label', 'дефицит'))}</div>
             </div>
 
             <!-- Target Star toggle button -->
-            <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? 'Текущая цель в калькуляторе' : 'Сделать целью в калькуляторе'}">
+            <button type="button" onclick="event.stopPropagation();selectTmaTargetOfficer('${off.id}')" class="tma-target-star-btn ${isTarget ? 'active' : ''}" title="${isTarget ? escapeHtml(tmaT('tma.target_active_title', 'Текущая цель в калькуляторе')) : escapeHtml(tmaT('tma.target_set_title', 'Сделать целью в калькуляторе'))}">
               ${isTarget ? '⭐' : '☆'}
             </button>
 
             <!-- Edit button -->
-            <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="Редактировать">
+            <button type="button" onclick="event.stopPropagation();openTmaEditOfficerModal('${off.id}')" class="tma-quick-btn" style="padding:4px 8px;font-size:11.5px" title="${escapeHtml(tmaT('tma.btn_edit', 'Редактировать'))}">
               ✏️
             </button>
           </div>
@@ -3422,7 +3444,7 @@ function onTmaOfficerModeChange(mode) {
   const hint = document.getElementById('tma-off-mode-hint');
   if (lblRetro) lblRetro.classList.toggle('active', tmaOfficerModalMode === 'retro');
   if (lblNormal) lblNormal.classList.toggle('active', tmaOfficerModalMode === 'normal');
-  if (hint) hint.textContent = (tmaOfficerModalMode === 'retro') ? 'Без списания ресурсов' : 'Списание со склада трекера';
+  if (hint) hint.textContent = (tmaOfficerModalMode === 'retro') ? tmaT('tma.mode_retro_desc', 'Без списания ресурсов') : tmaT('tma.mode_stock_desc', 'Списание ресурсов со склада');
   tmaHaptic('selection');
 }
 
@@ -3462,12 +3484,12 @@ function renderTmaOfficerModalSkills() {
   if (medalsBadge) {
     const calcFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress) ? logic.calculateSkillMedalsProgress : null;
     const spent = calcFn ? calcFn(tmaOfficerModalSkills) : 0;
-    medalsBadge.textContent = `${fmtNum(spent)} / 690 медалей`;
+    medalsBadge.textContent = `${fmtNum(spent)} / 690 ${tmaT('tma.medals_count', 'медалей')}`;
   }
   if (!container) return;
   container.innerHTML = [0, 1, 2, 3].map(sIdx => `
     <div class="tma-skill-row">
-      <span class="tma-skill-name">Н${sIdx + 1}</span>
+      <span class="tma-skill-name">${escapeHtml(tmaT('tma.skill_short', 'Н'))}${sIdx + 1}</span>
       <div class="tma-skill-btn-group">
         ${[1, 2, 3, 4, 5].map(lvl => `
           <button type="button" class="tma-skill-btn ${tmaOfficerModalSkills[sIdx] === lvl ? 'active' : ''}" onclick="setTmaOfficerModalSkill(${sIdx}, ${lvl})">${lvl}</button>
@@ -3486,7 +3508,7 @@ function onTmaOfficerCatalogChange() {
     const maxMedals = cat.medalsBeforeTraining || cat.medals_before_training || 690;
     const calcFn = (typeof logic !== 'undefined' && logic.calculateSkillMedalsProgress) ? logic.calculateSkillMedalsProgress : null;
     const spent = calcFn ? calcFn(tmaOfficerModalSkills) : 0;
-    if (medalsBadge) medalsBadge.textContent = `${fmtNum(spent)} / ${maxMedals} медалей`;
+    if (medalsBadge) medalsBadge.textContent = `${fmtNum(spent)} / ${maxMedals} ${tmaT('tma.medals_count', 'медалей')}`;
   }
 }
 
@@ -3498,9 +3520,9 @@ function openTmaAddOfficerModal() {
   tmaOfficerModalMode = getOfficerStockMode() || 'retro';
 
   const titleEl = document.getElementById('tma-officer-modal-title');
-  if (titleEl) titleEl.textContent = '🎖️ Добавить офицера';
+  if (titleEl) titleEl.textContent = '🎖️ ' + tmaT('tma.add_officer_title', 'Добавить офицера');
   const subtitleEl = document.getElementById('tma-officer-modal-subtitle');
-  if (subtitleEl) subtitleEl.textContent = 'Новый офицер сектора';
+  if (subtitleEl) subtitleEl.textContent = tmaT('tma.add_officer_subtitle', 'Новый офицер сектора');
 
   const catGroup = document.getElementById('tma-off-catalog-group');
   if (catGroup) catGroup.style.display = 'block';
@@ -3510,7 +3532,7 @@ function openTmaAddOfficerModal() {
     const existingCatalogIds = new Set((myCabinetProfile?.officers || []).map(o => o.catalogId));
     select.innerHTML = (state.officerCatalog || []).map(cat => {
       const already = existingCatalogIds.has(cat.id);
-      return `<option value="${cat.id}" ${already ? 'disabled' : ''}>${escapeHtml(cat.name)} (${cat.type || 'Пехота'}, Ген. ${cat.generation || 1})${already ? ' — уже добавлен' : ''}</option>`;
+      return `<option value="${cat.id}" ${already ? 'disabled' : ''}>${escapeHtml(cat.name)} (${getLocalizedOfficerType(cat.type || 'Пехота')}, ${tmaT('tma.gen_short', 'Ген.')} ${cat.generation || 1})${already ? ' — ' + tmaT('tma.already_added', 'уже добавлен') : ''}</option>`;
     }).join('');
   }
 
@@ -3540,9 +3562,9 @@ function openTmaEditOfficerModal(officerId) {
 
   const cat = getCatalogOfficer(off.catalogId);
   const titleEl = document.getElementById('tma-officer-modal-title');
-  if (titleEl) titleEl.textContent = `🎖️ Редактировать: ${escapeHtml(off.name || cat?.name || '')}`;
+  if (titleEl) titleEl.textContent = `🎖️ ${tmaT('tma.edit_officer_title', 'Редактировать:')} ${escapeHtml(off.name || cat?.name || '')}`;
   const subtitleEl = document.getElementById('tma-officer-modal-subtitle');
-  if (subtitleEl) subtitleEl.textContent = `${cat?.type || 'Офицер'} • Ген. ${cat?.generation || 1}`;
+  if (subtitleEl) subtitleEl.textContent = `${getLocalizedOfficerType(cat?.type || 'Пехота')} • ${tmaT('tma.gen_short', 'Ген.')} ${cat?.generation || 1}`;
 
   const catGroup = document.getElementById('tma-off-catalog-group');
   if (catGroup) catGroup.style.display = 'none';
@@ -3572,8 +3594,8 @@ function openTmaEditOfficerModal(officerId) {
 async function deleteTmaCurrentOfficer() {
   if (!tmaOfficerModalEditId) return;
   const off = (myCabinetProfile?.officers || []).find(o => String(o.id) === String(tmaOfficerModalEditId));
-  const offName = off?.name || 'офицера';
-  if (!confirm(`Удалить офицера «${offName}» из сектора?`)) return;
+  const offName = off?.name || tmaT('tma.officer_default', 'офицера');
+  if (!confirm(tmaT('tma.confirm_delete_officer', { name: offName }, `Удалить офицера «${offName}» из сектора?`))) return;
 
   tmaHaptic('medium');
   try {
@@ -3624,7 +3646,7 @@ async function submitTmaOfficerEdit() {
           const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
           if (!levelStockDelta.canAfford) {
             tmaHaptic('error');
-            toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
+            toast(`❌ ${tmaT('tma.toast_not_enough_level_stock', { count: fmtNum(levelStockDelta.deficitPuzzles || 0) }, `Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`)}`, 'error');
             return;
           }
           curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
@@ -3640,7 +3662,7 @@ async function submitTmaOfficerEdit() {
           const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
           if (!starRes.canAfford) {
             tmaHaptic('error');
-            toast(`❌ Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.`, 'error');
+            toast(`❌ ${tmaT('tma.toast_not_enough_stars_stock', 'Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.')}`, 'error');
             return;
           }
           curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
@@ -3659,7 +3681,7 @@ async function submitTmaOfficerEdit() {
           const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
           if (!skillRes.canAfford) {
             tmaHaptic('error');
-            toast(`❌ Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`, 'error');
+            toast(`❌ ${tmaT('tma.toast_not_enough_skill_stock', { count: fmtNum(skillRes.deficitMedals || 0) }, `Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`)}`, 'error');
             return;
           }
           curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
@@ -3898,7 +3920,7 @@ async function handleTmaAssignPlace(eventId, playerId, newPlace) {
 
 async function handleTmaStaffRemoveParticipant(eventId, playerId) {
   tmaHaptic('medium');
-  if (!confirm('Снять участника с события?')) return;
+  if (!confirm(tmaT('tma.confirm_remove_participant', 'Снять участника с события?'))) return;
   try {
     await doTmaApiFetch(`/api/events/${eventId}/register?sectorId=${playerId}`, {
       method: 'DELETE'
