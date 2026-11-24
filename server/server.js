@@ -357,13 +357,28 @@ function maskPlayerStockIfNeeded(player, user) {
   return authGuard.maskPlayerStockIfNeeded(player, user);
 }
 
+let lastKnownBaseUrl = null;
+
 function getAppBaseUrl(req = null) {
-  const settingUrl = db.getAppSetting('app_base_url');
-  if (settingUrl) return settingUrl.replace(/\/+$/, '');
-  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host;
+    if (!host.includes('localhost') && !host.includes('127.0.0.1')) {
+      lastKnownBaseUrl = `${proto}://${host}`;
+    }
+  }
+  const settingUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
+  if (settingUrl && settingUrl.trim()) return settingUrl.trim().replace(/\/+$/, '');
+  if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
+  if (lastKnownBaseUrl) return lastKnownBaseUrl.replace(/\/+$/, '');
   if (req && req.headers && req.headers.host) {
     const proto = req.headers['x-forwarded-proto'] || 'http';
     return `${proto}://${req.headers.host}`;
+  }
+  const botUsername = db.getAppSetting('telegram_bot_username');
+  if (botUsername && botUsername.trim()) {
+    return `https://t.me/${botUsername.trim().replace(/^@+/, '')}`;
   }
   return 'http://localhost:3000';
 }
@@ -1976,28 +1991,42 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
       }
 
+      const existingRegistrations = typeof db.getRegistrationsByEventId === 'function'
+        ? db.getRegistrationsByEventId(Number(eventId))
+        : (typeof db.getRegistrationsForEvent === 'function' ? db.getRegistrationsForEvent(Number(eventId)) : []);
+      const prevReg = (existingRegistrations || []).find(r => Number(r.playerId) === Number(targetSectorId));
+      const targetDesiredPlace = desiredPlace !== undefined ? Number(desiredPlace) : 0;
+      const targetOfficerId = String(finalOfficerId || '');
+      const isUnchanged = prevReg &&
+        Number(prevReg.desiredPlace || 0) === targetDesiredPlace &&
+        String(prevReg.officerId || '') === targetOfficerId;
+
       const reg = db.registerForEvent({
         eventId,
         playerId: targetSectorId,
-        officerId: finalOfficerId || '',
-        desiredPlace: desiredPlace !== undefined ? Number(desiredPlace) : 0
+        officerId: targetOfficerId,
+        desiredPlace: targetDesiredPlace
       });
 
-      try {
-        const ev = db.getEventById(eventId);
-        const et = ev ? (db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null) : null;
-        const placeStr = (desiredPlace === undefined || Number(desiredPlace) === 0) ? 'Любое' : `#${desiredPlace}`;
-        const baseUrl = getAppBaseUrl(req);
-        dispatchNotification('staff_event_registration', {
-          eventName: et?.name || `Событие #${eventId}`,
-          sectorName: player.name || `Сектор #${player.id}`,
-          desiredPlace: placeStr,
-          link: `${baseUrl}/#events`
-        }).catch(err => {
-          console.warn('[Notification] Error dispatching staff_event_registration:', err.message);
-        });
-      } catch (notifErr) {
-        console.warn('[Notification] Failed to prepare staff_event_registration:', notifErr.message);
+      if (!isUnchanged) {
+        try {
+          const ev = db.getEventById(eventId);
+          const et = ev ? (db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null) : null;
+          const placeStr = (targetDesiredPlace === 0) ? 'Любое' : `#${targetDesiredPlace}`;
+          const baseUrl = getAppBaseUrl(req);
+          dispatchNotification('staff_event_registration', {
+            eventId,
+            playerId: targetSectorId,
+            eventName: et?.name || `Событие #${eventId}`,
+            sectorName: player.name || `Сектор #${player.id}`,
+            desiredPlace: placeStr,
+            link: `${baseUrl}/#event/${eventId}`
+          }).catch(err => {
+            console.warn('[Notification] Error dispatching staff_event_registration:', err.message);
+          });
+        } catch (notifErr) {
+          console.warn('[Notification] Failed to prepare staff_event_registration:', notifErr.message);
+        }
       }
 
       return sendJson(res, 200, { success: true, registration: reg });
@@ -2531,6 +2560,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (body.webAppUrl !== undefined || body.telegram_webapp_url !== undefined) {
         const rawWebAppUrl = String(body.webAppUrl !== undefined ? body.webAppUrl : body.telegram_webapp_url).trim();
         db.setAppSetting('telegram_webapp_url', rawWebAppUrl);
+        if (rawWebAppUrl) {
+          db.setAppSetting('app_base_url', rawWebAppUrl);
+        }
         const liveToken = db.getAppSetting('telegram_bot_token');
         if (liveToken && rawWebAppUrl && /^https:\/\//i.test(rawWebAppUrl)) {
           const effectiveUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;

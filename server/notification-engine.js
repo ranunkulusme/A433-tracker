@@ -18,9 +18,14 @@ function createNotificationEngine({
 
   const tg = telegram || require('./telegram.js');
   const resolveBaseUrl = getAppBaseUrl || (() => {
-    const s = db.getAppSetting('app_base_url');
-    return s ? s.replace(/\/+$/, '') : (process.env.APP_BASE_URL || 'http://localhost:3000');
+    const s = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
+    if (s && s.trim()) return s.trim().replace(/\/+$/, '');
+    if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
+    if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
+    return 'http://localhost:3000';
   });
+
+  const recentStaffRegistrations = new Map();
 
   async function dispatchNotification(eventKey, data = {}, options = {}) {
     try {
@@ -35,11 +40,31 @@ function createNotificationEngine({
         return { sent: false, reason: 'no_bot_token' };
       }
 
+      if (!data.link) {
+        if (data.eventId) {
+          data.link = `${resolveBaseUrl()}/#event/${data.eventId}`;
+        } else {
+          data.link = `${resolveBaseUrl()}/#events`;
+        }
+      }
+
       const renderedText = logic.renderTemplate(template.template, data);
       const parseMode = template.parse_mode || 'HTML';
       let replyMarkup = options.replyMarkup || undefined;
       if (!replyMarkup && eventKey === 'event_registration_opened' && data.eventId) {
         replyMarkup = logic.formatEventRegistrationKeyboard(data.eventId);
+      }
+      if (!replyMarkup && eventKey === 'staff_event_registration') {
+        const linkUrl = String(data.link || `${resolveBaseUrl()}/#event/${data.eventId || ''}`).trim();
+        if (/^https?:\/\//i.test(linkUrl)) {
+          replyMarkup = {
+            inline_keyboard: [
+              [
+                { text: '🔗 Открыть распределение мест', url: linkUrl }
+              ]
+            ]
+          };
+        }
       }
 
       const mieruSettings = db.getMieruSettings ? db.getMieruSettings() : { enabled: false };
@@ -54,6 +79,46 @@ function createNotificationEngine({
         if (staffChatId && !isNaN(Number(staffChatId))) {
           staffChatId = Number(staffChatId);
         }
+
+        if (eventKey === 'staff_event_registration') {
+          const regKey = (data.eventId && data.playerId)
+            ? `${data.eventId}:${data.playerId}`
+            : `${data.eventName || ''}:${data.sectorName || ''}`;
+          const now = Date.now();
+          const recent = recentStaffRegistrations.get(regKey);
+
+          // If exact same desiredPlace within 3 minutes (180s), throttle duplicate
+          if (recent && (now - recent.timestamp < 180_000) && recent.previousPlace === data.desiredPlace) {
+            return { sent: false, skipped: true, reason: 'duplicate_unchanged' };
+          }
+
+          // If user changed place within 3 minutes and we have a previous message in the same chat, edit in-place
+          if (recent && (now - recent.timestamp < 180_000) && recent.messageId && (Number(recent.chatId) === Number(staffChatId))) {
+            try {
+              const editRes = await tg.editTelegramMessageText({
+                token,
+                chatId: staffChatId,
+                messageId: recent.messageId,
+                text: renderedText,
+                parseMode,
+                replyMarkup
+              }, sendOpts);
+
+              if (editRes && editRes.ok) {
+                recentStaffRegistrations.set(regKey, {
+                  messageId: recent.messageId,
+                  chatId: staffChatId,
+                  timestamp: now,
+                  previousPlace: data.desiredPlace
+                });
+                return { sent: true, edited: true, result: editRes };
+              }
+            } catch (editErr) {
+              console.warn('[Notification] Could not edit recent staff_event_registration message, falling back to new message:', editErr.message);
+            }
+          }
+        }
+
         const res = await tg.sendTelegramMessage({
           token,
           chatId: staffChatId,
@@ -61,6 +126,22 @@ function createNotificationEngine({
           parseMode,
           replyMarkup
         }, sendOpts);
+
+        if (eventKey === 'staff_event_registration' && res && res.ok) {
+          const regKey = (data.eventId && data.playerId)
+            ? `${data.eventId}:${data.playerId}`
+            : `${data.eventName || ''}:${data.sectorName || ''}`;
+          const msgId = (res.result && (res.result.message_id || res.result.messageId)) || null;
+          if (msgId) {
+            recentStaffRegistrations.set(regKey, {
+              messageId: msgId,
+              chatId: staffChatId,
+              timestamp: Date.now(),
+              previousPlace: data.desiredPlace
+            });
+          }
+        }
+
         return { sent: res.ok, result: res };
       }
 

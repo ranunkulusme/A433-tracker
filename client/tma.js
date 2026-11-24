@@ -1827,7 +1827,10 @@ function renderTmaMatrix() {
   `;
 }
 
+let isTmaRegistering = false;
 async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
+  if (isTmaRegistering) return;
+  isTmaRegistering = true;
   tmaHaptic('medium');
   const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
     || myCabinetProfile
@@ -1860,10 +1863,15 @@ async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
   } catch (err) {
     tmaHaptic('error');
     toast('Ошибка регистрации: ' + (err.message || 'попробуйте позже'), 'error');
+  } finally {
+    isTmaRegistering = false;
   }
 }
 
+let isTmaUnregistering = false;
 async function handleTmaUnregisterEvent(eventId) {
+  if (isTmaUnregistering) return;
+  isTmaUnregistering = true;
   tmaHaptic('medium');
   const player = state.players.find(p => Number(p.id) === Number(currentUser?.playerId))
     || myCabinetProfile
@@ -1888,6 +1896,8 @@ async function handleTmaUnregisterEvent(eventId) {
   } catch (err) {
     tmaHaptic('error');
     toast('Ошибка отмены: ' + (err.message || 'попробуйте позже'), 'error');
+  } finally {
+    isTmaUnregistering = false;
   }
 }
 

@@ -236,7 +236,23 @@ test('EventOperations: registerForEvent and unregisterFromEvent manage registrat
   assert.equal(regs[0].playerId, player.id);
   assert.equal(regs[0].desiredPlace, 1);
   assert.equal(regs[0].officerId, 'general-rex', 'Auto-selection should skip maxed Nathon and pick unmaxed Rex');
-  assert.ok(dispatched.some(d => d.key === 'staff_event_registration'));
+  const regNotifs = dispatched.filter(d => d.key === 'staff_event_registration');
+  assert.equal(regNotifs.length, 1);
+  assert.equal(regNotifs[0].data.eventId, ev.id);
+  assert.equal(regNotifs[0].data.playerId, player.id);
+  assert.ok(regNotifs[0].data.link.includes(`#event/${ev.id}`), 'Link should point directly to event');
+
+  // Calling registerForEvent again with unchanged place/officer should NOT dispatch duplicate notification
+  const dupRes = await eventOps.registerForEvent({
+    eventId: ev.id,
+    playerId: player.id,
+    desiredPlace: 1,
+    officerId: 'general-rex',
+    user
+  });
+  assert.equal(dupRes.ok, true);
+  const regNotifsAfterDup = dispatched.filter(d => d.key === 'staff_event_registration');
+  assert.equal(regNotifsAfterDup.length, 1, 'Should NOT dispatch duplicate notification for unchanged registration');
 
   // 1b. Attempt to register an officer with onlyPersonalPuzzles or special officer (Angel)
   const personalOff = db.addPlayerOfficer(player.id, { catalogId: 'angel', level: 100, onlyPersonalPuzzles: true });
