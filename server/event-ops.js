@@ -277,24 +277,36 @@ function createEventOperations({
       }
     }
 
+    const existingRegistrations = typeof db.getRegistrationsByEventId === 'function'
+      ? db.getRegistrationsByEventId(Number(eventId))
+      : (typeof db.getRegistrationsForEvent === 'function' ? db.getRegistrationsForEvent(Number(eventId)) : []);
+    const prevReg = (existingRegistrations || []).find(r => Number(r.playerId) === Number(targetSectorId));
+    const targetDesiredPlace = Number(desiredPlace) || 0;
+    const targetOfficerId = String(finalOfficerId || '');
+    const isUnchanged = prevReg &&
+      Number(prevReg.desiredPlace || 0) === targetDesiredPlace &&
+      String(prevReg.officerId || '') === targetOfficerId;
+
     db.registerForEvent({
       eventId: Number(eventId),
       playerId: targetSectorId,
-      officerId: String(finalOfficerId || ''),
-      desiredPlace: Number(desiredPlace) || 0
+      officerId: targetOfficerId,
+      desiredPlace: targetDesiredPlace
     });
 
-    // Notify staff
-    if (typeof dispatchNotification === 'function') {
+    // Notify staff only if registration is new or modified
+    if (!isUnchanged && typeof dispatchNotification === 'function') {
       try {
         const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
-        const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'Любое';
+        const placeStr = targetDesiredPlace > 0 ? `#${targetDesiredPlace}` : 'Любое';
         const baseUrl = resolveBaseUrl(req);
         dispatchNotification('staff_event_registration', {
+          eventId: Number(eventId),
+          playerId: targetSectorId,
           eventName: et?.name || `Событие #${eventId}`,
           sectorName: player.name || `Сектор #${player.id}`,
           desiredPlace: placeStr,
-          link: `${baseUrl}/#events`
+          link: `${baseUrl}/#event/${eventId}`
         }).catch(() => {});
       } catch (_) {}
     }

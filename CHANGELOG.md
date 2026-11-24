@@ -5,6 +5,21 @@
 
 ---
 
+## [3.52.1] - 2026-11-24
+
+### Исправлено (Fixed)
+- **Устранение спама и дублирования заявок на события в Telegram-чат офицеров**:
+  - `server/bot-controller.js`: удален дублирующий вызов `dispatchNotificationFn` при успешной обработке регистрации через `eventOps`, устранено дублирование сообщений при каждом нажатии.
+  - `server/event-ops.js` и `server/server.js`: добавлена проверка неизменности параметров заявки (`isUnchanged`). Если боец повторно выбирает то же место и того же офицера, отправка повторного уведомления в чат пропускается.
+  - `server/notification-engine.js`: внедрен механизм in-place редактирования сообщений (`editTelegramMessageText`) и дедупликации (`recentStaffRegistrations`). При изменении желаемого места бойцом в течение 3 минут бот не засоряет чат новыми сообщениями, а редактирует текст уже отправленной заявки на месте.
+  - `client/tma.js`: добавлены флаги `isTmaRegistering` и `isTmaUnregistering` для предотвращения параллельных повторных запросов при множественных нажатиях на кнопки в Telegram Mini App.
+- **Прямая ссылка на событие и интерактивная инлайн-кнопка для офицеров**:
+  - `server/server.js`: функция `getAppBaseUrl` расширена для корректного разрешения `telegram_webapp_url`, `app_base_url`, переменных окружения, заголовка `Host` входящих запросов (`lastKnownBaseUrl`) и fallback на `https://t.me/<bot_username>`. При сохранении настроек Telegram URL синхронизируется в `app_base_url`.
+  - `server/event-ops.js`, `server/server.js`, `server/bot-controller.js`: ссылки в уведомлениях `staff_event_registration` теперь ведут точечно на карточку конкретного события (`${baseUrl}/#event/${eventId}`) вместо корня `/events`.
+  - `server/notification-engine.js`: к уведомлениям `staff_event_registration` теперь автоматически прикрепляется инлайн-кнопка Telegram `[ 🔗 Открыть распределение мест ]` с прямым переходом к ивенту в трекере.
+
+---
+
 ## [3.52.0] - 2026-11-24
 
 ### Добавлено (Added)

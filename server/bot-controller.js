@@ -1374,27 +1374,41 @@ async function handleTelegramUpdate(update) {
           return { ok: true, action: 'reg_event', error: regRes.error };
         }
       } else {
+        const existingRegistrations = typeof db.getRegistrationsByEventId === 'function'
+          ? db.getRegistrationsByEventId(Number(eventId))
+          : (typeof db.getRegistrationsForEvent === 'function' ? db.getRegistrationsForEvent(Number(eventId)) : []);
+        const prevReg = (existingRegistrations || []).find(r => Number(r.playerId) === Number(player.id));
+        const targetDesiredPlace = Number(desiredPlace) || 0;
+        const targetOfficerId = String(officerId || '');
+        const isUnchanged = prevReg &&
+          Number(prevReg.desiredPlace || 0) === targetDesiredPlace &&
+          String(prevReg.officerId || '') === targetOfficerId;
+
         db.registerForEvent({
           eventId,
           playerId: player.id,
-          officerId,
-          desiredPlace
+          officerId: targetOfficerId,
+          desiredPlace: targetDesiredPlace
         });
-      }
 
-      try {
-        const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
-        const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'Любое';
-        const baseUrl = getAppBaseUrl(req);
-        dispatchNotificationFn('staff_event_registration', {
-          eventName: et?.name || `Событие #${eventId}`,
-          sectorName: player.name || `Сектор #${player.id}`,
-          desiredPlace: placeStr,
-          link: `${baseUrl}/#events`
-        }).catch(err => {
-          console.warn('[Notification] Error dispatching staff_event_registration from bot callback:', err.message);
-        });
-      } catch (_) {}
+        if (!isUnchanged && typeof dispatchNotificationFn === 'function') {
+          try {
+            const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
+            const placeStr = targetDesiredPlace > 0 ? `#${targetDesiredPlace}` : 'Любое';
+            const baseUrl = typeof getAppBaseUrl === 'function' ? getAppBaseUrl() : 'http://localhost:3000';
+            dispatchNotificationFn('staff_event_registration', {
+              eventId,
+              playerId: player.id,
+              eventName: et?.name || `Событие #${eventId}`,
+              sectorName: player.name || `Сектор #${player.id}`,
+              desiredPlace: placeStr,
+              link: `${baseUrl}/#event/${eventId}`
+            }).catch(err => {
+              console.warn('[Notification] Error dispatching staff_event_registration from bot callback:', err.message);
+            });
+          } catch (_) {}
+        }
+      }
 
       if (token) {
         const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'любое подходящее';

@@ -204,3 +204,89 @@ test('NotificationEngine: dispatchNotification routes to announcement channel an
   // Reset template back to default
   engine.resetTemplate('event_registration_opened');
 });
+
+test('NotificationEngine: staff_event_registration includes inline button, throttles duplicate, and edits in-place on change', async () => {
+  const sentMessages = [];
+  const editedMessages = [];
+  let messageIdCounter = 500;
+
+  const fakeTelegram = {
+    sendTelegramMessage: async (payload) => {
+      const msgId = ++messageIdCounter;
+      sentMessages.push({ ...payload, messageId: msgId });
+      return { ok: true, result: { message_id: msgId } };
+    },
+    editTelegramMessageText: async (payload) => {
+      editedMessages.push(payload);
+      return { ok: true, result: { message_id: payload.messageId } };
+    }
+  };
+
+  db.setAppSetting('telegram_bot_token', 'fake_token_123');
+  db.setAppSetting('telegram_staff_chat_id', '-100999888777');
+
+  const engine = createNotificationEngine({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    getAppBaseUrl: () => 'https://kow.example.com'
+  });
+
+  // 1. Initial registration for #1
+  const res1 = await engine.dispatchNotification('staff_event_registration', {
+    eventId: 42,
+    playerId: 10,
+    eventName: 'Мощные силы',
+    sectorName: 'Xolesik',
+    desiredPlace: '#1',
+    link: 'https://kow.example.com/#event/42'
+  });
+
+  assert.equal(res1.sent, true);
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].chatId, -100999888777);
+  assert.ok(sentMessages[0].text.includes('Xolesik'));
+  assert.ok(sentMessages[0].text.includes('#1'));
+  // Verifying inline keyboard with direct tracker link
+  assert.ok(sentMessages[0].replyMarkup, 'Should include replyMarkup');
+  assert.deepEqual(sentMessages[0].replyMarkup.inline_keyboard[0][0], {
+    text: '🔗 Открыть распределение мест',
+    url: 'https://kow.example.com/#event/42'
+  });
+
+  // 2. Duplicate registration with SAME desiredPlace within cooldown -> should be skipped
+  const res2 = await engine.dispatchNotification('staff_event_registration', {
+    eventId: 42,
+    playerId: 10,
+    eventName: 'Мощные силы',
+    sectorName: 'Xolesik',
+    desiredPlace: '#1',
+    link: 'https://kow.example.com/#event/42'
+  });
+
+  assert.equal(res2.sent, false);
+  assert.equal(res2.skipped, true);
+  assert.equal(res2.reason, 'duplicate_unchanged');
+  assert.equal(sentMessages.length, 1, 'No new message should be sent');
+
+  // 3. Changed desiredPlace to #3 within cooldown -> should edit existing message in-place
+  const res3 = await engine.dispatchNotification('staff_event_registration', {
+    eventId: 42,
+    playerId: 10,
+    eventName: 'Мощные силы',
+    sectorName: 'Xolesik',
+    desiredPlace: '#3',
+    link: 'https://kow.example.com/#event/42'
+  });
+
+  assert.equal(res3.sent, true);
+  assert.equal(res3.edited, true);
+  assert.equal(sentMessages.length, 1, 'No new message sent, edited previous');
+  assert.equal(editedMessages.length, 1);
+  assert.equal(editedMessages[0].messageId, sentMessages[0].messageId);
+  assert.ok(editedMessages[0].text.includes('#3'));
+  assert.deepEqual(editedMessages[0].replyMarkup.inline_keyboard[0][0], {
+    text: '🔗 Открыть распределение мест',
+    url: 'https://kow.example.com/#event/42'
+  });
+});

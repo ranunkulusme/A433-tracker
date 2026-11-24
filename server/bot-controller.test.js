@@ -142,11 +142,13 @@ test('TelegramBotController: routes RSVP callback query via eventOps', async () 
   };
 
   const eventOps = createEventOperations({ db, logic, telegram: fakeTelegram });
+  const dispatchedBotNotifs = [];
   const botCtrl = createTelegramBotController({
     db,
     logic,
     telegram: fakeTelegram,
-    eventOps
+    eventOps,
+    dispatchNotification: async (k, d) => dispatchedBotNotifs.push({ k, d })
   });
 
   const uRes = db.registerUser({ username: 'rsvp_hero', password: 'password123' });
@@ -198,11 +200,13 @@ test('TelegramBotController: routes event registration and unregistration callba
   };
 
   const eventOps = createEventOperations({ db, logic, telegram: fakeTelegram });
+  const dispatchedBotNotifs = [];
   const botCtrl = createTelegramBotController({
     db,
     logic,
     telegram: fakeTelegram,
-    eventOps
+    eventOps,
+    dispatchNotification: async (k, d) => dispatchedBotNotifs.push({ k, d })
   });
 
   const uRes = db.registerUser({ username: 'reg_hero', password: 'password123' });
@@ -242,6 +246,7 @@ test('TelegramBotController: routes event registration and unregistration callba
   assert.equal(regs.length, 1);
   assert.equal(regs[0].playerId, player.id);
   assert.equal(regs[0].officerId, 'general-rex');
+  assert.equal(dispatchedBotNotifs.length, 0, 'Bot controller should not call dispatchNotification a second time when eventOps handles registration');
 
   // Unregister
   const unregUpdate = {
@@ -274,11 +279,13 @@ test('TelegramBotController: routes event result submission via eventOps and awa
   };
 
   const eventOps = createEventOperations({ db, logic, telegram: fakeTelegram });
+  const dispatchedBotNotifs = [];
   const botCtrl = createTelegramBotController({
     db,
     logic,
     telegram: fakeTelegram,
-    eventOps
+    eventOps,
+    dispatchNotification: async (k, d) => dispatchedBotNotifs.push({ k, d })
   });
 
   const uRes = db.registerUser({ username: 'result_hero', password: 'password123' });
