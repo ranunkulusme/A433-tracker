@@ -1794,6 +1794,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/events' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
+      if (body.dateFrom) body.dateFrom = String(body.dateFrom).slice(0, 10);
+      if (body.dateTo) body.dateTo = String(body.dateTo).slice(0, 10);
       const isNew = !body.id;
 
       // Idempotent deduplication for rapid double-clicks on event creation
@@ -2063,6 +2065,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (eventMatch && req.method === 'PUT') {
       if (!requirePermission(req, res, 'manage_events')) return;
+      if (body.dateFrom) body.dateFrom = String(body.dateFrom).slice(0, 10);
+      if (body.dateTo) body.dateTo = String(body.dateTo).slice(0, 10);
       const eventId = Number(eventMatch[1]);
       const prevEvent = db.getEventById(eventId);
       const prevAssignments = prevEvent?.assignments || [];

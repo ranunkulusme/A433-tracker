@@ -235,6 +235,10 @@ test('allows r3 result submission only after next UTC midnight when empty', () =
   event.assignments[0].playerId = 9;
   assert.equal(canR3SubmitResult({ event, playerId: 7, place: 1, nowIso: '2026-06-26T00:00:00Z' }), false);
   assert.equal(canR3SubmitResult({ event, place: 1, nowIso: '2026-06-26T00:00:00Z', players: [{ id: 7 }] }), true);
+
+  // When dateTo contains timestamp from TMA or external source
+  const eventWithTimestamp = { dateTo: '2026-06-25T14:30', assignments: [{ place: 1, playerId: null }] };
+  assert.equal(canR3SubmitResult({ event: eventWithTimestamp, place: 1, nowIso: '2026-06-26T00:00:00Z' }), true);
 });
 
 test('returns officer star tooltip costs for 5 star levels', () => {

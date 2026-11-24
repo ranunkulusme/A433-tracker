@@ -1209,10 +1209,11 @@
   }
 
   function canR3SubmitResult({ event, place, nowIso, players=null }) {
-    const deadline = new Date(`${event.dateTo}T00:00:00Z`);
+    const rawTo = String(event.dateTo || '').split('T')[0];
+    const deadline = new Date(`${rawTo}T00:00:00Z`);
     deadline.setUTCDate(deadline.getUTCDate() + 1);
     const assignment = (event.assignments || []).find(item => item.place === place);
-    const assignedPlayerExists = assignment?.playerId && (!players || players.some(player => player.id === assignment.playerId));
+    const assignedPlayerExists = assignment?.playerId && (!players || players.some(player => player && player.id === assignment.playerId));
     return new Date(nowIso) >= deadline && !assignedPlayerExists;
   }
 

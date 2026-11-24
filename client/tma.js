@@ -2177,8 +2177,8 @@ function openTmaEventEditor(eventId = null) {
 
     const fromDate = ev.startDate || ev.dateStart || ev.dateFrom;
     const toDate = ev.endDate || ev.dateEnd || ev.dateTo;
-    dateFromInput.value = fromDate ? new Date(fromDate).toISOString().slice(0, 16) : '';
-    dateToInput.value = toDate ? new Date(toDate).toISOString().slice(0, 16) : '';
+    dateFromInput.value = fromDate ? String(fromDate).slice(0, 10) : '';
+    dateToInput.value = toDate ? String(toDate).slice(0, 10) : '';
     noteInput.value = ev.note || '';
     if (deleteBtn) deleteBtn.style.display = 'block';
 
@@ -2196,10 +2196,9 @@ function openTmaEventEditor(eventId = null) {
     title.textContent = '✨ Создать событие';
     const now = new Date();
     const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
-    tomorrow.setUTCHours(0, 0, 0, 0);
     const dayAfter = new Date(tomorrow.getTime() + 48 * 3600 * 1000);
-    dateFromInput.value = tomorrow.toISOString().slice(0, 16);
-    dateToInput.value = dayAfter.toISOString().slice(0, 16);
+    dateFromInput.value = tomorrow.toISOString().slice(0, 10);
+    dateToInput.value = dayAfter.toISOString().slice(0, 10);
     noteInput.value = '';
     if (deleteBtn) deleteBtn.style.display = 'none';
 
@@ -2346,8 +2345,10 @@ async function runTmaEventAutopick() {
 async function submitTmaEventEditor() {
   tmaHaptic('medium');
   const typeId = Number(document.getElementById('tma-ee-type').value);
-  const dateFrom = document.getElementById('tma-ee-date-from').value;
-  const dateTo = document.getElementById('tma-ee-date-to').value;
+  const rawDateFrom = document.getElementById('tma-ee-date-from').value;
+  const rawDateTo = document.getElementById('tma-ee-date-to').value;
+  const dateFrom = String(rawDateFrom || '').slice(0, 10);
+  const dateTo = String(rawDateTo || '').slice(0, 10);
   const note = document.getElementById('tma-ee-note').value.trim();
 
   if (!typeId) { toast('Выберите тип события', 'error'); return; }
@@ -2356,13 +2357,23 @@ async function submitTmaEventEditor() {
   const saveBtn = document.getElementById('tma-ee-save-btn');
   if (saveBtn) saveBtn.disabled = true;
 
+  const existingEvent = tmaEditEventId ? (state.events || []).find(e => Number(e.id) === Number(tmaEditEventId)) : null;
+  const existingAssignments = existingEvent?.assignments || [];
+
   const assignments = tmaEventEditorPlaces
     .filter(p => p.playerId)
-    .map(p => ({
-      place: p.place,
-      playerId: Number(p.playerId),
-      actualCoupons: p.coupons || 0
-    }));
+    .map(p => {
+      const prev = existingAssignments.find(a => Number(a.place) === Number(p.place) && Number(a.playerId) === Number(p.playerId));
+      const player = (state.players || []).find(pl => Number(pl.id) === Number(p.playerId));
+      const fallbackOfficerId = (player?.officers && player.officers.length > 0) ? player.officers[0].id : null;
+      return {
+        ...(prev || {}),
+        place: p.place,
+        playerId: Number(p.playerId),
+        officerId: prev?.officerId || fallbackOfficerId,
+        actualCoupons: p.coupons || (prev?.actualCoupons ?? 0)
+      };
+    });
 
   const payload = {
     ...(tmaEditEventId ? { id: tmaEditEventId } : {}),
