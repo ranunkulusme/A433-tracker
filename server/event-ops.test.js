@@ -219,7 +219,10 @@ test('EventOperations: registerForEvent and unregisterFromEvent manage registrat
   const et = db.saveEventType({ name: 'Война королей', places: [{ place: 1, coupons: 20000 }] });
   const ev = db.saveEvent({ typeId: et.id, dateFrom: '2026-12-01', dateTo: '2026-12-03' });
 
-  // 1. Register
+  // 1. Register without officerId: should automatically select optimal unmaxed officer over maxed first officer
+  const off1 = db.addPlayerOfficer(player.id, { catalogId: 'admiral-nathon', name: 'Нейтон', level: 180, stars: 5, skills: [5, 5, 5, 5] });
+  const off2 = db.addPlayerOfficer(player.id, { catalogId: 'general-rex', name: 'Рекс', level: 100, stars: 3, skills: [3, 2, 1, 1] });
+
   const regRes = await eventOps.registerForEvent({
     eventId: ev.id,
     playerId: player.id,
@@ -232,6 +235,7 @@ test('EventOperations: registerForEvent and unregisterFromEvent manage registrat
   assert.equal(regs.length, 1);
   assert.equal(regs[0].playerId, player.id);
   assert.equal(regs[0].desiredPlace, 1);
+  assert.equal(regs[0].officerId, 'general-rex', 'Auto-selection should skip maxed Nathon and pick unmaxed Rex');
   assert.ok(dispatched.some(d => d.key === 'staff_event_registration'));
 
   // 1b. Attempt to register an officer with onlyPersonalPuzzles or special officer (Angel)

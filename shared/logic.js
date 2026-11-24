@@ -3220,6 +3220,163 @@
 
   const getEventEligibleOfficers = getSimulatorEligibleOfficers;
 
+  function isOfficerMaxed(officer, catalogItem, player, eventDate) {
+    if (!officer) return false;
+    if (Boolean(officer.isMaxed)) return true;
+
+    const stars = Math.max(0, Number(officer.stars || 0));
+    const level = Math.max(0, Number(officer.level || 0));
+    const skills = Array.isArray(officer.skills) ? officer.skills.map(s => Number(s) || 1) : [1, 1, 1, 1];
+    const isSkillsMaxed = skills.length >= 4 && skills.every(s => s >= 5);
+
+    if (stars >= 5 && level >= MAX_LEVEL && isSkillsMaxed) {
+      return true;
+    }
+
+    if (catalogItem) {
+      const def = calculateOfficerDeficit({
+        officer,
+        catalogItem,
+        player: player || {},
+        targetLevel: MAX_LEVEL,
+        today: eventDate || new Date().toISOString().slice(0, 10),
+        includeStock: true,
+      });
+      if (def && def.deficitCoupons !== undefined && def.deficitCoupons <= 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function selectOptimalEventOfficer({ player, catalog = [], eventDate } = {}) {
+    if (!player || !Array.isArray(player.officers) || player.officers.length === 0) {
+      return {
+        officer: null,
+        officerId: '',
+        deficitCoupons: 0,
+        isTarget: false,
+        isMaxed: false,
+        isAllMaxed: false,
+      };
+    }
+
+    const catList = Array.isArray(catalog) && catalog.length ? catalog : DEFAULT_OFFICERS;
+    const catMap = new Map(catList.map(c => [String(c.id), c]));
+    const today = eventDate || new Date().toISOString().slice(0, 10);
+
+    const eligibleOfficers = player.officers.filter(o => isOfficerEligibleForEvents(o, catList));
+    if (eligibleOfficers.length === 0) {
+      return {
+        officer: null,
+        officerId: '',
+        deficitCoupons: 0,
+        isTarget: false,
+        isMaxed: false,
+        isAllMaxed: false,
+      };
+    }
+
+    const candidates = eligibleOfficers.map(o => {
+      const cat = catMap.get(String(o.catalogId || o.catalog_id || o.id)) || {
+        id: o.catalogId || o.id,
+        name: o.name || 'Офицер',
+        generation: 7,
+        couponPerPuzzle: 500,
+        type: 'Пехота',
+      };
+
+      const maxed = isOfficerMaxed(o, cat, player, today);
+      let defCoupons = 0;
+      let defDetails = null;
+
+      if (!maxed) {
+        defDetails = calculateOfficerDeficit({
+          officer: o,
+          catalogItem: cat,
+          player,
+          targetLevel: MAX_LEVEL,
+          today,
+          includeStock: true,
+        });
+        defCoupons = Math.max(0, Number(defDetails?.deficitCoupons || 0));
+      }
+
+      const isTarget = Boolean(
+        o.isTarget ||
+        o.is_target ||
+        o.priority ||
+        (player.targetOfficerId && String(player.targetOfficerId) === String(o.id)) ||
+        (player.customTargetId && String(player.customTargetId) === String(o.id))
+      );
+
+      return {
+        officer: o,
+        officerId: String(cat.id || o.catalogId || o.id),
+        catalogItem: cat,
+        generation: Number(cat.generation) || 0,
+        level: Number(o.level) || 0,
+        stars: Number(o.stars) || 0,
+        isMaxed: maxed || defCoupons <= 0,
+        isTarget,
+        deficitCoupons: defCoupons,
+        deficitDetails: defDetails,
+      };
+    });
+
+    // Priority 1: explicitly designated target officer if unmaxed
+    const targetCandidate = candidates.find(c => c.isTarget && !c.isMaxed && c.deficitCoupons > 0);
+    if (targetCandidate) {
+      return {
+        officer: targetCandidate.officer,
+        officerId: targetCandidate.officerId,
+        deficitCoupons: targetCandidate.deficitCoupons,
+        isTarget: true,
+        isMaxed: false,
+        isAllMaxed: false,
+      };
+    }
+
+    // Priority 2: unmaxed officers with positive deficit
+    const unmaxedCandidates = candidates.filter(c => !c.isMaxed && c.deficitCoupons > 0);
+    if (unmaxedCandidates.length > 0) {
+      unmaxedCandidates.sort((a, b) => {
+        if (b.generation !== a.generation) return b.generation - a.generation;
+        if (b.deficitCoupons !== a.deficitCoupons) return b.deficitCoupons - a.deficitCoupons;
+        if (b.level !== a.level) return b.level - a.level;
+        return String(a.officer.name || '').localeCompare(String(b.officer.name || ''));
+      });
+
+      const best = unmaxedCandidates[0];
+      return {
+        officer: best.officer,
+        officerId: best.officerId,
+        deficitCoupons: best.deficitCoupons,
+        isTarget: false,
+        isMaxed: false,
+        isAllMaxed: false,
+      };
+    }
+
+    // Priority 3 (Fallback): All eligible officers are maxed out
+    const fallbackList = [...candidates].sort((a, b) => {
+      if (b.generation !== a.generation) return b.generation - a.generation;
+      if (b.level !== a.level) return b.level - a.level;
+      return String(a.officer.name || '').localeCompare(String(b.officer.name || ''));
+    });
+
+    const fallback = fallbackList[0];
+    return {
+      officer: fallback ? fallback.officer : null,
+      officerId: fallback ? fallback.officerId : '',
+      deficitCoupons: 0,
+      isTarget: Boolean(fallback && fallback.isTarget),
+      isMaxed: true,
+      isAllMaxed: true,
+    };
+  }
+
   function collectUniqueOfficers(catalog = [], players = []) {
     const map = new Map();
     const catalogById = new Map();
@@ -4862,6 +5019,8 @@
     isOfficerEligibleForEvents,
     getSimulatorEligibleOfficers,
     getEventEligibleOfficers,
+    isOfficerMaxed,
+    selectOptimalEventOfficer,
     USER_PERMISSIONS,
     PERMISSION_PRESETS,
     hasUserPermission,

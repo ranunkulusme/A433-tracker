@@ -209,7 +209,10 @@ test('TelegramBotController: routes event registration and unregistration callba
   const player = db.createPlayer({
     userId: uRes.userId,
     name: 'Sector Reg',
-    officers: [{ id: 'off_1', name: 'Белла', skills: [5, 5, 5, 5], stars: 5 }]
+    officers: [
+      { id: 'off_1', name: 'Белла', catalogId: 'admiral-nathon', level: 180, skills: [5, 5, 5, 5], stars: 5 },
+      { id: 'off_2', name: 'Рекс', catalogId: 'general-rex', level: 100, skills: [2, 2, 2, 2], stars: 2 }
+    ]
   });
   db.bindUserTelegram(uRes.userId, 555666, 'reg_hero');
 
@@ -238,6 +241,7 @@ test('TelegramBotController: routes event registration and unregistration callba
   let regs = db.getRegistrationsByEventId(ev.id);
   assert.equal(regs.length, 1);
   assert.equal(regs[0].playerId, player.id);
+  assert.equal(regs[0].officerId, 'general-rex');
 
   // Unregister
   const unregUpdate = {

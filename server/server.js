@@ -1946,9 +1946,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       const { officerId, desiredPlace } = body;
-      if (officerId) {
-        const off = (player.officers || []).find(o => String(o.id) === String(officerId) || String(o.catalogId) === String(officerId));
-        const catalog = db.getCatalog ? db.getCatalog() : [];
+      let finalOfficerId = officerId;
+      const catalog = db.getCatalog ? db.getCatalog() : [];
+      if (finalOfficerId) {
+        const off = (player.officers || []).find(o => String(o.id) === String(finalOfficerId) || String(o.catalogId) === String(finalOfficerId));
         if (off) {
           const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
             ? logic.isOfficerEligibleForEvents(off, catalog)
@@ -1957,7 +1958,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
             return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
           }
         } else {
-          const catItem = (catalog || []).find(c => c.id === String(officerId));
+          const catItem = (catalog || []).find(c => c.id === String(finalOfficerId));
           if (catItem) {
             const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
               ? logic.isOfficerEligibleForEvents({ catalogId: catItem.id }, catalog)
@@ -1967,12 +1968,18 @@ function createRequestHandler(staticDir, s3Manager = null) {
             }
           }
         }
+      } else {
+        if (typeof logic.selectOptimalEventOfficer === 'function') {
+          const ev = db.getEventById(eventId);
+          const optimal = logic.selectOptimalEventOfficer({ player, catalog, eventDate: ev?.dateFrom });
+          finalOfficerId = optimal.officerId || (optimal.officer ? (optimal.officer.catalogId || optimal.officer.id) : '');
+        }
       }
 
       const reg = db.registerForEvent({
         eventId,
         playerId: targetSectorId,
-        officerId: officerId || '',
+        officerId: finalOfficerId || '',
         desiredPlace: desiredPlace !== undefined ? Number(desiredPlace) : 0
       });
 

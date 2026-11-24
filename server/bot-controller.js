@@ -1339,11 +1339,20 @@ async function handleTelegramUpdate(update) {
 
       const pOfficers = Array.isArray(player.officers) ? player.officers : [];
       const catalog = db.getCatalog ? db.getCatalog() : [];
-      const eligibleOfficers = typeof logic.getEventEligibleOfficers === 'function'
-        ? logic.getEventEligibleOfficers(pOfficers, catalog)
-        : pOfficers.filter(o => !Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles));
-      const officer = eligibleOfficers[0] || null;
-      const officerId = (officer ? (officer.catalogId || officer.id) : '') || '';
+      let officer = null;
+      let officerId = '';
+      let optimal = null;
+      if (typeof logic.selectOptimalEventOfficer === 'function') {
+        optimal = logic.selectOptimalEventOfficer({ player, catalog, eventDate: ev.dateFrom });
+        officer = optimal.officer || null;
+        officerId = optimal.officerId || '';
+      } else {
+        const eligibleOfficers = typeof logic.getEventEligibleOfficers === 'function'
+          ? logic.getEventEligibleOfficers(pOfficers, catalog)
+          : pOfficers.filter(o => !Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles));
+        officer = eligibleOfficers[0] || null;
+        officerId = (officer ? (officer.catalogId || officer.id) : '') || '';
+      }
 
       if (eventOps && typeof eventOps.registerForEvent === 'function') {
         const regRes = await eventOps.registerForEvent({
@@ -1389,10 +1398,19 @@ async function handleTelegramUpdate(update) {
 
       if (token) {
         const placeStr = desiredPlace > 0 ? `#${desiredPlace}` : 'любое подходящее';
+        let alertMsg = `✅ Заявка принята! Желаемое место: ${placeStr}`;
+        if (optimal && optimal.officer) {
+          const offName = optimal.officer.name || 'Офицер';
+          if (optimal.isAllMaxed) {
+            alertMsg += ` · Офицер: ${offName} (все прокачаны!)`;
+          } else {
+            alertMsg += ` · Офицер: ${offName}`;
+          }
+        }
         await telegram.answerTelegramCallback({
           token,
           callbackQueryId: cqId,
-          text: `✅ Заявка принята! Желаемое место: ${placeStr}`
+          text: alertMsg
         });
 
         if (chatMsg?.chat?.id && chatMsg?.message_id) {
