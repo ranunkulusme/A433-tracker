@@ -326,3 +326,49 @@ test('TelegramBotController: routes event result submission via eventOps and awa
   const updatedPlayer = db.getPlayerById(player.id);
   assert.equal(updatedPlayer.stock.coupons, 26000);
 });
+
+test('TelegramBotController: photo OCR via ocrAdapter recognizes chest-only & star-II stock without losing chests', async () => {
+  const { createOcrAdapter } = require('./ocr-adapter.js');
+  const sentMessages = [];
+  const fakeTelegram = {
+    getTelegramFile: async () => ({ ok: true, result: { file_path: 'photos/chests.png' } }),
+    downloadTelegramFile: async () => Buffer.from('FAKE_PNG'),
+    sendTelegramMessage: async (payload) => { sentMessages.push(payload); return { ok: true }; }
+  };
+  const ocrAdapter = createOcrAdapter({
+    customRunner: async () => ({
+      leftText: 'Сундук медалей\nлегендарного\nофицера\nВ наличии: 9',
+      rightText: 'Легендарная звезда II\n420\nВ наличии: 44'
+    })
+  });
+  const botCtrl = createTelegramBotController({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    ocrAdapter
+  });
+
+  const uRes = db.registerUser({ username: 'chest_ocr_user', password: 'password123' });
+  db.createPlayer({
+    userId: uRes.userId,
+    name: 'Sector Chest OCR',
+    stock: { coupons: 1000, chests: 1, legendaryStars2: 10 }
+  });
+  db.bindUserTelegram(uRes.userId, 888999, 'chest_ocr_user');
+  db.setAppSetting('telegram_bot_token', 'fake_token');
+
+  const res = await botCtrl.handleUpdate({
+    update_id: 2001,
+    message: {
+      chat: { id: 888999, type: 'private' },
+      from: { id: 888999, username: 'chest_ocr_user' },
+      photo: [{ file_id: 'f_chest_1' }]
+    }
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.ocr, true);
+  assert.equal(res.recognizedStock.chests, 9);
+  assert.equal(res.recognizedStock.legendaryStars2, 44);
+  assert.ok(sentMessages.some(m => m.text.includes('Сундуки медалей') && m.text.includes('9')));
+});

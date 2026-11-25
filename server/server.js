@@ -14,8 +14,11 @@ const { createOfficerProgression } = require('./officer-progression.js');
 const { createNotificationEngine } = require('./notification-engine.js');
 const { createAuthGuard } = require('./auth-guard.js');
 const { createSeasonPlanner } = require('./season-planner.js');
+const { createOcrAdapter } = require('./ocr-adapter.js');
+const telegramFormats = require('./telegram-formats.js');
 
 const authGuard = createAuthGuard({ db, logic });
+const ocrAdapter = createOcrAdapter();
 
 let APP_VERSION = '3.21.0';
 try {
@@ -38,150 +41,16 @@ const MIME_TYPES = {
   '.wasm': 'application/wasm'
 };
 
-let customOcrRunner = null;
 function setServerOcrRunner(runner) {
-  customOcrRunner = runner;
+  ocrAdapter.setRunner(runner);
 }
 
 async function runOcrOnImageBuffer(imageBuffer, options = {}) {
-  if (typeof customOcrRunner === 'function') {
-    try {
-      const res = await customOcrRunner(imageBuffer, options);
-      if (res === null) return { success: false, error: 'ocr_null' };
-      if (typeof res === 'string') return { success: true, text: res };
-      if (res && typeof res.text === 'string') return { success: true, text: res.text, stock: res.stock };
-      if (res && res.stock) return { success: true, text: '', stock: res.stock };
-      if (res && (res.coupons !== undefined || res.puzzles !== undefined || res.starCoupons !== undefined)) {
-        return { success: true, text: '', stock: res };
-      }
-      if (res && typeof res === 'object') return { success: true, text: '', ...res };
-      return { success: true, text: '' };
-    } catch (err) {
-      console.warn('[OCR] Custom OCR runner error:', err.message);
-      return { success: false, error: 'ocr_error', message: err.message };
-    }
-  }
-
-  const { execFile } = require('node:child_process');
-  const os = require('node:os');
-  let ext = '.png';
-  if (imageBuffer && imageBuffer.length >= 4) {
-    if (imageBuffer[0] === 0xFF && imageBuffer[1] === 0xD8 && imageBuffer[2] === 0xFF) {
-      ext = '.jpg';
-    } else if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50 && imageBuffer[2] === 0x4E && imageBuffer[3] === 0x47) {
-      ext = '.png';
-    } else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49 && imageBuffer[2] === 0x46 && imageBuffer[3] === 0x46) {
-      ext = '.webp';
-    }
-  }
-  const tempPath = path.join(os.tmpdir(), `ocr_scan_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-  const filesToCleanup = [tempPath];
-
-  try {
-    await fs.promises.writeFile(tempPath, imageBuffer);
-    const ocrText = await new Promise((resolve, reject) => {
-      execFile('tesseract', [tempPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 25000 }, (error, stdout) => {
-        if (error) return reject(error);
-        resolve(stdout || '');
-      });
-    });
-
-    let extraText = '';
-    // Если доступен ImageMagick (magick/convert), делаем сплит по колонкам (left 52% и right 52%)
-    // Это исключает смешивание строк между двумя колонками в складских сетках и магазинах
-    try {
-      const leftPath = path.join(os.tmpdir(), `ocr_col_left_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-      const rightPath = path.join(os.tmpdir(), `ocr_col_right_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-      filesToCleanup.push(leftPath, rightPath);
-
-      const magickBin = await new Promise(res => {
-        execFile('which', ['magick'], (err, stdout) => {
-          if (!err && stdout && stdout.trim()) return res('magick');
-          execFile('which', ['convert'], (err2, stdout2) => {
-            if (!err2 && stdout2 && stdout2.trim()) return res('convert');
-            res(null);
-          });
-        });
-      });
-
-      if (magickBin) {
-        await Promise.all([
-          new Promise((resolveCrop) => {
-            execFile(magickBin, [tempPath, '-gravity', 'West', '-crop', '56%x100%+0+0', leftPath], { timeout: 10000 }, () => resolveCrop());
-          }),
-          new Promise((resolveCrop) => {
-            execFile(magickBin, [tempPath, '-gravity', 'East', '-crop', '56%x100%+0+0', rightPath], { timeout: 10000 }, () => resolveCrop());
-          })
-        ]);
-
-        const [leftOcr, rightOcr] = await Promise.all([
-          new Promise((resOcr) => {
-            execFile('tesseract', [leftPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 20000 }, (e, out) => resOcr(out || ''));
-          }),
-          new Promise((resOcr) => {
-            execFile('tesseract', [rightPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 20000 }, (e, out) => resOcr(out || ''));
-          })
-        ]);
-
-        if (leftOcr || rightOcr) {
-          extraText = `\n\n=== LEFT COLUMN ===\n${leftOcr}\n\n=== RIGHT COLUMN ===\n${rightOcr}`;
-        }
-      }
-    } catch (_) {
-      // Обработка колонок опциональна — если magick недоступен, продолжаем с полным текстом
-    }
-
-    return { success: true, text: (ocrText || '') + extraText };
-  } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.message?.includes('not found'))) {
-      return { success: false, error: 'tesseract_not_installed', message: 'Tesseract OCR не установлен на сервере' };
-    }
-    return { success: false, error: 'ocr_failed', message: err.message || 'Ошибка распознавания текста' };
-  } finally {
-    for (const f of filesToCleanup) {
-      fs.promises.unlink(f).catch(() => {});
-    }
-  }
+  return ocrAdapter.recognizeBuffer(imageBuffer, options);
 }
 
 async function tryServerOcr(imageBufferOrPath) {
-  if (typeof customOcrRunner === 'function') {
-    try {
-      const direct = await customOcrRunner(imageBufferOrPath);
-      if (direct === null) return null;
-      if (direct && (direct.coupons !== undefined || direct.puzzles !== undefined || direct.starCoupons !== undefined)) {
-        return direct;
-      }
-      if (direct && direct.stock) {
-        return direct.stock;
-      }
-      if (typeof direct === 'string') {
-        const parsed = logic.parseWarehouseScreenshotText(direct);
-        return parsed && parsed.isWarehouse ? parsed.stock : null;
-      }
-    } catch (err) {
-      console.warn('[OCR] Custom OCR runner error:', err.message);
-      return null;
-    }
-  }
-
-  let buf = imageBufferOrPath;
-  if (typeof imageBufferOrPath === 'string') {
-    try {
-      buf = await fs.promises.readFile(imageBufferOrPath);
-    } catch (_) {
-      return null;
-    }
-  }
-  const ocrRes = await runOcrOnImageBuffer(buf);
-  if (!ocrRes || !ocrRes.success) return null;
-  if (ocrRes.stock) return ocrRes.stock;
-  if (!ocrRes.text || !ocrRes.text.trim()) return null;
-  const parsedStock = logic.parseWarehouseScreenshotText(ocrRes.text);
-  if (parsedStock && parsedStock.stock && Object.keys(parsedStock.stock).length > 0) {
-    return parsedStock.stock;
-  }
-  return null;
+  return ocrAdapter.recognizeStock(imageBufferOrPath);
 }
 
 function sendJson(res, statusCode, data) {
@@ -367,26 +236,14 @@ function getAppBaseUrl(req = null) {
       lastKnownBaseUrl = `${proto}://${host}`;
     }
   }
-  const settingUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-  if (settingUrl && settingUrl.trim()) return settingUrl.trim().replace(/\/+$/, '');
-  if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
-  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
-  if (lastKnownBaseUrl) return lastKnownBaseUrl.replace(/\/+$/, '');
-  if (req && req.headers && req.headers.host) {
-    const proto = req.headers['x-forwarded-proto'] || 'http';
-    return `${proto}://${req.headers.host}`;
-  }
-  const botUsername = db.getAppSetting('telegram_bot_username');
-  if (botUsername && botUsername.trim()) {
-    return `https://t.me/${botUsername.trim().replace(/^@+/, '')}`;
-  }
-  return 'http://localhost:3000';
+  return db.resolveAppBaseUrl(req, lastKnownBaseUrl);
 }
 
 const notificationEngine = createNotificationEngine({
   db,
   logic,
   telegram,
+  telegramFormats,
   getAppBaseUrl
 });
 
@@ -413,6 +270,8 @@ const botController = createTelegramBotController({
   db,
   logic,
   telegram,
+  telegramFormats,
+  ocrAdapter,
   eventOps,
   notificationEngine,
   tryServerOcr,
@@ -463,7 +322,7 @@ async function syncTelegramBotInfoAndPolling() {
     }
 
     const rawWebAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-    const webAppUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
+    const webAppUrl = telegramFormats.formatTmaUrl ? telegramFormats.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
     if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
       telegram.setTelegramChatMenuButton(token, {
         text: 'KoW Tracker',
@@ -732,7 +591,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         if (rawInitData && typeof rawInitData === 'string' && regRes.userId) {
           const botToken = db.getAppSetting('telegram_bot_token');
           if (botToken) {
-            const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+            const val = authGuard.validateTelegramWebAppData(rawInitData, botToken);
             if (val && val.valid && val.user?.id) {
               db.bindUserTelegram(regRes.userId, val.user.id, val.user.username || '');
             }
@@ -759,7 +618,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
       }
 
-      const validation = logic.validateTelegramWebAppData(initData, botToken);
+      const validation = authGuard.validateTelegramWebAppData(initData, botToken);
       if (!validation.valid) {
         console.warn('[Telegram WebApp] Validation error:', validation.error);
         return sendError(res, 401, 'INVALID_TELEGRAM_DATA', `Ошибка валидации Telegram WebApp: ${validation.error}`);
@@ -853,7 +712,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         const rawBotToken = db.getAppSetting('telegram_bot_token');
         const botToken = rawBotToken ? String(rawBotToken).trim() : null;
         if (botToken) {
-          const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+          const val = authGuard.validateTelegramWebAppData(rawInitData, botToken);
           if (val && val.valid && val.user?.id) {
             db.bindUserTelegram(loginRes.user.id, val.user.id, val.user.username || '');
           }
@@ -1254,84 +1113,23 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 400, 'NO_IMAGES', 'Не переданы изображения для распознавания');
       }
 
-      let accumulated = { sector: {}, stock: {} };
-      let allRecognizedFields = [];
-      let allRawTexts = [];
-      let detectedTypes = [];
-      let processedCount = 0;
-      let lastError = null;
-
-      for (const imgItem of rawImages) {
-        let buf = null;
-        if (typeof imgItem === 'string') {
-          const match = imgItem.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/);
-          const base64Str = match ? match[1] : imgItem;
-          try {
-            buf = Buffer.from(base64Str, 'base64');
-          } catch (_) {
-            continue;
-          }
-        } else if (Buffer.isBuffer(imgItem)) {
-          buf = imgItem;
-        }
-
-        if (!buf || buf.length === 0) continue;
-
-        const ocrRes = await runOcrOnImageBuffer(buf);
-        if (!ocrRes.success) {
-          lastError = ocrRes;
-          continue;
-        }
-
-        const rawText = ocrRes.text || '';
-        if (rawText) {
-          allRawTexts.push(rawText);
-        }
-
-        if (ocrRes.stock && Object.keys(ocrRes.stock).length > 0) {
-          accumulated = logic.mergeScanResults(accumulated, {
-            isWarehouse: true,
-            stock: ocrRes.stock
-          });
-          detectedTypes.push('warehouse');
-          allRecognizedFields.push(...Object.keys(ocrRes.stock));
-          processedCount++;
-          continue;
-        }
-
-        const parsed = logic.parseSmartScanText(rawText);
-        detectedTypes.push(parsed.detectedType);
-        if (parsed.recognizedFields && parsed.recognizedFields.length > 0) {
-          allRecognizedFields.push(...parsed.recognizedFields);
-        }
-
-        const currentScan = {
-          isProfile: parsed.isProfile,
-          isWarehouse: parsed.isWarehouse,
-          sector: parsed.sector || {},
-          stock: parsed.stock || {},
-        };
-        accumulated = logic.mergeScanResults(accumulated, currentScan);
-        processedCount++;
+      const scanRes = await ocrAdapter.scanImages(rawImages, {
+        mode: body.mode === 'exchange' ? 'exchange' : 'smart'
+      });
+      if (!scanRes.success) {
+        return sendError(res, 500, scanRes.error || 'OCR_ERROR', scanRes.message || 'Ошибка распознавания');
       }
-
-      if (processedCount === 0 && lastError) {
-        return sendError(res, 500, lastError.error || 'OCR_ERROR', lastError.message || 'Ошибка распознавания');
-      }
-
-      const uniqueFields = Array.from(new Set(allRecognizedFields));
-      const hasRecognizedData = uniqueFields.length > 0;
-      const primaryType = detectedTypes.find(t => t !== 'unknown') || 'unknown';
 
       return sendJson(res, 200, {
         success: true,
-        detectedType: primaryType,
-        hasRecognizedData,
-        sector: accumulated.sector || {},
-        stock: accumulated.stock || {},
-        recognizedFields: uniqueFields,
-        imagesProcessed: processedCount,
-        rawText: allRawTexts.join('\n\n--- [След. скриншот] ---\n\n')
+        detectedType: scanRes.detectedType,
+        hasRecognizedData: scanRes.hasRecognizedData,
+        sector: scanRes.sector || {},
+        stock: scanRes.stock || {},
+        officers: scanRes.officers || [],
+        recognizedFields: scanRes.recognizedFields || [],
+        imagesProcessed: scanRes.imagesProcessed || 0,
+        rawText: (scanRes.rawTexts || []).join('\n\n--- [След. скриншот] ---\n\n')
       });
     }
 
@@ -2565,7 +2363,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
         const liveToken = db.getAppSetting('telegram_bot_token');
         if (liveToken && rawWebAppUrl && /^https:\/\//i.test(rawWebAppUrl)) {
-          const effectiveUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
+          const effectiveUrl = telegramFormats.formatTmaUrl ? telegramFormats.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
           telegram.setTelegramChatMenuButton(liveToken, {
             text: '🚀 KoW Tracker',
             url: effectiveUrl
@@ -2744,7 +2542,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!initData || typeof initData !== 'string') {
         return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
       }
-      const validation = logic.validateTelegramWebAppData(initData, botToken);
+      const validation = authGuard.validateTelegramWebAppData(initData, botToken);
       if (!validation.valid || !validation.user?.id) {
         return sendError(res, 400, 'INVALID_TELEGRAM_DATA', 'Ошибка валидации Telegram WebApp');
       }

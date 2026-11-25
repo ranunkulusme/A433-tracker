@@ -2420,6 +2420,26 @@ test('initDb auto-heals corrupted event date_from and date_to containing timesta
   }
 });
 
+test('db.resolveAppBaseUrl resolves configured settings, env, request Host, or fallback deterministically', () => {
+  const dbModule = require('./db.js');
+  const tempDbPath = path.join('/tmp', `test-kow-baseurl-${Date.now()}.db`);
+  try {
+    dbModule.initDb(tempDbPath);
+    dbModule.setAppSetting('telegram_webapp_url', 'https://kow.example.com/');
+    assert.equal(dbModule.resolveAppBaseUrl(), 'https://kow.example.com');
+
+    dbModule.setAppSetting('telegram_webapp_url', '');
+    dbModule.setAppSetting('telegram_bot_username', '@MyTestBot');
+    assert.equal(
+      dbModule.resolveAppBaseUrl({ headers: { host: 'app.alliance.org', 'x-forwarded-proto': 'https' } }),
+      'https://app.alliance.org'
+    );
+    assert.equal(dbModule.resolveAppBaseUrl(), 'https://t.me/MyTestBot');
+  } finally {
+    try { fs.unlinkSync(tempDbPath); } catch (_) {}
+  }
+});
+
 
 
 

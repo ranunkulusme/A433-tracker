@@ -9,11 +9,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { hasAnyStockValue } = require('./ocr-adapter.js');
 
 function createTelegramBotController({
   db,
   logic,
   telegram,
+  telegramFormats,
+  ocrAdapter,
   eventOps,
   notificationEngine,
   tryServerOcr,
@@ -26,6 +29,19 @@ function createTelegramBotController({
 
   const tg = telegram || require('./telegram.js');
   telegram = tg;
+  const tgFmt = telegramFormats || require('./telegram-formats.js');
+  const resolveBaseUrl = typeof getAppBaseUrl === 'function'
+    ? getAppBaseUrl
+    : (() => (typeof db.resolveAppBaseUrl === 'function' ? db.resolveAppBaseUrl() : 'http://localhost:3000'));
+  const recognizeStockFn = async (bufOrPath) => {
+    if (ocrAdapter && typeof ocrAdapter.recognizeStock === 'function') {
+      return ocrAdapter.recognizeStock(bufOrPath);
+    }
+    if (typeof tryServerOcr === 'function') {
+      return tryServerOcr(bufOrPath);
+    }
+    return null;
+  };
 
   const staleRemindersFn = (notificationEngine && typeof notificationEngine.checkStaleStockReminders === 'function')
     ? ((...args) => notificationEngine.checkStaleStockReminders(...args))
@@ -153,7 +169,7 @@ async function handleTelegramUpdate(update) {
         if (token) {
           const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
           const isStaff = authRes.user.rank === 'r4' || authRes.user.rank === 'r5';
-          const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+          const keyboard = tgFmt.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
           await telegram.sendTelegramMessage({
             token,
             chatId,
@@ -270,7 +286,7 @@ async function handleTelegramUpdate(update) {
         if (user) {
           const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
           const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
-          const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+          const keyboard = tgFmt.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
           await telegram.sendTelegramMessage({
             token,
             chatId,
@@ -329,7 +345,7 @@ async function handleTelegramUpdate(update) {
       const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
       const { targetOfficer, targetDeficit, deficitSummary } = getPlayerTargetOfficerDeficit(player);
 
-      const replyText = logic.formatTelegramMeMessage({
+      const replyText = tgFmt.formatTelegramMeMessage({
         user,
         player,
         freshness,
@@ -338,7 +354,7 @@ async function handleTelegramUpdate(update) {
         deficitSummary
       });
 
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+      const keyboard = tgFmt.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -376,7 +392,7 @@ async function handleTelegramUpdate(update) {
       const isPersonalOnly = Boolean(deficitDetails?.isOnlyPersonalPuzzles || deficitSummary?.isOnlyPersonalPuzzles);
       const daysEstimate = isPersonalOnly ? null : ((targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null));
 
-      const replyText = logic.formatTelegramDeficitMessage({
+      const replyText = tgFmt.formatTelegramDeficitMessage({
         player,
         targetOfficer: targetOfficer || 'Офицер',
         deficit: deficitDetails,
@@ -384,7 +400,7 @@ async function handleTelegramUpdate(update) {
         daysEstimate
       });
 
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+      const keyboard = tgFmt.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -445,15 +461,15 @@ async function handleTelegramUpdate(update) {
           .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
       }
 
-      const replyText = logic.formatTelegramEventsListMessage({
+      const replyText = tgFmt.formatTelegramEventsListMessage({
         events: eventsList,
         playerId: player?.id,
         mode
       });
 
-      const keyboard = logic.getTelegramEventsKeyboard
-        ? logic.getTelegramEventsKeyboard({ events: eventsList, mode })
-        : logic.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
+      const keyboard = tgFmt.getTelegramEventsKeyboard
+        ? tgFmt.getTelegramEventsKeyboard({ events: eventsList, mode })
+        : tgFmt.getTelegramMainMenuKeyboard({ isStaff: user.rank === 'r4' || user.rank === 'r5' });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -472,7 +488,7 @@ async function handleTelegramUpdate(update) {
       const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
       const isStaff = user && (user.rank === 'r4' || user.rank === 'r5');
       const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+      const keyboard = tgFmt.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
 
       if (token) {
         await telegram.sendTelegramMessage({
@@ -568,7 +584,7 @@ async function handleTelegramUpdate(update) {
         }
       });
 
-      const whoMsg = logic.formatTelegramWhoMessage({
+      const whoMsg = tgFmt.formatTelegramWhoMessage({
         player: targetPlayer,
         user: targetUser,
         freshness,
@@ -613,7 +629,7 @@ async function handleTelegramUpdate(update) {
       });
 
       staleList.sort((a, b) => b.days - a.days);
-      const staleMsg = logic.formatTelegramStaleReport({ stalePlayers: staleList });
+      const staleMsg = tgFmt.formatTelegramStaleReport({ stalePlayers: staleList });
 
       if (token) {
         await telegram.sendTelegramMessage({ token, chatId, text: staleMsg });
@@ -688,7 +704,7 @@ async function handleTelegramUpdate(update) {
 
       const pendingUsers = db.getPendingUsers ? db.getPendingUsers() : [];
 
-      const digestMsg = logic.formatTelegramDigestMessage({
+      const digestMsg = tgFmt.formatTelegramDigestMessage({
         totalSectors: allPlayers.length,
         freshnessStats,
         nextEvent: nextEvInfo,
@@ -702,7 +718,7 @@ async function handleTelegramUpdate(update) {
     }
 
     // E) /stock or /склад text command
-    const stockParsed = logic.parseTelegramStockCommand(text);
+    const stockParsed = tgFmt.parseTelegramStockCommand(text);
     if (stockParsed) {
       const fromId = msg.from?.id;
       const user = fromId ? resolveTelegramUser(fromId, msg.from?.username) : null;
@@ -757,7 +773,7 @@ async function handleTelegramUpdate(update) {
       });
 
       if (token) {
-        const replyText = logic.formatStockUpdateSuccessMessage(diff, after, {
+        const replyText = tgFmt.formatStockUpdateSuccessMessage(diff, after, {
           sectorName: player.name
         });
         await telegram.sendTelegramMessage({
@@ -837,9 +853,9 @@ async function handleTelegramUpdate(update) {
       }
 
       const caption = (msg.caption || '').trim();
-      let photoStockParsed = logic.parseTelegramStockCommand(caption);
+      let photoStockParsed = tgFmt.parseTelegramStockCommand(caption);
       if (!photoStockParsed && caption) {
-        photoStockParsed = logic.parseTelegramStockCommand('/stock ' + caption);
+        photoStockParsed = tgFmt.parseTelegramStockCommand('/stock ' + caption);
       }
 
       const before = player.stock || {};
@@ -871,7 +887,7 @@ async function handleTelegramUpdate(update) {
         });
 
         if (token) {
-          const replyText = logic.formatStockUpdateSuccessMessage(diff, after, {
+          const replyText = tgFmt.formatStockUpdateSuccessMessage(diff, after, {
             sectorName: player.name
           });
           await telegram.sendTelegramMessage({
@@ -886,10 +902,10 @@ async function handleTelegramUpdate(update) {
         // Try server-side OCR on downloaded screenshot
         let recognizedStock = null;
         if (downloadedFileBuf && downloadedFileBuf.length > 0) {
-          recognizedStock = await tryServerOcr(downloadedFileBuf);
+          recognizedStock = await recognizeStockFn(downloadedFileBuf);
         }
 
-        if (recognizedStock && (recognizedStock.coupons > 0 || recognizedStock.puzzles > 0 || recognizedStock.starCoupons > 0)) {
+        if (recognizedStock && hasAnyStockValue(recognizedStock)) {
           const recStockFull = {
             coupons: Number(recognizedStock.coupons) || 0,
             puzzles: Number(recognizedStock.puzzles) || 0,
@@ -897,7 +913,7 @@ async function handleTelegramUpdate(update) {
             legendaryStars1: Number(recognizedStock.legendaryStars1) || 0,
             legendaryStars2: Number(recognizedStock.legendaryStars2) || 0,
             legendaryStars3: Number(recognizedStock.legendaryStars3) || 0,
-            chests: before.chests || 0
+            chests: recognizedStock.chests !== undefined ? (Number(recognizedStock.chests) || 0) : (before.chests || 0)
           };
 
           const diff = logic.calculateStockDiff(before, recStockFull);
@@ -914,11 +930,11 @@ async function handleTelegramUpdate(update) {
           });
 
           if (token) {
-            const ocrMsg = logic.formatTelegramOcrConfirmationMessage({
+            const ocrMsg = tgFmt.formatTelegramOcrConfirmationMessage({
               player,
               recognizedStock: recStockFull
             });
-            const ocrKb = logic.getTelegramOcrConfirmationKeyboard(historyRecord.id);
+            const ocrKb = tgFmt.getTelegramOcrConfirmationKeyboard(historyRecord.id);
             await telegram.sendTelegramMessage({
               token,
               chatId,
@@ -949,7 +965,7 @@ async function handleTelegramUpdate(update) {
           });
 
           if (token) {
-            const fallbackKb = logic.getTelegramStockFallbackKeyboard();
+            const fallbackKb = tgFmt.getTelegramStockFallbackKeyboard();
             await telegram.sendTelegramMessage({
               token,
               chatId,
@@ -1000,7 +1016,7 @@ async function handleTelegramUpdate(update) {
       const player = (user.player_id ? db.getPlayerById(user.player_id) : null) || sectors[0];
       const isStaff = user.rank === 'r4' || user.rank === 'r5';
       const webAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url') || null;
-      const keyboard = logic.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
+      const keyboard = tgFmt.getTelegramMainMenuKeyboard({ isStaff, webAppUrl });
       const targetChatId = chatMsg?.chat?.id || fromId;
 
       if (data === 'cmd_menu') {
@@ -1018,7 +1034,7 @@ async function handleTelegramUpdate(update) {
       if (data === 'cmd_me') {
         const freshness = player?.stockUpdatedAt ? logic.getStockFreshness(player.stockUpdatedAt) : null;
         const { targetOfficer, targetDeficit, deficitSummary } = getPlayerTargetOfficerDeficit(player);
-        const replyText = logic.formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit, deficitSummary });
+        const replyText = tgFmt.formatTelegramMeMessage({ user, player, freshness, targetOfficer, targetDeficit, deficitSummary });
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
         }
@@ -1032,7 +1048,7 @@ async function handleTelegramUpdate(update) {
         const dailyCoupons = (daily?.coupons || 0) + ((daily?.puzzles || 0) * 50);
         const isPersonalOnly = Boolean(deficitDetails?.isOnlyPersonalPuzzles || deficitSummary?.isOnlyPersonalPuzzles);
         const daysEstimate = isPersonalOnly ? null : ((targetDeficit > 0 && dailyCoupons > 0) ? Math.ceil(targetDeficit / dailyCoupons) : (targetDeficit === 0 ? 0 : null));
-        const replyText = logic.formatTelegramDeficitMessage({ player, targetOfficer: targetOfficer || 'Офицер', deficit: deficitDetails, dailyRewards: daily, daysEstimate });
+        const replyText = tgFmt.formatTelegramDeficitMessage({ player, targetOfficer: targetOfficer || 'Офицер', deficit: deficitDetails, dailyRewards: daily, daysEstimate });
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: keyboard });
         }
@@ -1057,9 +1073,9 @@ async function handleTelegramUpdate(update) {
         const upcomingEvents = enrichedEvents
           .filter(e => !e.dateTo || e.dateTo >= nowIso.slice(0, 10))
           .sort((a, b) => (a.dateFrom || '').localeCompare(b.dateFrom || ''));
-        const replyText = logic.formatTelegramEventsListMessage({ events: upcomingEvents, playerId: player?.id, mode: 'upcoming' });
-        const eventsMarkup = logic.getTelegramEventsKeyboard
-          ? logic.getTelegramEventsKeyboard({ events: upcomingEvents, mode: 'upcoming' })
+        const replyText = tgFmt.formatTelegramEventsListMessage({ events: upcomingEvents, playerId: player?.id, mode: 'upcoming' });
+        const eventsMarkup = tgFmt.getTelegramEventsKeyboard
+          ? tgFmt.getTelegramEventsKeyboard({ events: upcomingEvents, mode: 'upcoming' })
           : keyboard;
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: eventsMarkup });
@@ -1085,9 +1101,9 @@ async function handleTelegramUpdate(update) {
         const pastEvents = enrichedEvents
           .filter(e => e.dateTo && e.dateTo < nowIso.slice(0, 10))
           .sort((a, b) => (b.dateFrom || '').localeCompare(a.dateFrom || ''));
-        const replyText = logic.formatTelegramEventsListMessage({ events: pastEvents, playerId: player?.id, mode: 'past' });
-        const eventsMarkup = logic.getTelegramEventsKeyboard
-          ? logic.getTelegramEventsKeyboard({ events: pastEvents, mode: 'past' })
+        const replyText = tgFmt.formatTelegramEventsListMessage({ events: pastEvents, playerId: player?.id, mode: 'past' });
+        const eventsMarkup = tgFmt.getTelegramEventsKeyboard
+          ? tgFmt.getTelegramEventsKeyboard({ events: pastEvents, mode: 'past' })
           : keyboard;
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: replyText, replyMarkup: eventsMarkup });
@@ -1107,8 +1123,8 @@ async function handleTelegramUpdate(update) {
         const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
         const reg = player ? (db.getUserRegistration ? db.getUserRegistration(eventId, player.id) : null) : null;
         const assign = (ev.assignments || []).find(a => Number(a.playerId) === Number(player?.id));
-        const detailText = logic.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: reg, assignment: assign });
-        const detailKb = logic.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: reg });
+        const detailText = tgFmt.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: reg, assignment: assign });
+        const detailKb = tgFmt.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: reg });
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: detailText, replyMarkup: detailKb });
         }
@@ -1184,7 +1200,7 @@ async function handleTelegramUpdate(update) {
           };
         }
         const pendingUsers = db.getPendingUsers ? db.getPendingUsers() : [];
-        const digestMsg = logic.formatTelegramDigestMessage({
+        const digestMsg = tgFmt.formatTelegramDigestMessage({
           totalSectors: allPlayers.length,
           freshnessStats,
           nextEvent: nextEvInfo,
@@ -1216,7 +1232,7 @@ async function handleTelegramUpdate(update) {
           }
         });
         staleList.sort((a, b) => b.days - a.days);
-        const staleMsg = logic.formatTelegramStaleReport({ stalePlayers: staleList });
+        const staleMsg = tgFmt.formatTelegramStaleReport({ stalePlayers: staleList });
         if (token) {
           await telegram.sendTelegramMessage({ token, chatId: targetChatId, text: staleMsg, replyMarkup: keyboard });
         }
@@ -1395,7 +1411,7 @@ async function handleTelegramUpdate(update) {
           try {
             const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
             const placeStr = targetDesiredPlace > 0 ? `#${targetDesiredPlace}` : 'Любое';
-            const baseUrl = typeof getAppBaseUrl === 'function' ? getAppBaseUrl() : 'http://localhost:3000';
+            const baseUrl = resolveBaseUrl();
             dispatchNotificationFn('staff_event_registration', {
               eventId,
               playerId: player.id,
@@ -1431,8 +1447,8 @@ async function handleTelegramUpdate(update) {
           const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
           const reg = db.getUserRegistration ? db.getUserRegistration(eventId, player.id) : null;
           const assign = (ev.assignments || []).find(a => Number(a.playerId) === Number(player?.id));
-          const updatedText = logic.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: reg, assignment: assign });
-          const updatedKb = logic.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: reg });
+          const updatedText = tgFmt.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: reg, assignment: assign });
+          const updatedKb = tgFmt.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: reg });
           await telegram.editTelegramMessageText({
             token,
             chatId: chatMsg.chat.id,
@@ -1510,8 +1526,8 @@ async function handleTelegramUpdate(update) {
         if (chatMsg?.chat?.id && chatMsg?.message_id) {
           const et = db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null;
           const assign = (ev.assignments || []).find(a => Number(a.playerId) === Number(player?.id));
-          const updatedText = logic.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: null, assignment: assign });
-          const updatedKb = logic.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: null });
+          const updatedText = tgFmt.formatTelegramEventDetailMessage({ event: ev, eventType: et, registration: null, assignment: assign });
+          const updatedKb = tgFmt.formatEventDetailRegistrationKeyboard({ eventId, eventType: et, registration: null });
           await telegram.editTelegramMessageText({
             token,
             chatId: chatMsg.chat.id,
@@ -1892,7 +1908,7 @@ async function handleTelegramUpdate(update) {
         });
 
         if (chatMsg?.chat?.id && chatMsg?.message_id) {
-          const successMsg = logic.formatStockUpdateSuccessMessage(diff, rec.snapshotAfter, {
+          const successMsg = tgFmt.formatStockUpdateSuccessMessage(diff, rec.snapshotAfter, {
             sectorName: player.name
           });
           await telegram.editTelegramMessageText({

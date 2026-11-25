@@ -17,9 +17,7 @@ function createEventOperations({
 
   const resolveBaseUrl = (req = null) => {
     if (typeof getAppBaseUrl === 'function') return getAppBaseUrl(req);
-    const configuredUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-    if (configuredUrl) return String(configuredUrl).replace(/\/+$/, '');
-    return 'http://localhost:3000';
+    return db.resolveAppBaseUrl ? db.resolveAppBaseUrl(req) : 'http://localhost:3000';
   };
 
   /**

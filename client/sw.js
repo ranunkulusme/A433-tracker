@@ -14,8 +14,6 @@ const STATIC_ASSETS = [
   '/app.js',
   '/logic.js',
   '/tma.js',
-  '/smart-scanner.js',
-  '/ocr.js',
   '/vendor/i18next.min.js',
   '/i18n.js',
   '/manifest.json',

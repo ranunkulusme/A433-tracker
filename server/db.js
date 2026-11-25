@@ -1709,79 +1709,15 @@ function importKowJson(rawJson) {
   const state = migrateState(raw);
   const db = getDb();
 
-  const rawOfficersByPlayerAndId = new Map();
-  const rawPlayerVipPoints = new Map();
-  const rawPlayerUserId = new Map();
-  if (Array.isArray(raw?.players)) {
-    for (const rp of raw.players) {
-      if (rp && rp.id !== undefined) {
-        const vp = rp.sector?.vipPoints ?? rp.vipPoints ?? rp.vip_points ?? 0;
-        rawPlayerVipPoints.set(rp.id, vp);
-        const uid = rp.userId ?? rp.user_id ?? null;
-        if (uid !== null && uid !== undefined) {
-          rawPlayerUserId.set(rp.id, Number(uid));
-        }
-      }
-      if (Array.isArray(rp?.officers)) {
-        for (const ro of rp.officers) {
-          if (ro && ro.id) {
-            rawOfficersByPlayerAndId.set(`${rp.id}:${ro.id}`, ro);
-          }
-        }
-      }
-    }
-  }
-  const rawCatalogUpgradeTypes = new Map();
-  if (Array.isArray(raw?.officerCatalog)) {
-    for (const rc of raw.officerCatalog) {
-      if (rc && rc.id) {
-        rawCatalogUpgradeTypes.set(rc.id, rc.upgradeType || rc.upgrade_type || 'standard');
-      }
-    }
-  }
-
   db.exec('BEGIN TRANSACTION');
   try {
     for (const item of state.officerCatalog || []) {
-      if (rawCatalogUpgradeTypes.has(item.id)) {
-        item.upgradeType = rawCatalogUpgradeTypes.get(item.id);
-      }
       saveCatalogItem(item);
     }
     for (const et of state.eventTypes || []) {
       saveEventType(et);
     }
     for (const p of state.players || []) {
-      if (rawPlayerVipPoints.has(p.id)) {
-        p.sector = p.sector || {};
-        p.sector.vipPoints = rawPlayerVipPoints.get(p.id);
-      }
-      if (rawPlayerUserId.has(p.id)) {
-        p.userId = rawPlayerUserId.get(p.id);
-      }
-      if (Array.isArray(p.officers)) {
-        for (const o of p.officers) {
-          const rawOfficer = rawOfficersByPlayerAndId.get(`${p.id}:${o.id}`);
-          if (rawOfficer) {
-            if (rawOfficer.personalPuzzles !== undefined || rawOfficer.personal_puzzles !== undefined) {
-              o.personalPuzzles = rawOfficer.personalPuzzles ?? rawOfficer.personal_puzzles;
-            }
-            if (rawOfficer.onlyPersonalPuzzles !== undefined || rawOfficer.only_personal_puzzles !== undefined) {
-              o.onlyPersonalPuzzles = Boolean(rawOfficer.onlyPersonalPuzzles ?? rawOfficer.only_personal_puzzles);
-            }
-            if (rawOfficer.skills !== undefined) {
-              o.skills = rawOfficer.skills;
-            } else if (rawOfficer.skills_json !== undefined) {
-              o.skills_json = rawOfficer.skills_json;
-            }
-            if (rawOfficer.invested !== undefined) {
-              o.invested = rawOfficer.invested;
-            } else if (rawOfficer.invested_json !== undefined) {
-              o.invested_json = rawOfficer.invested_json;
-            }
-          }
-        }
-      }
       createPlayer(p);
     }
     for (const ev of state.events || []) {
@@ -1794,8 +1730,9 @@ function importKowJson(rawJson) {
         chests: sh.chests
       }, sh.date);
     }
-    if (raw && raw.userPermissions && typeof raw.userPermissions === 'object' && !Array.isArray(raw.userPermissions)) {
-      for (const [uname, perms] of Object.entries(raw.userPermissions)) {
+    const permsMap = state.userPermissions || raw?.userPermissions;
+    if (permsMap && typeof permsMap === 'object' && !Array.isArray(permsMap)) {
+      for (const [uname, perms] of Object.entries(permsMap)) {
         if (!uname || !Array.isArray(perms)) continue;
         const existingUser = findUserByUsername(uname);
         if (existingUser) {
@@ -2551,6 +2488,31 @@ function setAppSetting(key, value) {
   return strVal;
 }
 
+function resolveAppBaseUrl(req = null, lastKnownBaseUrl = null) {
+  let resolvedKnown = lastKnownBaseUrl || null;
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host;
+    if (!host.includes('localhost') && !host.includes('127.0.0.1')) {
+      resolvedKnown = `${proto}://${host}`;
+    }
+  }
+  const settingUrl = getAppSetting('telegram_webapp_url') || getAppSetting('app_base_url');
+  if (settingUrl && settingUrl.trim()) return settingUrl.trim().replace(/\/+$/, '');
+  if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
+  if (resolvedKnown) return resolvedKnown.replace(/\/+$/, '');
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    return `${proto}://${req.headers.host}`.replace(/\/+$/, '');
+  }
+  const botUsername = getAppSetting('telegram_bot_username');
+  if (botUsername && botUsername.trim()) {
+    return `https://t.me/${botUsername.trim().replace(/^@+/, '')}`;
+  }
+  return 'http://localhost:3000';
+}
+
 function getMieruSettings() {
   return {
     enabled: getAppSetting('mieru_enabled') === 'true',
@@ -2959,6 +2921,7 @@ module.exports = {
   parsePermissions,
   getAppSetting,
   setAppSetting,
+  resolveAppBaseUrl,
   getNotificationTemplates,
   getNotificationTemplate,
   updateNotificationTemplate,

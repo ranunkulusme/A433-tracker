@@ -9,15 +9,6 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const telegram = require('./telegram.js');
 
-let activeMieruProcess = null;
-let mieruStatus = {
-  running: false,
-  pid: null,
-  startedAt: null,
-  port: 1080,
-  error: null
-};
-
 function isIpAddress(str) {
   return /^(\d{1,3}\.){3}\d{1,3}$/.test(str) || (typeof str === 'string' && str.includes(':'));
 }
@@ -175,6 +166,19 @@ function maskSecret(secret) {
 }
 
 /**
+ * Create an isolated Mieru tunnel process manager instance.
+ */
+function createMieruManager({ telegramClient = telegram, spawnFn = spawn } = {}) {
+  let activeMieruProcess = null;
+  let mieruStatus = {
+    running: false,
+    pid: null,
+    startedAt: null,
+    port: 1080,
+    error: null
+  };
+
+/**
  * Start or restart the local Mieru client process.
  */
 function startMieruProcess(configObj, dataDir = path.join(__dirname, '..', 'data')) {
@@ -190,7 +194,6 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, '..', 'data
 
     const port = configObj.socks5Port || 1080;
 
-    // Check if mieru binary is available in PATH before attempting to spawn
     if (!isMieruBinaryAvailable()) {
       mieruStatus = {
         running: false,
@@ -209,7 +212,7 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, '..', 'data
     }
 
     try {
-      const proc = spawn('mieru', ['run'], {
+      const proc = spawnFn('mieru', ['run'], {
         detached: false,
         stdio: 'pipe',
         env: {
@@ -272,9 +275,6 @@ function startMieruProcess(configObj, dataDir = path.join(__dirname, '..', 'data
   }
 }
 
-/**
- * Stop the active Mieru process cleanly.
- */
 function stopMieruProcess() {
   if (activeMieruProcess) {
     try {
@@ -296,15 +296,12 @@ function getMieruStatus() {
   };
 }
 
-/**
- * Test connectivity through Mieru SOCKS5 proxy to Telegram Bot API.
- */
 async function testMieruConnection(proxyUrl, botToken) {
   const token = botToken || '123456:FAKE_TOKEN_FOR_PING';
   const start = Date.now();
 
   try {
-    const res = await telegram.callTelegramApi(token, 'getMe', null, {
+    const res = await telegramClient.callTelegramApi(token, 'getMe', null, {
       proxyUrl,
       timeoutMs: 8000
     });
@@ -320,7 +317,6 @@ async function testMieruConnection(proxyUrl, botToken) {
       };
     }
 
-    // Telegram replied with error (e.g. 401 Unauthorized for fake token), but connection itself SUCCEEDED!
     if (res.errorCode === 401 || (res.error && res.error.includes('Unauthorized'))) {
       return {
         ok: true,
@@ -363,14 +359,22 @@ async function testMieruConnection(proxyUrl, botToken) {
   }
 }
 
+  return {
+    startMieruProcess,
+    stopMieruProcess,
+    getMieruStatus,
+    testMieruConnection
+  };
+}
+
+const defaultMieruManager = createMieruManager();
+
 module.exports = {
   formatMieruConfig,
   parseMieruConfig,
   maskSecret,
-  startMieruProcess,
-  stopMieruProcess,
-  getMieruStatus,
-  testMieruConnection,
+  ...defaultMieruManager,
   isMieruBinaryAvailable,
-  isMieruAvailable: isMieruBinaryAvailable
+  isMieruAvailable: isMieruBinaryAvailable,
+  createMieruManager
 };

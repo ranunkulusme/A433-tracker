@@ -7,6 +7,72 @@
  * Zero external dependencies.
  */
 
+const crypto = require('node:crypto');
+
+function validateTelegramWebAppData(initData, botToken, options = {}) {
+  if (!initData || !botToken) {
+    return { valid: false, error: 'missing_arguments' };
+  }
+
+  try {
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    if (!hash) {
+      return { valid: false, error: 'missing_hash' };
+    }
+
+    const authDate = Number(params.get('auth_date')) || 0;
+    const nowSec = options.nowSec !== undefined ? options.nowSec : Math.floor(Date.now() / 1000);
+    const maxAgeSec = options.maxAgeSec !== undefined ? options.maxAgeSec : 86400;
+
+    if (maxAgeSec > 0) {
+      if (!authDate || (nowSec - authDate) > maxAgeSec || (authDate - nowSec) > 86400) {
+        return { valid: false, error: 'expired' };
+      }
+    }
+
+    const pairs = [];
+    for (const [key, val] of params.entries()) {
+      if (key !== 'hash' && key !== 'signature') {
+        pairs.push(`${key}=${val}`);
+      }
+    }
+    pairs.sort();
+    const dataCheckString = pairs.join('\n');
+
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+    let hashesMatch = false;
+    if (typeof crypto.timingSafeEqual === 'function' && hash.length === 64 && calculatedHash.length === 64) {
+      hashesMatch = crypto.timingSafeEqual(Buffer.from(calculatedHash, 'hex'), Buffer.from(hash, 'hex'));
+    } else {
+      hashesMatch = (calculatedHash === hash);
+    }
+
+    if (!hashesMatch) {
+      return { valid: false, error: 'invalid_hash' };
+    }
+
+    let user = null;
+    const userRaw = params.get('user');
+    if (userRaw) {
+      try {
+        user = JSON.parse(userRaw);
+      } catch (_) {}
+    }
+
+    return {
+      valid: true,
+      user,
+      authDate,
+      queryId: params.get('query_id') || null
+    };
+  } catch (err) {
+    return { valid: false, error: err.message };
+  }
+}
+
 function createAuthGuard({ db, logic } = {}) {
   if (!logic) {
     logic = require('../shared/logic.js');
@@ -192,11 +258,8 @@ function createAuthGuard({ db, logic } = {}) {
     return { ok: true, player, isLeader, isOwner };
   }
 
-  function verifyTelegramWebAppData(initData, botToken) {
-    if (!logic || typeof logic.validateTelegramWebAppData !== 'function') {
-      return { valid: false, error: 'logic.validateTelegramWebAppData is not available' };
-    }
-    return logic.validateTelegramWebAppData(initData, botToken);
+  function verifyTelegramWebAppData(initData, botToken, options = {}) {
+    return validateTelegramWebAppData(initData, botToken, options);
   }
 
   function authenticateTelegramWebApp(initData, botToken) {
@@ -307,6 +370,7 @@ function createAuthGuard({ db, logic } = {}) {
     maskPlayerStockIfNeeded,
     checkSectorAccess,
     verifyTelegramWebAppData,
+    validateTelegramWebAppData,
     authenticateTelegramWebApp,
     canApproveUser,
     canBlockUser,
@@ -315,5 +379,6 @@ function createAuthGuard({ db, logic } = {}) {
 }
 
 module.exports = {
-  createAuthGuard
+  createAuthGuard,
+  validateTelegramWebAppData
 };

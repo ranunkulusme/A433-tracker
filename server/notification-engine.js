@@ -11,19 +11,15 @@ function createNotificationEngine({
   db,
   logic,
   telegram,
+  telegramFormats,
   getAppBaseUrl
 } = {}) {
   if (!db) throw new Error('db is required for NotificationEngine');
   if (!logic) throw new Error('logic is required for NotificationEngine');
 
   const tg = telegram || require('./telegram.js');
-  const resolveBaseUrl = getAppBaseUrl || (() => {
-    const s = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-    if (s && s.trim()) return s.trim().replace(/\/+$/, '');
-    if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
-    if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
-    return 'http://localhost:3000';
-  });
+  const tgFmt = telegramFormats || require('./telegram-formats.js');
+  const resolveBaseUrl = getAppBaseUrl || (() => db.resolveAppBaseUrl());
 
   const recentStaffRegistrations = new Map();
 
@@ -52,7 +48,7 @@ function createNotificationEngine({
       const parseMode = template.parse_mode || 'HTML';
       let replyMarkup = options.replyMarkup || undefined;
       if (!replyMarkup && eventKey === 'event_registration_opened' && data.eventId) {
-        replyMarkup = logic.formatEventRegistrationKeyboard(data.eventId);
+        replyMarkup = tgFmt.formatEventRegistrationKeyboard(data.eventId);
       }
       if (!replyMarkup && eventKey === 'staff_event_registration') {
         const linkUrl = String(data.link || `${resolveBaseUrl()}/#event/${data.eventId || ''}`).trim();

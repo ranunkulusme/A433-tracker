@@ -210,3 +210,42 @@ test('AuthGuard: User lifecycle guards (approve, block, delete)', () => {
   // Can delete regular user
   assert.equal(authGuard.canDeleteUser(r5Leader, { id: 2, username: 'other' }).allowed, true);
 });
+
+test('AuthGuard: validateTelegramWebAppData HMAC validation and expiration', () => {
+  const { validateTelegramWebAppData } = require('./auth-guard.js');
+  const botToken = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
+  const nowSec = Math.floor(Date.now() / 1000);
+  const userStr = JSON.stringify({ id: 777888, username: 'hero_ivan', first_name: 'Иван' });
+
+  function createValidInitData(overrides = {}) {
+    const authDate = overrides.authDate !== undefined ? overrides.authDate : nowSec;
+    const queryId = overrides.queryId !== undefined ? overrides.queryId : 'AAH888';
+    const uStr = overrides.userStr !== undefined ? overrides.userStr : userStr;
+    const pairs = [`auth_date=${authDate}`, `query_id=${queryId}`, `user=${uStr}`].sort();
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const hash = crypto.createHmac('sha256', secretKey).update(pairs.join('\n')).digest('hex');
+    const params = new URLSearchParams();
+    params.set('query_id', queryId);
+    params.set('user', uStr);
+    params.set('auth_date', String(authDate));
+    params.set('hash', overrides.hash !== undefined ? overrides.hash : hash);
+    return params.toString();
+  }
+
+  const res1 = validateTelegramWebAppData(createValidInitData(), botToken, { nowSec });
+  assert.equal(res1.valid, true);
+  assert.equal(res1.user.id, 777888);
+
+  const res2 = validateTelegramWebAppData(createValidInitData({ hash: 'deadbeef'.repeat(8) }), botToken, { nowSec });
+  assert.equal(res2.valid, false);
+  assert.equal(res2.error, 'invalid_hash');
+
+  const res3 = validateTelegramWebAppData(createValidInitData({ authDate: nowSec - 90000 }), botToken, { nowSec });
+  assert.equal(res3.valid, false);
+  assert.equal(res3.error, 'expired');
+
+  const paramsWithSig = new URLSearchParams(createValidInitData());
+  paramsWithSig.set('signature', 'ed25519_sig_123');
+  const res4 = validateTelegramWebAppData(paramsWithSig.toString(), botToken, { nowSec });
+  assert.equal(res4.valid, true);
+});

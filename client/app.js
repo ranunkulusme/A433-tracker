@@ -10845,48 +10845,267 @@ function resetVipTiersToDefault() {
   }
 }
 
-// ─── EXCHANGE SHOP OCR SCANNER ─────────────────────────────────
-// ─── EXCHANGE OCR (CATALOG OCR) DELEGATORS ─────────────────────
+// ─── EXCHANGE SHOP OCR CONTROLLER (SERVER OCR) ─────────────────
+let isExchangeOcrRunning = false;
+
+function readExchangeImageAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    if (typeof file === 'string') return resolve(file);
+    if (!file) return resolve('');
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+}
+
+function initExchangeOcr() {
+  const dropzone = document.getElementById('exchange-dropzone');
+  const fileInput = document.getElementById('exchange-file-input');
+
+  if (dropzone && dropzone.dataset && !dropzone.dataset.initialized) {
+    dropzone.dataset.initialized = 'true';
+    dropzone.addEventListener('dragenter', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('dragover'); });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+      const files = e.dataTransfer ? e.dataTransfer.files : null;
+      if (files && files.length > 0) handleExchangeFiles(files);
+    });
+  }
+
+  const modal = document.getElementById('modal-exchange-ocr');
+  if (modal && modal.dataset && !modal.dataset.dropInitialized) {
+    modal.dataset.dropInitialized = 'true';
+    modal.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
+    modal.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const files = e.dataTransfer ? e.dataTransfer.files : null;
+      if (files && files.length > 0) handleExchangeFiles(files);
+    });
+    window.addEventListener('paste', (e) => {
+      if (!modal.classList.contains('open')) return;
+      const items = e.clipboardData ? Array.from(e.clipboardData.items || []) : [];
+      const imageFiles = items
+        .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        handleExchangeFiles(imageFiles);
+      }
+    });
+  }
+
+  if (fileInput && fileInput.dataset && !fileInput.dataset.initialized) {
+    fileInput.dataset.initialized = 'true';
+    fileInput.addEventListener('change', handleExchangeFileInput);
+  }
+}
+
+function handleExchangeFileInput(event) {
+  const files = Array.from(event?.target?.files || []);
+  if (event?.target) event.target.value = '';
+  if (files.length > 0) handleExchangeFiles(files);
+}
+
 function openExchangeOcrModal() {
   if (!canManage() && !hasPermission('manage_catalog')) {
     toast('Недостаточно прав для управления каталогом', 'error');
     return;
   }
-  if (typeof smartScannerUI !== 'undefined' && typeof smartScannerUI.openExchangeOcrModal === 'function') {
-    return smartScannerUI.openExchangeOcrModal();
+  isExchangeOcrRunning = false;
+  const fileInput = document.getElementById('exchange-file-input');
+  if (fileInput) fileInput.value = '';
+  const dropzone = document.getElementById('exchange-dropzone');
+  if (dropzone) {
+    dropzone.style.display = 'block';
+    dropzone.classList.remove('dragover');
+  }
+  const progressCont = document.getElementById('exchange-progress-container');
+  if (progressCont) progressCont.style.display = 'none';
+  const resultsCont = document.getElementById('exchange-results-container');
+  if (resultsCont) resultsCont.style.display = 'none';
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  if (tbody) tbody.innerHTML = '';
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (submitBtn) submitBtn.disabled = true;
+
+  initExchangeOcr();
+  openModal('modal-exchange-ocr');
+}
+
+function closeExchangeOcrModal() {
+  isExchangeOcrRunning = false;
+  closeModal('modal-exchange-ocr');
+}
+
+async function handleExchangeFiles(filesList) {
+  if (isExchangeOcrRunning) return;
+  const files = Array.from(filesList || []).filter(f => f && (f.type ? f.type.startsWith('image/') : true));
+  if (files.length === 0) {
+    toast('Выберите файлы изображений для сканирования', 'warning');
+    return;
+  }
+
+  isExchangeOcrRunning = true;
+  const progressCont = document.getElementById('exchange-progress-container');
+  const progressBar = document.getElementById('exchange-progress-bar');
+  const progressPercent = document.getElementById('exchange-progress-percent');
+  const progressStatus = document.getElementById('exchange-progress-status');
+  const progressDetails = document.getElementById('exchange-progress-details');
+
+  if (progressCont) progressCont.style.display = 'block';
+  if (progressBar) progressBar.style.width = '30%';
+  if (progressPercent) progressPercent.textContent = '30%';
+  if (progressStatus) progressStatus.textContent = 'Распознавание на сервере (OCR)...';
+  if (progressDetails) progressDetails.textContent = `Изображений: ${files.length}`;
+
+  try {
+    const base64Images = [];
+    for (const file of files) {
+      const b64 = await readExchangeImageAsBase64(file);
+      if (b64) base64Images.push(b64);
+    }
+
+    const result = await apiFetch('/api/ocr/scan', {
+      method: 'POST',
+      body: { images: base64Images, mode: 'exchange' }
+    });
+
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressPercent) progressPercent.textContent = '100%';
+    if (progressStatus) progressStatus.textContent = 'Готово';
+
+    if (result && result.success && Array.isArray(result.officers) && result.officers.length > 0) {
+      renderExchangeOcrTable(result.officers);
+      toast(`Распознано командиров: ${result.officers.length}`);
+    } else {
+      toast('Командиры не найдены на скриншоте. Вы можете добавить строку вручную.', 'warning');
+      renderExchangeOcrTable([{
+        name: '',
+        type: 'Пехота',
+        generation: 8,
+        couponPerPuzzle: 720,
+        starCouponCost: 360,
+        medalsBeforeTraining: 690,
+        medalsTraining: 900,
+        medalsTotal: 1590
+      }]);
+    }
+  } catch (err) {
+    toast('Ошибка распознавания: ' + (err.message || err), 'error');
+    if (progressStatus) progressStatus.textContent = 'Сбой распознавания';
+  } finally {
+    isExchangeOcrRunning = false;
   }
 }
 
-function closeExchangeOcrModal(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.closeExchangeOcrModal) ? smartScannerUI.closeExchangeOcrModal(...args) : undefined;
+function buildExchangeOcrRowHtml(off = {}, idx = 0) {
+  const types = (typeof logic !== 'undefined' && logic.OFFICER_TYPES) ? logic.OFFICER_TYPES : ['Танк', 'Пехота', 'ПТ-Сау', 'Горнизон', 'Осада'];
+  const before = Math.max(0, parseInt(off.medalsBeforeTraining, 10) || 690);
+  const training = Math.max(0, parseInt(off.medalsTraining, 10) || 900);
+  const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals) ? logic.calculateTotalMedals(before, training) : (before + training);
+  const offType = types.includes(off.type) ? off.type : 'Пехота';
+
+  return `
+    <tr class="exchange-ocr-row" data-idx="${idx}">
+      <td><input type="text" class="input-sm exchange-row-name" value="${escapeHtml(off.name || '')}" placeholder="Имя командира" style="width:100%" required></td>
+      <td><select class="input-sm exchange-row-type" style="width:100%">${types.map(t => `<option value="${t}" ${t === offType ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+      <td><input type="number" class="input-sm exchange-row-gen" value="${off.generation || 8}" min="1" max="25" style="width:60px"></td>
+      <td><input type="number" class="input-sm exchange-row-coupon" value="${off.couponPerPuzzle ?? 720}" min="0" step="10" style="width:75px"></td>
+      <td><input type="number" class="input-sm exchange-row-star-coupon" value="${off.starCouponCost ?? 360}" min="0" step="10" style="width:75px"></td>
+      <td><input type="number" class="input-sm exchange-row-medals-before" value="${before}" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)"></td>
+      <td><input type="number" class="input-sm exchange-row-medals-training" value="${training}" min="0" step="10" style="width:70px" oninput="recalcExchangeRowTotal(this)"></td>
+      <td><strong class="exchange-row-medals-total" style="color:var(--text1)">${total}</strong></td>
+      <td style="text-align:center"><button type="button" class="btn-sm btn-ghost" onclick="removeExchangeRow(this)" title="Удалить строку" style="color:var(--red);padding:2px 6px">✕</button></td>
+    </tr>
+  `;
 }
 
-function initExchangeOcr(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.initExchangeOcr) ? smartScannerUI.initExchangeOcr(...args) : undefined;
+function renderExchangeOcrTable(officersList) {
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const resultsCont = document.getElementById('exchange-results-container');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (!tbody) return;
+  tbody.innerHTML = (officersList || []).map((off, idx) => buildExchangeOcrRowHtml(off, idx)).join('');
+  if (resultsCont) resultsCont.style.display = 'block';
+  if (submitBtn) submitBtn.disabled = tbody.children.length === 0;
 }
 
-function handleExchangeFiles(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.handleExchangeFiles) ? smartScannerUI.handleExchangeFiles(...args) : undefined;
+function recalcExchangeRowTotal(input) {
+  const row = input?.closest('tr');
+  if (!row) return;
+  const before = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-before')?.value, 10) || 0);
+  const training = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-training')?.value, 10) || 0);
+  const total = (typeof logic !== 'undefined' && logic.calculateTotalMedals) ? logic.calculateTotalMedals(before, training) : (before + training);
+  const totalElem = row.querySelector('.exchange-row-medals-total');
+  if (totalElem) totalElem.textContent = String(total);
 }
 
-function renderExchangeOcrTable(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.renderExchangeOcrTable) ? smartScannerUI.renderExchangeOcrTable(...args) : undefined;
+function removeExchangeRow(btn) {
+  btn?.closest('tr')?.remove();
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (submitBtn) submitBtn.disabled = !tbody || tbody.children.length === 0;
 }
 
-function recalcExchangeRowTotal(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.recalcExchangeRowTotal) ? smartScannerUI.recalcExchangeRowTotal(...args) : undefined;
+function addManualExchangeRow() {
+  const tbody = document.getElementById('exchange-ocr-table-body');
+  const resultsCont = document.getElementById('exchange-results-container');
+  const submitBtn = document.getElementById('exchange-btn-submit');
+  if (!tbody) return;
+  tbody.insertAdjacentHTML('beforeend', buildExchangeOcrRowHtml({ type: 'Пехота', generation: 8 }, tbody.children.length));
+  if (resultsCont) resultsCont.style.display = 'block';
+  if (submitBtn) submitBtn.disabled = false;
+  tbody.lastElementChild?.querySelector('.exchange-row-name')?.focus();
 }
 
-function removeExchangeRow(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.removeExchangeRow) ? smartScannerUI.removeExchangeRow(...args) : undefined;
-}
+async function submitBatchExchangeOfficers() {
+  const rows = document.querySelectorAll('#exchange-ocr-table-body tr');
+  if (!rows || rows.length === 0) {
+    toast('Нет офицеров для добавления', 'warning');
+    return;
+  }
 
-function addManualExchangeRow(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.addManualExchangeRow) ? smartScannerUI.addManualExchangeRow(...args) : undefined;
-}
+  const officers = [];
+  for (const row of rows) {
+    const nameInput = row.querySelector('.exchange-row-name');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) {
+      toast('Заполните имена всех офицеров в таблице', 'warning');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+    const medalsBeforeTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-before')?.value, 10) || 690);
+    const medalsTraining = Math.max(0, parseInt(row.querySelector('.exchange-row-medals-training')?.value, 10) || 900);
+    const medalsTotal = (typeof logic !== 'undefined' && logic.calculateTotalMedals) ? logic.calculateTotalMedals(medalsBeforeTraining, medalsTraining) : (medalsBeforeTraining + medalsTraining);
+    officers.push({
+      name,
+      type: row.querySelector('.exchange-row-type')?.value || 'Пехота',
+      generation: Math.max(1, parseInt(row.querySelector('.exchange-row-gen')?.value, 10) || 8),
+      couponPerPuzzle: Math.max(0, parseInt(row.querySelector('.exchange-row-coupon')?.value, 10) || 720),
+      starCouponCost: Math.max(0, parseInt(row.querySelector('.exchange-row-star-coupon')?.value, 10) || 360),
+      medalsBeforeTraining,
+      medalsTraining,
+      medalsTotal,
+      upgradeType: 'standard'
+    });
+  }
 
-function submitBatchExchangeOfficers(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.submitBatchExchangeOfficers) ? smartScannerUI.submitBatchExchangeOfficers(...args) : undefined;
+  try {
+    const res = await apiFetch('/api/catalog/batch', { method: 'POST', body: { officers } });
+    closeExchangeOcrModal();
+    toast(`Добавлено/обновлено офицеров: ${res?.count || officers.length}`);
+    await loadDataFromServer();
+    renderOfficers();
+  } catch (err) {
+    toast('Ошибка сохранения офицеров: ' + (err.message || err), 'error');
+  }
 }
 
 // ─── EVENT TYPE MODAL ─────────────────────────────────────────
@@ -12090,35 +12309,6 @@ function handleImport(e) {
   reader.readAsText(file); e.target.value='';
 }
 
-// ─── SMART SCANNER (OCR) DELEGATORS ─────────────────────────────
-function openSmartScannerModal(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.openSmartScannerModal) ? smartScannerUI.openSmartScannerModal(...args) : undefined;
-}
-
-function closeSmartScannerModal(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.closeSmartScannerModal) ? smartScannerUI.closeSmartScannerModal(...args) : undefined;
-}
-
-function updateScannerPreviewStarPoints(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.updateScannerPreviewStarPoints) ? smartScannerUI.updateScannerPreviewStarPoints(...args) : undefined;
-}
-
-function handleScannerFiles(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.handleScannerFiles) ? smartScannerUI.handleScannerFiles(...args) : undefined;
-}
-
-function displayScannerResults(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.displayScannerResults) ? smartScannerUI.displayScannerResults(...args) : undefined;
-}
-
-function applyScanResultsToProfile(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.applyScanResultsToProfile) ? smartScannerUI.applyScanResultsToProfile(...args) : undefined;
-}
-
-function initSmartScanner(...args) {
-  return (typeof smartScannerUI !== 'undefined' && smartScannerUI.initSmartScanner) ? smartScannerUI.initSmartScanner(...args) : undefined;
-}
-
 /* ── MODULE 3: STOCK AUDIT, FRESHNESS & SCREENSHOT ZOOM ── */
 
 function renderStockFreshnessBadge(updatedAt) {
@@ -12427,7 +12617,6 @@ async function initApp() {
   updateNetworkStatusUI();
   fetchAndApplyAppVersion();
   checkPwaInstallable();
-  initSmartScanner();
   initExchangeOcr();
 
   if (typeof document !== 'undefined') {
@@ -12850,14 +13039,8 @@ if (typeof window !== 'undefined') {
   window.handleNetworkBadgeClick = handleNetworkBadgeClick;
   window.handleInstallPwaClick = handleInstallPwaClick;
   window.checkPwaInstallable = checkPwaInstallable;
-  window.openSmartScannerModal = openSmartScannerModal;
-  window.closeSmartScannerModal = closeSmartScannerModal;
-  window.handleScannerFiles = handleScannerFiles;
-  window.applyScanResultsToProfile = applyScanResultsToProfile;
   window.updateCabinetTotalStarPoints = updateCabinetTotalStarPoints;
   window.updatePlayerModalStarPoints = updatePlayerModalStarPoints;
-  window.updateScannerPreviewStarPoints = updateScannerPreviewStarPoints;
-  window.initSmartScanner = initSmartScanner;
 
   window.openPlayerModal = openPlayerModal;
   window.savePlayer = savePlayer;
@@ -12881,6 +13064,12 @@ if (typeof window !== 'undefined') {
   window.submitChangeSectorOwner = submitChangeSectorOwner;
   window.openExchangeOcrModal = openExchangeOcrModal;
   window.closeExchangeOcrModal = closeExchangeOcrModal;
+  window.handleExchangeFileInput = handleExchangeFileInput;
+  window.handleExchangeFiles = handleExchangeFiles;
+  window.recalcExchangeRowTotal = recalcExchangeRowTotal;
+  window.removeExchangeRow = removeExchangeRow;
+  window.addManualExchangeRow = addManualExchangeRow;
+  window.submitBatchExchangeOfficers = submitBatchExchangeOfficers;
   window.closeModal = closeModal;
   window.onSectorOfficerFilterChange = onSectorOfficerFilterChange;
   window.removeSectorOfficerFilter = removeSectorOfficerFilter;
