@@ -6240,12 +6240,15 @@ test('Telegram Mini App dedicated UI, auto-auth, and bind-webapp endpoint', asyn
     assert.ok(cssText.includes('.tma-card'), 'style.css contains .tma-card styles');
     assert.ok(cssText.includes('.tma-bottom-nav'), 'style.css contains .tma-bottom-nav styles');
 
-    const jsRes = await fetch(`${baseUrl}/app.js`);
-    const jsText = await jsRes.text();
-    assert.ok(jsText.includes('isTmaMode'), 'app.js contains isTmaMode');
-    assert.ok(jsText.includes('renderTmaCabinet'), 'app.js contains renderTmaCabinet');
-    assert.ok(jsText.includes('renderTmaEvents'), 'app.js contains renderTmaEvents');
-    assert.ok(jsText.includes('renderTmaMatrix'), 'app.js contains renderTmaMatrix');
+    const runtimeRes = await fetch(`${baseUrl}/runtime.js`);
+    const runtimeText = await runtimeRes.text();
+    assert.ok(runtimeText.includes('function isTmaMode('), 'runtime.js contains canonical isTmaMode');
+
+    const tmaJsRes = await fetch(`${baseUrl}/tma.js`);
+    const tmaJsText = await tmaJsRes.text();
+    assert.ok(tmaJsText.includes('function renderTmaCabinet('), 'tma.js contains renderTmaCabinet');
+    assert.ok(tmaJsText.includes('function renderTmaEvents('), 'tma.js contains renderTmaEvents');
+    assert.ok(tmaJsText.includes('function renderTmaMatrix('), 'tma.js contains renderTmaMatrix');
 
     // 2. Test POST /api/telegram/bind-webapp with authenticated user
     const reg = db.registerUser({ username: 'tma_auto_binder', password: 'password123', playerName: 'Сектор TMA' });
@@ -6577,15 +6580,19 @@ test('Telegram Mini App sector officers management, calculator target picker, st
     assert.ok(cssText.includes('.tma-star-btn'));
     assert.ok(cssText.includes('.tma-target-star-btn'));
 
-    // 9. Verify app.js exports TMA officer functions
+    // 9. Verify tma.js exports TMA officer functions and app.js does not keep legacy window.tma?. stubs
     const appRes = await fetch(`${baseUrl}/app.js`);
     const appText = await appRes.text();
-    assert.ok(appText.includes('window.openTmaOfficersPickerModal = openTmaOfficersPickerModal;'));
-    assert.ok(appText.includes('window.selectTmaTargetOfficer = selectTmaTargetOfficer;'));
-    assert.ok(appText.includes('window.openTmaAddOfficerModal = openTmaAddOfficerModal;'));
-    assert.ok(appText.includes('window.openTmaEditOfficerModal = openTmaEditOfficerModal;'));
-    assert.ok(appText.includes('window.submitTmaOfficerEdit = submitTmaOfficerEdit;'));
-    assert.ok(appText.includes('window.deleteTmaCurrentOfficer = deleteTmaCurrentOfficer;'));
+    assert.ok(!appText.includes('window.tma?.'), 'app.js must not keep window.tma?. stubs');
+
+    const tmaRes = await fetch(`${baseUrl}/tma.js`);
+    const tmaText = await tmaRes.text();
+    assert.ok(tmaText.includes('window.openTmaOfficersPickerModal = openTmaOfficersPickerModal;'));
+    assert.ok(tmaText.includes('window.selectTmaTargetOfficer = selectTmaTargetOfficer;'));
+    assert.ok(tmaText.includes('window.openTmaAddOfficerModal = openTmaAddOfficerModal;'));
+    assert.ok(tmaText.includes('window.openTmaEditOfficerModal = openTmaEditOfficerModal;'));
+    assert.ok(tmaText.includes('window.submitTmaOfficerEdit = submitTmaOfficerEdit;'));
+    assert.ok(tmaText.includes('window.deleteTmaCurrentOfficer = deleteTmaCurrentOfficer;'));
   } finally {
     await server.close();
   }
@@ -6730,18 +6737,20 @@ test('TMA R4/R5 events CRUD, smart autopick, sector dossier viewing and compact 
     assert.ok(indexHtml.includes('closeTmaEventEditorModal()'));
     assert.ok(indexHtml.includes('closeTmaSectorDetailModal()'));
 
-    // 9. Verify app.js and tma.js export new TMA functions
+    // 9. Verify runtime.js, index.html, and tma.js expose TMA orchestration & functions directly (no app.js stubs)
+    assert.ok(indexHtml.includes('runtime.js'), 'index.html must include runtime.js');
     const appRes = await fetch(`${baseUrl}/app.js`);
     const appText = await appRes.text();
-    assert.ok(appText.includes('window.toggleTmaOfficersAccordion = toggleTmaOfficersAccordion;'));
-    assert.ok(appText.includes('window.openTmaEventEditor = openTmaEventEditor;'));
-    assert.ok(appText.includes('window.runTmaEventAutopick = runTmaEventAutopick;'));
-    assert.ok(appText.includes('window.submitTmaEventEditor = submitTmaEventEditor;'));
-    assert.ok(appText.includes('window.handleTmaDeleteEvent = handleTmaDeleteEvent;'));
-    assert.ok(appText.includes('window.openTmaSectorDetail = openTmaSectorDetail;'));
+    assert.ok(!appText.includes('window.tma?.'), 'app.js must not contain obsolete window.tma?. stubs');
 
     const tmaRes = await fetch(`${baseUrl}/tma.js`);
     const tmaText = await tmaRes.text();
+    assert.ok(tmaText.includes('window.toggleTmaOfficersAccordion = toggleTmaOfficersAccordion;'));
+    assert.ok(tmaText.includes('window.openTmaEventEditor = openTmaEventEditor;'));
+    assert.ok(tmaText.includes('window.runTmaEventAutopick = runTmaEventAutopick;'));
+    assert.ok(tmaText.includes('window.submitTmaEventEditor = submitTmaEventEditor;'));
+    assert.ok(tmaText.includes('window.handleTmaDeleteEvent = handleTmaDeleteEvent;'));
+    assert.ok(tmaText.includes('window.openTmaSectorDetail = openTmaSectorDetail;'));
     assert.ok(tmaText.includes('window.closeTmaEventEditorModal = closeTmaEventEditorModal;'));
     assert.ok(tmaText.includes('window.closeTmaSectorDetailModal = closeTmaSectorDetailModal;'));
     assert.ok(tmaText.includes('await openTmaEventDetail(finalEventId);'));

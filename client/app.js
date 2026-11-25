@@ -1,27 +1,30 @@
 // ─── CONSTANTS ───────────────────────────────────────────────
-const APP_VERSION = 'v3.52.0';
+const APP_VERSION = 'v3.53.1';
 const COUPON_PER_PUZZLE = 500;
 const PUZZLES_PER_LEVEL = 5;
 const MAX_LEVEL = 180;
 
 // ─── STATE ───────────────────────────────────────────────────
-let state = {
-  version: 3,
-  officerCatalog: [],
-  players: [],    // { id, name, officers: [{id, name, level, coupons}] }
-  eventTypes: [], // { id, name, color, places: [{place, label, coupons}] }
-  events: [],     // { id, typeId, dateFrom, dateTo, assignments: [{place, playerId, officerId, actualCoupons?}], note }
-  stockHistory: [],
-  currentRole: 'r5',
-  currentPlayerId: null,
-  stockSyncEnabled: true,
-  nextId: 1,
-  sectorOfficerFilter: [],
-};
+var state = Object.assign(
+  (typeof globalThis !== 'undefined' && globalThis.state) ? globalThis.state : {},
+  {
+    version: 3,
+    officerCatalog: [],
+    players: [],    // { id, name, officers: [{id, name, level, coupons}] }
+    eventTypes: [], // { id, name, color, places: [{place, label, coupons}] }
+    events: [],     // { id, typeId, dateFrom, dateTo, assignments: [{place, playerId, officerId, actualCoupons?}], note }
+    stockHistory: [],
+    currentRole: 'r5',
+    currentPlayerId: null,
+    stockSyncEnabled: true,
+    nextId: 1,
+    sectorOfficerFilter: [],
+  }
+);
 
-let currentUser = null;
+var currentUser = (typeof globalThis !== 'undefined' && typeof globalThis.currentUser !== 'undefined') ? globalThis.currentUser : null;
 let pendingRequestsCount = 0;
-let myCabinetProfile = null;
+var myCabinetProfile = null;
 let myCabinetSectors = [];
 let regModalSelectedSectorId = null;
 let myCabinetSim = {
@@ -386,110 +389,26 @@ function handleOfflineApiRequest(url, method, bodyObj) {
   return { offline: true };
 }
 
-async function apiFetch(url, options = {}) {
-  const method = (options.method || 'GET').toUpperCase();
-  const token = localStorage.getItem('kow_token');
-  const headers = { ...(options.headers || {}) };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  headers['Pragma'] = 'no-cache';
-  headers['Cache-Control'] = 'no-cache';
-
-  let bodyObj = options.body;
-  if (typeof bodyObj === 'string') {
-    try {
-      bodyObj = JSON.parse(bodyObj);
-    } catch (e) {}
-  }
-
-  if (options.body && typeof options.body === 'object' && !(typeof FormData !== 'undefined' && options.body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(options.body);
-  }
-
-  const fetchOptions = {
-    ...options,
-    cache: 'no-store',
-    headers
-  };
-
-  let res;
-  try {
-    res = await fetch(url, fetchOptions);
-  } catch (netErr) {
-    // Network failure (server unreachable or connection dropped)
-    return handleOfflineApiRequest(url, method, bodyObj);
-  }
-
-  if (res.status === 401) {
-    let data = null;
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      try { data = await res.json(); } catch (_) {}
-    } else {
-      try { data = await res.text(); } catch (_) {}
-    }
-
-    const isAuthRoute = url.includes('/api/auth/') ||
-                        url.includes('/api/telegram/bind') ||
-                        url.includes('/api/telegram/channel-bind');
-    const isTelegramDataError = Boolean(data && (data.error === 'INVALID_TELEGRAM_DATA' || data.error === 'MISSING_TELEGRAM_USER'));
-
-    if (!isAuthRoute && !isTelegramDataError) {
-      const hadSession = Boolean(currentUser || (typeof localStorage !== 'undefined' && localStorage.getItem('kow_token')));
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem('kow_token');
-        localStorage.removeItem('kow_user');
-      }
-      currentUser = null;
+if (typeof KowRuntime !== 'undefined' && typeof KowRuntime.configure === 'function') {
+  KowRuntime.configure({
+    onNetworkError: handleOfflineApiRequest,
+    onUnauthorizedSessionExpired: ({ hadSession, isTma }) => {
       renderTopbarProfile();
       renderSidebarNav();
       if (hadSession) {
-        if (typeof isTmaMode === 'function' && isTmaMode()) {
-          if (typeof renderTmaUnboundScreen === 'function') {
-            renderTmaUnboundScreen({ message: 'Сессия истекла. Пожалуйста, войдите снова.' });
-          }
+        if (isTma) {
+          KowRuntime.callTma('renderTmaUnboundScreen', { message: 'Сессия истекла. Пожалуйста, войдите снова.' });
         } else {
           openAuthModal('login', 'Сессия истекла. Пожалуйста, войдите снова.');
         }
       }
     }
-
-    const message = (data && (data.message || data.error)) || res.statusText || 'UNAUTHORIZED';
-    const err = new Error(message);
-    err.status = 401;
-    err.data = data;
-    throw err;
-  }
-
-  let data = null;
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    data = await res.json();
-  } else {
-    data = await res.text();
-  }
-
-  if (!res.ok) {
-    const message = (data && data.message) || (data && data.error) || res.statusText || 'API Error';
-    const err = new Error(message);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-
-  return data;
+  });
 }
 
 if (typeof window !== 'undefined') {
-  window.apiFetch = apiFetch;
-  window.__appApiFetch = apiFetch;
   window.state = state;
   window.currentUser = currentUser;
-  window.toast = toast;
   window.loadDataFromServer = loadDataFromServer;
 }
 
@@ -575,16 +494,6 @@ async function flushOutboxQueue() {
   }
 }
 
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 function formatDateTime(s) {
   if (!s) return '—';
   try {
@@ -654,6 +563,7 @@ function load() {
   } catch(e) {}
   if (!state.players.length && !state.eventTypes.length) seedDemo();
   state = migrateState(state);
+  if (typeof normalizeStateCatalog === 'function') normalizeStateCatalog(state);
   save();
 }
 
@@ -720,9 +630,6 @@ function seedDemo() {
 // ─── MATH ────────────────────────────────────────────────────
 function totalPuzzles(o) { return o.level * PUZZLES_PER_LEVEL + Math.floor(o.coupons / COUPON_PER_PUZZLE); }
 function pct(v, m) { return Math.min(100, Math.round(v / Math.max(1,m) * 100)); }
-function fmtNum(value, digits=0) {
-  return (Number(value) || 0).toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }).replace(/[\u00a0\u202f]/g, ' ');
-}
 function fmtOne(value) { return fmtNum(value, 1); }
 
 function formatInputNumber(val, allowDecimals = false) {
@@ -834,7 +741,6 @@ function showUndoToast(msg, undoFn, type = 'success') {
 function getPlayer(id) { return state.players.find(p => String(p.id) === String(id)); }
 function getEventType(id) { return state.eventTypes.find(t => String(t.id) === String(id)); }
 function getEvent(id) { return state.events.find(e => String(e.id) === String(id)); }
-function getCatalogOfficer(id) { return state.officerCatalog.find(o => String(o.id) === String(id)); }
 function officerLabel(officer) {
   const catalog = getCatalogOfficer(officer?.catalogId);
   return catalog?.name || officer?.name || '—';
@@ -1003,17 +909,6 @@ function evBadge(et) {
   return `<span class="badge" style="background:${et.color}22;color:${et.color};border:1px solid ${et.color}44">${et.name}</span>`;
 }
 
-function toast(msg, type='success') {
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.innerHTML = `<span>${{success:'✓',error:'✕',info:'ℹ'}[type]||'✓'}</span><span>${msg}</span>`;
-  const container = document.getElementById('toasts');
-  if (container) {
-    container.appendChild(el);
-  }
-  setTimeout(()=>el.remove(), 3500);
-}
-
 function showToast(msg, type = 'info') {
   return toast(msg, type);
 }
@@ -1021,7 +916,7 @@ function showToast(msg, type = 'info') {
 function openModal(id) {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
     if (id === 'modal-auth') {
-      if (typeof renderTmaUnboundScreen === 'function') renderTmaUnboundScreen();
+      KowRuntime.callTma('renderTmaUnboundScreen');
       return;
     }
   }
@@ -1128,9 +1023,7 @@ function openAuthModal(tab = 'login', alertMessage = null) {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
     enableTmaView();
     closeAllModals();
-    if (typeof renderTmaUnboundScreen === 'function') {
-      renderTmaUnboundScreen(alertMessage ? { message: alertMessage } : null);
-    }
+    KowRuntime.callTma('renderTmaUnboundScreen', alertMessage ? { message: alertMessage } : null);
     return;
   }
   openModal('modal-auth');
@@ -1245,10 +1138,8 @@ async function handleLoginSubmit(e) {
     renderSidebarNav();
     if (typeof isTmaMode === 'function' && isTmaMode()) {
       enableTmaView();
-      if (typeof doTmaLoadData === 'function') await doTmaLoadData();
-      if (typeof renderTmaApp === 'function') {
-        renderTmaApp();
-      }
+      await loadDataFromServer();
+      KowRuntime.callTma('renderTmaApp');
     } else {
       await loadDataFromServer();
       flushOutboxQueue();
@@ -1345,7 +1236,7 @@ async function logout() {
     renderTopbarProfile();
     renderSidebarNav();
     if (typeof isTmaMode === 'function' && isTmaMode()) {
-      renderTmaUnboundScreen();
+      KowRuntime.callTma('renderTmaUnboundScreen');
       return;
     }
     openAuthModal('login');
@@ -1436,14 +1327,12 @@ async function checkAuth() {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
     enableTmaView();
     setupTmaEnvironment();
-    const tmaAuthed = await initTmaAuth();
+    const tmaAuthed = await KowRuntime.callTma('initTmaAuth');
     closeAllModals();
     if (tmaAuthed) {
       return true;
     }
-    if (typeof renderTmaUnboundScreen === 'function') {
-      renderTmaUnboundScreen();
-    }
+    KowRuntime.callTma('renderTmaUnboundScreen');
     return false;
   }
 
@@ -2918,58 +2807,6 @@ function renderCabinetOfficerSkills(o) {
   `;
 }
 
-function extractCleanOfficerResponse(res) {
-  if (!res || typeof res !== 'object') return null;
-  const { newStock, stockDeducted, stockRefunded, resetDelta, ...cleanOfficer } = res;
-  return cleanOfficer;
-}
-
-function applyOfficerMutationResponse({ playerId = null, officerId = null, response = null, fallbackPatch = null } = {}) {
-  const clean = extractCleanOfficerResponse(response);
-  const newStock = response && response.newStock ? response.newStock : null;
-
-  if (newStock && typeof myCabinetProfile !== 'undefined' && myCabinetProfile && (!playerId || myCabinetProfile.id === playerId)) {
-    myCabinetProfile.stock = newStock;
-  }
-
-  const patchOfficerList = (list) => {
-    if (!Array.isArray(list)) return;
-    const targetId = officerId || (clean && clean.id);
-    if (!targetId) return;
-    const found = list.find(o => String(o.id) === String(targetId));
-    if (found) {
-      if (clean && clean.id) Object.assign(found, clean);
-      else if (fallbackPatch) Object.assign(found, fallbackPatch);
-    } else if (clean && clean.id && !officerId) {
-      list.push(clean);
-    }
-  };
-
-  if (typeof myCabinetProfile !== 'undefined' && myCabinetProfile && (!playerId || myCabinetProfile.id === playerId)) {
-    patchOfficerList(myCabinetProfile.officers);
-  }
-  if (typeof state !== 'undefined' && Array.isArray(state.players)) {
-    for (const p of state.players) {
-      if (!playerId || p.id === playerId) {
-        if (newStock) p.stock = newStock;
-        patchOfficerList(p.officers);
-      }
-    }
-  }
-  return { cleanOfficer: clean, newStock };
-}
-
-function formatStockSpendSummary(prevStock, nextStock) {
-  if (!prevStock || !nextStock) return '';
-  const starCouponsSpent = Math.max(0, (Number(prevStock.starCoupons) || 0) - (Number(nextStock.starCoupons) || 0));
-  if (starCouponsSpent > 0) return ` Списано: ${fmtNum(starCouponsSpent)} купонов звезды`;
-  const couponsSpent = Math.max(0, (Number(prevStock.coupons) || 0) - (Number(nextStock.coupons) || 0));
-  if (couponsSpent > 0) return ` Списано: ${fmtNum(couponsSpent)} куп.`;
-  const puzzlesSpent = Math.max(0, (Number(prevStock.puzzles) || 0) - (Number(nextStock.puzzles) || 0));
-  if (puzzlesSpent > 0) return ` Списано: ${fmtNum(puzzlesSpent)} медалей`;
-  return '';
-}
-
 async function setMyOfficerSkill(officerId, skillIndex, level) {
   if (!myCabinetProfile || !myCabinetProfile.officers) {
     const foundPlayer = (state.players || []).find(p => (p.officers || []).some(x => String(x.id) === String(officerId)));
@@ -3007,8 +2844,8 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
       } else {
         await renderMyCabinet();
       }
-      if (typeof renderTmaCabinet === 'function') {
-        renderTmaCabinet();
+      if (typeof KowRuntime !== 'undefined') {
+        KowRuntime.callTma('renderTmaCabinet');
       }
       toast(typeof t === 'function' ? t('officers.toast_retro_skills_updated') : '🎯 Навык обновлен (Ретро: без списания со склада)');
       return;
@@ -3039,8 +2876,8 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
     if (stockGridWrap && myCabinetProfile) {
       stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
     }
-    if (typeof renderTmaCabinet === 'function') {
-      renderTmaCabinet();
+    if (typeof KowRuntime !== 'undefined') {
+      KowRuntime.callTma('renderTmaCabinet');
     }
   };
 
@@ -3403,8 +3240,8 @@ async function saveCabinetInline(key) {
     if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
       simEl.innerHTML = renderCabinetSimulatorHtml();
     }
-    if (typeof renderTmaCabinet === 'function') {
-      renderTmaCabinet();
+    if (typeof KowRuntime !== 'undefined') {
+      KowRuntime.callTma('renderTmaCabinet');
     }
   } catch (err) {
     toast('Ошибка сохранения: ' + err.message, 'error');
@@ -4017,8 +3854,8 @@ async function saveMyOfficerSubmit() {
       if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
         simEl.innerHTML = renderCabinetSimulatorHtml();
       }
-      if (typeof renderTmaCabinet === 'function') {
-        renderTmaCabinet();
+      if (typeof KowRuntime !== 'undefined') {
+        KowRuntime.callTma('renderTmaCabinet');
       }
     } else {
       const catalogId = document.getElementById('my-officer-catalog-select').value;
@@ -4054,8 +3891,8 @@ async function saveMyOfficerSubmit() {
       closeAllModals();
       toast('Офицер добавлен в профиль' + (createdOff?.stockDeducted ? ' (ресурсы списаны со склада)' : ''));
       await renderMyCabinet();
-      if (typeof renderTmaCabinet === 'function') {
-        renderTmaCabinet();
+      if (typeof KowRuntime !== 'undefined') {
+        KowRuntime.callTma('renderTmaCabinet');
       }
     }
   } catch (err) {
@@ -4089,8 +3926,8 @@ async function deleteMyOfficer(officerId, officerName) {
     if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
       simEl.innerHTML = renderCabinetSimulatorHtml();
     }
-    if (typeof renderTmaCabinet === 'function') {
-      renderTmaCabinet();
+    if (typeof KowRuntime !== 'undefined') {
+      KowRuntime.callTma('renderTmaCabinet');
     }
   } catch (err) {
     toast('Ошибка удаления офицера: ' + err.message, 'error');
@@ -4131,8 +3968,8 @@ async function setMyOfficerStars(officerId, stars) {
       } else {
         await renderMyCabinet();
       }
-      if (typeof renderTmaCabinet === 'function') {
-        renderTmaCabinet();
+      if (typeof KowRuntime !== 'undefined') {
+        KowRuntime.callTma('renderTmaCabinet');
       }
       toast(typeof t === 'function' ? t('officers.toast_retro_stars_updated') : '⭐ Звёзды обновлены (Ретро: без списания со склада)');
       return;
@@ -4161,8 +3998,8 @@ async function setMyOfficerStars(officerId, stars) {
     if (stockGridWrap && myCabinetProfile) {
       stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
     }
-    if (typeof renderTmaCabinet === 'function') {
-      renderTmaCabinet();
+    if (typeof KowRuntime !== 'undefined') {
+      KowRuntime.callTma('renderTmaCabinet');
     }
   };
 
@@ -6140,7 +5977,7 @@ let pageParams = {};
 
 function navigate(page, params={}, updateHash = true) {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
-    if (typeof renderTmaApp === 'function') renderTmaApp();
+    KowRuntime.callTma('renderTmaApp');
     return;
   }
   const role = currentUser?.rank || state.currentRole || 'r3';
@@ -6254,7 +6091,7 @@ function handleHashRoute() {
 
 function navigateInitialOrHash() {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
-    renderTmaApp();
+    KowRuntime.callTma('renderTmaApp');
     return;
   }
   const parseFn = typeof parseRouteFromHash === 'function'
@@ -7274,14 +7111,15 @@ function updateRegisterModalForSector(sectorId) {
     ? `Изменить заявку (${escapeHtml(targetSector.name)})`
     : `Регистрация на «${et?.name || 'Ивент'}» (${escapeHtml(targetSector.name)})`;
 
+  const catalogList = getOfficerCatalog();
   const isEligibleFn = (o) => {
     return (typeof logic !== 'undefined' && typeof logic.isOfficerEligibleForEvents === 'function')
-      ? logic.isOfficerEligibleForEvents(o, state.catalog)
+      ? logic.isOfficerEligibleForEvents(o, catalogList)
       : (!Boolean(o.onlyPersonalPuzzles || o.only_personal_puzzles) && getCatalogOfficer(o.catalogId)?.upgradeType !== 'special' && Number(getCatalogOfficer(o.catalogId)?.couponPerPuzzle) !== 0);
   };
   let optimalOfficer = null;
   if (typeof logic !== 'undefined' && typeof logic.selectOptimalEventOfficer === 'function') {
-    const optRes = logic.selectOptimalEventOfficer({ player: targetSector, catalog: state.catalog, eventDate: ev.dateFrom });
+    const optRes = logic.selectOptimalEventOfficer({ player: targetSector, catalog: catalogList, eventDate: ev.dateFrom });
     optimalOfficer = optRes?.officer || null;
   }
   const eligibleOfficer = optimalOfficer || targetSector.officers.find(isEligibleFn);
@@ -7369,7 +7207,7 @@ function onRegisterModalChange() {
 
   const c = getCatalogOfficer(officer.catalogId);
   const isEligible = (typeof logic !== 'undefined' && typeof logic.isOfficerEligibleForEvents === 'function')
-    ? logic.isOfficerEligibleForEvents(officer, state.catalog)
+    ? logic.isOfficerEligibleForEvents(officer, getOfficerCatalog())
     : (!Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles) && c?.upgradeType !== 'special' && Number(c?.couponPerPuzzle) !== 0);
   const submitBtn = document.getElementById('reg-btn-submit');
   if (!isEligible) {
@@ -7452,7 +7290,7 @@ async function handleSubmitRegistration() {
   const officer = (sector?.officers || []).find(o => String(o.id) === String(officerId));
   const c = officer ? getCatalogOfficer(officer.catalogId) : null;
   const isEligible = officer && ((typeof logic !== 'undefined' && typeof logic.isOfficerEligibleForEvents === 'function')
-    ? logic.isOfficerEligibleForEvents(officer, state.catalog)
+    ? logic.isOfficerEligibleForEvents(officer, getOfficerCatalog())
     : (!Boolean(officer.onlyPersonalPuzzles || officer.only_personal_puzzles) && c?.upgradeType !== 'special' && Number(c?.couponPerPuzzle) !== 0));
   if (officer && !isEligible) {
     toast('Этот офицер не может участвовать в ивентах на купоны (качается личными медалями или спец-тип)', 'error');
@@ -9688,13 +9526,9 @@ function buildMatrixRows() {
       }
 
       const def = calculateOfficerDeficit({ officer: o, catalogItem: cat, player: p, targetLevel: MAX_LEVEL, includeStock: false });
-      let recBadge = '<span class="badge badge-none">4–10 место</span>';
-      if (def.deficitPuzzles === 0) recBadge = '<span class="badge badge-success">Максимум ✓</span>';
-      else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) recBadge = '<span class="badge badge-none">Только личные</span>';
-      else if (def.costPerPuzzle === 0) recBadge = '<span class="badge badge-none">Только пазлы</span>';
-      else if (def.deficitCoupons >= 12500) recBadge = '<span class="badge" style="background:#f59e0b22;color:#d97706">🥇 1 место</span>';
-      else if (def.deficitCoupons >= 6500) recBadge = '<span class="badge" style="background:#64748b22;color:#94a3b8">🥈 2 место</span>';
-      else if (def.deficitCoupons >= 3500) recBadge = '<span class="badge" style="background:#b4530922;color:#d97706">🥉 3 место</span>';
+      const recBadge = (typeof KowRuntime !== 'undefined' && typeof KowRuntime.classifyMatrixRecommendation === 'function')
+        ? KowRuntime.classifyMatrixRecommendation(def).badgeHtml
+        : '<span class="badge badge-none">4–10 место</span>';
 
       rows.push({
         player: p,
@@ -12204,15 +12038,7 @@ async function fetchAndApplyAppVersion() {
   }
 }
 
-async function initApp() {
-  if (typeof isTmaMode === 'function' && isTmaMode()) {
-    enableTmaView();
-    setupTmaEnvironment();
-  } else {
-    if (typeof disableTmaView === 'function') {
-      disableTmaView();
-    }
-  }
+async function initSharedApp() {
   load();
   if (typeof initI18n === 'function') {
     try {
@@ -12250,15 +12076,6 @@ async function initApp() {
       }
     });
   }
-
-  checkAuth().then(isAuth => {
-    if (isAuth) {
-      navigateInitialOrHash();
-      if (typeof navigator === 'undefined' || navigator.onLine) {
-        flushOutboxQueue();
-      }
-    }
-  });
 
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     let refreshing = false;
@@ -12318,6 +12135,16 @@ async function initApp() {
   setupBackgroundSync();
 }
 
+async function launchWebApp() {
+  const isAuth = await checkAuth();
+  if (isAuth) {
+    navigateInitialOrHash();
+    if (typeof navigator === 'undefined' || navigator.onLine) {
+      flushOutboxQueue();
+    }
+  }
+}
+
 let isGlobalSyncing = false;
 
 async function handleGlobalSync() {
@@ -12341,7 +12168,7 @@ async function handleGlobalSync() {
 
 function refreshCurrentPage() {
   if (typeof isTmaMode === 'function' && isTmaMode()) {
-    refreshTmaCurrentTab();
+    KowRuntime.callTma('refreshTmaCurrentTab');
     return;
   }
   if (currentPage === 'users') {
@@ -12466,174 +12293,13 @@ if (typeof window !== 'undefined') {
   }, 30000);
 }
 
-// ─── TELEGRAM MINI APP (TMA) BRIDGE ───────────────────────────────
-function isTmaMode() {
-  if (typeof window !== "undefined" && typeof window.isTmaMode === "function" && window.isTmaMode !== isTmaMode) {
-    return window.isTmaMode();
-  }
-  if (typeof window === "undefined") return false;
-  if (window.TelegramWebviewProxy) {
-    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-    return true;
-  }
-  if (typeof navigator !== 'undefined' && /Telegram/i.test(navigator.userAgent || '')) {
-    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-    return true;
-  }
-  try {
-    const s = (window.location && window.location.search) ? window.location.search : '';
-    if (s && (s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma')) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-    if (typeof URLSearchParams !== 'undefined' && s) {
-      const params = new URLSearchParams(s);
-      if (params.get("tma") === "1" || params.has("tma")) {
-        try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-        return true;
-      }
-    }
-  } catch (_) {}
-  try {
-    const h = (window.location && window.location.hash) ? window.location.hash : '';
-    if (h && (h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 || h.indexOf('tgWebAppVersion') !== -1 || h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1)) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-  } catch (_) {}
-  const tg = window.Telegram?.WebApp;
-  if (tg) {
-    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-  }
-  disableTmaView();
-  return false;
+// ─── RUNTIME ADAPTER REGISTRATION ───────────────────────────
+if (typeof KowRuntime !== 'undefined' && typeof KowRuntime.registerWebAdapter === 'function') {
+  KowRuntime.registerWebAdapter({
+    initShared: initSharedApp,
+    launchWeb: launchWebApp
+  });
 }
-
-function disableTmaView() {
-  if (typeof window !== 'undefined' && typeof window.disableTmaView === 'function' && window.disableTmaView !== disableTmaView) {
-    return window.disableTmaView();
-  }
-  if (typeof sessionStorage !== 'undefined') {
-    try { sessionStorage.removeItem('kow_tma'); } catch (_) {}
-  }
-  if (typeof document !== 'undefined') {
-    if (typeof document.documentElement?.classList?.remove === 'function') {
-      document.documentElement.classList.remove('tma-mode');
-    }
-    if (typeof document.body?.classList?.remove === 'function') {
-      document.body.classList.remove('tma-mode');
-    }
-    const appEl = document.getElementById('app');
-    if (appEl && appEl.style && appEl.style.display === 'none') {
-      appEl.style.display = '';
-    }
-    const tmaEl = document.getElementById('tma-app');
-    if (tmaEl && tmaEl.style) {
-      tmaEl.style.display = 'none';
-    }
-  }
-}
-
-function enableTmaView() {
-  if (typeof window !== 'undefined' && typeof window.enableTmaView === 'function' && window.enableTmaView !== enableTmaView) {
-    return window.enableTmaView();
-  }
-  if (typeof document !== 'undefined') {
-    document.documentElement?.classList.add('tma-mode');
-    document.body?.classList.add('tma-mode');
-    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-    const tmaEl = document.getElementById('tma-app');
-    if (tmaEl) tmaEl.style.display = 'flex';
-    const appEl = document.getElementById('app');
-    if (appEl) appEl.style.display = 'none';
-    const authModal = document.getElementById('modal-auth');
-    if (authModal) {
-      authModal.classList.remove('open');
-      authModal.style.display = 'none';
-    }
-    const overlay = document.getElementById('overlay');
-    if (overlay) {
-      overlay.classList.remove('open');
-      overlay.style.display = 'none';
-    }
-  }
-}
-
-function setupTmaEnvironment() {
-  if (typeof window !== 'undefined' && typeof window.setupTmaEnvironment === 'function' && window.setupTmaEnvironment !== setupTmaEnvironment) {
-    return window.setupTmaEnvironment();
-  }
-  const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
-  if (tg) {
-    try {
-      tg.ready?.();
-      tg.expand?.();
-    } catch (_) {}
-  }
-}
-
-async function initTmaAuth() {
-  if (typeof window !== 'undefined' && typeof window.initTmaAuth === 'function' && window.initTmaAuth !== initTmaAuth) {
-    return window.initTmaAuth();
-  }
-  return false;
-}
-
-function renderTmaApp(...args) {
-  if (typeof window !== 'undefined' && typeof window.renderTmaApp === 'function' && window.renderTmaApp !== renderTmaApp) {
-    return window.renderTmaApp(...args);
-  }
-  return null;
-}
-function renderTmaUnboundScreen(...args) {
-  if (typeof window !== 'undefined' && typeof window.renderTmaUnboundScreen === 'function' && window.renderTmaUnboundScreen !== renderTmaUnboundScreen) {
-    return window.renderTmaUnboundScreen(...args);
-  }
-  return null;
-}
-
-function renderTmaCabinet(...args) {
-  if (typeof window !== 'undefined' && typeof window.renderTmaCabinet === 'function' && window.renderTmaCabinet !== renderTmaCabinet) {
-    return window.renderTmaCabinet(...args);
-  }
-  return null;
-}
-function renderTmaEvents(...args) {
-  if (typeof window !== 'undefined' && typeof window.renderTmaEvents === 'function' && window.renderTmaEvents !== renderTmaEvents) {
-    return window.renderTmaEvents(...args);
-  }
-  return null;
-}
-function renderTmaMatrix(...args) {
-  if (typeof window !== 'undefined' && typeof window.renderTmaMatrix === 'function' && window.renderTmaMatrix !== renderTmaMatrix) {
-    return window.renderTmaMatrix(...args);
-  }
-  return null;
-}
-
-function openTmaOfficersPickerModal(...a) { return window.tma?.openTmaOfficersPickerModal?.(...a); }
-function selectTmaTargetOfficer(...a) { return window.tma?.selectTmaTargetOfficer?.(...a); }
-function openTmaAddOfficerModal(...a) { return window.tma?.openTmaAddOfficerModal?.(...a); }
-function openTmaEditOfficerModal(...a) { return window.tma?.openTmaEditOfficerModal?.(...a); }
-function submitTmaOfficerEdit(...a) { return window.tma?.submitTmaOfficerEdit?.(...a); }
-function deleteTmaCurrentOfficer(...a) { return window.tma?.deleteTmaCurrentOfficer?.(...a); }
-
-function toggleTmaOfficersAccordion(...a) { return window.tma?.toggleTmaOfficersAccordion?.(...a); }
-function openTmaEventEditor(...a) { return window.tma?.openTmaEventEditor?.(...a); }
-function runTmaEventAutopick(...a) { return window.tma?.runTmaEventAutopick?.(...a); }
-function submitTmaEventEditor(...a) { return window.tma?.submitTmaEventEditor?.(...a); }
-function handleTmaDeleteEvent(...a) { return window.tma?.handleTmaDeleteEvent?.(...a); }
-function openTmaSectorDetail(...a) { return window.tma?.openTmaSectorDetail?.(...a); }
-
-// ─── INIT ────────────────────────────────────────────────────
-initApp();
 
 if (typeof window !== 'undefined') {
   window.saveMyCabinetProfile = saveMyCabinetProfile;
@@ -12806,25 +12472,4 @@ if (typeof window !== 'undefined') {
   window.selectMatrixOfficer = selectMatrixOfficer;
   window.clearMatrixOfficerFilter = clearMatrixOfficerFilter;
   window.onMatrixOfficerKeydown = onMatrixOfficerKeydown;
-
-  window.apiFetch = apiFetch;
-  window.isTmaMode = isTmaMode;
-  window.enableTmaView = enableTmaView;
-  window.disableTmaView = disableTmaView;
-  window.setupTmaEnvironment = setupTmaEnvironment;
-  window.initTmaAuth = initTmaAuth;
-
-  window.openTmaOfficersPickerModal = openTmaOfficersPickerModal;
-  window.selectTmaTargetOfficer = selectTmaTargetOfficer;
-  window.openTmaAddOfficerModal = openTmaAddOfficerModal;
-  window.openTmaEditOfficerModal = openTmaEditOfficerModal;
-  window.submitTmaOfficerEdit = submitTmaOfficerEdit;
-  window.deleteTmaCurrentOfficer = deleteTmaCurrentOfficer;
-
-  window.toggleTmaOfficersAccordion = toggleTmaOfficersAccordion;
-  window.openTmaEventEditor = openTmaEventEditor;
-  window.runTmaEventAutopick = runTmaEventAutopick;
-  window.submitTmaEventEditor = submitTmaEventEditor;
-  window.handleTmaDeleteEvent = handleTmaDeleteEvent;
-  window.openTmaSectorDetail = openTmaSectorDetail;
 }

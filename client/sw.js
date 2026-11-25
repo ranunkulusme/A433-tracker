@@ -5,12 +5,13 @@
  * сквозной пропуск API-запросов напрямую в сеть.
  */
 
-const CACHE_NAME = 'kow-cache-v3.51.0';
+const CACHE_NAME = 'kow-cache-v3.53.1';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/style.css',
+  '/runtime.js',
   '/app.js',
   '/logic.js',
   '/tma.js',

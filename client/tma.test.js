@@ -10,8 +10,42 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-test('tma.js executes without ReferenceError in bare browser environment without app.js', () => {
+test('runtime.js + tma.js execute cleanly in bare browser environment without app.js and eliminate legacy shims/stubs', () => {
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
+  const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+  const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const swCode = fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+  // Structural architectural guarantees ("replace, don't layer")
+  for (const obsoleteShim of [
+    'function doTmaApiFetch',
+    'function doTmaToast',
+    'function doTmaFmtNum',
+    'function doTmaEscapeHtml',
+    'function doTmaGetCatalogOfficer',
+    'function doTmaParseEventBoundary',
+    'function doTmaGetLocalizedOfficerType',
+    'function isTmaMode('
+  ]) {
+    assert.ok(!tmaCode.includes(obsoleteShim), `tma.js must not contain obsolete shim ${obsoleteShim}`);
+  }
+  const closeEventMatches = tmaCode.match(/function closeTmaEventModal\s*\(/g) || [];
+  assert.equal(closeEventMatches.length, 1, 'tma.js must define closeTmaEventModal exactly once');
+  assert.ok(!/\bstate\.catalog\b/.test(tmaCode), 'tma.js must not read undefined state.catalog');
+  assert.ok(!/\bstate\.catalog\b/.test(appCode), 'app.js must not read undefined state.catalog');
+  assert.ok(!appCode.includes('window.tma?.'), 'app.js must not contain dead window.tma?. stubs');
+  assert.ok(!appCode.includes('function isTmaMode('), 'app.js must delegate isTmaMode to runtime.js');
+  assert.ok(!appCode.includes('async function apiFetch('), 'app.js must delegate apiFetch to runtime.js');
+
+  // Version parity across package.json, app.js, index.html, sw.js
+  assert.ok(appCode.includes(`const APP_VERSION = 'v${pkg.version}';`), `app.js APP_VERSION must match v${pkg.version}`);
+  assert.ok(swCode.includes(`const CACHE_NAME = 'kow-cache-v${pkg.version}';`), `sw.js CACHE_NAME must match v${pkg.version}`);
+  assert.ok(swCode.includes("'/runtime.js'"), 'sw.js STATIC_ASSETS must include /runtime.js');
+  assert.ok(indexHtml.includes(`runtime.js?v=${pkg.version}`), 'index.html must load runtime.js with current version');
+  assert.ok(indexHtml.includes(`app.js?v=${pkg.version}`), 'index.html must load app.js with current version');
+  assert.ok(indexHtml.includes(`tma.js?v=${pkg.version}`), 'index.html must load tma.js with current version');
 
   // Mock DOM / Window environment
   const mockStorage = {};
@@ -60,31 +94,34 @@ test('tma.js executes without ReferenceError in bare browser environment without
     clearTimeout: (id) => clearTimeout(id)
   });
 
-  // Executing tma.js must not throw ReferenceError: apiFetch / toast / state / currentUser
+  // Executing runtime.js + tma.js must not throw ReferenceError: apiFetch / toast / state / currentUser
   assert.doesNotThrow(() => {
+    vm.runInContext(runtimeCode, context);
     vm.runInContext(tmaCode, context);
   });
 
-  // Verify that apiFetch and doTmaApiFetch are available and defined
+  assert.equal(typeof context.window.KowRuntime, 'object');
   assert.equal(typeof context.window.apiFetch, 'function');
   assert.equal(typeof context.apiFetch, 'function');
-  assert.equal(typeof context.doTmaApiFetch, 'function');
   assert.equal(typeof context.window.toast, 'function');
   assert.equal(typeof context.toast, 'function');
 });
 
-test('doTmaApiFetch executes standalone fetch and handles JSON and errors', async () => {
-  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+test('KowRuntime.apiFetch executes fetch, handles JSON/errors, invokes onNetworkError, and handles 401 session reset', async () => {
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
 
   let capturedUrl = null;
   let capturedOptions = null;
+  let expiredTriggered = 0;
+  let networkFallbackCalled = 0;
 
+  const mockStorage = { kow_token: 'test_jwt_token', kow_user: '{"id":1}' };
   const mockWindow = {
     location: { search: '?tma=1', hash: '' },
     localStorage: {
-      getItem: (k) => (k === 'kow_token' ? 'test_jwt_token' : null),
-      setItem: () => {},
-      removeItem: () => {}
+      getItem: (k) => mockStorage[k] || null,
+      setItem: (k, v) => { mockStorage[k] = String(v); },
+      removeItem: (k) => { delete mockStorage[k]; }
     },
     fetch: async (url, options) => {
       capturedUrl = url;
@@ -95,6 +132,17 @@ test('doTmaApiFetch executes standalone fetch and handles JSON and errors', asyn
           status: 400,
           headers: { get: () => 'application/json' },
           json: async () => ({ message: 'Invalid credentials' })
+        };
+      }
+      if (url === '/api/network-fail') {
+        throw new Error('Network unreachable');
+      }
+      if (url === '/api/protected-401') {
+        return {
+          ok: false,
+          status: 401,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ error: 'UNAUTHORIZED', message: 'Expired' })
         };
       }
       return {
@@ -126,10 +174,19 @@ test('doTmaApiFetch executes standalone fetch and handles JSON and errors', asyn
     clearTimeout
   });
 
-  vm.runInContext(tmaCode, context);
+  vm.runInContext(runtimeCode, context);
+  context.KowRuntime.configure({
+    onNetworkError: async (url, method) => {
+      networkFallbackCalled++;
+      return { offline: true, url, method };
+    },
+    onUnauthorizedSessionExpired: () => {
+      expiredTriggered++;
+    }
+  });
 
   // 1. Successful call
-  const res = await context.doTmaApiFetch('/api/test-endpoint', {
+  const res = await context.apiFetch('/api/test-endpoint', {
     method: 'POST',
     body: { foo: 'bar' }
   });
@@ -144,7 +201,7 @@ test('doTmaApiFetch executes standalone fetch and handles JSON and errors', asyn
   // 2. Error call throws with proper message
   await assert.rejects(
     async () => {
-      await context.doTmaApiFetch('/api/error-test');
+      await context.apiFetch('/api/error-test');
     },
     (err) => {
       assert.equal(err.message, 'Invalid credentials');
@@ -152,50 +209,21 @@ test('doTmaApiFetch executes standalone fetch and handles JSON and errors', asyn
       return true;
     }
   );
+
+  // 3. Network failure invokes configured offline handler
+  const netRes = await context.apiFetch('/api/network-fail', { method: 'PUT' });
+  assert.equal(networkFallbackCalled, 1);
+  assert.equal(netRes.offline, true);
+
+  // 4. 401 on protected endpoint clears token & invokes unauthorized callback
+  await assert.rejects(() => context.apiFetch('/api/protected-401'), (e) => e.status === 401);
+  assert.equal(mockStorage.kow_token, undefined);
+  assert.equal(expiredTriggered, 1);
 });
 
-test('doTmaApiFetch delegates to window.__appApiFetch when app.js is loaded', async () => {
-  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
-
-  let appApiCalled = false;
-  const mockWindow = {
-    location: { search: '?tma=1', hash: '' },
-    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-    __appApiFetch: async (url, options) => {
-      appApiCalled = true;
-      return { delegated: true, url };
-    }
-  };
-
-  const mockDocument = {
-    readyState: 'complete',
-    documentElement: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
-    body: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
-    getElementById: () => null,
-    addEventListener: () => {}
-  };
-  mockWindow.window = mockWindow;
-  mockWindow.document = mockDocument;
-
-  const context = vm.createContext({
-    window: mockWindow,
-    document: mockDocument,
-    localStorage: mockWindow.localStorage,
-    console,
-    setTimeout,
-    clearTimeout
-  });
-
-  vm.runInContext(tmaCode, context);
-
-  const res = await context.doTmaApiFetch('/api/delegated-test');
-  assert.equal(appApiCalled, true);
-  assert.equal(res.delegated, true);
-  assert.equal(res.url, '/api/delegated-test');
-});
-
-test('sequential execution of logic.js, app.js and tma.js has zero identifier collisions and switches tabs cleanly', () => {
+test('sequential execution of logic.js, runtime.js, app.js and tma.js has zero identifier collisions and switches tabs cleanly', () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
@@ -280,9 +308,10 @@ test('sequential execution of logic.js, app.js and tma.js has zero identifier co
   // 1. Must load sequentially without SyntaxError: Identifier 'X' has already been declared
   assert.doesNotThrow(() => {
     vm.runInContext(logicCode, context);
+    vm.runInContext(runtimeCode, context);
     vm.runInContext(appCode, context);
     vm.runInContext(tmaCode, context);
-  }, 'Loading logic.js, app.js, tma.js sequentially threw a SyntaxError or ReferenceError');
+  }, 'Loading logic.js, runtime.js, app.js, tma.js sequentially threw a SyntaxError or ReferenceError');
 
   // 2. Verify TMA functions exist and are not recursive stubs
   assert.equal(typeof context.switchTmaTab, 'function');
@@ -317,17 +346,18 @@ test('sequential execution of logic.js, app.js and tma.js has zero identifier co
 
   // 6. Test openAuthModal in TMA mode suppresses modal-auth and renders unbound screen
   assert.doesNotThrow(() => {
-    elements['modal-auth'].classList.remove('open');
-    elements['overlay'].classList.remove('open');
+    getEl('modal-auth').classList.remove('open');
+    getEl('overlay').classList.remove('open');
     context.openAuthModal('login', 'Тестовое предупреждение');
-    assert.equal(elements['modal-auth'].classList.contains('open'), false);
-    assert.equal(elements['overlay'].classList.contains('open'), false);
-    assert.equal(elements['tma-unbound-screen'].style.display, 'block');
+    assert.equal(getEl('modal-auth').classList.contains('open'), false);
+    assert.equal(getEl('overlay').classList.contains('open'), false);
+    assert.equal(getEl('tma-unbound-screen').style.display, 'block');
   });
 });
 
 test('initTmaAuth self-heals using kow_token and binds telegram when telegram-webapp returns 404', async () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
@@ -440,6 +470,7 @@ test('initTmaAuth self-heals using kow_token and binds telegram when telegram-we
   mockDocument.defaultView = context;
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(appCode, context);
   vm.runInContext(tmaCode, context);
 
@@ -458,6 +489,7 @@ test('initTmaAuth self-heals using kow_token and binds telegram when telegram-we
 
 test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия истекла"', async () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
@@ -523,6 +555,7 @@ test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия ис�
   mockDocument.defaultView = context;
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(appCode, context);
   vm.runInContext(tmaCode, context);
 
@@ -549,6 +582,7 @@ test('apiFetch does not intercept /api/auth/ 401 errors with "Сессия ис�
 });
 
 test('isTmaMode returns false in regular browser with Telegram SDK platform=weba and cleans up tma-mode', () => {
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
   const sessionStorageMock = {
@@ -618,6 +652,7 @@ test('isTmaMode returns false in regular browser with Telegram SDK platform=weba
   context.window = context;
   context.globalThis = context;
 
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(tmaCode, context);
 
   // In standard browser with empty initData and platform 'weba', isTmaMode must be false
@@ -666,6 +701,7 @@ test('isTmaMode returns false in regular browser with Telegram SDK platform=weba
 
 test('app.js isTmaMode returns false in regular browser and correctly cleans up classes', () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
   const sessionStorageMock = {
@@ -739,6 +775,7 @@ test('app.js isTmaMode returns false in regular browser and correctly cleans up 
   context.globalThis = context;
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(appCode, context);
 
   // In standard browser, app.js isTmaMode must return false
@@ -752,6 +789,7 @@ test('app.js isTmaMode returns false in regular browser and correctly cleans up 
 
 test('apiFetch and initTmaAuth do not kill session or show "Сессия истекла" when /api/telegram/bind-webapp returns 401', async () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
@@ -837,6 +875,7 @@ test('apiFetch and initTmaAuth do not kill session or show "Сессия ист�
   mockDocument.defaultView = context;
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(appCode, context);
   vm.runInContext(tmaCode, context);
 
@@ -896,6 +935,7 @@ test('apiFetch and initTmaAuth do not kill session or show "Сессия ист�
 
 test('renderTmaCabinetEventBanner distinguishes between active and upcoming events', () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
   const mockWindow = {
@@ -931,6 +971,7 @@ test('renderTmaCabinetEventBanner distinguishes between active and upcoming even
   context.globalThis = context;
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(tmaCode, context);
 
   // 1. Когда есть активное (уже идущее) событие
@@ -973,6 +1014,7 @@ test('renderTmaCabinetEventBanner distinguishes between active and upcoming even
 
 test('renderTmaMatrix renders compact officer cards instead of sector power ranking', () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
   let containerHtml = '';
@@ -1017,6 +1059,7 @@ test('renderTmaMatrix renders compact officer cards instead of sector power rank
   context.globalThis = context;
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(tmaCode, context);
 
   context.state = {
@@ -1060,6 +1103,7 @@ test('renderTmaMatrix renders compact officer cards instead of sector power rank
 });
 
 test('submitTmaEventEditor normalizes dates to YYYY-MM-DD and preserves officerId/rsvpStatus', async () => {
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
   let savedPayload = null;
@@ -1107,6 +1151,7 @@ test('submitTmaEventEditor normalizes dates to YYYY-MM-DD and preserves officerI
   context.window = context;
   context.globalThis = context;
 
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(tmaCode, context);
 
   // Set existing event with assignments having officerId and rsvpStatus
@@ -1123,7 +1168,7 @@ test('submitTmaEventEditor normalizes dates to YYYY-MM-DD and preserves officerI
     }]
   };
 
-  context.doTmaApiFetch = async (url, opts) => {
+  context.apiFetch = async (url, opts) => {
     if (url === '/api/events' && opts.method === 'POST') {
       savedPayload = opts.body;
       return { id: 99, ...opts.body };
@@ -1148,6 +1193,7 @@ test('submitTmaEventEditor normalizes dates to YYYY-MM-DD and preserves officerI
 
 test('web app renderEventDetail and calCard handle TMA edited event with clean dates and safe officers', () => {
   const logicCode = fs.readFileSync(path.join(__dirname, '..', 'shared', 'logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 
   let contentHtml = '';
@@ -1194,6 +1240,7 @@ test('web app renderEventDetail and calCard handle TMA edited event with clean d
   });
 
   vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext(appCode, context);
 
   // Event edited in TMA before normalization fix (or with ISO timestamp)
@@ -1225,6 +1272,7 @@ test('web app renderEventDetail and calCard handle TMA edited event with clean d
 
 test('tma.js supports multi-language switching, Telegram language autodetection, and localized UI', async () => {
   const i18nCode = fs.readFileSync(path.join(__dirname, 'i18n.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
   const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
 
   const elements = {};
@@ -1295,8 +1343,9 @@ test('tma.js supports multi-language switching, Telegram language autodetection,
     clearTimeout: (id) => clearTimeout(id)
   });
 
-  // Load i18n.js then tma.js
+  // Load i18n.js, runtime.js then tma.js
   vm.runInContext(i18nCode, context);
+  vm.runInContext(runtimeCode, context);
   vm.runInContext('initI18n();', context);
   vm.runInContext(tmaCode, context);
 
@@ -1331,6 +1380,118 @@ test('tma.js supports multi-language switching, Telegram language autodetection,
   assert.equal(elements['tma-nav-label-cabinet']?.textContent, 'Кабинет');
   vm.runInContext('activeTmaTab = "cabinet"; updateTmaMainButton();', context);
   assert.equal(elements['tma-main-btn-text']?.textContent, 'Изменить склад');
+});
+
+test('KowRuntime handles normalized officerCatalog in handleTmaRegisterEvent, shared matrix classification, and deterministic single boot', async () => {
+  const logicCode = fs.readFileSync(path.join(__dirname, '../shared/logic.js'), 'utf8');
+  const runtimeCode = fs.readFileSync(path.join(__dirname, 'runtime.js'), 'utf8');
+  const tmaCode = fs.readFileSync(path.join(__dirname, 'tma.js'), 'utf8');
+
+  const registeredPayloads = [];
+  const mockWindow = {
+    location: { search: '?tma=1', hash: '', pathname: '/' },
+    localStorage: { getItem: () => 'tok_1', setItem: () => {}, removeItem: () => {} },
+    Telegram: { WebApp: { initData: 'query_id=1&auth_date=1&hash=h', platform: 'ios', ready: () => {}, expand: () => {} } },
+    fetch: async (url, opts) => {
+      if (url.includes('/register')) {
+        registeredPayloads.push(JSON.parse(opts.body));
+        return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ success: true }) };
+      }
+      return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ events: [], players: [], catalog: [] }) };
+    }
+  };
+  const mockDocument = {
+    readyState: 'complete',
+    documentElement: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    body: { classList: { add: () => {}, remove: () => {}, contains: () => true } },
+    getElementById: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.document = mockDocument;
+
+  const context = vm.createContext({
+    window: mockWindow,
+    document: mockDocument,
+    localStorage: mockWindow.localStorage,
+    Telegram: mockWindow.Telegram,
+    fetch: mockWindow.fetch,
+    console: { log: () => {}, warn: () => {}, error: () => {} },
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {}
+  });
+  Object.assign(context, mockWindow);
+  context.window = context;
+  context.globalThis = context;
+
+  vm.runInContext(logicCode, context);
+  vm.runInContext(runtimeCode, context);
+  vm.runInContext(tmaCode, context);
+
+  // 1. Officer catalog fix: state has officerCatalog only (no state.catalog)
+  context.currentUser = { id: 10, playerId: 7, rank: 'r3' };
+  context.state = {
+    players: [{
+      id: 7,
+      name: 'Sector 7',
+      stock: { coupons: 5000, puzzles: 10, starCoupons: 0 },
+      officers: [
+        { id: 'off_max', catalogId: 'nathon', name: 'Нейтон', level: 180, stars: 5, skills: [5, 5, 5, 5] },
+        { id: 'off_need', catalogId: 'rex', name: 'Рекс', level: 80, stars: 2, skills: [2, 1, 1, 1] }
+      ]
+    }],
+    officerCatalog: [
+      { id: 'nathon', name: 'Нейтон', type: 'Танк', generation: 6, couponPerPuzzle: 500, upgradeType: 'standard' },
+      { id: 'rex', name: 'Рекс', type: 'Танк', generation: 7, couponPerPuzzle: 600, upgradeType: 'standard' }
+    ],
+    events: [{ id: 55, typeId: 1, dateFrom: '2026-12-01' }],
+    currentRole: 'r3'
+  };
+
+  await context.handleTmaRegisterEvent(55, 0);
+  assert.equal(registeredPayloads.length, 1);
+  assert.equal(registeredPayloads[0].officerId, 'rex', 'Auto-pick must skip maxed Nathon and choose Rex using normalized officerCatalog');
+
+  // 2. Shared Matrix threshold classification
+  const cMax = context.KowRuntime.classifyMatrixRecommendation({ deficitPuzzles: 0 });
+  assert.equal(cMax.rank, 0);
+  const c1 = context.KowRuntime.classifyMatrixRecommendation({ deficitPuzzles: 100, deficitCoupons: 15000, costPerPuzzle: 600 });
+  assert.equal(c1.rank, 1);
+  const c2 = context.KowRuntime.classifyMatrixRecommendation({ deficitPuzzles: 20, deficitCoupons: 7000, costPerPuzzle: 500 });
+  assert.equal(c2.rank, 2);
+  const c3 = context.KowRuntime.classifyMatrixRecommendation({ deficitPuzzles: 10, deficitCoupons: 4000, costPerPuzzle: 500 });
+  assert.equal(c3.rank, 3);
+  const c4 = context.KowRuntime.classifyMatrixRecommendation({ deficitPuzzles: 3, deficitCoupons: 1500, costPerPuzzle: 500 });
+  assert.equal(c4.rank, 4);
+
+  // 3. Deterministic single boot: TMA mode only launches TMA adapter and does NOT invoke web checkAuth
+  let webInitCount = 0;
+  let webLaunchCount = 0;
+  let tmaLaunchCount = 0;
+  context.KowRuntime.resetBootForTests();
+  context.KowRuntime.registerWebAdapter({
+    initShared: async () => { webInitCount++; },
+    launchWeb: async () => { webLaunchCount++; }
+  });
+  context.KowRuntime.registerTmaAdapter({
+    launch: async () => { tmaLaunchCount++; }
+  });
+
+  await context.KowRuntime.boot();
+  await context.KowRuntime.boot(); // second call must be idempotent no-op
+  assert.equal(webInitCount, 1);
+  assert.equal(webLaunchCount, 0, 'Web checkAuth launch must NOT run in TMA mode');
+  assert.equal(tmaLaunchCount, 1, 'TMA adapter must launch exactly once');
+
+  // Non-TMA mode only launches Web adapter
+  mockWindow.Telegram.WebApp.initData = '';
+  mockWindow.location.search = '';
+  context.KowRuntime.resetBootForTests();
+  await context.KowRuntime.boot();
+  assert.equal(webInitCount, 2);
+  assert.equal(webLaunchCount, 1, 'Web adapter must launch in regular browser');
+  assert.equal(tmaLaunchCount, 1, 'TMA adapter must NOT launch in regular browser');
 });
 
 
