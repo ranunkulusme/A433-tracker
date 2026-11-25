@@ -6819,9 +6819,110 @@ test('POST /api/ocr/scan authenticates, processes screenshots and returns recogn
     assert.equal(blankData.detectedType, 'unknown');
     assert.equal(blankData.hasRecognizedData, false);
     assert.deepEqual(blankData.recognizedFields, []);
-    assert.deepEqual(blankData.recognizedFields, []);
   } finally {
     setServerOcrRunner(null);
+    await server.close();
+  }
+});
+
+test('API transactional officer progression: isolated skill rollback, reset:true, and refundStock DELETE without legacy stock_history double-write', async () => {
+  const { startServer } = require('./server.js');
+  const db = require('./db.js');
+  const server = await startServer({ port: 0, dbPath: ':memory:' });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const reg = db.registerUser({ username: 'tx_off_user', password: 'password123', playerName: 'Sector TX' });
+    db.approveUser(reg.userId, 'r3');
+    const loginRes = await (await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'tx_off_user', password: 'password123' })
+    })).json();
+    const token = loginRes.token;
+    const playerId = loginRes.user.playerId;
+
+    const initStock = {
+      coupons: 500000,
+      puzzles: 1000,
+      starCoupons: 5000,
+      legendaryStars1: 5,
+      legendaryStars2: 2,
+      legendaryStars3: 1,
+      chests: 0
+    };
+    await fetch(`${baseUrl}/api/my-profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock: initStock })
+    });
+
+    // Verify no legacy double-write into stock_history table on PUT /api/my-profile
+    const legacyRowsCount = db.getDb().prepare('SELECT COUNT(*) as c FROM stock_history WHERE player_id = ?').get(playerId).c;
+    assert.equal(legacyRowsCount, 0, 'PUT /api/my-profile should not write duplicate rows into legacy stock_history table');
+
+    // 1. Add officer with atomic stock deduction (level 60 + 2 stars)
+    const addRes = await fetch(`${baseUrl}/api/my-profile/officers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogId: 'admiral-nathon',
+        name: 'Адмирал Нейтон',
+        level: 60,
+        stars: 2,
+        skills: [1, 1, 1, 1],
+        deductStock: true
+      })
+    });
+    assert.equal(addRes.status, 200);
+    const createdOff = await addRes.json();
+    assert.equal(createdOff.stockDeducted, true);
+    assert.ok(createdOff.invested.levelPuzzles > 0 || createdOff.invested.levelCoupons > 0);
+    const stockAfterAdd = { ...createdOff.newStock };
+
+    // 2. Skill upgrade + isolated rollback
+    const upRes = await (await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skills: [5, 1, 1, 1], deductStock: true })
+    })).json();
+    assert.equal(upRes.stockDeducted, true);
+
+    const downRes = await (await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skills: [1, 1, 1, 1], deductStock: true })
+    })).json();
+    assert.equal(downRes.newStock.coupons, stockAfterAdd.coupons);
+    assert.equal(downRes.newStock.puzzles, stockAfterAdd.puzzles);
+
+    // 3. Atomic reset: { reset: true } in single HTTP call refunds all remaining investments
+    const resetRes = await (await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reset: true })
+    })).json();
+    assert.equal(resetRes.level, 0);
+    assert.equal(resetRes.stars, 0);
+    assert.deepEqual(resetRes.skills, [1, 1, 1, 1]);
+    assert.equal(resetRes.newStock.coupons, initStock.coupons);
+    assert.equal(resetRes.newStock.puzzles, initStock.puzzles);
+    assert.equal(resetRes.newStock.starCoupons, initStock.starCoupons);
+
+    // 4. Delete officer with ?refundStock=true
+    await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stars: 1, deductStock: true })
+    });
+    const delRes = await (await fetch(`${baseUrl}/api/my-profile/officers/${createdOff.id}?refundStock=true`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    })).json();
+    assert.equal(delRes.success, true);
+    assert.equal(delRes.stockRefunded, true);
+    assert.equal(delRes.newStock.starCoupons, initStock.starCoupons);
+  } finally {
     await server.close();
   }
 });

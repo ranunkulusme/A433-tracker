@@ -2318,28 +2318,6 @@ test('db.getStockHistoryRecordById and updateStockHistoryRecord', () => {
   assert.equal(updated.diffSummary, '+100 купонов (подтверждено)');
 });
 
-test('getPlayersByUserId self-heals and returns sector if users.player_id is set but players.user_id is NULL', () => {
-  const dbModule = require('./db.js');
-  dbModule.initDb(':memory:');
-
-  const p = dbModule.createPlayer({ name: 'Desynced Sector', power: 500000 });
-  const reg = dbModule.registerUser({ username: 'desync_user', password: 'pwd' });
-  dbModule.approveUser(reg.userId, 'r3');
-
-  // Simulate desync where users.player_id is set but players.user_id is NULL (e.g. legacy import or admin edit)
-  dbModule.getDb().prepare('UPDATE users SET player_id = ? WHERE id = ?').run(p.id, reg.userId);
-  dbModule.getDb().prepare('UPDATE players SET user_id = NULL WHERE id = ?').run(p.id);
-
-  const sectors = dbModule.getPlayersByUserId(reg.userId);
-  assert.equal(sectors.length, 1, 'Must find sector linked via users.player_id');
-  assert.equal(sectors[0].id, p.id);
-  assert.equal(sectors[0].name, 'Desynced Sector');
-
-  // Verify auto-heal persisted in players table
-  const healedPlayer = dbModule.getPlayerById(p.id);
-  assert.equal(healedPlayer.userId, reg.userId, 'Must heal players.user_id to match user');
-});
-
 test('updateUser with playerId updates both users.player_id and players.user_id and unlinks old sector', () => {
   const dbModule = require('./db.js');
   dbModule.initDb(':memory:');
@@ -2438,6 +2416,92 @@ test('db.resolveAppBaseUrl resolves configured settings, env, request Host, or f
   } finally {
     try { fs.unlinkSync(tempDbPath); } catch (_) {}
   }
+});
+
+test('getPlayersByUserId is read-only and healUserSectorLinks repairs desynced links explicitly', () => {
+  const dbModule = require('./db.js');
+  const rawDb = dbModule.initDb(':memory:');
+
+  const p = dbModule.createPlayer({ name: 'ReadOnly Check Sector', power: 1000 });
+  const reg = dbModule.registerUser({ username: 'desync_ro_user', password: 'password123' });
+  dbModule.approveUser(reg.userId, 'r3');
+
+  // Create desync: user points to player, player.user_id is NULL
+  rawDb.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(p.id, reg.userId);
+  rawDb.prepare('UPDATE players SET user_id = NULL WHERE id = ?').run(p.id);
+
+  // Pure read must NOT mutate database tables
+  const sectorsBeforeHeal = dbModule.getPlayersByUserId(reg.userId);
+  assert.equal(sectorsBeforeHeal.length, 0, 'getPlayersByUserId should not return unlinked rows or mutate DB');
+  const playerRowBefore = rawDb.prepare('SELECT user_id FROM players WHERE id = ?').get(p.id);
+  assert.equal(playerRowBefore.user_id, null, 'getPlayersByUserId must be side-effect free');
+
+  // Explicit command heals the link
+  const healRes = dbModule.healUserSectorLinks(reg.userId);
+  assert.equal(healRes.healed, true);
+  const playerRowAfter = rawDb.prepare('SELECT user_id FROM players WHERE id = ?').get(p.id);
+  assert.equal(playerRowAfter.user_id, reg.userId);
+
+  const sectorsAfterHeal = dbModule.getPlayersByUserId(reg.userId);
+  assert.equal(sectorsAfterHeal.length, 1);
+  assert.equal(sectorsAfterHeal[0].id, p.id);
+});
+
+test('withTransaction commits valid work and rolls back failed writes cleanly', () => {
+  const dbModule = require('./db.js');
+  const rawDb = dbModule.initDb(':memory:');
+  const player = dbModule.getPlayers()[0];
+  const origName = player.name;
+
+  // Rollback case
+  assert.throws(() => {
+    dbModule.withTransaction(() => {
+      dbModule.updatePlayer(player.id, { name: 'Should Rollback' });
+      throw new Error('Abort tx');
+    });
+  }, /Abort tx/);
+  assert.equal(dbModule.getPlayerById(player.id).name, origName);
+
+  // Nested commit + inner rollback savepoint case
+  dbModule.withTransaction(() => {
+    dbModule.updatePlayer(player.id, { name: 'Committed Tx Name' });
+    try {
+      dbModule.withTransaction(() => {
+        dbModule.updatePlayer(player.id, { name: 'Inner Rolled Back' });
+        throw new Error('Inner abort');
+      });
+    } catch (_) {}
+  });
+  assert.equal(dbModule.getPlayerById(player.id).name, 'Committed Tx Name');
+});
+
+test('exportKowJson includes stock_history_records and importKowJson restores v3 & legacy v2 records into stock_history_records', () => {
+  const dbModule = require('./db.js');
+  dbModule.initDb(':memory:');
+  const player = dbModule.getPlayers()[0];
+
+  dbModule.updatePlayer(player.id, {
+    stock: { ...player.stock, coupons: (player.stock.coupons || 0) + 777 }
+  });
+
+  const exported = dbModule.exportKowJson();
+  assert.ok(Array.isArray(exported.stockHistory));
+  assert.ok(exported.stockHistory.length >= 1, 'exportKowJson must include stock_history_records entries');
+  assert.ok(exported.stockHistory.some(h => h.diffSummary && h.diffSummary.includes('+777')), 'Exported entry must carry v3 diffSummary');
+
+  // Import v3 + legacy v2 entries into fresh DB
+  dbModule.initDb(':memory:');
+  dbModule.importKowJson({
+    ...exported,
+    stockHistory: [
+      ...exported.stockHistory,
+      { playerId: player.id, date: '2026-09-15', coupons: 4321, puzzles: 12, chests: 3 }
+    ]
+  });
+
+  const restored = dbModule.getStockHistory(player.id);
+  assert.ok(restored.some(h => h.diffSummary && h.diffSummary.includes('+777')), 'v3 stockHistory record restored');
+  assert.ok(restored.some(h => h.snapshotAfter && h.snapshotAfter.coupons === 4321), 'Legacy v2 stockHistory migrated into stock_history_records');
 });
 
 

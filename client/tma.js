@@ -3621,82 +3621,35 @@ async function submitTmaOfficerEdit() {
     : [1, 1, 1, 1];
   const isRetro = (tmaOfficerModalMode === 'retro');
 
-  let newStock = null;
-  let newInvested = null;
-
-  if (!isRetro && myCabinetProfile?.stock) {
-    if (tmaOfficerModalEditId) {
-      const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(tmaOfficerModalEditId));
-      if (oldOff) {
-        const cat = getCatalogOfficer(oldOff.catalogId);
-        const rawCost = Number(cat?.couponPerPuzzle);
-        const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
-        const upgradeType = cat?.upgradeType || 'standard';
-        const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
-        const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
-
-        let curStock = { ...myCabinetProfile.stock };
-        const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
-        let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
-        let hasChanges = false;
-
-        // 1. Level
-        if (oldOff.level !== level) {
-          const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-          const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
-          if (!levelStockDelta.canAfford) {
-            tmaHaptic('error');
-            toast(`❌ ${tmaT('tma.toast_not_enough_level_stock', { count: fmtNum(levelStockDelta.deficitPuzzles || 0) }, `Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`)}`, 'error');
-            return;
-          }
-          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
-          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
-          if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
-          hasChanges = true;
-        }
-
-        // 2. Stars
-        const oldStars = Number(oldOff.stars) || 0;
-        if (oldStars !== stars) {
-          const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-          const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
-          if (!starRes.canAfford) {
-            tmaHaptic('error');
-            toast(`❌ ${tmaT('tma.toast_not_enough_stars_stock', 'Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.')}`, 'error');
-            return;
-          }
-          curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
-          curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
-          curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
-          curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
-          if (starRes.newInvested) curInv = starRes.newInvested;
-          hasChanges = true;
-        }
-
-        // 3. Skills
-        const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
-        const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
-        if (hasSkillDiff) {
-          const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
-          const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
-          if (!skillRes.canAfford) {
-            tmaHaptic('error');
-            toast(`❌ ${tmaT('tma.toast_not_enough_skill_stock', { count: fmtNum(skillRes.deficitMedals || 0) }, `Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`)}`, 'error');
-            return;
-          }
-          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
-          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
-          if (skillRes.newInvested) curInv = skillRes.newInvested;
-          hasChanges = true;
-        }
-
-        if (hasChanges) {
-          newStock = curStock;
-          newInvested = curInv;
-        }
+  const applyLocalTmaOfficerState = (res, officerId = null, fallbackPatch = null) => {
+    if (typeof applyOfficerMutationResponse === 'function') {
+      applyOfficerMutationResponse({
+        playerId: myCabinetProfile?.id,
+        officerId,
+        response: res,
+        fallbackPatch
+      });
+      return;
+    }
+    if (res && res.newStock && myCabinetProfile) {
+      myCabinetProfile.stock = res.newStock;
+    }
+    const targetId = officerId || (res && res.id);
+    if (targetId && myCabinetProfile) {
+      myCabinetProfile.officers = myCabinetProfile.officers || [];
+      const found = myCabinetProfile.officers.find(o => String(o.id) === String(targetId));
+      if (found) {
+        const clean = res ? { ...res } : {};
+        delete clean.newStock;
+        delete clean.stockDeducted;
+        delete clean.stockRefunded;
+        if (clean.id) Object.assign(found, clean);
+        else if (fallbackPatch) Object.assign(found, fallbackPatch);
+      } else if (res && res.id && !officerId) {
+        myCabinetProfile.officers.push(res);
       }
     }
-  }
+  };
 
   try {
     if (tmaOfficerModalEditId) {
@@ -3708,60 +3661,18 @@ async function submitTmaOfficerEdit() {
           skills,
           personalPuzzles,
           onlyPersonalPuzzles,
-          deductStock: !isRetro,
-          ...(newInvested ? { invested: newInvested } : {})
+          deductStock: !isRetro
         }
       });
 
-      if (updatedOffData && updatedOffData.newStock) {
-        myCabinetProfile.stock = updatedOffData.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = updatedOffData.newStock;
-        }
-      } else if (newStock) {
-        myCabinetProfile.stock = newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = newStock;
-        }
-      }
-
-      const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(tmaOfficerModalEditId));
-      if (off) {
-        if (updatedOffData && updatedOffData.id) Object.assign(off, updatedOffData);
-        else {
-          off.level = level;
-          off.stars = stars;
-          off.skills = skills;
-          off.personalPuzzles = personalPuzzles;
-          off.onlyPersonalPuzzles = onlyPersonalPuzzles;
-        }
-        if (newInvested) off.invested = newInvested;
-      }
-      if (state.players) {
-        for (const p of state.players) {
-          if (p.id === myCabinetProfile?.id && p.officers) {
-            const po = p.officers.find(o => String(o.id) === String(tmaOfficerModalEditId));
-            if (po) {
-              if (updatedOffData && updatedOffData.id) Object.assign(po, updatedOffData);
-              else {
-                po.level = level;
-                po.stars = stars;
-                po.skills = skills;
-                po.personalPuzzles = personalPuzzles;
-                po.onlyPersonalPuzzles = onlyPersonalPuzzles;
-              }
-              if (newInvested) po.invested = newInvested;
-            }
-          }
-        }
-      }
+      applyLocalTmaOfficerState(updatedOffData, tmaOfficerModalEditId, {
+        level, stars, skills, personalPuzzles, onlyPersonalPuzzles
+      });
 
       setOfficerMode(tmaOfficerModalEditId, isRetro ? 'retro' : 'normal', { silent: true });
       tmaHaptic('success');
       closeTmaModals();
-      toast('Офицер обновлен', 'success');
+      toast('Офицер обновлен' + (updatedOffData?.stockDeducted ? ' (ресурсы списаны)' : ''), 'success');
       renderTmaCabinet();
       renderTmaOfficersPickerList();
       if (typeof renderMyCabinet === 'function') renderMyCabinet().catch(() => {});
@@ -3774,72 +3685,29 @@ async function submitTmaOfficerEdit() {
       }
       const cat = getCatalogOfficer(catalogId);
 
-      let initialStockDeduction = null;
-      if (!isRetro && myCabinetProfile?.stock) {
-        const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
-          ? logic.calculateInitialOfficerStockDeduction
-          : calculateInitialOfficerStockDeduction;
-        if (initialFn) {
-          initialStockDeduction = initialFn({
-            officer: { level, stars, skills },
-            stock: myCabinetProfile.stock,
-            catalogOfficer: cat,
-            isRetrospective: false
-          });
-          if (!initialStockDeduction.canAfford) {
-            tmaHaptic('error');
-            toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
-            return;
-          }
-        }
-      }
-
-      const payload = {
-        catalogId,
-        name: cat?.name || '',
-        level,
-        coupons: 0,
-        stars,
-        skills,
-        personalPuzzles,
-        onlyPersonalPuzzles,
-        deductStock: !isRetro,
-        ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
-      };
-
       const createdOff = await doTmaApiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: payload
+        body: {
+          catalogId,
+          name: cat?.name || '',
+          level,
+          coupons: 0,
+          stars,
+          skills,
+          personalPuzzles,
+          onlyPersonalPuzzles,
+          deductStock: !isRetro
+        }
       });
 
+      applyLocalTmaOfficerState(createdOff);
       if (createdOff && createdOff.id) {
         setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
       }
 
-      if (createdOff && createdOff.newStock) {
-        myCabinetProfile.stock = createdOff.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = createdOff.newStock;
-        }
-      } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-        myCabinetProfile.stock = initialStockDeduction.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = initialStockDeduction.newStock;
-        }
-      }
-
-      if (myCabinetProfile) {
-        myCabinetProfile.officers = myCabinetProfile.officers || [];
-        if (createdOff && createdOff.id && !myCabinetProfile.officers.some(o => String(o.id) === String(createdOff.id))) {
-          myCabinetProfile.officers.push(createdOff);
-        }
-      }
-
       tmaHaptic('success');
       closeTmaModals();
-      toast('Офицер добавлен в сектор' + (initialStockDeduction?.deductStock ? ' (ресурсы списаны)' : ''), 'success');
+      toast('Офицер добавлен в сектор' + (createdOff?.stockDeducted ? ' (ресурсы списаны)' : ''), 'success');
       renderTmaCabinet();
       renderTmaOfficersPickerList();
       if (typeof renderMyCabinet === 'function') renderMyCabinet().catch(() => {});

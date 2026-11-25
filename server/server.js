@@ -93,18 +93,6 @@ function readJsonBody(req) {
   });
 }
 
-function sanitizeSkills(skills) {
-  if (!Array.isArray(skills)) return [1, 1, 1, 1];
-  const arr = skills.slice(0, 4);
-  while (arr.length < 4) arr.push(1);
-  return arr.map(n => Math.max(1, Math.min(5, Math.floor(Number(n) || 1))));
-}
-
-function sanitizeInvested(invested) {
-  if (!invested || typeof invested !== 'object') return { ...logic.INVESTED_ZERO };
-  return logic.normalizeInvested(invested);
-}
-
 function sanitizeVipPoints(pts) {
   return Math.max(0, Math.floor(Number(pts) || 0));
 }
@@ -133,11 +121,6 @@ function sanitizeStock(stock) {
     stock.chests = Math.max(0, parseInt(stock.chests, 10) || 0);
   }
   return stock;
-}
-
-function sanitizePersonalPuzzles(val) {
-  const num = parseInt(val, 10);
-  return isNaN(num) || num < 0 ? 0 : num;
 }
 
 function sanitizeEventTypePlaces(places) {
@@ -734,7 +717,25 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     // PLAYER CABINET & SECTORS (/api/my-profile, /api/my-sectors)
     // ─────────────────────────────────────────────────────────
+    function syncPlayerOfficers(playerId, officers) {
+      if (!Array.isArray(officers)) return;
+      const normalized = officerProgression.normalizeOfficersPayload(officers);
+      for (const o of normalized) {
+        if (o.id) {
+          const updatedOff = db.updatePlayerOfficer(playerId, o.id, o);
+          if (!updatedOff) {
+            db.addPlayerOfficer(playerId, o);
+          }
+        } else {
+          db.addPlayerOfficer(playerId, o);
+        }
+      }
+    }
+
     function resolveUserPlayerId(req) {
+      if (req.user && req.user.id && typeof db.healUserSectorLinks === 'function') {
+        db.healUserSectorLinks(req.user.id);
+      }
       if (req.user && req.user.playerId) return req.user.playerId;
       if (!req.user || !req.user.id) return null;
       const sectors = db.getPlayersByUserId(req.user.id);
@@ -748,6 +749,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/my-profile' && req.method === 'GET') {
       if (!requireAuth(req, res)) return;
+      if (typeof db.healUserSectorLinks === 'function') {
+        db.healUserSectorLinks(req.user.id);
+      }
       let sectors = db.getPlayersByUserId(req.user.id);
       let activeSector = null;
       const requestedSectorId = parsedUrl.searchParams.get('sectorId')
@@ -879,34 +883,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       if (Array.isArray(body.officers)) {
-        for (const o of body.officers) {
-          if (o.skills !== undefined) {
-            o.skills = sanitizeSkills(o.skills);
-          }
-          if (o.invested !== undefined) {
-            o.invested = sanitizeInvested(o.invested);
-          }
-          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
-            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
-          }
-          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
-            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
-          }
-          if (o.id) {
-            const updatedOff = db.updatePlayerOfficer(activePlayerId, o.id, o);
-            if (!updatedOff) {
-              db.addPlayerOfficer(activePlayerId, o);
-            }
-          } else {
-            db.addPlayerOfficer(activePlayerId, o);
-          }
-        }
+        syncPlayerOfficers(activePlayerId, body.officers);
       }
 
       const updated = db.updatePlayer(activePlayerId, { ...body, editorUserId: req.user.id });
-      if (body.stock) {
-        db.recordStockHistory(activePlayerId, body.stock);
-      }
       return sendJson(res, 200, updated);
     }
 
@@ -972,7 +952,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, {
         ...result.officer,
         newStock: result.newStock,
-        stockDeducted: result.stockDeducted
+        stockDeducted: result.stockDeducted,
+        ...(result.stockRefunded !== undefined ? { stockRefunded: result.stockRefunded } : {})
       });
     }
 
@@ -983,8 +964,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
-      officerProgression.deleteOfficer(activePlayerId, officerId);
-      return sendJson(res, 200, { success: true });
+      const refundStock = parsedUrl.searchParams.get('refundStock') === 'true' || Boolean(body && (body.refundStock || body.refund_stock));
+      const isRetro = body && (body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false));
+      const result = officerProgression.deleteOfficer(activePlayerId, officerId, {
+        refundStock,
+        isRetro,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 404, result.error, result.message);
+      }
+      return sendJson(res, 200, {
+        success: true,
+        ...(result.newStock ? { newStock: result.newStock } : {}),
+        stockRefunded: Boolean(result.stockRefunded)
+      });
     }
 
     // ─────────────────────────────────────────────────────────
@@ -1043,20 +1037,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         sanitizeStock(body.stock);
       }
       if (Array.isArray(body.officers)) {
-        for (const o of body.officers) {
-          if (o.skills !== undefined) {
-            o.skills = sanitizeSkills(o.skills);
-          }
-          if (o.invested !== undefined) {
-            o.invested = sanitizeInvested(o.invested);
-          }
-          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
-            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
-          }
-          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
-            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
-          }
-        }
+        body.officers = officerProgression.normalizeOfficersPayload(body.officers);
       }
       const created = db.createPlayer(body);
       return sendJson(res, 200, created);
@@ -1099,33 +1080,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
             }
           }
         }
-        for (const o of body.officers) {
-          if (o.skills !== undefined) {
-            o.skills = sanitizeSkills(o.skills);
-          }
-          if (o.invested !== undefined) {
-            o.invested = sanitizeInvested(o.invested);
-          }
-          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
-            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
-          }
-          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
-            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
-          }
-          if (o.id) {
-            const updatedOff = db.updatePlayerOfficer(targetPlayerId, o.id, o);
-            if (!updatedOff) {
-              db.addPlayerOfficer(targetPlayerId, o);
-            }
-          } else {
-            db.addPlayerOfficer(targetPlayerId, o);
-          }
-        }
+        syncPlayerOfficers(targetPlayerId, body.officers);
       }
       const updated = db.updatePlayer(targetPlayerId, { ...body, editorUserId: req.user.id });
-      if (body.stock) {
-        db.recordStockHistory(targetPlayerId, body.stock);
-      }
       return sendJson(res, 200, updated);
     }
 
@@ -1262,7 +1219,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, {
         ...result.officer,
         newStock: result.newStock,
-        stockDeducted: result.stockDeducted
+        stockDeducted: result.stockDeducted,
+        ...(result.stockRefunded !== undefined ? { stockRefunded: result.stockRefunded } : {})
       });
     }
 
@@ -1272,8 +1230,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      officerProgression.deleteOfficer(targetPlayerId, offId);
-      return sendJson(res, 200, { success: true });
+      const refundStock = parsedUrl.searchParams.get('refundStock') === 'true' || Boolean(body && (body.refundStock || body.refund_stock));
+      const isRetro = body && (body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false));
+      const result = officerProgression.deleteOfficer(targetPlayerId, offId, {
+        refundStock,
+        isRetro,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 404, result.error, result.message);
+      }
+      return sendJson(res, 200, {
+        success: true,
+        ...(result.newStock ? { newStock: result.newStock } : {}),
+        stockRefunded: Boolean(result.stockRefunded)
+      });
     }
 
     // ─────────────────────────────────────────────────────────

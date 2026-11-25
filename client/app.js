@@ -2918,6 +2918,58 @@ function renderCabinetOfficerSkills(o) {
   `;
 }
 
+function extractCleanOfficerResponse(res) {
+  if (!res || typeof res !== 'object') return null;
+  const { newStock, stockDeducted, stockRefunded, resetDelta, ...cleanOfficer } = res;
+  return cleanOfficer;
+}
+
+function applyOfficerMutationResponse({ playerId = null, officerId = null, response = null, fallbackPatch = null } = {}) {
+  const clean = extractCleanOfficerResponse(response);
+  const newStock = response && response.newStock ? response.newStock : null;
+
+  if (newStock && typeof myCabinetProfile !== 'undefined' && myCabinetProfile && (!playerId || myCabinetProfile.id === playerId)) {
+    myCabinetProfile.stock = newStock;
+  }
+
+  const patchOfficerList = (list) => {
+    if (!Array.isArray(list)) return;
+    const targetId = officerId || (clean && clean.id);
+    if (!targetId) return;
+    const found = list.find(o => String(o.id) === String(targetId));
+    if (found) {
+      if (clean && clean.id) Object.assign(found, clean);
+      else if (fallbackPatch) Object.assign(found, fallbackPatch);
+    } else if (clean && clean.id && !officerId) {
+      list.push(clean);
+    }
+  };
+
+  if (typeof myCabinetProfile !== 'undefined' && myCabinetProfile && (!playerId || myCabinetProfile.id === playerId)) {
+    patchOfficerList(myCabinetProfile.officers);
+  }
+  if (typeof state !== 'undefined' && Array.isArray(state.players)) {
+    for (const p of state.players) {
+      if (!playerId || p.id === playerId) {
+        if (newStock) p.stock = newStock;
+        patchOfficerList(p.officers);
+      }
+    }
+  }
+  return { cleanOfficer: clean, newStock };
+}
+
+function formatStockSpendSummary(prevStock, nextStock) {
+  if (!prevStock || !nextStock) return '';
+  const starCouponsSpent = Math.max(0, (Number(prevStock.starCoupons) || 0) - (Number(nextStock.starCoupons) || 0));
+  if (starCouponsSpent > 0) return ` Списано: ${fmtNum(starCouponsSpent)} купонов звезды`;
+  const couponsSpent = Math.max(0, (Number(prevStock.coupons) || 0) - (Number(nextStock.coupons) || 0));
+  if (couponsSpent > 0) return ` Списано: ${fmtNum(couponsSpent)} куп.`;
+  const puzzlesSpent = Math.max(0, (Number(prevStock.puzzles) || 0) - (Number(nextStock.puzzles) || 0));
+  if (puzzlesSpent > 0) return ` Списано: ${fmtNum(puzzlesSpent)} медалей`;
+  return '';
+}
+
 async function setMyOfficerSkill(officerId, skillIndex, level) {
   if (!myCabinetProfile || !myCabinetProfile.officers) {
     const foundPlayer = (state.players || []).find(p => (p.officers || []).some(x => String(x.id) === String(officerId)));
@@ -2967,68 +3019,11 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
   }
 
   const prevStock = myCabinetProfile?.stock ? JSON.parse(JSON.stringify(myCabinetProfile.stock)) : null;
-  const prevOfficer = JSON.parse(JSON.stringify(off));
-
+  const prevSkills = [...currentSkills];
   const newSkills = [...currentSkills];
   newSkills[skillIndex] = newLevel;
 
-  let stockDelta = null;
-  let newStock = null;
-
-  if (myCabinetProfile?.stock) {
-    const cat = getCatalogOfficer(off.catalogId);
-    const rawCost = Number(cat?.couponPerPuzzle);
-    const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
-    const upgradeType = cat?.upgradeType || 'standard';
-    const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
-
-    const deltaFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
-    stockDelta = deltaFn(currentSkills, newSkills, myCabinetProfile.stock, costPerPuzzle, upgradeType, maxMedals, off.invested);
-
-    if (!stockDelta.canAfford) {
-      toast(`❌ Недостаточно ресурсов на складе для улучшения навыка (не хватает ${fmtNum(stockDelta.deficitMedals || 0)} медалей). Повышение отменено.`, 'error');
-      return;
-    }
-
-    newStock = {
-      ...myCabinetProfile.stock,
-      coupons: Math.max(0, (myCabinetProfile.stock.coupons || 0) + (stockDelta.delta.coupons || 0)),
-      puzzles: Math.max(0, (myCabinetProfile.stock.puzzles || 0) + (stockDelta.delta.puzzles || 0)),
-    };
-  }
-
-  const newInvested = stockDelta?.newInvested;
-
-  try {
-    await apiFetch(`/api/my-profile/officers/${officerId}`, {
-      method: 'PUT',
-      body: { skills: newSkills, ...(newInvested ? { invested: newInvested } : {}) }
-    });
-    if (newStock) {
-      await apiFetch('/api/my-profile', {
-        method: 'PUT',
-        body: { stock: newStock }
-      });
-      myCabinetProfile.stock = newStock;
-    }
-
-    off.skills = newSkills;
-    if (newInvested) off.invested = newInvested;
-    if (state.players) {
-      for (const p of state.players) {
-        if (p.officers) {
-          const o = p.officers.find(x => String(x.id) === String(officerId));
-          if (o) {
-            o.skills = newSkills;
-            if (newInvested) o.invested = newInvested;
-          }
-        }
-        if (p.id === myCabinetProfile.id && newStock) {
-          p.stock = newStock;
-        }
-      }
-    }
-
+  const refreshCabinetViews = async () => {
     const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
     if (cardEl && myCabinetProfile) {
       const today = new Date().toISOString().slice(0, 10);
@@ -3047,43 +3042,35 @@ async function setMyOfficerSkill(officerId, skillIndex, level) {
     if (typeof renderTmaCabinet === 'function') {
       renderTmaCabinet();
     }
+  };
 
-    const actionText = stockDelta && stockDelta.delta.coupons < 0
-      ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.coupons))} куп.`
-      : (stockDelta && stockDelta.delta.puzzles < 0 ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.puzzles))} медалей` : '');
+  try {
+    const res = await apiFetch(`/api/my-profile/officers/${officerId}`, {
+      method: 'PUT',
+      body: { skills: newSkills, deductStock: true }
+    });
+    applyOfficerMutationResponse({
+      playerId: myCabinetProfile?.id,
+      officerId,
+      response: res,
+      fallbackPatch: { skills: newSkills }
+    });
+    await refreshCabinetViews();
 
+    const actionText = formatStockSpendSummary(prevStock, res?.newStock || myCabinetProfile?.stock);
     showUndoToast(`Навык ${skillIndex + 1} обновлен: ${newSkills[skillIndex]}/5.${actionText}`, async () => {
       try {
-        await apiFetch(`/api/my-profile/officers/${officerId}`, {
+        const undoRes = await apiFetch(`/api/my-profile/officers/${officerId}`, {
           method: 'PUT',
-          body: { skills: prevOfficer.skills, invested: prevOfficer.invested }
+          body: { skills: prevSkills, deductStock: true }
         });
-        if (prevStock) {
-          await apiFetch('/api/my-profile', {
-            method: 'PUT',
-            body: { stock: prevStock }
-          });
-          myCabinetProfile.stock = prevStock;
-        }
-        Object.assign(off, prevOfficer);
-        const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
-        if (cardEl && myCabinetProfile) {
-          const today = new Date().toISOString().slice(0, 10);
-          cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
-        } else {
-          await renderMyCabinet();
-        }
-        const simEl = document.getElementById('cabinet-sim-container');
-        if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
-          simEl.innerHTML = renderCabinetSimulatorHtml();
-        }
-        const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
-        if (stockGridWrap && myCabinetProfile) {
-          stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
-        }
-        if (typeof renderTmaCabinet === 'function') {
-          renderTmaCabinet();
-        }
+        applyOfficerMutationResponse({
+          playerId: myCabinetProfile?.id,
+          officerId,
+          response: undoRes,
+          fallbackPatch: { skills: prevSkills }
+        });
+        await refreshCabinetViews();
         toast('Действие отменено, ресурсы и навыки восстановлены');
       } catch (err) {
         toast('Ошибка отмены: ' + (err.message || err), 'error');
@@ -3951,23 +3938,16 @@ function openResetMyOfficerModal(officerId) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = 'Сброс...';
       try {
-        await apiFetch(`/api/my-profile/officers/${officerId}`, {
+        const resetRes = await apiFetch(`/api/my-profile/officers/${officerId}`, {
           method: 'PUT',
-          body: { ...res.resetOfficer, invested: res.newInvested }
+          body: { reset: true }
         });
-        await apiFetch('/api/my-profile', { method: 'PUT', body: { stock: res.newStock } });
-        myCabinetProfile.stock = res.newStock;
-        Object.assign(off, res.resetOfficer);
-        off.invested = res.newInvested;
-        if (state.players) {
-          for (const p of state.players) {
-            if (p.id === myCabinetProfile.id) {
-              p.stock = res.newStock;
-              const po = (p.officers || []).find(o => String(o.id) === String(officerId));
-              if (po) { Object.assign(po, res.resetOfficer); po.invested = res.newInvested; }
-            }
-          }
-        }
+        applyOfficerMutationResponse({
+          playerId: myCabinetProfile?.id,
+          officerId,
+          response: resetRes,
+          fallbackPatch: { ...res.resetOfficer, invested: res.newInvested }
+        });
         closeModal('modal-reset-officer');
         toast(typeof t === 'function' ? t('officers.toast_reset_success') : 'Офицер сброшен в стоковое состояние, ресурсы возвращены на склад');
         await renderMyCabinet();
@@ -3994,80 +3974,6 @@ async function saveMyOfficerSubmit() {
     : [1, 1, 1, 1];
   const isRetro = document.getElementById('my-officer-retro-on')?.checked ?? true;
 
-  let newStock = null;
-  let newInvested = null;
-
-  if (!isRetro && myCabinetProfile?.stock) {
-    if (myOfficerEditId) {
-      const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(myOfficerEditId));
-      if (oldOff) {
-        const cat = getCatalogOfficer(oldOff.catalogId);
-        const rawCost = Number(cat?.couponPerPuzzle);
-        const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
-        const upgradeType = cat?.upgradeType || 'standard';
-        const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
-        const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
-
-        let curStock = { ...myCabinetProfile.stock };
-        const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
-        let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
-        let hasChanges = false;
-
-        // 1. Level
-        if (oldOff.level !== level) {
-          const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-          const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
-          if (!levelStockDelta.canAfford) {
-            toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`, 'error');
-            return;
-          }
-          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
-          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
-          if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
-          hasChanges = true;
-        }
-
-        // 2. Stars
-        const oldStars = Number(oldOff.stars) || 0;
-        if (oldStars !== stars) {
-          const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-          const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
-          if (!starRes.canAfford) {
-            toast(`❌ Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.`, 'error');
-            return;
-          }
-          curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
-          curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
-          curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
-          curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
-          if (starRes.newInvested) curInv = starRes.newInvested;
-          hasChanges = true;
-        }
-
-        // 3. Skills
-        const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
-        const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
-        if (hasSkillDiff) {
-          const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
-          const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
-          if (!skillRes.canAfford) {
-            toast(`❌ Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`, 'error');
-            return;
-          }
-          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
-          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
-          if (skillRes.newInvested) curInv = skillRes.newInvested;
-          hasChanges = true;
-        }
-
-        if (hasChanges) {
-          newStock = curStock;
-          newInvested = curInv;
-        }
-      }
-    }
-  }
-
   try {
     if (myOfficerEditId) {
       const updatedOffData = await apiFetch(`/api/my-profile/officers/${myOfficerEditId}`, {
@@ -4079,65 +3985,22 @@ async function saveMyOfficerSubmit() {
           skills,
           personalPuzzles,
           onlyPersonalPuzzles,
-          deductStock: !isRetro,
-          ...(newInvested ? { invested: newInvested } : {})
+          deductStock: !isRetro
         }
       });
-      if (updatedOffData && updatedOffData.newStock) {
-        myCabinetProfile.stock = updatedOffData.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = updatedOffData.newStock;
-        }
-      } else if (newStock) {
-        myCabinetProfile.stock = newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = newStock;
-        }
-      }
+
+      applyOfficerMutationResponse({
+        playerId: myCabinetProfile?.id,
+        officerId: myOfficerEditId,
+        response: updatedOffData,
+        fallbackPatch: { level, coupons, stars, skills, personalPuzzles, onlyPersonalPuzzles }
+      });
 
       const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(myOfficerEditId));
-      if (off) {
-        if (updatedOffData && updatedOffData.id) {
-          Object.assign(off, updatedOffData);
-        } else {
-          off.level = level;
-          off.coupons = coupons;
-          off.stars = stars;
-          off.skills = skills;
-          off.personalPuzzles = personalPuzzles;
-          off.onlyPersonalPuzzles = onlyPersonalPuzzles;
-        }
-        if (newInvested) off.invested = newInvested;
-      }
-      if (state.players) {
-        for (const p of state.players) {
-          if (p.id === myCabinetProfile?.id && p.officers) {
-            const po = p.officers.find(o => String(o.id) === String(myOfficerEditId));
-            if (po) {
-              if (updatedOffData && updatedOffData.id) Object.assign(po, updatedOffData);
-              else {
-                po.level = level;
-                po.coupons = coupons;
-                po.stars = stars;
-                po.skills = skills;
-                po.personalPuzzles = personalPuzzles;
-                po.onlyPersonalPuzzles = onlyPersonalPuzzles;
-              }
-              if (newInvested) po.invested = newInvested;
-            }
-          }
-        }
-      }
-
-      if (myOfficerEditId) {
-        setOfficerMode(myOfficerEditId, isRetro ? 'retro' : 'normal', { silent: true });
-      }
+      setOfficerMode(myOfficerEditId, isRetro ? 'retro' : 'normal', { silent: true });
       closeAllModals();
-      toast('Офицер обновлен');
+      toast('Офицер обновлен' + (updatedOffData?.stockDeducted ? ' (ресурсы списаны со склада)' : ''));
 
-      // Точечное обновление только измененной карточки офицера и связанных блоков
       const today = new Date().toISOString().slice(0, 10);
       const cardEl = document.getElementById(`cabinet-officer-card-${myOfficerEditId}`);
       if (cardEl && off) {
@@ -4165,63 +4028,31 @@ async function saveMyOfficerSubmit() {
       }
       const cat = getCatalogOfficer(catalogId);
 
-      let initialStockDeduction = null;
-      if (!isRetro && myCabinetProfile?.stock) {
-        const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
-          ? logic.calculateInitialOfficerStockDeduction
-          : calculateInitialOfficerStockDeduction;
-        if (initialFn) {
-          initialStockDeduction = initialFn({
-            officer: { level, stars, skills },
-            stock: myCabinetProfile.stock,
-            catalogOfficer: cat,
-            isRetrospective: false
-          });
-          if (!initialStockDeduction.canAfford) {
-            toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
-            return;
-          }
-        }
-      }
-
-      const payload = {
-        catalogId,
-        name: cat?.name || '',
-        level,
-        coupons,
-        stars,
-        skills,
-        personalPuzzles,
-        onlyPersonalPuzzles,
-        deductStock: !isRetro,
-        ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
-      };
-
       const createdOff = await apiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: payload
+        body: {
+          catalogId,
+          name: cat?.name || '',
+          level,
+          coupons,
+          stars,
+          skills,
+          personalPuzzles,
+          onlyPersonalPuzzles,
+          deductStock: !isRetro
+        }
       });
 
+      applyOfficerMutationResponse({
+        playerId: myCabinetProfile?.id,
+        response: createdOff
+      });
       if (createdOff && createdOff.id) {
         setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
       }
 
-      if (createdOff && createdOff.newStock) {
-        myCabinetProfile.stock = createdOff.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = createdOff.newStock;
-        }
-      } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-        myCabinetProfile.stock = initialStockDeduction.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = initialStockDeduction.newStock;
-        }
-      }
-
       closeAllModals();
-      toast('Офицер добавлен в профиль' + (initialStockDeduction?.deductStock ? ' (ресурсы списаны со склада)' : ''));
+      toast('Офицер добавлен в профиль' + (createdOff?.stockDeducted ? ' (ресурсы списаны со склада)' : ''));
       await renderMyCabinet();
       if (typeof renderTmaCabinet === 'function') {
         renderTmaCabinet();
@@ -4312,63 +4143,8 @@ async function setMyOfficerStars(officerId, stars) {
   }
 
   const prevStock = myCabinetProfile?.stock ? JSON.parse(JSON.stringify(myCabinetProfile.stock)) : null;
-  const prevOfficer = JSON.parse(JSON.stringify(off));
 
-  let stockDelta = null;
-  let newStock = null;
-
-  if (myCabinetProfile?.stock) {
-    const cat = getCatalogOfficer(off.catalogId);
-    const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
-    const deltaFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-    stockDelta = deltaFn(oldStars, count, myCabinetProfile.stock, starCouponCost, off.invested);
-
-    if (!stockDelta.canAfford) {
-      toast(`❌ Недостаточно ресурсов на складе! Требуется ${fmtNum(stockDelta.points)} очков звёзд (не хватает ${fmtNum(stockDelta.deficitPoints)}). Повышение отменено.`, 'error');
-      return;
-    }
-
-    newStock = {
-      ...myCabinetProfile.stock,
-      starCoupons: Math.max(0, (myCabinetProfile.stock.starCoupons || 0) + (stockDelta.delta.starCoupons || 0)),
-      legendaryStars1: Math.max(0, (myCabinetProfile.stock.legendaryStars1 || 0) + (stockDelta.delta.legendaryStars1 || 0)),
-      legendaryStars2: Math.max(0, (myCabinetProfile.stock.legendaryStars2 || 0) + (stockDelta.delta.legendaryStars2 || 0)),
-      legendaryStars3: Math.max(0, (myCabinetProfile.stock.legendaryStars3 || 0) + (stockDelta.delta.legendaryStars3 || 0)),
-    };
-  }
-
-  const newInvested = stockDelta?.newInvested;
-
-  try {
-    await apiFetch(`/api/my-profile/officers/${officerId}`, {
-      method: 'PUT',
-      body: { stars: count, ...(newInvested ? { invested: newInvested } : {}) }
-    });
-    if (newStock) {
-      await apiFetch('/api/my-profile', {
-        method: 'PUT',
-        body: { stock: newStock }
-      });
-      myCabinetProfile.stock = newStock;
-    }
-
-    off.stars = count;
-    if (newInvested) off.invested = newInvested;
-    if (state.players) {
-      for (const p of state.players) {
-        if (p.officers) {
-          const o = p.officers.find(x => String(x.id) === String(officerId));
-          if (o) {
-            o.stars = count;
-            if (newInvested) o.invested = newInvested;
-          }
-        }
-        if (p.id === myCabinetProfile.id && newStock) {
-          p.stock = newStock;
-        }
-      }
-    }
-
+  const refreshStarViews = async () => {
     const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
     const updatedOff = myCabinetProfile?.officers?.find(o => String(o.id) === String(officerId));
     if (cardEl && updatedOff) {
@@ -4388,43 +4164,35 @@ async function setMyOfficerStars(officerId, stars) {
     if (typeof renderTmaCabinet === 'function') {
       renderTmaCabinet();
     }
+  };
 
-    const actionText = stockDelta && stockDelta.delta.starCoupons < 0
-      ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.starCoupons))} купонов звезды`
-      : '';
+  try {
+    const res = await apiFetch(`/api/my-profile/officers/${officerId}`, {
+      method: 'PUT',
+      body: { stars: count, deductStock: true }
+    });
+    applyOfficerMutationResponse({
+      playerId: myCabinetProfile?.id,
+      officerId,
+      response: res,
+      fallbackPatch: { stars: count }
+    });
+    await refreshStarViews();
 
+    const actionText = formatStockSpendSummary(prevStock, res?.newStock || myCabinetProfile?.stock);
     showUndoToast(`⭐ Звёзды ${escapeHtml(officerLabel(off))}: ${count}★.${actionText}`, async () => {
       try {
-        await apiFetch(`/api/my-profile/officers/${officerId}`, {
+        const undoRes = await apiFetch(`/api/my-profile/officers/${officerId}`, {
           method: 'PUT',
-          body: { stars: prevOfficer.stars, invested: prevOfficer.invested }
+          body: { stars: oldStars, deductStock: true }
         });
-        if (prevStock) {
-          await apiFetch('/api/my-profile', {
-            method: 'PUT',
-            body: { stock: prevStock }
-          });
-          myCabinetProfile.stock = prevStock;
-        }
-        Object.assign(off, prevOfficer);
-        const cardEl = document.getElementById(`cabinet-officer-card-${officerId}`);
-        if (cardEl) {
-          const today = new Date().toISOString().slice(0, 10);
-          cardEl.outerHTML = renderCabinetOfficerCardHtml(off, myCabinetProfile, today);
-        } else {
-          await renderMyCabinet();
-        }
-        const simEl = document.getElementById('cabinet-sim-container');
-        if (simEl && typeof renderCabinetSimulatorHtml === 'function') {
-          simEl.innerHTML = renderCabinetSimulatorHtml();
-        }
-        const stockGridWrap = document.getElementById('cabinet-stock-grid-wrap');
-        if (stockGridWrap && myCabinetProfile) {
-          stockGridWrap.innerHTML = renderCabinetStockGridHtml(myCabinetProfile);
-        }
-        if (typeof renderTmaCabinet === 'function') {
-          renderTmaCabinet();
-        }
+        applyOfficerMutationResponse({
+          playerId: myCabinetProfile?.id,
+          officerId,
+          response: undoRes,
+          fallbackPatch: { stars: oldStars }
+        });
+        await refreshStarViews();
         toast('Действие отменено, ресурсы и звёзды восстановлены');
       } catch (err) {
         toast('Ошибка отмены: ' + (err.message || err), 'error');
@@ -8478,58 +8246,12 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
   }
 
   const prevStock = p?.stock ? JSON.parse(JSON.stringify(p.stock)) : null;
-  const prevOfficer = off ? JSON.parse(JSON.stringify(off)) : null;
 
-  let stockDelta = null;
-  let newStock = null;
-
-  if (p?.stock) {
-    const cat = off ? getCatalogOfficer(off.catalogId) : null;
-    const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
-    const deltaFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-    stockDelta = deltaFn(oldStars, s, p.stock, starCouponCost, off?.invested);
-
-    if (!stockDelta.canAfford) {
-      toast(`❌ Недостаточно ресурсов на складе! Требуется ${fmtNum(stockDelta.points)} очков звёзд (не хватает ${fmtNum(stockDelta.deficitPoints)}).`, 'error');
-      return;
-    }
-
-    newStock = {
-      ...p.stock,
-      starCoupons: Math.max(0, (p.stock.starCoupons || 0) + (stockDelta.delta.starCoupons || 0)),
-      legendaryStars1: Math.max(0, (p.stock.legendaryStars1 || 0) + (stockDelta.delta.legendaryStars1 || 0)),
-      legendaryStars2: Math.max(0, (p.stock.legendaryStars2 || 0) + (stockDelta.delta.legendaryStars2 || 0)),
-      legendaryStars3: Math.max(0, (p.stock.legendaryStars3 || 0) + (stockDelta.delta.legendaryStars3 || 0)),
-    };
-  }
-
-  const newInvested = stockDelta?.newInvested;
-
-  try {
-    const res = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
-      method: 'PUT',
-      body: { stars: s, ...(newInvested ? { invested: newInvested } : {}) }
-    });
-    if (newStock) {
-      await apiFetch(`/api/players/${playerId}`, {
-        method: 'PUT',
-        body: { stock: newStock }
-      });
-      p.stock = newStock;
-    }
-
-    if (off) {
-      if (res && res.id) Object.assign(off, res);
-      else {
-        off.stars = s;
-        if (newInvested) off.invested = newInvested;
-      }
-    }
+  const refreshSectorStarViews = (starVal) => {
     if (typeof save === 'function') save();
-
     const cellEl = document.getElementById(`sector-officer-stars-cell-${officerId}`);
     if (cellEl) {
-      cellEl.innerHTML = renderSectorOfficerStars(playerId, officerId, s);
+      cellEl.innerHTML = renderSectorOfficerStars(playerId, officerId, starVal);
     } else {
       renderPlayerDetail(playerId);
     }
@@ -8537,40 +8259,35 @@ async function handleQuickChangeStars(playerId, officerId, stars) {
     if (stockWrap && p) {
       stockWrap.innerHTML = renderSectorStockGridHtml(p, true);
     }
+  };
 
-    const actionText = stockDelta && stockDelta.delta.starCoupons < 0
-      ? ` Списано: ${fmtNum(Math.abs(stockDelta.delta.starCoupons))} купонов звезды`
-      : '';
+  try {
+    const res = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+      method: 'PUT',
+      body: { stars: s, deductStock: true }
+    });
+    applyOfficerMutationResponse({
+      playerId,
+      officerId,
+      response: res,
+      fallbackPatch: { stars: s }
+    });
+    refreshSectorStarViews(s);
 
+    const actionText = formatStockSpendSummary(prevStock, res?.newStock || p?.stock);
     showUndoToast(`⭐ Звёзды ${escapeHtml(officerLabel(off))}: ${s}★.${actionText}`, async () => {
       try {
-        if (prevOfficer) {
-          await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
-            method: 'PUT',
-            body: { stars: prevOfficer.stars, invested: prevOfficer.invested }
-          });
-        }
-        if (prevStock) {
-          await apiFetch(`/api/players/${playerId}`, {
-            method: 'PUT',
-            body: { stock: prevStock }
-          });
-          p.stock = prevStock;
-        }
-        if (off && prevOfficer) {
-          Object.assign(off, prevOfficer);
-        }
-        if (typeof save === 'function') save();
-        const cellEl = document.getElementById(`sector-officer-stars-cell-${officerId}`);
-        if (cellEl && off) {
-          cellEl.innerHTML = renderSectorOfficerStars(playerId, officerId, off.stars);
-        }
-        const stockWrap = document.getElementById(`sector-stock-grid-wrap-${playerId}`);
-        if (stockWrap && p) {
-          stockWrap.innerHTML = renderSectorStockGridHtml(p, true);
-        } else {
-          renderPlayerDetail(playerId);
-        }
+        const undoRes = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+          method: 'PUT',
+          body: { stars: oldStars, deductStock: true }
+        });
+        applyOfficerMutationResponse({
+          playerId,
+          officerId,
+          response: undoRes,
+          fallbackPatch: { stars: oldStars }
+        });
+        refreshSectorStarViews(oldStars);
         toast('Действие отменено, ресурсы и звёзды восстановлены');
       } catch (err) {
         toast('Ошибка отмены: ' + (err.message || err), 'error');
@@ -8720,25 +8437,6 @@ async function submitAddSectorOfficer() {
 
   const p = getPlayer(addSectorOfficerPlayerId);
 
-  let initialStockDeduction = null;
-  if (!isRetro && p?.stock) {
-    const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
-      ? logic.calculateInitialOfficerStockDeduction
-      : calculateInitialOfficerStockDeduction;
-    if (initialFn) {
-      initialStockDeduction = initialFn({
-        officer: { level, stars, skills },
-        stock: p.stock,
-        catalogOfficer: cat,
-        isRetrospective: false
-      });
-      if (!initialStockDeduction.canAfford) {
-        toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
-        return;
-      }
-    }
-  }
-
   const payload = {
     catalogId,
     name: cat?.name || '',
@@ -8748,8 +8446,7 @@ async function submitAddSectorOfficer() {
     skills,
     personalPuzzles,
     onlyPersonalPuzzles,
-    deductStock: !isRetro,
-    ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
+    deductStock: !isRetro
   };
 
   try {
@@ -8758,23 +8455,21 @@ async function submitAddSectorOfficer() {
       body: payload
     });
 
-    if (p && res && res.newStock) {
-      p.stock = res.newStock;
-    } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-      if (p) p.stock = initialStockDeduction.newStock;
-    }
-
-    if (p) {
+    const { cleanOfficer } = applyOfficerMutationResponse({
+      playerId: addSectorOfficerPlayerId,
+      response: res
+    });
+    const officerId = cleanOfficer?.id || res?.id;
+    if (p && !p.officers?.some(o => String(o.id) === String(officerId))) {
       p.officers = p.officers || [];
-      const newSectorOff = res || { id: 'o' + state.nextId++, ...payload };
-      p.officers.push(newSectorOff);
-      if (newSectorOff && newSectorOff.id) {
-        setOfficerMode(newSectorOff.id, isRetro ? 'retro' : 'normal', { silent: true });
-      }
+      p.officers.push(cleanOfficer || { id: 'o' + state.nextId++, ...payload });
+    }
+    if (officerId) {
+      setOfficerMode(officerId, isRetro ? 'retro' : 'normal', { silent: true });
     }
     if (typeof save === 'function') save();
     closeAllModals();
-    toast(`Офицер «${cat?.name || ''}» добавлен в сектор` + (initialStockDeduction?.deductStock ? ' (ресурсы списаны со склада)' : ''));
+    toast(`Офицер «${cat?.name || ''}» добавлен в сектор` + (res?.stockDeducted ? ' (ресурсы списаны со склада)' : ''));
     renderPlayerDetail(addSectorOfficerPlayerId);
   } catch (err) {
     toast('Ошибка добавления офицера: ' + (err.message || err), 'error');
@@ -8858,19 +8553,16 @@ function openResetSectorOfficerModal(playerId, officerId) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = 'Сброс...';
       try {
-        await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
+        const resetRes = await apiFetch(`/api/players/${playerId}/officers/${officerId}`, {
           method: 'PUT',
-          body: { ...res.resetOfficer, invested: res.newInvested }
+          body: { reset: true }
         });
-        await apiFetch(`/api/players/${playerId}`, { method: 'PUT', body: { stock: res.newStock } });
-        p.stock = res.newStock;
-        Object.assign(off, res.resetOfficer);
-        off.invested = res.newInvested;
-        if (myCabinetProfile && myCabinetProfile.id === p.id) {
-          myCabinetProfile.stock = res.newStock;
-          const myOff = (myCabinetProfile.officers || []).find(o => String(o.id) === String(officerId));
-          if (myOff) { Object.assign(myOff, res.resetOfficer); myOff.invested = res.newInvested; }
-        }
+        applyOfficerMutationResponse({
+          playerId,
+          officerId,
+          response: resetRes,
+          fallbackPatch: { ...res.resetOfficer, invested: res.newInvested }
+        });
         if (typeof save === 'function') save();
         closeModal('modal-reset-officer');
         toast(typeof t === 'function' ? t('officers.toast_reset_success') : 'Офицер сброшен в стоковое состояние, ресурсы возвращены на склад');
@@ -8954,77 +8646,6 @@ async function submitEditSectorOfficer() {
     ? soSelectedSkills.map(s => Math.max(1, Math.min(5, parseInt(s) || 1)))
     : [1, 1, 1, 1];
 
-  const p = getPlayer(editSectorOfficerPlayerId);
-  const oldOff = p?.officers?.find(o => String(o.id) === String(editSectorOfficerId));
-  let newStock = null;
-  let newInvested = null;
-
-  if (!isRetro && p?.stock && oldOff) {
-    const cat = getCatalogOfficer(oldOff.catalogId);
-    const rawCost = Number(cat?.couponPerPuzzle);
-    const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
-    const upgradeType = cat?.upgradeType || 'standard';
-    const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
-    const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
-
-    let curStock = { ...p.stock };
-    const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
-    let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
-    let hasChanges = false;
-
-    // 1. Level
-    if (oldOff.level !== level) {
-      const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-      const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
-      if (!levelStockDelta.canAfford) {
-        toast(`❌ Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.)`, 'error');
-        return;
-      }
-      curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
-      curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
-      if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
-      hasChanges = true;
-    }
-
-    // 2. Stars
-    const oldStars = Number(oldOff.stars) || 0;
-    if (oldStars !== stars) {
-      const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-      const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
-      if (!starRes.canAfford) {
-        toast(`❌ Недостаточно ресурсов на складе для изменения звёзд`, 'error');
-        return;
-      }
-      curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
-      curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
-      curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
-      curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
-      if (starRes.newInvested) curInv = starRes.newInvested;
-      hasChanges = true;
-    }
-
-    // 3. Skills
-    const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
-    const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
-    if (hasSkillDiff) {
-      const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
-      const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
-      if (!skillRes.canAfford) {
-        toast(`❌ Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей)`, 'error');
-        return;
-      }
-      curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
-      curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
-      if (skillRes.newInvested) curInv = skillRes.newInvested;
-      hasChanges = true;
-    }
-
-    if (hasChanges) {
-      newStock = curStock;
-      newInvested = curInv;
-    }
-  }
-
   const payload = {
     level,
     coupons,
@@ -9032,31 +8653,23 @@ async function submitEditSectorOfficer() {
     skills,
     personalPuzzles,
     onlyPersonalPuzzles,
-    ...(newInvested ? { invested: newInvested } : {})
+    deductStock: !isRetro
   };
   try {
     const res = await apiFetch(`/api/players/${editSectorOfficerPlayerId}/officers/${editSectorOfficerId}`, {
       method: 'PUT',
       body: payload
     });
-    if (newStock) {
-      await apiFetch(`/api/players/${editSectorOfficerPlayerId}`, {
-        method: 'PUT',
-        body: { stock: newStock }
-      });
-      if (p) p.stock = newStock;
-    }
-    if (p && Array.isArray(p.officers)) {
-      const off = p.officers.find(o => String(o.id) === String(editSectorOfficerId));
-      if (off) {
-        if (res && res.id) Object.assign(off, res);
-        else Object.assign(off, payload);
-      }
-    }
+    applyOfficerMutationResponse({
+      playerId: editSectorOfficerPlayerId,
+      officerId: editSectorOfficerId,
+      response: res,
+      fallbackPatch: payload
+    });
     if (typeof save === 'function') save();
     setOfficerMode(editSectorOfficerId, isRetro ? 'retro' : 'normal', { silent: true });
     closeAllModals();
-    toast('Офицер сохранён' + (newStock ? ' (ресурсы списаны со склада)' : ''));
+    toast('Офицер сохранён' + (res?.stockDeducted ? ' (ресурсы списаны со склада)' : ''));
     renderPlayerDetail(editSectorOfficerPlayerId);
   } catch (err) {
     toast('Ошибка сохранения офицера: ' + (err.message || err), 'error');

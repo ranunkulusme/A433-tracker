@@ -3765,6 +3765,17 @@
     return { active, upcoming, past };
   }
 
+  function resolveOfficerUpgradeParams(cat = null) {
+    const gen = Number(cat?.generation) || 0;
+    const upgradeType = cat?.upgradeType || cat?.upgrade_type || 'standard';
+    const rawCost = Number(cat?.couponPerPuzzle);
+    const costPerPuzzle = rawCost === 0
+      ? (upgradeType === 'special' ? 0 : 500)
+      : (rawCost || (gen === 7 ? 600 : (gen >= 8 ? 720 : 500)));
+    const starCouponCost = Number(cat?.starCouponCost) || (gen === 7 ? 300 : (gen <= 6 ? 250 : 360));
+    const maxMedals = Number(cat?.medalsBeforeTraining || cat?.medals_before_training) || 690;
+    return { costPerPuzzle, upgradeType, starCouponCost, maxMedals };
+  }
 
   return {
     COUPON_PER_PUZZLE,
@@ -3853,6 +3864,7 @@
     convertTimeBetweenTimezones,
     calculateInitialOfficerStockDeduction,
     calculateOfficerStockReset,
+    resolveOfficerUpgradeParams,
     normalizeOfficerMode,
     getOfficerModeFromStore,
     setOfficerModeInStore,

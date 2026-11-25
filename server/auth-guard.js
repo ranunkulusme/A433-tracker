@@ -336,6 +336,9 @@ function createAuthGuard({ db, logic } = {}) {
       db.touchUserActive(user.id);
     }
     const cookie = formatSessionCookie(token);
+    if (typeof db.healUserSectorLinks === 'function') {
+      db.healUserSectorLinks(user.id);
+    }
     const linkedPlayerId = user.player_id || user.playerId || null;
     const player = linkedPlayerId && typeof db.getPlayerById === 'function'
       ? db.getPlayerById(linkedPlayerId)
