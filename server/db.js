@@ -96,33 +96,31 @@ function clearUserSessions(userId) {
   return true;
 }
 
-function findUserByUsername(username) {
-  if (!username) return null;
-  const user = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+function mapUserRow(user) {
   if (!user) return null;
   return {
     ...user,
     permissions: parsePermissions(user.permissions),
-    telegramChatId: user.telegram_chat_id,
-    telegramUsername: user.telegram_username,
+    isBlocked: Boolean(user.is_blocked),
+    isApproved: Boolean(user.is_approved),
+    playerId: user.player_id ?? null,
+    telegramChatId: user.telegram_chat_id || null,
+    telegramUsername: user.telegram_username || null,
     telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0,
     timezone: user.timezone || 'Europe/Moscow',
     timezoneOffset: (user.timezone_offset !== null && user.timezone_offset !== undefined) ? Number(user.timezone_offset) : 3
   };
 }
 
+function findUserByUsername(username) {
+  if (!username) return null;
+  const user = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+  return mapUserRow(user);
+}
+
 function findUserById(id) {
   const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!user) return null;
-  return {
-    ...user,
-    permissions: parsePermissions(user.permissions),
-    telegramChatId: user.telegram_chat_id,
-    telegramUsername: user.telegram_username,
-    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0,
-    timezone: user.timezone || 'Europe/Moscow',
-    timezoneOffset: (user.timezone_offset !== null && user.timezone_offset !== undefined) ? Number(user.timezone_offset) : 3
-  };
+  return mapUserRow(user);
 }
 
 function registerUser({ username, password, playerId, playerName }) {
@@ -2722,11 +2720,7 @@ function findUserByTelegramChatId(chatId) {
        OR CAST(telegram_chat_id AS TEXT) = ?
        OR telegram_chat_id = CAST(? AS INTEGER)
   `).get(chatId, isNaN(numId) ? chatId : numId, strId, isNaN(numId) ? 0 : numId);
-  if (!row) return null;
-  return {
-    ...row,
-    permissions: parsePermissions(row.permissions)
-  };
+  return mapUserRow(row);
 }
 
 function findUserByTelegramUsername(tgUsername) {
@@ -2748,11 +2742,7 @@ function findUserByTelegramUsername(tgUsername) {
     END, u.id ASC
     LIMIT 1
   `).get(raw, clean, clean, raw, clean, clean);
-  if (!row) return null;
-  return {
-    ...row,
-    permissions: parsePermissions(row.permissions)
-  };
+  return mapUserRow(row);
 }
 
 function toggleTelegramNotifications(userId, enabled) {

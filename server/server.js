@@ -94,10 +94,6 @@ function readJsonBody(req) {
   });
 }
 
-function authenticate(req) {
-  return authGuard.authenticate(req);
-}
-
 function sanitizeSkills(skills) {
   if (!Array.isArray(skills)) return [1, 1, 1, 1];
   const arr = skills.slice(0, 4);
@@ -179,52 +175,13 @@ function sanitizeEventType(data) {
   return result;
 }
 
-function requireAuth(req, res) {
-  if (!req.user) {
-    sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-    return false;
-  }
-  return true;
-}
-
-function requireRole(roles) {
-  return (req, res) => {
-    if (!req.user) authenticate(req);
-    if (!req.user) {
-      sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      return false;
-    }
-    if (!authGuard.hasRole(req.user, roles)) {
-      sendError(res, 403, 'FORBIDDEN', `Доступ запрещен для ранга ${req.user.rank}`);
-      return false;
-    }
-    return true;
-  };
-}
-
-function requirePermission(reqOrPerm, res, permission) {
-  if (typeof reqOrPerm === 'string') {
-    const perm = reqOrPerm;
-    return (req, res) => requirePermission(req, res, perm);
-  }
-  const req = reqOrPerm;
-  if (!req.user) {
-    authenticate(req);
-  }
-  if (!req.user) {
-    sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-    return false;
-  }
-  if (authGuard.hasPermission(req.user, permission)) {
-    return true;
-  }
-  sendError(res, 403, 'FORBIDDEN', `Недостаточно прав: требуется разрешение ${permission}`);
-  return false;
-}
-
-function maskPlayerStockIfNeeded(player, user) {
-  return authGuard.maskPlayerStockIfNeeded(player, user);
-}
+const {
+  authenticate,
+  requireAuth,
+  requireRole,
+  requirePermission,
+  maskPlayerStockIfNeeded
+} = authGuard;
 
 let lastKnownBaseUrl = null;
 
@@ -609,85 +566,20 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/auth/telegram-webapp' && req.method === 'POST') {
       const rawBotToken = db.getAppSetting('telegram_bot_token');
       const botToken = rawBotToken ? String(rawBotToken).trim() : null;
-      if (!botToken) {
-        return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен на сервере');
-      }
-
       const initData = body && (body.initData || body.init_data);
-      if (!initData || typeof initData !== 'string') {
-        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
+      const authRes = authGuard.authenticateTelegramWebApp(initData, botToken);
+      if (!authRes.ok) {
+        return sendError(res, authRes.status || 401, authRes.error, authRes.message);
       }
-
-      const validation = authGuard.validateTelegramWebAppData(initData, botToken);
-      if (!validation.valid) {
-        console.warn('[Telegram WebApp] Validation error:', validation.error);
-        return sendError(res, 401, 'INVALID_TELEGRAM_DATA', `Ошибка валидации Telegram WebApp: ${validation.error}`);
+      if (authRes.cookie) {
+        res.setHeader('Set-Cookie', authRes.cookie);
       }
-
-      const tgUserId = validation.user?.id;
-      if (!tgUserId) {
-        return sendError(res, 400, 'MISSING_TELEGRAM_USER', 'Не найден объект пользователя Telegram в initData');
-      }
-
-      let user = db.findUserByTelegramChatId(tgUserId);
-      if (!user && validation.user?.username) {
-        const matched = db.findUserByTelegramUsername(validation.user.username);
-        if (matched && (!matched.telegram_chat_id || String(matched.telegram_chat_id) !== String(tgUserId))) {
-          db.bindUserTelegram(matched.id, tgUserId, validation.user.username);
-          user = (typeof db.getUserById === 'function') ? db.getUserById(matched.id) : matched;
-        }
-      }
-      if (!user && validation.user?.first_name) {
-        const matchedFirst = db.findUserByTelegramUsername(validation.user.first_name);
-        if (matchedFirst && (!matchedFirst.telegram_chat_id || String(matchedFirst.telegram_chat_id) !== String(tgUserId))) {
-          db.bindUserTelegram(matchedFirst.id, tgUserId, validation.user.username || validation.user.first_name);
-          user = (typeof db.getUserById === 'function') ? db.getUserById(matchedFirst.id) : matchedFirst;
-        }
-      }
-      if (!user && validation.user?.first_name && validation.user?.last_name) {
-        const fullName = `${validation.user.first_name} ${validation.user.last_name}`.trim();
-        const matchedFull = db.findUserByTelegramUsername(fullName);
-        if (matchedFull && (!matchedFull.telegram_chat_id || String(matchedFull.telegram_chat_id) !== String(tgUserId))) {
-          db.bindUserTelegram(matchedFull.id, tgUserId, validation.user.username || fullName);
-          user = (typeof db.getUserById === 'function') ? db.getUserById(matchedFull.id) : matchedFull;
-        }
-      }
-      if (!user) {
-        console.warn(`[Telegram WebApp] User not bound: tgUserId=${tgUserId}, tgUsername=${validation.user?.username}, firstName=${validation.user?.first_name}`);
-        return sendError(res, 404, 'USER_NOT_BOUND', 'Пользователь с данным Telegram ID не найден в KoW Tracker. Привяжите Telegram в личном кабинете.');
-      }
-
-      if (user.is_approved === 0) {
-        return sendError(res, 403, 'PENDING_APPROVAL', 'Ваш аккаунт ожидает подтверждения офицером');
-      }
-
-      if (user.is_active === 0) {
-        return sendError(res, 403, 'ACCOUNT_BLOCKED', 'Ваш аккаунт заблокирован администрацией');
-      }
-
-      const sessionToken = db.createSession(user.id);
-      db.touchUserActive(user.id);
-
-      const cookieHeader = `token=${encodeURIComponent(sessionToken)}; HttpOnly; SameSite=Lax; Path=/`;
-      res.setHeader('Set-Cookie', cookieHeader);
-
-      const player = user.player_id ? db.getPlayerById(user.player_id) : (db.getPlayersByUserId(user.id)[0] || null);
-
       return sendJson(res, 200, {
         success: true,
-        token: sessionToken,
-        user: {
-          id: user.id,
-          username: user.username,
-          rank: user.rank,
-          playerId: user.player_id || (player ? player.id : null),
-          permissions: user.permissions || [],
-          telegramChatId: user.telegram_chat_id || null,
-          telegramUsername: user.telegram_username || null,
-          hasDefaultAdminPassword: user.username === 'admin' ? db.isDefaultAdminPassword() : false
-        },
-        player,
-        telegramUser: validation.user
+        token: authRes.token,
+        user: authRes.user,
+        player: authRes.player,
+        telegramUser: authRes.telegramUser
       });
     }
 
@@ -733,8 +625,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/auth/logout' && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
       if (req.token) {
-        db.deleteSession(req.token);
+        authGuard.destroySession(req.token);
       }
+      res.setHeader('Set-Cookie', authGuard.formatLogoutCookie());
       return sendJson(res, 200, { success: true });
     }
 
@@ -975,8 +868,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
-      delete body.rank;
-      delete body.id;
+      authGuard.sanitizePlayerUpdatePayload(body, { allowPrivilegeFields: false });
 
       if (body.sector && body.sector.vipPoints !== undefined) {
         body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
@@ -1194,12 +1086,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      if (!check.isLeader) {
-        delete body.rank;
-        delete body.id;
-        delete body.userId;
-        delete body.user_id;
-      }
+      authGuard.sanitizePlayerUpdatePayload(body, { allowPrivilegeFields: check.isLeader });
       if (body.sector && body.sector.vipPoints !== undefined) {
         body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
       }
@@ -1257,9 +1144,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const stockHistoryMatch = pathname.match(/^\/api\/players\/(\d+)\/stock-history$/);
     if (stockHistoryMatch && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const targetPlayerId = Number(stockHistoryMatch[1]);
       const player = db.getPlayerById(targetPlayerId);
       if (!player) {
@@ -1279,9 +1164,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (stockHistoryMatch && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const targetPlayerId = Number(stockHistoryMatch[1]);
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
@@ -1404,7 +1287,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // VIP TIERS
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/vip-tiers' && req.method === 'GET') {
-      if (!authenticate(req, res)) return;
+      if (!requireAuth(req, res)) return;
       return sendJson(res, 200, db.getVipTiers());
     }
 
@@ -2202,9 +2085,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     const screenshotMatch = pathname.match(/^\/api\/screenshots\/(.+)$/);
     if (screenshotMatch && (req.method === 'GET' || req.method === 'HEAD')) {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
 
       const rawParam = screenshotMatch[1];
       let filename = '';
@@ -2289,9 +2170,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2330,9 +2209,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки Telegram бота');
       }
@@ -2399,9 +2276,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
 
     if (pathname === '/api/mieru/settings' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2428,9 +2303,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/mieru/settings' && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки туннеля Mieru');
       }
@@ -2503,9 +2376,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/mieru/test' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2530,9 +2401,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/bind-webapp' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const rawBotToken = db.getAppSetting('telegram_bot_token');
       const botToken = rawBotToken ? String(rawBotToken).trim() : null;
       if (!botToken) {
@@ -2552,9 +2421,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
 
       const token = crypto.randomBytes(16).toString('hex');
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
@@ -2586,26 +2453,20 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/bind' && req.method === 'DELETE') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       db.unbindUserTelegram(req.user.id);
       return sendJson(res, 200, { success: true });
     }
 
     if (pathname === '/api/telegram/notifications' && (req.method === 'PUT' || req.method === 'POST')) {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const enabled = body.enabled !== false && body.enabled !== 0 && body.enabled !== '0';
       db.toggleTelegramNotifications(req.user.id, enabled);
       return sendJson(res, 200, { success: true, enabled });
     }
 
     if (pathname === '/api/telegram/staff-bind-token' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки чата штаба');
       }
@@ -2621,9 +2482,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/channel-bind-token' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки канала анонсов');
       }
@@ -2639,9 +2498,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/schedule' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2662,9 +2519,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/schedule' && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять расписание уведомлений');
       }
@@ -2693,9 +2548,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/check-reminders' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2707,9 +2560,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/check-morning-reminders' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2726,9 +2577,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
 
     if (pathname === '/api/notification-templates' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2738,9 +2587,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const tplMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)$/);
     if (tplMatch && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2754,9 +2601,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const tplResetMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/reset$/);
     if (tplResetMatch && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2770,9 +2615,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const tplTestMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/test$/);
     if (tplTestMatch && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }

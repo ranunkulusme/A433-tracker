@@ -1713,6 +1713,10 @@ test('API VIP tiers GET /api/vip-tiers and PUT /api/vip-tiers with RBAC', async 
     });
     const { token: r3Token } = await r3LoginRes.json();
 
+    // 0. Unauthenticated GET /api/vip-tiers must immediately respond 401 without hanging
+    const unauthVipRes = await fetch(`${baseUrl}/api/vip-tiers`, { signal: AbortSignal.timeout(2000) });
+    assert.equal(unauthVipRes.status, 401);
+
     // 1. GET /api/vip-tiers is accessible to R3
     const getRes = await fetch(`${baseUrl}/api/vip-tiers`, {
       headers: { Authorization: `Bearer ${r3Token}` }

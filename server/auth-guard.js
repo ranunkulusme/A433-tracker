@@ -144,6 +144,27 @@ function createAuthGuard({ db, logic } = {}) {
     return `token=; HttpOnly; Path=${path}; Max-Age=0`;
   }
 
+  function sendJsonAuthError(res, status, error, message) {
+    if (res && typeof res.writeHead === 'function') {
+      res.writeHead(status, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate'
+      });
+      res.end(JSON.stringify({ error, message }));
+    }
+    return false;
+  }
+
+  function requireAuth(req, res) {
+    if (!req || !req.user) {
+      authenticate(req);
+    }
+    if (!req || !req.user) {
+      return sendJsonAuthError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+    }
+    return true;
+  }
+
   function hasRole(user, roles) {
     if (!user || !user.rank) return false;
     const allowed = Array.isArray(roles) ? roles : [roles];
@@ -162,22 +183,9 @@ function createAuthGuard({ db, logic } = {}) {
   function requireRole(roles) {
     const allowed = Array.isArray(roles) ? roles : [roles];
     return (req, res) => {
-      if (!req.user) {
-        authenticate(req);
-      }
-      if (!req.user) {
-        if (res && typeof res.writeHead === 'function') {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'UNAUTHORIZED', message: 'Требуется авторизация' }));
-        }
-        return false;
-      }
+      if (!requireAuth(req, res)) return false;
       if (!allowed.includes(req.user.rank)) {
-        if (res && typeof res.writeHead === 'function') {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'FORBIDDEN', message: `Доступ запрещен для ранга ${req.user.rank}` }));
-        }
-        return false;
+        return sendJsonAuthError(res, 403, 'FORBIDDEN', `Доступ запрещен для ранга ${req.user.rank}`);
       }
       return true;
     };
@@ -186,27 +194,23 @@ function createAuthGuard({ db, logic } = {}) {
   function requirePermission(reqOrPerm, res, permission) {
     if (typeof reqOrPerm === 'string') {
       const perm = reqOrPerm;
-      return (req, res) => requirePermission(req, res, perm);
+      return (req, resArg) => requirePermission(req, resArg, perm);
     }
     const req = reqOrPerm;
-    if (!req.user) {
-      authenticate(req);
+    if (!requireAuth(req, res)) return false;
+    if (hasPermission(req.user, permission)) return true;
+    return sendJsonAuthError(res, 403, 'FORBIDDEN', `Недостаточно прав: требуется разрешение ${permission}`);
+  }
+
+  function sanitizePlayerUpdatePayload(body, { allowPrivilegeFields = false } = {}) {
+    if (!body || typeof body !== 'object') return body;
+    if (!allowPrivilegeFields) {
+      delete body.rank;
+      delete body.id;
+      delete body.userId;
+      delete body.user_id;
     }
-    if (!req.user) {
-      if (res && typeof res.writeHead === 'function') {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'UNAUTHORIZED', message: 'Требуется авторизация' }));
-      }
-      return false;
-    }
-    if (hasPermission(req.user, permission)) {
-      return true;
-    }
-    if (res && typeof res.writeHead === 'function') {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'FORBIDDEN', message: `Недостаточно прав: требуется разрешение ${permission}` }));
-    }
-    return false;
+    return body;
   }
 
   function maskPlayerStockIfNeeded(player, user) {
@@ -258,11 +262,36 @@ function createAuthGuard({ db, logic } = {}) {
     return { ok: true, player, isLeader, isOwner };
   }
 
-  function verifyTelegramWebAppData(initData, botToken, options = {}) {
-    return validateTelegramWebAppData(initData, botToken, options);
+  function resolveUserByTelegramIdentity(tgUser) {
+    const tgUserId = tgUser?.id;
+    let user = typeof db.findUserByTelegramChatId === 'function' ? db.findUserByTelegramChatId(tgUserId) : null;
+    const findUserByIdFn = db.findUserById || db.getUserById;
+    const tryBindCandidate = (candidateQuery, fallbackName) => {
+      if (!candidateQuery || typeof db.findUserByTelegramUsername !== 'function') return null;
+      const matched = db.findUserByTelegramUsername(candidateQuery);
+      if (matched && (!matched.telegram_chat_id || String(matched.telegram_chat_id) !== String(tgUserId))) {
+        if (typeof db.bindUserTelegram === 'function') {
+          db.bindUserTelegram(matched.id, tgUserId, fallbackName);
+        }
+        return typeof findUserByIdFn === 'function' ? findUserByIdFn(matched.id) : matched;
+      }
+      return null;
+    };
+
+    if (!user && tgUser?.username) {
+      user = tryBindCandidate(tgUser.username, tgUser.username);
+    }
+    if (!user && tgUser?.first_name) {
+      user = tryBindCandidate(tgUser.first_name, tgUser.username || tgUser.first_name);
+    }
+    if (!user && tgUser?.first_name && tgUser?.last_name) {
+      const fullName = `${tgUser.first_name} ${tgUser.last_name}`.trim();
+      user = tryBindCandidate(fullName, tgUser.username || fullName);
+    }
+    return user;
   }
 
-  function authenticateTelegramWebApp(initData, botToken) {
+  function authenticateTelegramWebApp(initData, botToken, options = {}) {
     if (!botToken) {
       return { ok: false, status: 503, error: 'BOT_NOT_CONFIGURED', message: 'Токен Telegram-бота не настроен на сервере' };
     }
@@ -270,7 +299,7 @@ function createAuthGuard({ db, logic } = {}) {
       return { ok: false, status: 400, error: 'VALIDATION_ERROR', message: 'Параметр initData обязателен' };
     }
 
-    const validation = verifyTelegramWebAppData(initData, botToken);
+    const validation = validateTelegramWebAppData(initData, botToken, options);
     if (!validation.valid) {
       return { ok: false, status: 401, error: 'INVALID_TELEGRAM_DATA', message: `Ошибка валидации Telegram WebApp: ${validation.error}` };
     }
@@ -284,15 +313,7 @@ function createAuthGuard({ db, logic } = {}) {
       return { ok: false, status: 500, error: 'INTERNAL_ERROR', message: 'База данных недоступна' };
     }
 
-    let user = typeof db.findUserByTelegramChatId === 'function' ? db.findUserByTelegramChatId(tgUserId) : null;
-    if (!user && validation.user?.username && typeof db.findUserByTelegramUsername === 'function') {
-      const matched = db.findUserByTelegramUsername(validation.user.username);
-      if (matched && typeof db.bindUserTelegram === 'function') {
-        db.bindUserTelegram(matched.id, tgUserId, validation.user.username);
-        user = typeof db.findUserById === 'function' ? db.findUserById(matched.id) : matched;
-      }
-    }
-
+    const user = resolveUserByTelegramIdentity(validation.user);
     if (!user) {
       return {
         ok: false,
@@ -302,15 +323,42 @@ function createAuthGuard({ db, logic } = {}) {
       };
     }
 
-    if (user.is_blocked) {
-      return { ok: false, status: 403, error: 'USER_BLOCKED', message: 'Ваш аккаунт заблокирован' };
+    if (user.is_approved === 0 || user.isApproved === false) {
+      return { ok: false, status: 403, error: 'PENDING_APPROVAL', message: 'Ваш аккаунт ожидает подтверждения офицером' };
+    }
+
+    if (user.is_blocked || user.isBlocked) {
+      return { ok: false, status: 403, error: 'ACCOUNT_BLOCKED', message: 'Ваш аккаунт заблокирован администрацией' };
     }
 
     const token = createSession(user.id);
+    if (typeof db.touchUserActive === 'function') {
+      db.touchUserActive(user.id);
+    }
+    const cookie = formatSessionCookie(token);
+    const linkedPlayerId = user.player_id || user.playerId || null;
+    const player = linkedPlayerId && typeof db.getPlayerById === 'function'
+      ? db.getPlayerById(linkedPlayerId)
+      : (typeof db.getPlayersByUserId === 'function' ? (db.getPlayersByUserId(user.id)[0] || null) : null);
+
     return {
       ok: true,
       token,
-      user
+      cookie,
+      user: {
+        id: user.id,
+        username: user.username,
+        rank: user.rank,
+        playerId: linkedPlayerId || (player ? player.id : null),
+        permissions: user.permissions || [],
+        telegramChatId: user.telegram_chat_id || user.telegramChatId || null,
+        telegramUsername: user.telegram_username || user.telegramUsername || null,
+        hasDefaultAdminPassword: user.username === 'admin' && typeof db.isDefaultAdminPassword === 'function'
+          ? db.isDefaultAdminPassword()
+          : false
+      },
+      player,
+      telegramUser: validation.user
     };
   }
 
@@ -359,6 +407,7 @@ function createAuthGuard({ db, logic } = {}) {
   return {
     extractToken,
     authenticate,
+    requireAuth,
     createSession,
     destroySession,
     formatSessionCookie,
@@ -367,9 +416,9 @@ function createAuthGuard({ db, logic } = {}) {
     hasPermission,
     requireRole,
     requirePermission,
+    sanitizePlayerUpdatePayload,
     maskPlayerStockIfNeeded,
     checkSectorAccess,
-    verifyTelegramWebAppData,
     validateTelegramWebAppData,
     authenticateTelegramWebApp,
     canApproveUser,
