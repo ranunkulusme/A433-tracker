@@ -9,6 +9,7 @@ const path = require('node:path');
 const db = require('./db.js');
 const logic = require('../shared/logic.js');
 const { createEventOperations } = require('./event-ops.js');
+const { createNotificationEngine } = require('./notification-engine.js');
 
 const TEST_DB = path.join(__dirname, '..', 'data', `kow-event-ops-test-${Date.now()}.db`);
 
@@ -313,5 +314,258 @@ test('EventOperations: notifyAssignedPlayers sends RSVP markup to newly assigned
   assert.equal(notifications[0].data.username, 'assigned_player');
   assert.equal(notifications[0].data.place, '1');
   assert.ok(notifications[0].opts.replyMarkup.inline_keyboard[0][0].callback_data.includes('rsvp_event:confirm:'));
+
+  // Re-notify with includeStaffSummary should dispatch staff_event_autopick_summary
+  notifications.length = 0;
+  await eventOps.notifyAssignedPlayers({
+    event: ev,
+    previousAssignments: [],
+    includeStaffSummary: true,
+    isNew: true
+  });
+  assert.ok(notifications.some(n => n.key === 'event_place_assigned'));
+  assert.ok(notifications.some(n => n.key === 'staff_event_autopick_summary'));
+});
+
+test('EventOperations: rsvpEvent decline routes staff alert through notificationEngine & Mieru proxy', async () => {
+  const sentMessages = [];
+  const fakeTelegram = {
+    sendTelegramMessage: async (payload, sendOpts = {}) => {
+      sentMessages.push({ payload, sendOpts });
+      return { ok: true, result: { message_id: 901 } };
+    }
+  };
+  db.setAppSetting('telegram_bot_token', 'token_123');
+  db.setAppSetting('telegram_staff_chat_id', '-100888777');
+  db.saveMieruSettings({ enabled: true, socks5Port: 1099 });
+
+  const notificationEngine = createNotificationEngine({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    getAppBaseUrl: () => 'http://localhost:3000'
+  });
+  const eventOps = createEventOperations({
+    db,
+    logic,
+    dispatchNotification: (...args) => notificationEngine.dispatchNotification(...args),
+    notificationEngine,
+    telegram: fakeTelegram
+  });
+
+  const uRes = db.registerUser({ username: 'decliner_u', password: 'pass123' });
+  const user = db.findUserById(uRes.userId);
+  const player = db.createPlayer({ userId: user.id, name: 'Decline Sector' });
+  const et = db.saveEventType({ name: 'Король Войны', places: [{ place: 1, coupons: 12000 }] });
+  const ev = db.saveEvent({
+    typeId: et.id,
+    dateFrom: '2026-12-01',
+    dateTo: '2026-12-02',
+    assignments: [{ place: 1, playerId: player.id }]
+  });
+
+  const res = await eventOps.rsvpEvent({ eventId: ev.id, place: 1, status: 'declined', user });
+  assert.equal(res.ok, true);
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].payload.chatId, -100888777);
+  assert.ok(sentMessages[0].payload.text.includes('Отказ от участия'));
+  assert.equal(sentMessages[0].sendOpts.proxyUrl, 'socks5://127.0.0.1:1099');
+
+  db.saveMieruSettings({ enabled: false });
+});
+
+test('EventOperations: submitEventResult records correction diffSummary when recalculating changed actualPlace', async () => {
+  const eventOps = createEventOperations({ db, logic });
+
+  const uRes = db.registerUser({ username: 'corr_hero', password: 'pass123' });
+  const user = db.findUserById(uRes.userId);
+  const player = db.createPlayer({ userId: user.id, name: 'Corr Sector', stock: { coupons: 5000 } });
+  const et = db.saveEventType({
+    name: 'Кинг',
+    places: [
+      { place: 1, coupons: 25000 },
+      { place: 2, coupons: 10000 }
+    ]
+  });
+  const ev = db.saveEvent({
+    typeId: et.id,
+    dateFrom: '2026-11-01',
+    dateTo: '2026-11-02',
+    assignments: [{ place: 1, playerId: player.id }]
+  });
+
+  const first = await eventOps.submitEventResult({ eventId: ev.id, place: 1, actualPlace: 1, user });
+  assert.equal(first.ok, true);
+  assert.equal(db.getPlayerById(player.id).stock.coupons, 30000);
+
+  const corrected = await eventOps.submitEventResult({ eventId: ev.id, place: 1, actualPlace: 2, user });
+  assert.equal(corrected.ok, true);
+  assert.equal(db.getPlayerById(player.id).stock.coupons, 15000);
+
+  const history = db.getStockHistoryByPlayerId(player.id);
+  assert.equal(history.length, 2);
+  const latest = history[0];
+  assert.equal(latest.source, 'event_reward');
+  assert.ok(latest.diffSummary.includes('Корректировка награды'), `Expected correction summary, got: ${latest.diffSummary}`);
+});
+
+test('EventOperations: scheduleSeason with rules generates alternating cadence and creates events', () => {
+  const savedEvents = [];
+  const eventTypes = [
+    { id: 1, name: 'Король Войны', color: '#8b5cf6', places: [{ place: 1, coupons: 12500 }] },
+    { id: 2, name: 'Могучие Силы', color: '#10b981', places: [{ place: 1, coupons: 12500 }] }
+  ];
+
+  const mockDb = {
+    getEventTypes: () => [...eventTypes],
+    saveEventType: (t) => {
+      const created = { id: eventTypes.length + 1, ...t };
+      eventTypes.push(created);
+      return created;
+    },
+    saveEvent: (ev) => {
+      const saved = { id: savedEvents.length + 1, ...ev };
+      savedEvents.push(saved);
+      return saved;
+    }
+  };
+
+  const eventOps = createEventOperations({ db: mockDb, logic });
+  const result = eventOps.scheduleSeason({
+    startDate: '2026-11-20',
+    totalWeeks: 8,
+    rules: [
+      { typeName: 'Король Войны', color: '#8b5cf6', dayOfWeek: 2, activeWeeks: 1, breakWeeks: 1, weekOffset: 0 },
+      { typeName: 'Могучие Силы', color: '#10b981', dayOfWeek: 2, activeWeeks: 1, breakWeeks: 1, weekOffset: 1 }
+    ]
+  });
+
+  assert.equal(result.success, true);
+  assert.ok(result.count > 0);
+  assert.equal(savedEvents.length, result.count);
+  const typeIds = savedEvents.map(e => e.typeId);
+  assert.ok(typeIds.includes(1));
+  assert.ok(typeIds.includes(2));
+});
+
+test('EventOperations: scheduleSeason with ready-made events array saves batch', () => {
+  const savedEvents = [];
+  const mockDb = {
+    getEventTypes: () => [{ id: 10, name: 'Custom Event', color: '#123456' }],
+    saveEvent: (ev) => {
+      const saved = { id: savedEvents.length + 1, ...ev };
+      savedEvents.push(saved);
+      return saved;
+    }
+  };
+
+  const eventOps = createEventOperations({ db: mockDb, logic });
+  const result = eventOps.scheduleSeason({
+    events: [
+      { typeId: 10, dateFrom: '2026-11-20', dateTo: '2026-11-22', note: 'Batch 1' },
+      { typeId: 10, dateFrom: '2026-11-27', dateTo: '2026-11-29', note: 'Batch 2' }
+    ]
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.count, 2);
+  assert.equal(savedEvents[0].note, 'Batch 1');
+  assert.equal(savedEvents[1].note, 'Batch 2');
+});
+
+test('EventOperations: runSmartAutopick calculates optimal assignments and handles missing event', () => {
+  const mockEvent = { id: 42, typeId: 1, dateFrom: '2026-11-20', dateTo: '2026-11-22' };
+  const mockEventType = {
+    id: 1,
+    name: 'Король Войны',
+    places: [{ place: 1, coupons: 12500 }, { place: 2, coupons: 6500 }]
+  };
+  const mockPlayers = [
+    { id: 10, name: 'Alpha', stock: { coupons: 100 }, officers: [{ id: 'off_1', target: { stars: 5 }, skills: [5, 5, 5, 5], catalogId: 'c1' }] },
+    { id: 20, name: 'Beta', stock: { coupons: 200 }, officers: [{ id: 'off_2', target: { stars: 5 }, skills: [3, 3, 3, 3], catalogId: 'c2' }] }
+  ];
+  const mockRegistrations = [
+    { playerId: 10, officerId: 'off_1', desiredPlace: 1 },
+    { playerId: 20, officerId: 'off_2', desiredPlace: 2 }
+  ];
+  const mockDb = {
+    getEventById: (id) => (id === 42 ? mockEvent : null),
+    getEventTypes: () => [mockEventType],
+    getPlayers: () => mockPlayers,
+    getCatalog: () => [{ id: 'c1', name: 'Officer Alpha' }, { id: 'c2', name: 'Officer Beta' }],
+    getRegistrationsByEventId: () => mockRegistrations,
+    getRecentWinners: () => []
+  };
+
+  const eventOps = createEventOperations({ db: mockDb, logic });
+  const result = eventOps.runSmartAutopick(42);
+  assert.equal(result.success, true);
+  assert.ok(result.assignments.length > 0);
+  assert.ok(Array.isArray(result.unassignedCandidates));
+
+  const missing = eventOps.runSmartAutopick(999);
+  assert.equal(missing.success, false);
+  assert.equal(missing.error, 'EVENT_NOT_FOUND');
+});
+
+test('EventOperations: finishEvent, summarizeEvent and shareEventGrid orchestrate end-of-event notifications', async () => {
+  const sentDispatches = [];
+  const sentPhotos = [];
+  const fakeTelegram = {
+    sendTelegramPhoto: async (payload, sendOpts = {}) => {
+      sentPhotos.push({ payload, sendOpts });
+      return { ok: true, result: { message_id: 950 } };
+    }
+  };
+  db.setAppSetting('telegram_bot_token', 'tok_finish');
+  db.setAppSetting('telegram_staff_chat_id', '-100444555');
+
+  const notificationEngine = createNotificationEngine({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    getAppBaseUrl: () => 'https://kow.example.com'
+  });
+
+  const eventOps = createEventOperations({
+    db,
+    logic,
+    dispatchNotification: async (key, data, opts) => {
+      sentDispatches.push({ key, data, opts });
+      return { sent: true };
+    },
+    notificationEngine,
+    getAppBaseUrl: () => 'https://kow.example.com'
+  });
+
+  const uRes = db.registerUser({ username: 'fin_hero', password: 'password123' });
+  db.bindUserTelegram(uRes.userId, 112233, 'fin_hero');
+  const p = db.createPlayer({ userId: uRes.userId, name: 'Finish Sector' });
+  const et = db.saveEventType({ name: 'Битва за трон', places: [{ place: 1, coupons: 15000 }] });
+  const ev = db.saveEvent({
+    typeId: et.id,
+    dateFrom: '2026-12-10',
+    dateTo: '2026-12-12',
+    assignments: [{ place: 1, playerId: p.id, actualCoupons: 15000, resultStatus: 'pending' }]
+  });
+
+  const finRes = await eventOps.finishEvent({ eventId: ev.id });
+  assert.equal(finRes.ok, true);
+  assert.equal(finRes.sentCount, 1);
+  assert.equal(sentDispatches[0].key, 'event_result_prompt');
+
+  const sumRes = await eventOps.summarizeEvent({ eventId: ev.id });
+  assert.equal(sumRes.ok, true);
+  assert.equal(sumRes.totalAssigned, 1);
+  assert.equal(sentDispatches[1].key, 'staff_event_completed_summary');
+
+  const shareRes = await eventOps.shareEventGrid({
+    eventId: ev.id,
+    target: 'staff',
+    imageBase64: 'data:image/png;base64,AAA'
+  });
+  assert.equal(shareRes.ok, true);
+  assert.equal(sentPhotos.length, 1);
+  assert.equal(sentPhotos[0].payload.chatId, -100444555);
 });
 

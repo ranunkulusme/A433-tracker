@@ -1649,18 +1649,27 @@ async function handleTelegramUpdate(update) {
         }
       }
 
-      if (!isConfirm) {
+      // If eventOps did not run (legacy test fallback), send staff alert here
+      if (!isConfirm && !(eventOps && typeof eventOps.rsvpEvent === 'function')) {
         const et = db.getEventTypes().find(t => t.id === ev.typeId);
-        let staffChatId = db.getAppSetting('telegram_staff_chat_id');
-        if (staffChatId && token) {
-          if (!isNaN(Number(staffChatId))) staffChatId = Number(staffChatId);
-          const staffAlertText = `⚠️ <b>Отказ от участия в событии!</b>\n\nБоец: <b>@${user.username || 'боец'}</b>\nСектор: <b>${player?.name || 'Сектор'}</b>\nСобытие: <b>${et?.name || 'Событие'}</b>\nОсвобождено место: <b>#${placeNum}</b>\n\n<i>Место свободно для повторного распределения или резервиста!</i>`;
-          await telegram.sendTelegramMessage({
-            token,
-            chatId: staffChatId,
+        const staffAlertText = `⚠️ <b>Отказ от участия в событии!</b>\n\nБоец: <b>@${user.username || 'боец'}</b>\nСектор: <b>${player?.name || 'Сектор'}</b>\nСобытие: <b>${et?.name || 'Событие'}</b>\nОсвобождено место: <b>#${placeNum}</b>\n\n<i>Место свободно для повторного распределения или резервиста!</i>`;
+        if (notificationEngine && typeof notificationEngine.sendDirectMessage === 'function') {
+          await notificationEngine.sendDirectMessage({
+            channel: 'staff',
             text: staffAlertText,
             parseMode: 'HTML'
           }).catch(() => {});
+        } else {
+          let staffChatId = db.getAppSetting('telegram_staff_chat_id');
+          if (staffChatId && token) {
+            if (!isNaN(Number(staffChatId))) staffChatId = Number(staffChatId);
+            await telegram.sendTelegramMessage({
+              token,
+              chatId: staffChatId,
+              text: staffAlertText,
+              parseMode: 'HTML'
+            }).catch(() => {});
+          }
         }
       }
 

@@ -13,7 +13,6 @@ const { createTelegramBotController } = require('./bot-controller.js');
 const { createOfficerProgression } = require('./officer-progression.js');
 const { createNotificationEngine } = require('./notification-engine.js');
 const { createAuthGuard } = require('./auth-guard.js');
-const { createSeasonPlanner } = require('./season-planner.js');
 const { createOcrAdapter } = require('./ocr-adapter.js');
 const telegramFormats = require('./telegram-formats.js');
 
@@ -204,13 +203,6 @@ const notificationEngine = createNotificationEngine({
   getAppBaseUrl
 });
 
-const seasonPlanner = createSeasonPlanner({
-  db,
-  logic,
-  notificationEngine,
-  getAppBaseUrl
-});
-
 function dispatchNotification(...args) {
   return notificationEngine.dispatchNotification(...args);
 }
@@ -219,6 +211,7 @@ const eventOps = createEventOperations({
   db,
   logic,
   dispatchNotification,
+  notificationEngine,
   telegram,
   getAppBaseUrl
 });
@@ -1537,87 +1530,20 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       // Notifications on saveEvent: personal alerts for assigned places & staff summary
-      try {
-        const savedAssignments = (saved && saved.assignments) ? saved.assignments : [];
-        const assignedList = savedAssignments.filter(a => a.playerId && Number(a.place) > 0);
-
-        if (assignedList.length > 0) {
-          const eventTypes = db.getEventTypes();
-          const et = eventTypes.find(t => t.id === saved.typeId);
-          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom) : et.places) : [];
-          const baseUrl = getAppBaseUrl(req);
-          const players = db.getPlayers();
-
-          let newAssignmentsCount = 0;
-          for (const a of assignedList) {
-            const prevA = previousAssignments.find(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
-            if (prevA) continue; // Already assigned to this place earlier
-            newAssignmentsCount++;
-
-            const player = db.getPlayerById(a.playerId);
-            if (player && player.userId) {
-              const user = db.findUserById(player.userId);
-              if (user) {
-                const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
-                const rsvpMarkup = {
-                  inline_keyboard: [
-                    [
-                      { text: '✅ Подтверждаю участие', callback_data: `rsvp_event:confirm:${saved.id}:${a.place}` },
-                      { text: '❌ Не смогу участвовать', callback_data: `rsvp_event:decline:${saved.id}:${a.place}` }
-                    ]
-                  ]
-                };
-                await dispatchNotification('event_place_assigned', {
-                  username: user.username,
-                  sectorName: player.name || a.playerName || 'Сектор',
-                  eventName: et?.name || 'Событие',
-                  eventDate: saved.dateFrom || '',
-                  place: String(a.place),
-                  coupons: String(coupons),
-                  link: `${baseUrl}/#event/${saved.id}`
-                }, { userId: user.id, replyMarkup: rsvpMarkup }).catch(err => {
-                  console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
-                });
-              }
-            }
-          }
-
-          if (newAssignmentsCount > 0 || isNew) {
-            const topFormatted = assignedList
-              .sort((x, y) => Number(x.place) - Number(y.place))
-              .slice(0, 5)
-              .map((a, idx) => {
-                const p = players.find(pl => pl.id === a.playerId);
-                const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
-                const safeName = String(a.playerName || p?.name || 'Сектор')
-                  .replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;');
-                return `${idx + 1}. #${a.place}: ${safeName}${vipStr}`;
-              })
-              .join('\n');
-
-            await dispatchNotification('staff_event_autopick_summary', {
-              eventName: et?.name || 'Событие',
-              assignedCount: String(assignedList.length),
-              availablePlaces: String(places.length),
-              topAssignmentsList: topFormatted || 'Назначений нет',
-              link: `${baseUrl}/#event/${saved.id}`
-            }).catch(err => {
-              console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
-            });
-          }
-        }
-      } catch (assignNotifErr) {
-        console.warn('[Notification] Error in assignment notifications on saveEvent:', assignNotifErr.message);
-      }
+      await eventOps.notifyAssignedPlayers({
+        event: saved,
+        previousAssignments,
+        includeStaffSummary: true,
+        isNew,
+        req
+      });
 
       return sendJson(res, 200, saved);
     }
 
     if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const result = seasonPlanner.scheduleSeason(body);
+      const result = eventOps.scheduleSeason(body);
       return sendJson(res, 201, result);
     }
 
@@ -1629,88 +1555,18 @@ function createRequestHandler(staticDir, s3Manager = null) {
         ? Number(body.sectorId)
         : (req.user.playerId ? Number(req.user.playerId) : null);
 
-      if (!targetSectorId) {
-        return sendError(res, 400, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
-      }
-      const player = db.getPlayerById(targetSectorId);
-      if (!player) {
-        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
-      }
-      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
-      if (!isLeader && player.userId !== req.user.id) {
-        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
-      }
-
-      const { officerId, desiredPlace } = body;
-      let finalOfficerId = officerId;
-      const catalog = db.getCatalog ? db.getCatalog() : [];
-      if (finalOfficerId) {
-        const off = (player.officers || []).find(o => String(o.id) === String(finalOfficerId) || String(o.catalogId) === String(finalOfficerId));
-        if (off) {
-          const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
-            ? logic.isOfficerEligibleForEvents(off, catalog)
-            : !Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
-          if (!isEligible) {
-            return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
-          }
-        } else {
-          const catItem = (catalog || []).find(c => c.id === String(finalOfficerId));
-          if (catItem) {
-            const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
-              ? logic.isOfficerEligibleForEvents({ catalogId: catItem.id }, catalog)
-              : (catItem.upgradeType !== 'special' && Number(catItem.couponPerPuzzle) > 0);
-            if (!isEligible) {
-              return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
-            }
-          }
-        }
-      } else {
-        if (typeof logic.selectOptimalEventOfficer === 'function') {
-          const ev = db.getEventById(eventId);
-          const optimal = logic.selectOptimalEventOfficer({ player, catalog, eventDate: ev?.dateFrom });
-          finalOfficerId = optimal.officerId || (optimal.officer ? (optimal.officer.catalogId || optimal.officer.id) : '');
-        }
-      }
-
-      const existingRegistrations = typeof db.getRegistrationsByEventId === 'function'
-        ? db.getRegistrationsByEventId(Number(eventId))
-        : (typeof db.getRegistrationsForEvent === 'function' ? db.getRegistrationsForEvent(Number(eventId)) : []);
-      const prevReg = (existingRegistrations || []).find(r => Number(r.playerId) === Number(targetSectorId));
-      const targetDesiredPlace = desiredPlace !== undefined ? Number(desiredPlace) : 0;
-      const targetOfficerId = String(finalOfficerId || '');
-      const isUnchanged = prevReg &&
-        Number(prevReg.desiredPlace || 0) === targetDesiredPlace &&
-        String(prevReg.officerId || '') === targetOfficerId;
-
-      const reg = db.registerForEvent({
+      const opRes = await eventOps.registerForEvent({
         eventId,
         playerId: targetSectorId,
-        officerId: targetOfficerId,
-        desiredPlace: targetDesiredPlace
+        officerId: body.officerId,
+        desiredPlace: body.desiredPlace,
+        user: req.user,
+        req
       });
-
-      if (!isUnchanged) {
-        try {
-          const ev = db.getEventById(eventId);
-          const et = ev ? (db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null) : null;
-          const placeStr = (targetDesiredPlace === 0) ? 'Любое' : `#${targetDesiredPlace}`;
-          const baseUrl = getAppBaseUrl(req);
-          dispatchNotification('staff_event_registration', {
-            eventId,
-            playerId: targetSectorId,
-            eventName: et?.name || `Событие #${eventId}`,
-            sectorName: player.name || `Сектор #${player.id}`,
-            desiredPlace: placeStr,
-            link: `${baseUrl}/#event/${eventId}`
-          }).catch(err => {
-            console.warn('[Notification] Error dispatching staff_event_registration:', err.message);
-          });
-        } catch (notifErr) {
-          console.warn('[Notification] Failed to prepare staff_event_registration:', notifErr.message);
-        }
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      return sendJson(res, 200, { success: true, registration: reg });
+      return sendJson(res, 200, { success: true, registration: opRes.registration });
     }
 
     if (eventRegMatch && req.method === 'DELETE') {
@@ -1721,19 +1577,14 @@ function createRequestHandler(staticDir, s3Manager = null) {
         ? Number(sectorIdParam)
         : (body && body.sectorId ? Number(body.sectorId) : (req.user.playerId ? Number(req.user.playerId) : null));
 
-      if (!targetSectorId) {
-        return sendError(res, 400, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
+      const opRes = await eventOps.unregisterFromEvent({
+        eventId,
+        playerId: targetSectorId,
+        user: req.user
+      });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-      const player = db.getPlayerById(targetSectorId);
-      if (!player) {
-        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
-      }
-      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
-      if (!isLeader && player.userId !== req.user.id) {
-        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
-      }
-
-      db.unregisterFromEvent(eventId, targetSectorId);
       return sendJson(res, 200, { success: true });
     }
 
@@ -1741,7 +1592,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (autopickMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const eventId = Number(autopickMatch[1]);
-      const result = seasonPlanner.runSmartAutopick(eventId);
+      const result = eventOps.runSmartAutopick(eventId);
       if (!result.success) {
         return sendError(res, 404, result.error, result.message);
       }
@@ -1790,48 +1641,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const saved = db.saveEvent({ ...body, id: eventId });
 
-      try {
-        const newAssignments = Array.isArray(body.assignments) ? body.assignments : [];
-        if (newAssignments.length > 0) {
-          const eventTypes = db.getEventTypes();
-          const et = eventTypes.find(t => t.id === (saved.typeId || prevEvent?.typeId));
-          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom || prevEvent?.dateFrom) : et.places) : [];
-          const baseUrl = getAppBaseUrl(req);
-
-          for (const a of newAssignments) {
-            if (a.playerId && Number(a.place) > 0) {
-              const already = prevAssignments.some(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
-              if (!already) {
-                const player = db.getPlayerById(a.playerId);
-                if (player && player.userId) {
-                  const user = db.findUserById(player.userId);
-                  if (user) {
-                    const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
-                    const rsvpMarkup = {
-                      inline_keyboard: [
-                        [
-                          { text: '✅ Подтверждаю участие', callback_data: `rsvp_event:confirm:${saved.id}:${a.place}` },
-                          { text: '❌ Не смогу участвовать', callback_data: `rsvp_event:decline:${saved.id}:${a.place}` }
-                        ]
-                      ]
-                    };
-                    await dispatchNotification('event_place_assigned', {
-                      username: user.username,
-                      sectorName: player.name || a.playerName || 'Сектор',
-                      eventName: et?.name || 'Событие',
-                      eventDate: saved.dateFrom || prevEvent?.dateFrom || '',
-                      place: String(a.place),
-                      coupons: String(coupons),
-                      link: `${baseUrl}/#event/${saved.id}`
-                    }, { userId: user.id, replyMarkup: rsvpMarkup }).catch(() => {});
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[Notification] Error in PUT /api/events/:id place notifications:', err.message);
+      if (Array.isArray(body.assignments) && body.assignments.length > 0) {
+        await eventOps.notifyAssignedPlayers({
+          event: saved,
+          previousAssignments: prevAssignments,
+          includeStaffSummary: false,
+          req
+        });
       }
 
       return sendJson(res, 200, saved);
@@ -1889,153 +1705,47 @@ function createRequestHandler(staticDir, s3Manager = null) {
     const finishEventMatch = pathname.match(/^\/api\/events\/(\d+)\/finish$/);
     if (finishEventMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const eventId = Number(finishEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
-      const baseUrl = getAppBaseUrl(req);
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      let sentCount = 0;
-
-      for (const a of (ev.assignments || [])) {
-        if (!a.resultStatus || a.resultStatus === 'pending') {
-          const player = db.getPlayerById(a.playerId);
-          if (player && player.userId) {
-            const user = db.findUserById(player.userId);
-            if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
-              const buttons = {
-                inline_keyboard: [
-                  [
-                    { text: '🥇 1 место', callback_data: `event_result:submit:${ev.id}:1` },
-                    { text: '🥈 2 место', callback_data: `event_result:submit:${ev.id}:2` },
-                    { text: '🥉 3 место', callback_data: `event_result:submit:${ev.id}:3` }
-                  ],
-                  [
-                    { text: '🏅 4–10 место', callback_data: `event_result:submit:${ev.id}:4` },
-                    { text: '❌ Не участвовал', callback_data: `event_result:submit:${ev.id}:0` }
-                  ]
-                ]
-              };
-              await dispatchNotification('event_result_prompt', {
-                eventName: et?.name || 'Событие',
-                sectorName: player.name || 'Сектор',
-                assignedPlace: String(a.place),
-                link: `${baseUrl}/#event/${ev.id}`
-              }, { userId: user.id, replyMarkup: buttons }).catch(() => {});
-              sentCount++;
-            }
-          }
-        }
+      const opRes = await eventOps.finishEvent({ eventId: Number(finishEventMatch[1]), req });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      return sendJson(res, 200, { success: true, sentCount });
+      return sendJson(res, 200, { success: true, sentCount: opRes.sentCount });
     }
 
     const summaryEventMatch = pathname.match(/^\/api\/events\/(\d+)\/summary$/);
     if (summaryEventMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const eventId = Number(summaryEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
-      const baseUrl = getAppBaseUrl(req);
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      const totalAssigned = (ev.assignments || []).length;
-      const confirmedCount = (ev.assignments || []).filter(a => a.resultStatus === 'confirmed').length;
-      const unconfirmedCount = totalAssigned - confirmedCount;
-      const totalCoupons = (ev.assignments || []).reduce((sum, a) => sum + (Number(a.actualCoupons) || 0), 0);
-
-      await dispatchNotification('staff_event_completed_summary', {
-        eventName: et?.name || 'Событие',
-        totalAssigned: String(totalAssigned),
-        confirmedCount: String(confirmedCount),
-        unconfirmedCount: String(unconfirmedCount),
-        totalCoupons: String(totalCoupons),
-        link: `${baseUrl}/#event/${ev.id}`
+      const opRes = await eventOps.summarizeEvent({ eventId: Number(summaryEventMatch[1]), req });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
+      }
+      return sendJson(res, 200, {
+        success: true,
+        totalAssigned: opRes.totalAssigned,
+        confirmedCount: opRes.confirmedCount,
+        unconfirmedCount: opRes.unconfirmedCount,
+        totalCoupons: opRes.totalCoupons
       });
-
-      return sendJson(res, 200, { success: true, totalAssigned, confirmedCount, unconfirmedCount, totalCoupons });
     }
 
     const shareGridEventMatch = pathname.match(/^\/api\/events\/(\d+)\/share-grid$/);
     if (shareGridEventMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const eventId = Number(shareGridEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
-      const imageBase64 = body && (body.imageBase64 || body.image_base64);
-      if (!imageBase64 || typeof imageBase64 !== 'string') {
-        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр imageBase64 обязателен');
+      const opRes = await eventOps.shareEventGrid({
+        eventId: Number(shareGridEventMatch[1]),
+        target: body && body.target,
+        imageBase64: body && (body.imageBase64 || body.image_base64),
+        caption: body && body.caption,
+        req
+      });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      const botToken = db.getAppSetting('telegram_bot_token');
-      if (!botToken) {
-        return sendError(res, 400, 'BOT_TOKEN_NOT_CONFIGURED', 'Токен бота не настроен в системе');
-      }
-
-      const target = body && body.target ? String(body.target).trim().toLowerCase() : 'staff';
-      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
-      const announcementChatId = db.getAppSetting('telegram_announcement_chat_id');
-
-      const targetChats = [];
-      if (target === 'staff') {
-        if (!staffChatId) {
-          return sendError(res, 400, 'STAFF_CHAT_NOT_CONFIGURED', 'Чат штаба не настроен в системе');
-        }
-        targetChats.push(staffChatId);
-      } else if (target === 'channel' || target === 'announcement') {
-        if (!announcementChatId) {
-          return sendError(res, 400, 'ANNOUNCEMENT_CHAT_NOT_CONFIGURED', 'Канал анонсов не настроен в системе');
-        }
-        targetChats.push(announcementChatId);
-      } else if (target === 'both') {
-        if (!staffChatId && !announcementChatId) {
-          return sendError(res, 400, 'NO_CHATS_CONFIGURED', 'Ни чат штаба, ни канал анонсов не настроены в системе');
-        }
-        if (staffChatId) targetChats.push(staffChatId);
-        if (announcementChatId) targetChats.push(announcementChatId);
-      } else {
-        return sendError(res, 400, 'INVALID_TARGET', 'Недопустимый канал назначения (staff, channel, both)');
-      }
-
-      const baseUrl = getAppBaseUrl(req);
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      const eventTitle = ev.title || et?.name || 'Событие';
-      const escape = (typeof logic.escapeHtml === 'function') ? logic.escapeHtml : (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-      const defaultCaption = `📊 <b>Сетка события: ${escape(eventTitle)}</b>\n📅 Период: ${escape(ev.dateFrom || '')} — ${escape(ev.dateTo || '')}\n🎖 Назначений: ${(ev.assignments || []).length}`;
-      const caption = (body.caption && String(body.caption).trim()) ? String(body.caption).trim() : defaultCaption;
-
-      const replyMarkup = {
-        inline_keyboard: [
-          [{ text: '🔗 Открыть сетку ивента', url: `${baseUrl}/#event/${ev.id}` }]
-        ]
-      };
-
-      const sendResults = [];
-      for (const destChatId of targetChats) {
-        const result = await telegram.sendTelegramPhoto({
-          token: botToken,
-          chatId: destChatId,
-          photo: imageBase64,
-          caption,
-          parseMode: 'HTML',
-          replyMarkup
-        });
-        if (result.ok) {
-          sendResults.push({ chatId: destChatId, messageId: result.result?.message_id });
-        }
-      }
-
-      if (sendResults.length === 0) {
-        return sendError(res, 502, 'TELEGRAM_ERROR', 'Ошибка отправки изображения в Telegram');
-      }
-
       return sendJson(res, 200, {
         success: true,
-        sentCount: sendResults.length,
-        messageId: sendResults[0].messageId,
-        results: sendResults
+        sentCount: opRes.sentCount,
+        messageId: opRes.messageId,
+        results: opRes.results
       });
     }
 
@@ -2620,49 +2330,19 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
       const key = tplTestMatch[1];
-      const tpl = db.getNotificationTemplate(key);
-      if (!tpl) {
-        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
-      }
-
-      const botToken = db.getAppSetting('telegram_bot_token');
-      if (!botToken) {
-        return sendError(res, 400, 'NO_BOT_TOKEN', 'Токен Telegram бота не настроен в системе');
-      }
-
-      let targetChatId = null;
-      if (tpl.channel === 'personal') {
-        targetChatId = req.user.telegram_chat_id;
-        if (!targetChatId) {
-          return sendError(res, 400, 'NO_TELEGRAM_LINKED', 'Привяжите ваш Telegram аккаунт в Личном кабинете для получения тестовых сообщений');
-        }
-      } else {
-        targetChatId = db.getAppSetting('telegram_staff_chat_id');
-        if (!targetChatId) {
-          return sendError(res, 400, 'NO_STAFF_CHAT_LINKED', 'Чат штаба не привязан. Подключите чат штаба через PIN-код или укажите ID чата в настройках');
-        }
-        if (targetChatId && !isNaN(Number(targetChatId))) {
-          targetChatId = Number(targetChatId);
-        }
-      }
-
-      const templateText = body.template !== undefined ? body.template : tpl.template;
-      const parseMode = body.parseMode || body.parse_mode || tpl.parse_mode || 'HTML';
-      const sampleData = logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key] || {};
-      const renderedText = logic.renderTemplate(templateText, sampleData);
-
-      const sendRes = await telegram.sendTelegramMessage({
-        token: botToken,
-        chatId: targetChatId,
-        text: renderedText,
-        parseMode
+      const opRes = await notificationEngine.sendTemplateTest({
+        key,
+        user: req.user,
+        template: body.template,
+        parseMode: body.parseMode || body.parse_mode
       });
-
-      if (!sendRes.ok) {
-        return sendJson(res, 200, { success: false, error: sendRes.error });
+      if (!opRes.ok) {
+        if (opRes.status === 200) {
+          return sendJson(res, 200, { success: false, error: opRes.error });
+        }
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      return sendJson(res, 200, { success: true, messageId: sendRes.result?.message_id });
+      return sendJson(res, 200, { success: true, messageId: opRes.messageId });
     }
 
     // Unmatched API endpoint
