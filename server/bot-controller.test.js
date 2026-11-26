@@ -9,6 +9,7 @@ const path = require('node:path');
 const db = require('./db.js');
 const logic = require('../shared/logic.js');
 const { createEventOperations } = require('./event-ops.js');
+const { createNotificationEngine } = require('./notification-engine.js');
 const { createTelegramBotController } = require('./bot-controller.js');
 
 const TEST_DB = path.join(__dirname, '..', 'data', `kow-bot-ctrl-test-${Date.now()}.db`);
@@ -325,4 +326,116 @@ test('TelegramBotController: routes event result submission via eventOps and awa
 
   const updatedPlayer = db.getPlayerById(player.id);
   assert.equal(updatedPlayer.stock.coupons, 26000);
+});
+
+test('TelegramBotController: photo OCR via ocrAdapter recognizes chest-only & star-II stock without losing chests', async () => {
+  const { createOcrAdapter } = require('./ocr-adapter.js');
+  const sentMessages = [];
+  const fakeTelegram = {
+    getTelegramFile: async () => ({ ok: true, result: { file_path: 'photos/chests.png' } }),
+    downloadTelegramFile: async () => Buffer.from('FAKE_PNG'),
+    sendTelegramMessage: async (payload) => { sentMessages.push(payload); return { ok: true }; }
+  };
+  const ocrAdapter = createOcrAdapter({
+    customRunner: async () => ({
+      leftText: 'Сундук медалей\nлегендарного\nофицера\nВ наличии: 9',
+      rightText: 'Легендарная звезда II\n420\nВ наличии: 44'
+    })
+  });
+  const botCtrl = createTelegramBotController({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    ocrAdapter
+  });
+
+  const uRes = db.registerUser({ username: 'chest_ocr_user', password: 'password123' });
+  db.createPlayer({
+    userId: uRes.userId,
+    name: 'Sector Chest OCR',
+    stock: { coupons: 1000, chests: 1, legendaryStars2: 10 }
+  });
+  db.bindUserTelegram(uRes.userId, 888999, 'chest_ocr_user');
+  db.setAppSetting('telegram_bot_token', 'fake_token');
+
+  const res = await botCtrl.handleUpdate({
+    update_id: 2001,
+    message: {
+      chat: { id: 888999, type: 'private' },
+      from: { id: 888999, username: 'chest_ocr_user' },
+      photo: [{ file_id: 'f_chest_1' }]
+    }
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.ocr, true);
+  assert.equal(res.recognizedStock.chests, 9);
+  assert.equal(res.recognizedStock.legendaryStars2, 44);
+  assert.ok(sentMessages.some(m => m.text.includes('Сундуки медалей') && m.text.includes('9')));
+});
+
+test('TelegramBotController: RSVP decline via eventOps sends staff alert exactly once through Mieru proxy', async () => {
+  const sentMessages = [];
+  const fakeTelegram = {
+    answerTelegramCallback: async () => ({ ok: true }),
+    editTelegramMessageText: async () => ({ ok: true }),
+    sendTelegramMessage: async (payload, sendOpts = {}) => {
+      sentMessages.push({ payload, sendOpts });
+      return { ok: true, result: { message_id: 77 } };
+    }
+  };
+
+  db.setAppSetting('telegram_staff_chat_id', '-100666777');
+  db.saveMieruSettings({ enabled: true, socks5Port: 1091 });
+
+  const notificationEngine = createNotificationEngine({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    getAppBaseUrl: () => 'http://localhost:3000'
+  });
+  const eventOps = createEventOperations({
+    db,
+    logic,
+    dispatchNotification: (...args) => notificationEngine.dispatchNotification(...args),
+    notificationEngine,
+    telegram: fakeTelegram
+  });
+  const botCtrl = createTelegramBotController({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    eventOps,
+    notificationEngine
+  });
+
+  const uRes = db.registerUser({ username: 'decline_tg_user', password: 'password123' });
+  db.bindUserTelegram(uRes.userId, 333444, 'decline_tg_user');
+  const player = db.createPlayer({ userId: uRes.userId, name: 'Sector Decline' });
+  const et = db.saveEventType({ name: 'Кинг', places: [{ place: 1, coupons: 10000 }] });
+  const ev = db.saveEvent({
+    typeId: et.id,
+    dateFrom: '2026-12-10',
+    dateTo: '2026-12-12',
+    assignments: [{ place: 1, playerId: player.id, rsvpStatus: 'pending' }]
+  });
+
+  const res = await botCtrl.handleUpdate({
+    update_id: 3001,
+    callback_query: {
+      id: 'cq_decline_1',
+      from: { id: 333444, username: 'decline_tg_user' },
+      message: { chat: { id: 333444 }, message_id: 88, text: 'Вам назначено место #1' },
+      data: `rsvp_event:decline:${ev.id}:1`
+    }
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.action, 'declined');
+
+  const staffAlerts = sentMessages.filter(m => String(m.payload.chatId) === '-100666777' && m.payload.text.includes('Отказ от участия'));
+  assert.equal(staffAlerts.length, 1, 'Staff decline alert must be sent exactly once (not duplicated)');
+  assert.equal(staffAlerts[0].sendOpts.proxyUrl, 'socks5://127.0.0.1:1091');
+
+  db.saveMieruSettings({ enabled: false });
 });

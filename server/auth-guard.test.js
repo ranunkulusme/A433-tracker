@@ -210,3 +210,136 @@ test('AuthGuard: User lifecycle guards (approve, block, delete)', () => {
   // Can delete regular user
   assert.equal(authGuard.canDeleteUser(r5Leader, { id: 2, username: 'other' }).allowed, true);
 });
+
+test('AuthGuard: validateTelegramWebAppData HMAC validation and expiration', () => {
+  const { validateTelegramWebAppData } = require('./auth-guard.js');
+  const botToken = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
+  const nowSec = Math.floor(Date.now() / 1000);
+  const userStr = JSON.stringify({ id: 777888, username: 'hero_ivan', first_name: 'Иван' });
+
+  function createValidInitData(overrides = {}) {
+    const authDate = overrides.authDate !== undefined ? overrides.authDate : nowSec;
+    const queryId = overrides.queryId !== undefined ? overrides.queryId : 'AAH888';
+    const uStr = overrides.userStr !== undefined ? overrides.userStr : userStr;
+    const pairs = [`auth_date=${authDate}`, `query_id=${queryId}`, `user=${uStr}`].sort();
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const hash = crypto.createHmac('sha256', secretKey).update(pairs.join('\n')).digest('hex');
+    const params = new URLSearchParams();
+    params.set('query_id', queryId);
+    params.set('user', uStr);
+    params.set('auth_date', String(authDate));
+    params.set('hash', overrides.hash !== undefined ? overrides.hash : hash);
+    return params.toString();
+  }
+
+  const res1 = validateTelegramWebAppData(createValidInitData(), botToken, { nowSec });
+  assert.equal(res1.valid, true);
+  assert.equal(res1.user.id, 777888);
+
+  const res2 = validateTelegramWebAppData(createValidInitData({ hash: 'deadbeef'.repeat(8) }), botToken, { nowSec });
+  assert.equal(res2.valid, false);
+  assert.equal(res2.error, 'invalid_hash');
+
+  const res3 = validateTelegramWebAppData(createValidInitData({ authDate: nowSec - 90000 }), botToken, { nowSec });
+  assert.equal(res3.valid, false);
+  assert.equal(res3.error, 'expired');
+
+  const paramsWithSig = new URLSearchParams(createValidInitData());
+  paramsWithSig.set('signature', 'ed25519_sig_123');
+  const res4 = validateTelegramWebAppData(paramsWithSig.toString(), botToken, { nowSec });
+  assert.equal(res4.valid, true);
+});
+
+test('AuthGuard: requireAuth writes 401 response and authenticates request in one step', () => {
+  const authGuard = createAuthGuard({
+    db: {
+      verifySession: (tok) => (tok === 'good' ? { id: 7, username: 'hero', rank: 'r3' } : null),
+      touchUserActive: () => {}
+    },
+    logic
+  });
+
+  let statusWritten = null;
+  let bodyWritten = '';
+  const fakeRes = {
+    writeHead: (s) => { statusWritten = s; },
+    end: (b) => { bodyWritten = b; }
+  };
+
+  assert.equal(typeof authGuard.requireAuth, 'function');
+  const failReq = { headers: {} };
+  assert.equal(authGuard.requireAuth(failReq, fakeRes), false);
+  assert.equal(statusWritten, 401);
+  assert.match(bodyWritten, /UNAUTHORIZED/);
+
+  const okReq = { headers: { authorization: 'Bearer good' } };
+  assert.equal(authGuard.requireAuth(okReq, fakeRes), true);
+  assert.equal(okReq.user.id, 7);
+});
+
+test('AuthGuard: authenticateTelegramWebApp enforces is_blocked, is_approved, name matching, and cookie header', () => {
+  const botToken = '123456:TEST_BOT_TOKEN';
+  const nowSec = Math.floor(Date.now() / 1000);
+  function signUser(tgUser) {
+    const uStr = JSON.stringify(tgUser);
+    const pairs = [`auth_date=${nowSec}`, `query_id=Q1`, `user=${uStr}`].sort();
+    const secret = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const hash = crypto.createHmac('sha256', secret).update(pairs.join('\n')).digest('hex');
+    const p = new URLSearchParams({ query_id: 'Q1', user: uStr, auth_date: String(nowSec), hash });
+    return p.toString();
+  }
+
+  let touchedId = null;
+  const dbUsers = {
+    blocked: { id: 10, username: 'blocked_u', rank: 'r3', is_approved: 1, is_blocked: 1, player_id: 1 },
+    pending: { id: 11, username: 'pending_u', rank: 'r3', is_approved: 0, is_blocked: 0, player_id: 2 },
+    active: { id: 12, username: 'active_u', rank: 'r4', is_approved: 1, is_blocked: 0, player_id: 3, permissions: ['manage_events'] }
+  };
+  const authGuard = createAuthGuard({
+    db: {
+      findUserByTelegramChatId: (tgId) => (tgId === 100 ? dbUsers.blocked : (tgId === 101 ? dbUsers.pending : null)),
+      findUserByTelegramUsername: (uname) => (uname === 'John Doe' ? dbUsers.active : null),
+      bindUserTelegram: () => {},
+      findUserById: (id) => Object.values(dbUsers).find(u => u.id === id) || null,
+      createSession: (uid) => `sess_${uid}`,
+      touchUserActive: (uid) => { touchedId = uid; },
+      getPlayerById: (pid) => ({ id: pid, name: `Sector_${pid}` }),
+      getPlayersByUserId: () => [],
+      isDefaultAdminPassword: () => false
+    },
+    logic
+  });
+
+  const blockedRes = authGuard.authenticateTelegramWebApp(signUser({ id: 100 }), botToken);
+  assert.equal(blockedRes.ok, false);
+  assert.equal(blockedRes.status, 403);
+  assert.equal(blockedRes.error, 'ACCOUNT_BLOCKED');
+
+  const pendingRes = authGuard.authenticateTelegramWebApp(signUser({ id: 101 }), botToken);
+  assert.equal(pendingRes.ok, false);
+  assert.equal(pendingRes.status, 403);
+  assert.equal(pendingRes.error, 'PENDING_APPROVAL');
+
+  const okRes = authGuard.authenticateTelegramWebApp(signUser({ id: 102, first_name: 'John', last_name: 'Doe' }), botToken);
+  assert.equal(okRes.ok, true);
+  assert.equal(okRes.token, 'sess_12');
+  assert.match(okRes.cookie, /token=sess_12/);
+  assert.equal(touchedId, 12);
+  assert.equal(okRes.player.id, 3);
+});
+
+test('AuthGuard: sanitizePlayerUpdatePayload strips rank, id, userId, user_id unless explicitly allowed', () => {
+  const authGuard = createAuthGuard({ db: {}, logic });
+  const selfPayload = { id: 999, rank: 'r5', userId: 1, user_id: 1, name: 'MyBase', stock: { coupons: 50 } };
+  const cleanedSelf = authGuard.sanitizePlayerUpdatePayload(selfPayload, { allowPrivilegeFields: false });
+  assert.equal(cleanedSelf.rank, undefined);
+  assert.equal(cleanedSelf.id, undefined);
+  assert.equal(cleanedSelf.userId, undefined);
+  assert.equal(cleanedSelf.user_id, undefined);
+  assert.equal(cleanedSelf.name, 'MyBase');
+
+  const leaderPayload = { id: 999, rank: 'r4', userId: 22, name: 'OtherBase' };
+  const cleanedLeader = authGuard.sanitizePlayerUpdatePayload(leaderPayload, { allowPrivilegeFields: true });
+  assert.equal(cleanedLeader.rank, 'r4');
+  assert.equal(cleanedLeader.userId, 22);
+});

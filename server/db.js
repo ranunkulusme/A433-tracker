@@ -5,12 +5,45 @@ const path = require('node:path');
 const { DEFAULT_OFFICERS, COMMUNITY_OFFICERS, migrateState, INVESTED_ZERO, normalizeInvested, calculateStockDiff, DEFAULT_NOTIFICATION_TEMPLATES } = require('../shared/logic.js');
 
 let currentDb = null;
+let txDepth = 0;
 
 function getDb() {
   if (!currentDb) {
     initDb();
   }
   return currentDb;
+}
+
+function withTransaction(fn) {
+  const db = getDb();
+  if (txDepth === 0) {
+    db.exec('BEGIN IMMEDIATE');
+    txDepth++;
+    try {
+      const res = fn(db);
+      txDepth--;
+      db.exec('COMMIT');
+      return res;
+    } catch (err) {
+      txDepth--;
+      try { db.exec('ROLLBACK'); } catch (_) {}
+      throw err;
+    }
+  } else {
+    const sp = `sp_${txDepth}`;
+    txDepth++;
+    db.exec(`SAVEPOINT ${sp}`);
+    try {
+      const res = fn(db);
+      txDepth--;
+      db.exec(`RELEASE SAVEPOINT ${sp}`);
+      return res;
+    } catch (err) {
+      txDepth--;
+      try { db.exec(`ROLLBACK TO SAVEPOINT ${sp}`); } catch (_) {}
+      throw err;
+    }
+  }
 }
 
 function hashPassword(password) {
@@ -96,33 +129,31 @@ function clearUserSessions(userId) {
   return true;
 }
 
-function findUserByUsername(username) {
-  if (!username) return null;
-  const user = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+function mapUserRow(user) {
   if (!user) return null;
   return {
     ...user,
     permissions: parsePermissions(user.permissions),
-    telegramChatId: user.telegram_chat_id,
-    telegramUsername: user.telegram_username,
+    isBlocked: Boolean(user.is_blocked),
+    isApproved: Boolean(user.is_approved),
+    playerId: user.player_id ?? null,
+    telegramChatId: user.telegram_chat_id || null,
+    telegramUsername: user.telegram_username || null,
     telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0,
     timezone: user.timezone || 'Europe/Moscow',
     timezoneOffset: (user.timezone_offset !== null && user.timezone_offset !== undefined) ? Number(user.timezone_offset) : 3
   };
 }
 
+function findUserByUsername(username) {
+  if (!username) return null;
+  const user = getDb().prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+  return mapUserRow(user);
+}
+
 function findUserById(id) {
   const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!user) return null;
-  return {
-    ...user,
-    permissions: parsePermissions(user.permissions),
-    telegramChatId: user.telegram_chat_id,
-    telegramUsername: user.telegram_username,
-    telegramNotificationsEnabled: user.telegram_notifications_enabled !== 0,
-    timezone: user.timezone || 'Europe/Moscow',
-    timezoneOffset: (user.timezone_offset !== null && user.timezone_offset !== undefined) ? Number(user.timezone_offset) : 3
-  };
+  return mapUserRow(user);
 }
 
 function registerUser({ username, password, playerId, playerName }) {
@@ -655,46 +686,39 @@ function getPlayerById(id) {
   };
 }
 
+function healUserSectorLinks(userId) {
+  if (userId === undefined || userId === null) return { healed: false };
+  const db = getDb();
+  const uId = Number(userId);
+  const ownedRows = db.prepare('SELECT id FROM players WHERE user_id = ? ORDER BY id ASC').all(uId);
+  const userRow = db.prepare('SELECT id, player_id FROM users WHERE id = ?').get(uId);
+  if (!userRow) return { healed: false };
+
+  if (ownedRows.length === 0 && userRow.player_id) {
+    const linked = db.prepare('SELECT id, user_id FROM players WHERE id = ?').get(userRow.player_id);
+    if (linked && (!linked.user_id || linked.user_id === uId)) {
+      db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(uId, linked.id);
+      return { healed: true, playerId: linked.id };
+    }
+  } else if (ownedRows.length > 0 && !userRow.player_id) {
+    db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(ownedRows[0].id, uId);
+    return { healed: true, playerId: ownedRows[0].id };
+  }
+  return { healed: false };
+}
+
 function getPlayersByUserId(userId) {
   if (userId === undefined || userId === null) return [];
   const db = getDb();
   const uId = Number(userId);
 
-  let playerRows = db.prepare(`
+  const playerRows = db.prepare(`
     SELECT p.*, u.username as owner_username, u.rank as owner_rank
     FROM players p
     LEFT JOIN users u ON u.id = p.user_id
     WHERE p.user_id = ?
     ORDER BY p.id ASC
   `).all(uId);
-
-  // If no players found by user_id, check if user is linked via users.player_id
-  if (playerRows.length === 0) {
-    const userRow = db.prepare('SELECT id, player_id FROM users WHERE id = ?').get(uId);
-    if (userRow && userRow.player_id) {
-      const linked = db.prepare(`
-        SELECT p.*, u.username as owner_username, u.rank as owner_rank
-        FROM players p
-        LEFT JOIN users u ON u.id = p.user_id
-        WHERE p.id = ?
-      `).get(userRow.player_id);
-
-      if (linked) {
-        // Auto-heal: set user_id if null or empty, or already belongs to this user
-        if (!linked.user_id || linked.user_id === uId) {
-          db.prepare('UPDATE players SET user_id = ? WHERE id = ?').run(uId, linked.id);
-          linked.user_id = uId;
-        }
-        playerRows = [linked];
-      }
-    }
-  } else {
-    // If user has sectors but user.player_id is missing, set it to the first sector
-    const userRow = db.prepare('SELECT player_id FROM users WHERE id = ?').get(uId);
-    if (userRow && !userRow.player_id && playerRows.length > 0) {
-      db.prepare('UPDATE users SET player_id = ? WHERE id = ?').run(playerRows[0].id, uId);
-    }
-  }
 
   if (playerRows.length === 0) return [];
 
@@ -1455,11 +1479,53 @@ function unregisterFromEvent(eventId, playerId) {
 }
 
 // ─── STOCK HISTORY & AUDIT LOG ───────────────────────────────────────────
+const ALLOWED_STOCK_HISTORY_SOURCES = new Set([
+  'ocr_scan', 'manual_edit', 'manual_confirm', 'event_reward', 'telegram_command', 'telegram_photo'
+]);
+
+function mapStockHistoryRow(r) {
+  let before = {};
+  let after = {};
+  try {
+    before = typeof r.snapshot_before === 'string' ? JSON.parse(r.snapshot_before) : (r.snapshot_before || {});
+  } catch (e) {}
+  try {
+    after = typeof r.snapshot_after === 'string' ? JSON.parse(r.snapshot_after) : (r.snapshot_after || {});
+  } catch (e) {}
+
+  return {
+    id: r.id,
+    playerId: r.player_id,
+    userId: r.user_id,
+    authorUsername: r.author_username || null,
+    authorRank: r.author_rank || null,
+    source: r.source,
+    snapshotBefore: before,
+    snapshotAfter: after,
+    diffSummary: r.diff_summary,
+    screenshotPath: r.screenshot_path || null,
+    createdAt: r.created_at,
+    date: r.created_at ? String(r.created_at).slice(0, 10) : '',
+    coupons: Number(after?.coupons) || 0,
+    puzzles: Number(after?.puzzles) || 0,
+    chests: Number(after?.chests) || 0
+  };
+}
+
 function getStockHistory(playerId, limit = 50) {
   const db = getDb();
   if (playerId === undefined || playerId === null) {
-    const rows = db.prepare('SELECT * FROM stock_history ORDER BY date ASC, id ASC').all();
-    return rows.map(r => ({
+    const records = db.prepare(`
+      SELECT shr.*, u.username as author_username, u.rank as author_rank
+      FROM stock_history_records shr
+      LEFT JOIN users u ON u.id = shr.user_id
+      ORDER BY shr.created_at ASC, shr.id ASC
+    `).all();
+    if (records.length > 0) {
+      return records.map(mapStockHistoryRow);
+    }
+    const legacyRows = db.prepare('SELECT * FROM stock_history ORDER BY date ASC, id ASC').all();
+    return legacyRows.map(r => ({
       id: r.id,
       playerId: r.player_id,
       date: r.date,
@@ -1480,30 +1546,7 @@ function getStockHistory(playerId, limit = 50) {
     LIMIT ?
   `).all(pId, lim);
 
-  return rows.map(r => {
-    let before = {};
-    let after = {};
-    try {
-      before = typeof r.snapshot_before === 'string' ? JSON.parse(r.snapshot_before) : (r.snapshot_before || {});
-    } catch (e) {}
-    try {
-      after = typeof r.snapshot_after === 'string' ? JSON.parse(r.snapshot_after) : (r.snapshot_after || {});
-    } catch (e) {}
-
-    return {
-      id: r.id,
-      playerId: r.player_id,
-      userId: r.user_id,
-      authorUsername: r.author_username || null,
-      authorRank: r.author_rank || null,
-      source: r.source,
-      snapshotBefore: before,
-      snapshotAfter: after,
-      diffSummary: r.diff_summary,
-      screenshotPath: r.screenshot_path || null,
-      createdAt: r.created_at
-    };
-  });
+  return rows.map(mapStockHistoryRow);
 }
 
 function getStockHistoryByPlayerId(playerId, limit = 50) {
@@ -1707,95 +1750,65 @@ function exportKowJson() {
 function importKowJson(rawJson) {
   const raw = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
   const state = migrateState(raw);
-  const db = getDb();
 
-  const rawOfficersByPlayerAndId = new Map();
-  const rawPlayerVipPoints = new Map();
-  const rawPlayerUserId = new Map();
-  if (Array.isArray(raw?.players)) {
-    for (const rp of raw.players) {
-      if (rp && rp.id !== undefined) {
-        const vp = rp.sector?.vipPoints ?? rp.vipPoints ?? rp.vip_points ?? 0;
-        rawPlayerVipPoints.set(rp.id, vp);
-        const uid = rp.userId ?? rp.user_id ?? null;
-        if (uid !== null && uid !== undefined) {
-          rawPlayerUserId.set(rp.id, Number(uid));
-        }
-      }
-      if (Array.isArray(rp?.officers)) {
-        for (const ro of rp.officers) {
-          if (ro && ro.id) {
-            rawOfficersByPlayerAndId.set(`${rp.id}:${ro.id}`, ro);
-          }
-        }
-      }
-    }
-  }
-  const rawCatalogUpgradeTypes = new Map();
-  if (Array.isArray(raw?.officerCatalog)) {
-    for (const rc of raw.officerCatalog) {
-      if (rc && rc.id) {
-        rawCatalogUpgradeTypes.set(rc.id, rc.upgradeType || rc.upgrade_type || 'standard');
-      }
-    }
-  }
-
-  db.exec('BEGIN TRANSACTION');
-  try {
+  withTransaction((db) => {
     for (const item of state.officerCatalog || []) {
-      if (rawCatalogUpgradeTypes.has(item.id)) {
-        item.upgradeType = rawCatalogUpgradeTypes.get(item.id);
-      }
       saveCatalogItem(item);
     }
     for (const et of state.eventTypes || []) {
       saveEventType(et);
     }
     for (const p of state.players || []) {
-      if (rawPlayerVipPoints.has(p.id)) {
-        p.sector = p.sector || {};
-        p.sector.vipPoints = rawPlayerVipPoints.get(p.id);
-      }
-      if (rawPlayerUserId.has(p.id)) {
-        p.userId = rawPlayerUserId.get(p.id);
-      }
-      if (Array.isArray(p.officers)) {
-        for (const o of p.officers) {
-          const rawOfficer = rawOfficersByPlayerAndId.get(`${p.id}:${o.id}`);
-          if (rawOfficer) {
-            if (rawOfficer.personalPuzzles !== undefined || rawOfficer.personal_puzzles !== undefined) {
-              o.personalPuzzles = rawOfficer.personalPuzzles ?? rawOfficer.personal_puzzles;
-            }
-            if (rawOfficer.onlyPersonalPuzzles !== undefined || rawOfficer.only_personal_puzzles !== undefined) {
-              o.onlyPersonalPuzzles = Boolean(rawOfficer.onlyPersonalPuzzles ?? rawOfficer.only_personal_puzzles);
-            }
-            if (rawOfficer.skills !== undefined) {
-              o.skills = rawOfficer.skills;
-            } else if (rawOfficer.skills_json !== undefined) {
-              o.skills_json = rawOfficer.skills_json;
-            }
-            if (rawOfficer.invested !== undefined) {
-              o.invested = rawOfficer.invested;
-            } else if (rawOfficer.invested_json !== undefined) {
-              o.invested_json = rawOfficer.invested_json;
-            }
-          }
-        }
-      }
       createPlayer(p);
     }
     for (const ev of state.events || []) {
       saveEvent(ev);
     }
     for (const sh of state.stockHistory || []) {
-      recordStockHistory(sh.playerId || sh.player_id, {
-        coupons: sh.coupons,
-        puzzles: sh.puzzles,
-        chests: sh.chests
-      }, sh.date);
+      if (!sh || typeof sh !== 'object') continue;
+      const targetPlayerId = Number(sh.playerId || sh.player_id);
+      if (!targetPlayerId) continue;
+      const playerExists = db.prepare('SELECT id FROM players WHERE id = ?').get(targetPlayerId);
+      if (!playerExists) continue;
+
+      const rawUserId = sh.userId || sh.user_id || null;
+      const validUser = rawUserId ? db.prepare('SELECT id FROM users WHERE id = ?').get(Number(rawUserId)) : null;
+      const safeSource = ALLOWED_STOCK_HISTORY_SOURCES.has(sh.source) ? sh.source : 'manual_edit';
+      const createdAt = sh.createdAt || sh.created_at || (sh.date ? `${String(sh.date).slice(0, 10)}T12:00:00.000Z` : new Date().toISOString());
+      const snapshotBefore = sh.snapshotBefore || sh.snapshot_before || {};
+      const snapshotAfter = sh.snapshotAfter || sh.snapshot_after || {
+        coupons: Number(sh.coupons) || 0,
+        puzzles: Number(sh.puzzles) || 0,
+        chests: Number(sh.chests) || 0
+      };
+      const diffSummary = sh.diffSummary !== undefined
+        ? String(sh.diffSummary)
+        : (sh.diff_summary !== undefined ? String(sh.diff_summary) : 'Импорт истории склада');
+      const screenshotPath = sh.screenshotPath || sh.screenshot_path || null;
+
+      const duplicate = db.prepare(
+        'SELECT id FROM stock_history_records WHERE player_id = ? AND created_at = ? AND diff_summary = ?'
+      ).get(targetPlayerId, createdAt, diffSummary);
+      if (!duplicate) {
+        db.prepare(`
+          INSERT INTO stock_history_records (
+            player_id, user_id, source, snapshot_before, snapshot_after, diff_summary, screenshot_path, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          targetPlayerId,
+          validUser ? validUser.id : null,
+          safeSource,
+          typeof snapshotBefore === 'string' ? snapshotBefore : JSON.stringify(snapshotBefore),
+          typeof snapshotAfter === 'string' ? snapshotAfter : JSON.stringify(snapshotAfter),
+          diffSummary,
+          screenshotPath,
+          createdAt
+        );
+      }
     }
-    if (raw && raw.userPermissions && typeof raw.userPermissions === 'object' && !Array.isArray(raw.userPermissions)) {
-      for (const [uname, perms] of Object.entries(raw.userPermissions)) {
+    const permsMap = state.userPermissions || raw?.userPermissions;
+    if (permsMap && typeof permsMap === 'object' && !Array.isArray(permsMap)) {
+      for (const [uname, perms] of Object.entries(permsMap)) {
         if (!uname || !Array.isArray(perms)) continue;
         const existingUser = findUserByUsername(uname);
         if (existingUser) {
@@ -1803,11 +1816,7 @@ function importKowJson(rawJson) {
         }
       }
     }
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
 }
 
 // ─── BOOTSTRAP ───────────────────────────────────────────────
@@ -2289,6 +2298,7 @@ function initDb(filePath) {
 
   const db = new DatabaseSync(dbPath);
   currentDb = db;
+  txDepth = 0;
 
   if (dbPath !== ':memory:') {
     try {
@@ -2551,6 +2561,31 @@ function setAppSetting(key, value) {
   return strVal;
 }
 
+function resolveAppBaseUrl(req = null, lastKnownBaseUrl = null) {
+  let resolvedKnown = lastKnownBaseUrl || null;
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host;
+    if (!host.includes('localhost') && !host.includes('127.0.0.1')) {
+      resolvedKnown = `${proto}://${host}`;
+    }
+  }
+  const settingUrl = getAppSetting('telegram_webapp_url') || getAppSetting('app_base_url');
+  if (settingUrl && settingUrl.trim()) return settingUrl.trim().replace(/\/+$/, '');
+  if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
+  if (resolvedKnown) return resolvedKnown.replace(/\/+$/, '');
+  if (req && req.headers && req.headers.host) {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    return `${proto}://${req.headers.host}`.replace(/\/+$/, '');
+  }
+  const botUsername = getAppSetting('telegram_bot_username');
+  if (botUsername && botUsername.trim()) {
+    return `https://t.me/${botUsername.trim().replace(/^@+/, '')}`;
+  }
+  return 'http://localhost:3000';
+}
+
 function getMieruSettings() {
   return {
     enabled: getAppSetting('mieru_enabled') === 'true',
@@ -2760,11 +2795,7 @@ function findUserByTelegramChatId(chatId) {
        OR CAST(telegram_chat_id AS TEXT) = ?
        OR telegram_chat_id = CAST(? AS INTEGER)
   `).get(chatId, isNaN(numId) ? chatId : numId, strId, isNaN(numId) ? 0 : numId);
-  if (!row) return null;
-  return {
-    ...row,
-    permissions: parsePermissions(row.permissions)
-  };
+  return mapUserRow(row);
 }
 
 function findUserByTelegramUsername(tgUsername) {
@@ -2786,11 +2817,7 @@ function findUserByTelegramUsername(tgUsername) {
     END, u.id ASC
     LIMIT 1
   `).get(raw, clean, clean, raw, clean, clean);
-  if (!row) return null;
-  return {
-    ...row,
-    permissions: parsePermissions(row.permissions)
-  };
+  return mapUserRow(row);
 }
 
 function toggleTelegramNotifications(userId, enabled) {
@@ -2919,7 +2946,9 @@ module.exports = {
   getCandidatePlayers,
   getPlayers,
   getPlayersByUserId,
+  healUserSectorLinks,
   getPlayerById,
+  withTransaction,
   setUserActiveSector,
   createPlayer,
   updatePlayer,
@@ -2959,6 +2988,7 @@ module.exports = {
   parsePermissions,
   getAppSetting,
   setAppSetting,
+  resolveAppBaseUrl,
   getNotificationTemplates,
   getNotificationTemplate,
   updateNotificationTemplate,

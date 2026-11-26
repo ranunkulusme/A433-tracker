@@ -126,29 +126,89 @@ test('NotificationEngine: checkScheduledEventMorningReminders sends morning brie
   assert.ok(sentMessages[0].text.includes('Война за ресурсы'));
 });
 
-test('NotificationEngine: templates CRUD, reset and test render', async () => {
-  const engine = createNotificationEngine({ db, logic });
+test('NotificationEngine: hides shallow DB pass-throughs and routes direct, photo and template tests via Mieru proxy', async () => {
+  const sentMessages = [];
+  const sentPhotos = [];
+  const fakeTelegram = {
+    sendTelegramMessage: async (payload, sendOpts = {}) => {
+      sentMessages.push({ payload, sendOpts });
+      return { ok: true, result: { message_id: 700 + sentMessages.length } };
+    },
+    sendTelegramPhoto: async (payload, sendOpts = {}) => {
+      sentPhotos.push({ payload, sendOpts });
+      return { ok: true, result: { message_id: 800 + sentPhotos.length } };
+    }
+  };
 
-  const templates = engine.getTemplates();
-  assert.ok(Array.isArray(templates));
-  assert.ok(templates.length > 0);
+  db.setAppSetting('telegram_bot_token', 'fake_token_123');
+  db.setAppSetting('telegram_staff_chat_id', '-100333222');
+  db.setAppSetting('telegram_announcement_chat_id', '-100555444');
+  db.saveMieruSettings({ enabled: true, socks5Port: 1088 });
 
-  const tpl = engine.getTemplate('staff_new_user_pending');
-  assert.ok(tpl);
-
-  // Update
-  const updated = engine.saveTemplate('staff_new_user_pending', {
-    template: 'Тест: боец {username} ({characterName})'
+  const engine = createNotificationEngine({
+    db,
+    logic,
+    telegram: fakeTelegram,
+    getAppBaseUrl: () => 'https://kow.example.com'
   });
-  assert.ok(updated.template.includes('Тест:'));
 
-  // Test render
-  const testRes = engine.testTemplate('staff_new_user_pending', { username: 'BraveOne', characterName: 'Сектор 1' });
-  assert.equal(testRes.renderedText, 'Тест: боец BraveOne (Сектор 1)');
+  // Shallow DB CRUD wrappers must be absent ("replace, don't layer")
+  assert.equal(engine.getTemplates, undefined);
+  assert.equal(engine.getTemplate, undefined);
+  assert.equal(engine.saveTemplate, undefined);
+  assert.equal(engine.resetTemplate, undefined);
+  assert.equal(engine.testTemplate, undefined);
 
-  // Reset
-  const resetRes = engine.resetTemplate('staff_new_user_pending');
-  assert.ok(!resetRes.template.includes('Тест:'));
+  // 1. sendDirectMessage routes through Mieru SOCKS5 proxy
+  const directRes = await engine.sendDirectMessage({
+    channel: 'staff',
+    text: '<b>Alert</b>'
+  });
+  assert.equal(directRes.sent, true);
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].payload.chatId, -100333222);
+  assert.equal(sentMessages[0].sendOpts.proxyUrl, 'socks5://127.0.0.1:1088');
+
+  // 2. sendChannelPhoto handles staff / channel / both with Mieru proxy
+  const badPhoto = await engine.sendChannelPhoto({ target: 'staff', photo: '' });
+  assert.equal(badPhoto.ok, false);
+  assert.equal(badPhoto.status, 400);
+
+  const photoRes = await engine.sendChannelPhoto({
+    target: 'both',
+    photo: 'data:image/png;base64,AAA',
+    caption: 'Test Grid'
+  });
+  assert.equal(photoRes.ok, true);
+  assert.equal(photoRes.sentCount, 2);
+  assert.equal(sentPhotos.length, 2);
+  assert.equal(sentPhotos[0].sendOpts.proxyUrl, 'socks5://127.0.0.1:1088');
+  assert.equal(sentPhotos[1].sendOpts.proxyUrl, 'socks5://127.0.0.1:1088');
+
+  // 3. sendTemplateTest sends personal / staff tests via Mieru proxy
+  const uRes = db.registerUser({ username: 'tpl_tester', password: 'password123' });
+  const unlinkedUser = db.findUserById(uRes.userId);
+  const noTgRes = await engine.sendTemplateTest({
+    key: 'event_place_assigned',
+    user: unlinkedUser
+  });
+  assert.equal(noTgRes.ok, false);
+  assert.equal(noTgRes.status, 400);
+  assert.equal(noTgRes.error, 'NO_TELEGRAM_LINKED');
+
+  db.bindUserTelegram(uRes.userId, 555777, 'tpl_tester');
+  const linkedUser = db.findUserById(uRes.userId);
+  const personalTest = await engine.sendTemplateTest({
+    key: 'event_place_assigned',
+    user: linkedUser,
+    template: 'Custom #{place} -> {sectorName}'
+  });
+  assert.equal(personalTest.ok, true);
+  assert.equal(sentMessages[sentMessages.length - 1].payload.chatId, 555777);
+  assert.ok(sentMessages[sentMessages.length - 1].payload.text.includes('Custom #1'));
+  assert.equal(sentMessages[sentMessages.length - 1].sendOpts.proxyUrl, 'socks5://127.0.0.1:1088');
+
+  db.saveMieruSettings({ enabled: false });
 });
 
 test('NotificationEngine: dispatchNotification routes to announcement channel and handles missing channel', async () => {
@@ -171,7 +231,7 @@ test('NotificationEngine: dispatchNotification routes to announcement channel an
   });
 
   // Save template configured for announcement channel
-  engine.saveTemplate('event_registration_opened', {
+  db.updateNotificationTemplate('event_registration_opened', {
     channel: 'announcement'
   });
 
@@ -202,7 +262,7 @@ test('NotificationEngine: dispatchNotification routes to announcement channel an
   assert.ok(sentMessages[0].text.includes('Битва за Ресурсы'));
 
   // Reset template back to default
-  engine.resetTemplate('event_registration_opened');
+  db.resetNotificationTemplate('event_registration_opened');
 });
 
 test('NotificationEngine: staff_event_registration includes inline button, throttles duplicate, and edits in-place on change', async () => {

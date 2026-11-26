@@ -13,9 +13,11 @@ const { createTelegramBotController } = require('./bot-controller.js');
 const { createOfficerProgression } = require('./officer-progression.js');
 const { createNotificationEngine } = require('./notification-engine.js');
 const { createAuthGuard } = require('./auth-guard.js');
-const { createSeasonPlanner } = require('./season-planner.js');
+const { createOcrAdapter } = require('./ocr-adapter.js');
+const telegramFormats = require('./telegram-formats.js');
 
 const authGuard = createAuthGuard({ db, logic });
+const ocrAdapter = createOcrAdapter();
 
 let APP_VERSION = '3.21.0';
 try {
@@ -38,150 +40,16 @@ const MIME_TYPES = {
   '.wasm': 'application/wasm'
 };
 
-let customOcrRunner = null;
 function setServerOcrRunner(runner) {
-  customOcrRunner = runner;
+  ocrAdapter.setRunner(runner);
 }
 
 async function runOcrOnImageBuffer(imageBuffer, options = {}) {
-  if (typeof customOcrRunner === 'function') {
-    try {
-      const res = await customOcrRunner(imageBuffer, options);
-      if (res === null) return { success: false, error: 'ocr_null' };
-      if (typeof res === 'string') return { success: true, text: res };
-      if (res && typeof res.text === 'string') return { success: true, text: res.text, stock: res.stock };
-      if (res && res.stock) return { success: true, text: '', stock: res.stock };
-      if (res && (res.coupons !== undefined || res.puzzles !== undefined || res.starCoupons !== undefined)) {
-        return { success: true, text: '', stock: res };
-      }
-      if (res && typeof res === 'object') return { success: true, text: '', ...res };
-      return { success: true, text: '' };
-    } catch (err) {
-      console.warn('[OCR] Custom OCR runner error:', err.message);
-      return { success: false, error: 'ocr_error', message: err.message };
-    }
-  }
-
-  const { execFile } = require('node:child_process');
-  const os = require('node:os');
-  let ext = '.png';
-  if (imageBuffer && imageBuffer.length >= 4) {
-    if (imageBuffer[0] === 0xFF && imageBuffer[1] === 0xD8 && imageBuffer[2] === 0xFF) {
-      ext = '.jpg';
-    } else if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50 && imageBuffer[2] === 0x4E && imageBuffer[3] === 0x47) {
-      ext = '.png';
-    } else if (imageBuffer[0] === 0x52 && imageBuffer[1] === 0x49 && imageBuffer[2] === 0x46 && imageBuffer[3] === 0x46) {
-      ext = '.webp';
-    }
-  }
-  const tempPath = path.join(os.tmpdir(), `ocr_scan_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-  const filesToCleanup = [tempPath];
-
-  try {
-    await fs.promises.writeFile(tempPath, imageBuffer);
-    const ocrText = await new Promise((resolve, reject) => {
-      execFile('tesseract', [tempPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 25000 }, (error, stdout) => {
-        if (error) return reject(error);
-        resolve(stdout || '');
-      });
-    });
-
-    let extraText = '';
-    // Если доступен ImageMagick (magick/convert), делаем сплит по колонкам (left 52% и right 52%)
-    // Это исключает смешивание строк между двумя колонками в складских сетках и магазинах
-    try {
-      const leftPath = path.join(os.tmpdir(), `ocr_col_left_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-      const rightPath = path.join(os.tmpdir(), `ocr_col_right_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-      filesToCleanup.push(leftPath, rightPath);
-
-      const magickBin = await new Promise(res => {
-        execFile('which', ['magick'], (err, stdout) => {
-          if (!err && stdout && stdout.trim()) return res('magick');
-          execFile('which', ['convert'], (err2, stdout2) => {
-            if (!err2 && stdout2 && stdout2.trim()) return res('convert');
-            res(null);
-          });
-        });
-      });
-
-      if (magickBin) {
-        await Promise.all([
-          new Promise((resolveCrop) => {
-            execFile(magickBin, [tempPath, '-gravity', 'West', '-crop', '56%x100%+0+0', leftPath], { timeout: 10000 }, () => resolveCrop());
-          }),
-          new Promise((resolveCrop) => {
-            execFile(magickBin, [tempPath, '-gravity', 'East', '-crop', '56%x100%+0+0', rightPath], { timeout: 10000 }, () => resolveCrop());
-          })
-        ]);
-
-        const [leftOcr, rightOcr] = await Promise.all([
-          new Promise((resOcr) => {
-            execFile('tesseract', [leftPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 20000 }, (e, out) => resOcr(out || ''));
-          }),
-          new Promise((resOcr) => {
-            execFile('tesseract', [rightPath, 'stdout', '-l', 'rus+eng+deu', '--oem', '1'], { timeout: 20000 }, (e, out) => resOcr(out || ''));
-          })
-        ]);
-
-        if (leftOcr || rightOcr) {
-          extraText = `\n\n=== LEFT COLUMN ===\n${leftOcr}\n\n=== RIGHT COLUMN ===\n${rightOcr}`;
-        }
-      }
-    } catch (_) {
-      // Обработка колонок опциональна — если magick недоступен, продолжаем с полным текстом
-    }
-
-    return { success: true, text: (ocrText || '') + extraText };
-  } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.message?.includes('not found'))) {
-      return { success: false, error: 'tesseract_not_installed', message: 'Tesseract OCR не установлен на сервере' };
-    }
-    return { success: false, error: 'ocr_failed', message: err.message || 'Ошибка распознавания текста' };
-  } finally {
-    for (const f of filesToCleanup) {
-      fs.promises.unlink(f).catch(() => {});
-    }
-  }
+  return ocrAdapter.recognizeBuffer(imageBuffer, options);
 }
 
 async function tryServerOcr(imageBufferOrPath) {
-  if (typeof customOcrRunner === 'function') {
-    try {
-      const direct = await customOcrRunner(imageBufferOrPath);
-      if (direct === null) return null;
-      if (direct && (direct.coupons !== undefined || direct.puzzles !== undefined || direct.starCoupons !== undefined)) {
-        return direct;
-      }
-      if (direct && direct.stock) {
-        return direct.stock;
-      }
-      if (typeof direct === 'string') {
-        const parsed = logic.parseWarehouseScreenshotText(direct);
-        return parsed && parsed.isWarehouse ? parsed.stock : null;
-      }
-    } catch (err) {
-      console.warn('[OCR] Custom OCR runner error:', err.message);
-      return null;
-    }
-  }
-
-  let buf = imageBufferOrPath;
-  if (typeof imageBufferOrPath === 'string') {
-    try {
-      buf = await fs.promises.readFile(imageBufferOrPath);
-    } catch (_) {
-      return null;
-    }
-  }
-  const ocrRes = await runOcrOnImageBuffer(buf);
-  if (!ocrRes || !ocrRes.success) return null;
-  if (ocrRes.stock) return ocrRes.stock;
-  if (!ocrRes.text || !ocrRes.text.trim()) return null;
-  const parsedStock = logic.parseWarehouseScreenshotText(ocrRes.text);
-  if (parsedStock && parsedStock.stock && Object.keys(parsedStock.stock).length > 0) {
-    return parsedStock.stock;
-  }
-  return null;
+  return ocrAdapter.recognizeStock(imageBufferOrPath);
 }
 
 function sendJson(res, statusCode, data) {
@@ -225,22 +93,6 @@ function readJsonBody(req) {
   });
 }
 
-function authenticate(req) {
-  return authGuard.authenticate(req);
-}
-
-function sanitizeSkills(skills) {
-  if (!Array.isArray(skills)) return [1, 1, 1, 1];
-  const arr = skills.slice(0, 4);
-  while (arr.length < 4) arr.push(1);
-  return arr.map(n => Math.max(1, Math.min(5, Math.floor(Number(n) || 1))));
-}
-
-function sanitizeInvested(invested) {
-  if (!invested || typeof invested !== 'object') return { ...logic.INVESTED_ZERO };
-  return logic.normalizeInvested(invested);
-}
-
 function sanitizeVipPoints(pts) {
   return Math.max(0, Math.floor(Number(pts) || 0));
 }
@@ -269,11 +121,6 @@ function sanitizeStock(stock) {
     stock.chests = Math.max(0, parseInt(stock.chests, 10) || 0);
   }
   return stock;
-}
-
-function sanitizePersonalPuzzles(val) {
-  const num = parseInt(val, 10);
-  return isNaN(num) || num < 0 ? 0 : num;
 }
 
 function sanitizeEventTypePlaces(places) {
@@ -310,52 +157,13 @@ function sanitizeEventType(data) {
   return result;
 }
 
-function requireAuth(req, res) {
-  if (!req.user) {
-    sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-    return false;
-  }
-  return true;
-}
-
-function requireRole(roles) {
-  return (req, res) => {
-    if (!req.user) authenticate(req);
-    if (!req.user) {
-      sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      return false;
-    }
-    if (!authGuard.hasRole(req.user, roles)) {
-      sendError(res, 403, 'FORBIDDEN', `Доступ запрещен для ранга ${req.user.rank}`);
-      return false;
-    }
-    return true;
-  };
-}
-
-function requirePermission(reqOrPerm, res, permission) {
-  if (typeof reqOrPerm === 'string') {
-    const perm = reqOrPerm;
-    return (req, res) => requirePermission(req, res, perm);
-  }
-  const req = reqOrPerm;
-  if (!req.user) {
-    authenticate(req);
-  }
-  if (!req.user) {
-    sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-    return false;
-  }
-  if (authGuard.hasPermission(req.user, permission)) {
-    return true;
-  }
-  sendError(res, 403, 'FORBIDDEN', `Недостаточно прав: требуется разрешение ${permission}`);
-  return false;
-}
-
-function maskPlayerStockIfNeeded(player, user) {
-  return authGuard.maskPlayerStockIfNeeded(player, user);
-}
+const {
+  authenticate,
+  requireAuth,
+  requireRole,
+  requirePermission,
+  maskPlayerStockIfNeeded
+} = authGuard;
 
 let lastKnownBaseUrl = null;
 
@@ -367,33 +175,14 @@ function getAppBaseUrl(req = null) {
       lastKnownBaseUrl = `${proto}://${host}`;
     }
   }
-  const settingUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-  if (settingUrl && settingUrl.trim()) return settingUrl.trim().replace(/\/+$/, '');
-  if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
-  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
-  if (lastKnownBaseUrl) return lastKnownBaseUrl.replace(/\/+$/, '');
-  if (req && req.headers && req.headers.host) {
-    const proto = req.headers['x-forwarded-proto'] || 'http';
-    return `${proto}://${req.headers.host}`;
-  }
-  const botUsername = db.getAppSetting('telegram_bot_username');
-  if (botUsername && botUsername.trim()) {
-    return `https://t.me/${botUsername.trim().replace(/^@+/, '')}`;
-  }
-  return 'http://localhost:3000';
+  return db.resolveAppBaseUrl(req, lastKnownBaseUrl);
 }
 
 const notificationEngine = createNotificationEngine({
   db,
   logic,
   telegram,
-  getAppBaseUrl
-});
-
-const seasonPlanner = createSeasonPlanner({
-  db,
-  logic,
-  notificationEngine,
+  telegramFormats,
   getAppBaseUrl
 });
 
@@ -405,6 +194,7 @@ const eventOps = createEventOperations({
   db,
   logic,
   dispatchNotification,
+  notificationEngine,
   telegram,
   getAppBaseUrl
 });
@@ -413,6 +203,8 @@ const botController = createTelegramBotController({
   db,
   logic,
   telegram,
+  telegramFormats,
+  ocrAdapter,
   eventOps,
   notificationEngine,
   tryServerOcr,
@@ -463,7 +255,7 @@ async function syncTelegramBotInfoAndPolling() {
     }
 
     const rawWebAppUrl = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-    const webAppUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
+    const webAppUrl = telegramFormats.formatTmaUrl ? telegramFormats.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
     if (webAppUrl && /^https:\/\//i.test(webAppUrl)) {
       telegram.setTelegramChatMenuButton(token, {
         text: 'KoW Tracker',
@@ -732,7 +524,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         if (rawInitData && typeof rawInitData === 'string' && regRes.userId) {
           const botToken = db.getAppSetting('telegram_bot_token');
           if (botToken) {
-            const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+            const val = authGuard.validateTelegramWebAppData(rawInitData, botToken);
             if (val && val.valid && val.user?.id) {
               db.bindUserTelegram(regRes.userId, val.user.id, val.user.username || '');
             }
@@ -750,85 +542,20 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/auth/telegram-webapp' && req.method === 'POST') {
       const rawBotToken = db.getAppSetting('telegram_bot_token');
       const botToken = rawBotToken ? String(rawBotToken).trim() : null;
-      if (!botToken) {
-        return sendError(res, 503, 'BOT_NOT_CONFIGURED', 'Токен Telegram-бота не настроен на сервере');
-      }
-
       const initData = body && (body.initData || body.init_data);
-      if (!initData || typeof initData !== 'string') {
-        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
+      const authRes = authGuard.authenticateTelegramWebApp(initData, botToken);
+      if (!authRes.ok) {
+        return sendError(res, authRes.status || 401, authRes.error, authRes.message);
       }
-
-      const validation = logic.validateTelegramWebAppData(initData, botToken);
-      if (!validation.valid) {
-        console.warn('[Telegram WebApp] Validation error:', validation.error);
-        return sendError(res, 401, 'INVALID_TELEGRAM_DATA', `Ошибка валидации Telegram WebApp: ${validation.error}`);
+      if (authRes.cookie) {
+        res.setHeader('Set-Cookie', authRes.cookie);
       }
-
-      const tgUserId = validation.user?.id;
-      if (!tgUserId) {
-        return sendError(res, 400, 'MISSING_TELEGRAM_USER', 'Не найден объект пользователя Telegram в initData');
-      }
-
-      let user = db.findUserByTelegramChatId(tgUserId);
-      if (!user && validation.user?.username) {
-        const matched = db.findUserByTelegramUsername(validation.user.username);
-        if (matched && (!matched.telegram_chat_id || String(matched.telegram_chat_id) !== String(tgUserId))) {
-          db.bindUserTelegram(matched.id, tgUserId, validation.user.username);
-          user = (typeof db.getUserById === 'function') ? db.getUserById(matched.id) : matched;
-        }
-      }
-      if (!user && validation.user?.first_name) {
-        const matchedFirst = db.findUserByTelegramUsername(validation.user.first_name);
-        if (matchedFirst && (!matchedFirst.telegram_chat_id || String(matchedFirst.telegram_chat_id) !== String(tgUserId))) {
-          db.bindUserTelegram(matchedFirst.id, tgUserId, validation.user.username || validation.user.first_name);
-          user = (typeof db.getUserById === 'function') ? db.getUserById(matchedFirst.id) : matchedFirst;
-        }
-      }
-      if (!user && validation.user?.first_name && validation.user?.last_name) {
-        const fullName = `${validation.user.first_name} ${validation.user.last_name}`.trim();
-        const matchedFull = db.findUserByTelegramUsername(fullName);
-        if (matchedFull && (!matchedFull.telegram_chat_id || String(matchedFull.telegram_chat_id) !== String(tgUserId))) {
-          db.bindUserTelegram(matchedFull.id, tgUserId, validation.user.username || fullName);
-          user = (typeof db.getUserById === 'function') ? db.getUserById(matchedFull.id) : matchedFull;
-        }
-      }
-      if (!user) {
-        console.warn(`[Telegram WebApp] User not bound: tgUserId=${tgUserId}, tgUsername=${validation.user?.username}, firstName=${validation.user?.first_name}`);
-        return sendError(res, 404, 'USER_NOT_BOUND', 'Пользователь с данным Telegram ID не найден в KoW Tracker. Привяжите Telegram в личном кабинете.');
-      }
-
-      if (user.is_approved === 0) {
-        return sendError(res, 403, 'PENDING_APPROVAL', 'Ваш аккаунт ожидает подтверждения офицером');
-      }
-
-      if (user.is_active === 0) {
-        return sendError(res, 403, 'ACCOUNT_BLOCKED', 'Ваш аккаунт заблокирован администрацией');
-      }
-
-      const sessionToken = db.createSession(user.id);
-      db.touchUserActive(user.id);
-
-      const cookieHeader = `token=${encodeURIComponent(sessionToken)}; HttpOnly; SameSite=Lax; Path=/`;
-      res.setHeader('Set-Cookie', cookieHeader);
-
-      const player = user.player_id ? db.getPlayerById(user.player_id) : (db.getPlayersByUserId(user.id)[0] || null);
-
       return sendJson(res, 200, {
         success: true,
-        token: sessionToken,
-        user: {
-          id: user.id,
-          username: user.username,
-          rank: user.rank,
-          playerId: user.player_id || (player ? player.id : null),
-          permissions: user.permissions || [],
-          telegramChatId: user.telegram_chat_id || null,
-          telegramUsername: user.telegram_username || null,
-          hasDefaultAdminPassword: user.username === 'admin' ? db.isDefaultAdminPassword() : false
-        },
-        player,
-        telegramUser: validation.user
+        token: authRes.token,
+        user: authRes.user,
+        player: authRes.player,
+        telegramUser: authRes.telegramUser
       });
     }
 
@@ -853,7 +580,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         const rawBotToken = db.getAppSetting('telegram_bot_token');
         const botToken = rawBotToken ? String(rawBotToken).trim() : null;
         if (botToken) {
-          const val = logic.validateTelegramWebAppData(rawInitData, botToken);
+          const val = authGuard.validateTelegramWebAppData(rawInitData, botToken);
           if (val && val.valid && val.user?.id) {
             db.bindUserTelegram(loginRes.user.id, val.user.id, val.user.username || '');
           }
@@ -874,8 +601,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (pathname === '/api/auth/logout' && req.method === 'POST') {
       if (!requireAuth(req, res)) return;
       if (req.token) {
-        db.deleteSession(req.token);
+        authGuard.destroySession(req.token);
       }
+      res.setHeader('Set-Cookie', authGuard.formatLogoutCookie());
       return sendJson(res, 200, { success: true });
     }
 
@@ -989,7 +717,25 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     // PLAYER CABINET & SECTORS (/api/my-profile, /api/my-sectors)
     // ─────────────────────────────────────────────────────────
+    function syncPlayerOfficers(playerId, officers) {
+      if (!Array.isArray(officers)) return;
+      const normalized = officerProgression.normalizeOfficersPayload(officers);
+      for (const o of normalized) {
+        if (o.id) {
+          const updatedOff = db.updatePlayerOfficer(playerId, o.id, o);
+          if (!updatedOff) {
+            db.addPlayerOfficer(playerId, o);
+          }
+        } else {
+          db.addPlayerOfficer(playerId, o);
+        }
+      }
+    }
+
     function resolveUserPlayerId(req) {
+      if (req.user && req.user.id && typeof db.healUserSectorLinks === 'function') {
+        db.healUserSectorLinks(req.user.id);
+      }
       if (req.user && req.user.playerId) return req.user.playerId;
       if (!req.user || !req.user.id) return null;
       const sectors = db.getPlayersByUserId(req.user.id);
@@ -1003,6 +749,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     if (pathname === '/api/my-profile' && req.method === 'GET') {
       if (!requireAuth(req, res)) return;
+      if (typeof db.healUserSectorLinks === 'function') {
+        db.healUserSectorLinks(req.user.id);
+      }
       let sectors = db.getPlayersByUserId(req.user.id);
       let activeSector = null;
       const requestedSectorId = parsedUrl.searchParams.get('sectorId')
@@ -1116,8 +865,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!activePlayerId) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
-      delete body.rank;
-      delete body.id;
+      authGuard.sanitizePlayerUpdatePayload(body, { allowPrivilegeFields: false });
 
       if (body.sector && body.sector.vipPoints !== undefined) {
         body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
@@ -1135,34 +883,10 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       if (Array.isArray(body.officers)) {
-        for (const o of body.officers) {
-          if (o.skills !== undefined) {
-            o.skills = sanitizeSkills(o.skills);
-          }
-          if (o.invested !== undefined) {
-            o.invested = sanitizeInvested(o.invested);
-          }
-          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
-            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
-          }
-          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
-            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
-          }
-          if (o.id) {
-            const updatedOff = db.updatePlayerOfficer(activePlayerId, o.id, o);
-            if (!updatedOff) {
-              db.addPlayerOfficer(activePlayerId, o);
-            }
-          } else {
-            db.addPlayerOfficer(activePlayerId, o);
-          }
-        }
+        syncPlayerOfficers(activePlayerId, body.officers);
       }
 
       const updated = db.updatePlayer(activePlayerId, { ...body, editorUserId: req.user.id });
-      if (body.stock) {
-        db.recordStockHistory(activePlayerId, body.stock);
-      }
       return sendJson(res, 200, updated);
     }
 
@@ -1228,7 +952,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, {
         ...result.officer,
         newStock: result.newStock,
-        stockDeducted: result.stockDeducted
+        stockDeducted: result.stockDeducted,
+        ...(result.stockRefunded !== undefined ? { stockRefunded: result.stockRefunded } : {})
       });
     }
 
@@ -1239,8 +964,21 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 404, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
       }
       const officerId = myOfficerMatch[1];
-      officerProgression.deleteOfficer(activePlayerId, officerId);
-      return sendJson(res, 200, { success: true });
+      const refundStock = parsedUrl.searchParams.get('refundStock') === 'true' || Boolean(body && (body.refundStock || body.refund_stock));
+      const isRetro = body && (body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false));
+      const result = officerProgression.deleteOfficer(activePlayerId, officerId, {
+        refundStock,
+        isRetro,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 404, result.error, result.message);
+      }
+      return sendJson(res, 200, {
+        success: true,
+        ...(result.newStock ? { newStock: result.newStock } : {}),
+        stockRefunded: Boolean(result.stockRefunded)
+      });
     }
 
     // ─────────────────────────────────────────────────────────
@@ -1254,84 +992,23 @@ function createRequestHandler(staticDir, s3Manager = null) {
         return sendError(res, 400, 'NO_IMAGES', 'Не переданы изображения для распознавания');
       }
 
-      let accumulated = { sector: {}, stock: {} };
-      let allRecognizedFields = [];
-      let allRawTexts = [];
-      let detectedTypes = [];
-      let processedCount = 0;
-      let lastError = null;
-
-      for (const imgItem of rawImages) {
-        let buf = null;
-        if (typeof imgItem === 'string') {
-          const match = imgItem.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/);
-          const base64Str = match ? match[1] : imgItem;
-          try {
-            buf = Buffer.from(base64Str, 'base64');
-          } catch (_) {
-            continue;
-          }
-        } else if (Buffer.isBuffer(imgItem)) {
-          buf = imgItem;
-        }
-
-        if (!buf || buf.length === 0) continue;
-
-        const ocrRes = await runOcrOnImageBuffer(buf);
-        if (!ocrRes.success) {
-          lastError = ocrRes;
-          continue;
-        }
-
-        const rawText = ocrRes.text || '';
-        if (rawText) {
-          allRawTexts.push(rawText);
-        }
-
-        if (ocrRes.stock && Object.keys(ocrRes.stock).length > 0) {
-          accumulated = logic.mergeScanResults(accumulated, {
-            isWarehouse: true,
-            stock: ocrRes.stock
-          });
-          detectedTypes.push('warehouse');
-          allRecognizedFields.push(...Object.keys(ocrRes.stock));
-          processedCount++;
-          continue;
-        }
-
-        const parsed = logic.parseSmartScanText(rawText);
-        detectedTypes.push(parsed.detectedType);
-        if (parsed.recognizedFields && parsed.recognizedFields.length > 0) {
-          allRecognizedFields.push(...parsed.recognizedFields);
-        }
-
-        const currentScan = {
-          isProfile: parsed.isProfile,
-          isWarehouse: parsed.isWarehouse,
-          sector: parsed.sector || {},
-          stock: parsed.stock || {},
-        };
-        accumulated = logic.mergeScanResults(accumulated, currentScan);
-        processedCount++;
+      const scanRes = await ocrAdapter.scanImages(rawImages, {
+        mode: body.mode === 'exchange' ? 'exchange' : 'smart'
+      });
+      if (!scanRes.success) {
+        return sendError(res, 500, scanRes.error || 'OCR_ERROR', scanRes.message || 'Ошибка распознавания');
       }
-
-      if (processedCount === 0 && lastError) {
-        return sendError(res, 500, lastError.error || 'OCR_ERROR', lastError.message || 'Ошибка распознавания');
-      }
-
-      const uniqueFields = Array.from(new Set(allRecognizedFields));
-      const hasRecognizedData = uniqueFields.length > 0;
-      const primaryType = detectedTypes.find(t => t !== 'unknown') || 'unknown';
 
       return sendJson(res, 200, {
         success: true,
-        detectedType: primaryType,
-        hasRecognizedData,
-        sector: accumulated.sector || {},
-        stock: accumulated.stock || {},
-        recognizedFields: uniqueFields,
-        imagesProcessed: processedCount,
-        rawText: allRawTexts.join('\n\n--- [След. скриншот] ---\n\n')
+        detectedType: scanRes.detectedType,
+        hasRecognizedData: scanRes.hasRecognizedData,
+        sector: scanRes.sector || {},
+        stock: scanRes.stock || {},
+        officers: scanRes.officers || [],
+        recognizedFields: scanRes.recognizedFields || [],
+        imagesProcessed: scanRes.imagesProcessed || 0,
+        rawText: (scanRes.rawTexts || []).join('\n\n--- [След. скриншот] ---\n\n')
       });
     }
 
@@ -1360,20 +1037,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         sanitizeStock(body.stock);
       }
       if (Array.isArray(body.officers)) {
-        for (const o of body.officers) {
-          if (o.skills !== undefined) {
-            o.skills = sanitizeSkills(o.skills);
-          }
-          if (o.invested !== undefined) {
-            o.invested = sanitizeInvested(o.invested);
-          }
-          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
-            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
-          }
-          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
-            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
-          }
-        }
+        body.officers = officerProgression.normalizeOfficersPayload(body.officers);
       }
       const created = db.createPlayer(body);
       return sendJson(res, 200, created);
@@ -1396,12 +1060,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      if (!check.isLeader) {
-        delete body.rank;
-        delete body.id;
-        delete body.userId;
-        delete body.user_id;
-      }
+      authGuard.sanitizePlayerUpdatePayload(body, { allowPrivilegeFields: check.isLeader });
       if (body.sector && body.sector.vipPoints !== undefined) {
         body.sector.vipPoints = sanitizeVipPoints(body.sector.vipPoints);
       }
@@ -1421,33 +1080,9 @@ function createRequestHandler(staticDir, s3Manager = null) {
             }
           }
         }
-        for (const o of body.officers) {
-          if (o.skills !== undefined) {
-            o.skills = sanitizeSkills(o.skills);
-          }
-          if (o.invested !== undefined) {
-            o.invested = sanitizeInvested(o.invested);
-          }
-          if (o.personalPuzzles !== undefined || o.personal_puzzles !== undefined) {
-            o.personalPuzzles = sanitizePersonalPuzzles(o.personalPuzzles ?? o.personal_puzzles);
-          }
-          if (o.onlyPersonalPuzzles !== undefined || o.only_personal_puzzles !== undefined) {
-            o.onlyPersonalPuzzles = Boolean(o.onlyPersonalPuzzles ?? o.only_personal_puzzles);
-          }
-          if (o.id) {
-            const updatedOff = db.updatePlayerOfficer(targetPlayerId, o.id, o);
-            if (!updatedOff) {
-              db.addPlayerOfficer(targetPlayerId, o);
-            }
-          } else {
-            db.addPlayerOfficer(targetPlayerId, o);
-          }
-        }
+        syncPlayerOfficers(targetPlayerId, body.officers);
       }
       const updated = db.updatePlayer(targetPlayerId, { ...body, editorUserId: req.user.id });
-      if (body.stock) {
-        db.recordStockHistory(targetPlayerId, body.stock);
-      }
       return sendJson(res, 200, updated);
     }
 
@@ -1459,9 +1094,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const stockHistoryMatch = pathname.match(/^\/api\/players\/(\d+)\/stock-history$/);
     if (stockHistoryMatch && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const targetPlayerId = Number(stockHistoryMatch[1]);
       const player = db.getPlayerById(targetPlayerId);
       if (!player) {
@@ -1481,9 +1114,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (stockHistoryMatch && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const targetPlayerId = Number(stockHistoryMatch[1]);
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
@@ -1588,7 +1219,8 @@ function createRequestHandler(staticDir, s3Manager = null) {
       return sendJson(res, 200, {
         ...result.officer,
         newStock: result.newStock,
-        stockDeducted: result.stockDeducted
+        stockDeducted: result.stockDeducted,
+        ...(result.stockRefunded !== undefined ? { stockRefunded: result.stockRefunded } : {})
       });
     }
 
@@ -1598,15 +1230,28 @@ function createRequestHandler(staticDir, s3Manager = null) {
       const check = checkSectorAccess(targetPlayerId);
       if (!check.ok) return sendError(res, check.status, check.error, check.message);
 
-      officerProgression.deleteOfficer(targetPlayerId, offId);
-      return sendJson(res, 200, { success: true });
+      const refundStock = parsedUrl.searchParams.get('refundStock') === 'true' || Boolean(body && (body.refundStock || body.refund_stock));
+      const isRetro = body && (body.isRetro !== undefined ? Boolean(body.isRetro) : (body.isRetrospective !== undefined ? Boolean(body.isRetrospective) : false));
+      const result = officerProgression.deleteOfficer(targetPlayerId, offId, {
+        refundStock,
+        isRetro,
+        userId: req.user?.id
+      });
+      if (!result.ok) {
+        return sendError(res, result.status || 404, result.error, result.message);
+      }
+      return sendJson(res, 200, {
+        success: true,
+        ...(result.newStock ? { newStock: result.newStock } : {}),
+        stockRefunded: Boolean(result.stockRefunded)
+      });
     }
 
     // ─────────────────────────────────────────────────────────
     // VIP TIERS
     // ─────────────────────────────────────────────────────────
     if (pathname === '/api/vip-tiers' && req.method === 'GET') {
-      if (!authenticate(req, res)) return;
+      if (!requireAuth(req, res)) return;
       return sendJson(res, 200, db.getVipTiers());
     }
 
@@ -1856,87 +1501,20 @@ function createRequestHandler(staticDir, s3Manager = null) {
       }
 
       // Notifications on saveEvent: personal alerts for assigned places & staff summary
-      try {
-        const savedAssignments = (saved && saved.assignments) ? saved.assignments : [];
-        const assignedList = savedAssignments.filter(a => a.playerId && Number(a.place) > 0);
-
-        if (assignedList.length > 0) {
-          const eventTypes = db.getEventTypes();
-          const et = eventTypes.find(t => t.id === saved.typeId);
-          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom) : et.places) : [];
-          const baseUrl = getAppBaseUrl(req);
-          const players = db.getPlayers();
-
-          let newAssignmentsCount = 0;
-          for (const a of assignedList) {
-            const prevA = previousAssignments.find(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
-            if (prevA) continue; // Already assigned to this place earlier
-            newAssignmentsCount++;
-
-            const player = db.getPlayerById(a.playerId);
-            if (player && player.userId) {
-              const user = db.findUserById(player.userId);
-              if (user) {
-                const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
-                const rsvpMarkup = {
-                  inline_keyboard: [
-                    [
-                      { text: '✅ Подтверждаю участие', callback_data: `rsvp_event:confirm:${saved.id}:${a.place}` },
-                      { text: '❌ Не смогу участвовать', callback_data: `rsvp_event:decline:${saved.id}:${a.place}` }
-                    ]
-                  ]
-                };
-                await dispatchNotification('event_place_assigned', {
-                  username: user.username,
-                  sectorName: player.name || a.playerName || 'Сектор',
-                  eventName: et?.name || 'Событие',
-                  eventDate: saved.dateFrom || '',
-                  place: String(a.place),
-                  coupons: String(coupons),
-                  link: `${baseUrl}/#event/${saved.id}`
-                }, { userId: user.id, replyMarkup: rsvpMarkup }).catch(err => {
-                  console.warn(`[Notification] Error sending event_place_assigned to user ${user.id}:`, err.message);
-                });
-              }
-            }
-          }
-
-          if (newAssignmentsCount > 0 || isNew) {
-            const topFormatted = assignedList
-              .sort((x, y) => Number(x.place) - Number(y.place))
-              .slice(0, 5)
-              .map((a, idx) => {
-                const p = players.find(pl => pl.id === a.playerId);
-                const vipStr = (p && p.vip !== undefined) ? ` (VIP ${p.vip})` : '';
-                const safeName = String(a.playerName || p?.name || 'Сектор')
-                  .replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;');
-                return `${idx + 1}. #${a.place}: ${safeName}${vipStr}`;
-              })
-              .join('\n');
-
-            await dispatchNotification('staff_event_autopick_summary', {
-              eventName: et?.name || 'Событие',
-              assignedCount: String(assignedList.length),
-              availablePlaces: String(places.length),
-              topAssignmentsList: topFormatted || 'Назначений нет',
-              link: `${baseUrl}/#event/${saved.id}`
-            }).catch(err => {
-              console.warn('[Notification] Error sending staff_event_autopick_summary:', err.message);
-            });
-          }
-        }
-      } catch (assignNotifErr) {
-        console.warn('[Notification] Error in assignment notifications on saveEvent:', assignNotifErr.message);
-      }
+      await eventOps.notifyAssignedPlayers({
+        event: saved,
+        previousAssignments,
+        includeStaffSummary: true,
+        isNew,
+        req
+      });
 
       return sendJson(res, 200, saved);
     }
 
     if (pathname === '/api/events/schedule-season' && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const result = seasonPlanner.scheduleSeason(body);
+      const result = eventOps.scheduleSeason(body);
       return sendJson(res, 201, result);
     }
 
@@ -1948,88 +1526,18 @@ function createRequestHandler(staticDir, s3Manager = null) {
         ? Number(body.sectorId)
         : (req.user.playerId ? Number(req.user.playerId) : null);
 
-      if (!targetSectorId) {
-        return sendError(res, 400, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
-      }
-      const player = db.getPlayerById(targetSectorId);
-      if (!player) {
-        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
-      }
-      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
-      if (!isLeader && player.userId !== req.user.id) {
-        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
-      }
-
-      const { officerId, desiredPlace } = body;
-      let finalOfficerId = officerId;
-      const catalog = db.getCatalog ? db.getCatalog() : [];
-      if (finalOfficerId) {
-        const off = (player.officers || []).find(o => String(o.id) === String(finalOfficerId) || String(o.catalogId) === String(finalOfficerId));
-        if (off) {
-          const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
-            ? logic.isOfficerEligibleForEvents(off, catalog)
-            : !Boolean(off.onlyPersonalPuzzles || off.only_personal_puzzles);
-          if (!isEligible) {
-            return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
-          }
-        } else {
-          const catItem = (catalog || []).find(c => c.id === String(finalOfficerId));
-          if (catItem) {
-            const isEligible = typeof logic.isOfficerEligibleForEvents === 'function'
-              ? logic.isOfficerEligibleForEvents({ catalogId: catItem.id }, catalog)
-              : (catItem.upgradeType !== 'special' && Number(catItem.couponPerPuzzle) > 0);
-            if (!isEligible) {
-              return sendError(res, 400, 'OFFICER_ONLY_PERSONAL_PUZZLES', 'Этот офицер качается только за счет личных пазлов и не участвует в распределении ивентов');
-            }
-          }
-        }
-      } else {
-        if (typeof logic.selectOptimalEventOfficer === 'function') {
-          const ev = db.getEventById(eventId);
-          const optimal = logic.selectOptimalEventOfficer({ player, catalog, eventDate: ev?.dateFrom });
-          finalOfficerId = optimal.officerId || (optimal.officer ? (optimal.officer.catalogId || optimal.officer.id) : '');
-        }
-      }
-
-      const existingRegistrations = typeof db.getRegistrationsByEventId === 'function'
-        ? db.getRegistrationsByEventId(Number(eventId))
-        : (typeof db.getRegistrationsForEvent === 'function' ? db.getRegistrationsForEvent(Number(eventId)) : []);
-      const prevReg = (existingRegistrations || []).find(r => Number(r.playerId) === Number(targetSectorId));
-      const targetDesiredPlace = desiredPlace !== undefined ? Number(desiredPlace) : 0;
-      const targetOfficerId = String(finalOfficerId || '');
-      const isUnchanged = prevReg &&
-        Number(prevReg.desiredPlace || 0) === targetDesiredPlace &&
-        String(prevReg.officerId || '') === targetOfficerId;
-
-      const reg = db.registerForEvent({
+      const opRes = await eventOps.registerForEvent({
         eventId,
         playerId: targetSectorId,
-        officerId: targetOfficerId,
-        desiredPlace: targetDesiredPlace
+        officerId: body.officerId,
+        desiredPlace: body.desiredPlace,
+        user: req.user,
+        req
       });
-
-      if (!isUnchanged) {
-        try {
-          const ev = db.getEventById(eventId);
-          const et = ev ? (db.getEventTypeById ? db.getEventTypeById(ev.typeId) : null) : null;
-          const placeStr = (targetDesiredPlace === 0) ? 'Любое' : `#${targetDesiredPlace}`;
-          const baseUrl = getAppBaseUrl(req);
-          dispatchNotification('staff_event_registration', {
-            eventId,
-            playerId: targetSectorId,
-            eventName: et?.name || `Событие #${eventId}`,
-            sectorName: player.name || `Сектор #${player.id}`,
-            desiredPlace: placeStr,
-            link: `${baseUrl}/#event/${eventId}`
-          }).catch(err => {
-            console.warn('[Notification] Error dispatching staff_event_registration:', err.message);
-          });
-        } catch (notifErr) {
-          console.warn('[Notification] Failed to prepare staff_event_registration:', notifErr.message);
-        }
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      return sendJson(res, 200, { success: true, registration: reg });
+      return sendJson(res, 200, { success: true, registration: opRes.registration });
     }
 
     if (eventRegMatch && req.method === 'DELETE') {
@@ -2040,19 +1548,14 @@ function createRequestHandler(staticDir, s3Manager = null) {
         ? Number(sectorIdParam)
         : (body && body.sectorId ? Number(body.sectorId) : (req.user.playerId ? Number(req.user.playerId) : null));
 
-      if (!targetSectorId) {
-        return sendError(res, 400, 'NO_LINKED_PLAYER', 'К вашему аккаунту не привязан профиль игрока');
+      const opRes = await eventOps.unregisterFromEvent({
+        eventId,
+        playerId: targetSectorId,
+        user: req.user
+      });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-      const player = db.getPlayerById(targetSectorId);
-      if (!player) {
-        return sendError(res, 404, 'PLAYER_NOT_FOUND', 'Сектор не найден');
-      }
-      const isLeader = req.user.rank === 'r4' || req.user.rank === 'r5';
-      if (!isLeader && player.userId !== req.user.id) {
-        return sendError(res, 403, 'FORBIDDEN', 'Вы не являетесь владельцем этого сектора');
-      }
-
-      db.unregisterFromEvent(eventId, targetSectorId);
       return sendJson(res, 200, { success: true });
     }
 
@@ -2060,7 +1563,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     if (autopickMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
       const eventId = Number(autopickMatch[1]);
-      const result = seasonPlanner.runSmartAutopick(eventId);
+      const result = eventOps.runSmartAutopick(eventId);
       if (!result.success) {
         return sendError(res, 404, result.error, result.message);
       }
@@ -2109,48 +1612,13 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
       const saved = db.saveEvent({ ...body, id: eventId });
 
-      try {
-        const newAssignments = Array.isArray(body.assignments) ? body.assignments : [];
-        if (newAssignments.length > 0) {
-          const eventTypes = db.getEventTypes();
-          const et = eventTypes.find(t => t.id === (saved.typeId || prevEvent?.typeId));
-          const places = et ? (typeof logic.resolveEventPlaces === 'function' ? logic.resolveEventPlaces(et, saved.dateFrom || prevEvent?.dateFrom) : et.places) : [];
-          const baseUrl = getAppBaseUrl(req);
-
-          for (const a of newAssignments) {
-            if (a.playerId && Number(a.place) > 0) {
-              const already = prevAssignments.some(pa => pa.playerId === a.playerId && Number(pa.place) === Number(a.place));
-              if (!already) {
-                const player = db.getPlayerById(a.playerId);
-                if (player && player.userId) {
-                  const user = db.findUserById(player.userId);
-                  if (user) {
-                    const coupons = a.coupons !== undefined ? a.coupons : (places.find(p => Number(p.place) === Number(a.place))?.coupons || 0);
-                    const rsvpMarkup = {
-                      inline_keyboard: [
-                        [
-                          { text: '✅ Подтверждаю участие', callback_data: `rsvp_event:confirm:${saved.id}:${a.place}` },
-                          { text: '❌ Не смогу участвовать', callback_data: `rsvp_event:decline:${saved.id}:${a.place}` }
-                        ]
-                      ]
-                    };
-                    await dispatchNotification('event_place_assigned', {
-                      username: user.username,
-                      sectorName: player.name || a.playerName || 'Сектор',
-                      eventName: et?.name || 'Событие',
-                      eventDate: saved.dateFrom || prevEvent?.dateFrom || '',
-                      place: String(a.place),
-                      coupons: String(coupons),
-                      link: `${baseUrl}/#event/${saved.id}`
-                    }, { userId: user.id, replyMarkup: rsvpMarkup }).catch(() => {});
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[Notification] Error in PUT /api/events/:id place notifications:', err.message);
+      if (Array.isArray(body.assignments) && body.assignments.length > 0) {
+        await eventOps.notifyAssignedPlayers({
+          event: saved,
+          previousAssignments: prevAssignments,
+          includeStaffSummary: false,
+          req
+        });
       }
 
       return sendJson(res, 200, saved);
@@ -2208,153 +1676,47 @@ function createRequestHandler(staticDir, s3Manager = null) {
     const finishEventMatch = pathname.match(/^\/api\/events\/(\d+)\/finish$/);
     if (finishEventMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const eventId = Number(finishEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
-      const baseUrl = getAppBaseUrl(req);
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      let sentCount = 0;
-
-      for (const a of (ev.assignments || [])) {
-        if (!a.resultStatus || a.resultStatus === 'pending') {
-          const player = db.getPlayerById(a.playerId);
-          if (player && player.userId) {
-            const user = db.findUserById(player.userId);
-            if (user && user.telegram_chat_id && user.telegram_notifications_enabled !== 0) {
-              const buttons = {
-                inline_keyboard: [
-                  [
-                    { text: '🥇 1 место', callback_data: `event_result:submit:${ev.id}:1` },
-                    { text: '🥈 2 место', callback_data: `event_result:submit:${ev.id}:2` },
-                    { text: '🥉 3 место', callback_data: `event_result:submit:${ev.id}:3` }
-                  ],
-                  [
-                    { text: '🏅 4–10 место', callback_data: `event_result:submit:${ev.id}:4` },
-                    { text: '❌ Не участвовал', callback_data: `event_result:submit:${ev.id}:0` }
-                  ]
-                ]
-              };
-              await dispatchNotification('event_result_prompt', {
-                eventName: et?.name || 'Событие',
-                sectorName: player.name || 'Сектор',
-                assignedPlace: String(a.place),
-                link: `${baseUrl}/#event/${ev.id}`
-              }, { userId: user.id, replyMarkup: buttons }).catch(() => {});
-              sentCount++;
-            }
-          }
-        }
+      const opRes = await eventOps.finishEvent({ eventId: Number(finishEventMatch[1]), req });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      return sendJson(res, 200, { success: true, sentCount });
+      return sendJson(res, 200, { success: true, sentCount: opRes.sentCount });
     }
 
     const summaryEventMatch = pathname.match(/^\/api\/events\/(\d+)\/summary$/);
     if (summaryEventMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const eventId = Number(summaryEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
-      const baseUrl = getAppBaseUrl(req);
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      const totalAssigned = (ev.assignments || []).length;
-      const confirmedCount = (ev.assignments || []).filter(a => a.resultStatus === 'confirmed').length;
-      const unconfirmedCount = totalAssigned - confirmedCount;
-      const totalCoupons = (ev.assignments || []).reduce((sum, a) => sum + (Number(a.actualCoupons) || 0), 0);
-
-      await dispatchNotification('staff_event_completed_summary', {
-        eventName: et?.name || 'Событие',
-        totalAssigned: String(totalAssigned),
-        confirmedCount: String(confirmedCount),
-        unconfirmedCount: String(unconfirmedCount),
-        totalCoupons: String(totalCoupons),
-        link: `${baseUrl}/#event/${ev.id}`
+      const opRes = await eventOps.summarizeEvent({ eventId: Number(summaryEventMatch[1]), req });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
+      }
+      return sendJson(res, 200, {
+        success: true,
+        totalAssigned: opRes.totalAssigned,
+        confirmedCount: opRes.confirmedCount,
+        unconfirmedCount: opRes.unconfirmedCount,
+        totalCoupons: opRes.totalCoupons
       });
-
-      return sendJson(res, 200, { success: true, totalAssigned, confirmedCount, unconfirmedCount, totalCoupons });
     }
 
     const shareGridEventMatch = pathname.match(/^\/api\/events\/(\d+)\/share-grid$/);
     if (shareGridEventMatch && req.method === 'POST') {
       if (!requirePermission(req, res, 'manage_events')) return;
-      const eventId = Number(shareGridEventMatch[1]);
-      const ev = db.getEventById(eventId);
-      if (!ev) return sendError(res, 404, 'EVENT_NOT_FOUND', 'Событие не найдено');
-
-      const imageBase64 = body && (body.imageBase64 || body.image_base64);
-      if (!imageBase64 || typeof imageBase64 !== 'string') {
-        return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр imageBase64 обязателен');
+      const opRes = await eventOps.shareEventGrid({
+        eventId: Number(shareGridEventMatch[1]),
+        target: body && body.target,
+        imageBase64: body && (body.imageBase64 || body.image_base64),
+        caption: body && body.caption,
+        req
+      });
+      if (!opRes.ok) {
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      const botToken = db.getAppSetting('telegram_bot_token');
-      if (!botToken) {
-        return sendError(res, 400, 'BOT_TOKEN_NOT_CONFIGURED', 'Токен бота не настроен в системе');
-      }
-
-      const target = body && body.target ? String(body.target).trim().toLowerCase() : 'staff';
-      const staffChatId = db.getAppSetting('telegram_staff_chat_id');
-      const announcementChatId = db.getAppSetting('telegram_announcement_chat_id');
-
-      const targetChats = [];
-      if (target === 'staff') {
-        if (!staffChatId) {
-          return sendError(res, 400, 'STAFF_CHAT_NOT_CONFIGURED', 'Чат штаба не настроен в системе');
-        }
-        targetChats.push(staffChatId);
-      } else if (target === 'channel' || target === 'announcement') {
-        if (!announcementChatId) {
-          return sendError(res, 400, 'ANNOUNCEMENT_CHAT_NOT_CONFIGURED', 'Канал анонсов не настроен в системе');
-        }
-        targetChats.push(announcementChatId);
-      } else if (target === 'both') {
-        if (!staffChatId && !announcementChatId) {
-          return sendError(res, 400, 'NO_CHATS_CONFIGURED', 'Ни чат штаба, ни канал анонсов не настроены в системе');
-        }
-        if (staffChatId) targetChats.push(staffChatId);
-        if (announcementChatId) targetChats.push(announcementChatId);
-      } else {
-        return sendError(res, 400, 'INVALID_TARGET', 'Недопустимый канал назначения (staff, channel, both)');
-      }
-
-      const baseUrl = getAppBaseUrl(req);
-      const et = db.getEventTypes().find(t => t.id === ev.typeId);
-      const eventTitle = ev.title || et?.name || 'Событие';
-      const escape = (typeof logic.escapeHtml === 'function') ? logic.escapeHtml : (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-      const defaultCaption = `📊 <b>Сетка события: ${escape(eventTitle)}</b>\n📅 Период: ${escape(ev.dateFrom || '')} — ${escape(ev.dateTo || '')}\n🎖 Назначений: ${(ev.assignments || []).length}`;
-      const caption = (body.caption && String(body.caption).trim()) ? String(body.caption).trim() : defaultCaption;
-
-      const replyMarkup = {
-        inline_keyboard: [
-          [{ text: '🔗 Открыть сетку ивента', url: `${baseUrl}/#event/${ev.id}` }]
-        ]
-      };
-
-      const sendResults = [];
-      for (const destChatId of targetChats) {
-        const result = await telegram.sendTelegramPhoto({
-          token: botToken,
-          chatId: destChatId,
-          photo: imageBase64,
-          caption,
-          parseMode: 'HTML',
-          replyMarkup
-        });
-        if (result.ok) {
-          sendResults.push({ chatId: destChatId, messageId: result.result?.message_id });
-        }
-      }
-
-      if (sendResults.length === 0) {
-        return sendError(res, 502, 'TELEGRAM_ERROR', 'Ошибка отправки изображения в Telegram');
-      }
-
       return sendJson(res, 200, {
         success: true,
-        sentCount: sendResults.length,
-        messageId: sendResults[0].messageId,
-        results: sendResults
+        sentCount: opRes.sentCount,
+        messageId: opRes.messageId,
+        results: opRes.results
       });
     }
 
@@ -2404,9 +1766,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
     const screenshotMatch = pathname.match(/^\/api\/screenshots\/(.+)$/);
     if (screenshotMatch && (req.method === 'GET' || req.method === 'HEAD')) {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
 
       const rawParam = screenshotMatch[1];
       let filename = '';
@@ -2491,9 +1851,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2532,9 +1890,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/settings' && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки Telegram бота');
       }
@@ -2565,7 +1921,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
         }
         const liveToken = db.getAppSetting('telegram_bot_token');
         if (liveToken && rawWebAppUrl && /^https:\/\//i.test(rawWebAppUrl)) {
-          const effectiveUrl = logic.formatTmaUrl ? logic.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
+          const effectiveUrl = telegramFormats.formatTmaUrl ? telegramFormats.formatTmaUrl(rawWebAppUrl) : rawWebAppUrl;
           telegram.setTelegramChatMenuButton(liveToken, {
             text: '🚀 KoW Tracker',
             url: effectiveUrl
@@ -2601,9 +1957,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
 
     if (pathname === '/api/mieru/settings' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2630,9 +1984,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/mieru/settings' && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять настройки туннеля Mieru');
       }
@@ -2705,9 +2057,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/mieru/test' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2732,9 +2082,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/bind-webapp' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const rawBotToken = db.getAppSetting('telegram_bot_token');
       const botToken = rawBotToken ? String(rawBotToken).trim() : null;
       if (!botToken) {
@@ -2744,7 +2092,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
       if (!initData || typeof initData !== 'string') {
         return sendError(res, 400, 'VALIDATION_ERROR', 'Параметр initData обязателен');
       }
-      const validation = logic.validateTelegramWebAppData(initData, botToken);
+      const validation = authGuard.validateTelegramWebAppData(initData, botToken);
       if (!validation.valid || !validation.user?.id) {
         return sendError(res, 400, 'INVALID_TELEGRAM_DATA', 'Ошибка валидации Telegram WebApp');
       }
@@ -2754,9 +2102,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/bind-token' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
 
       const token = crypto.randomBytes(16).toString('hex');
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
@@ -2788,26 +2134,20 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/bind' && req.method === 'DELETE') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       db.unbindUserTelegram(req.user.id);
       return sendJson(res, 200, { success: true });
     }
 
     if (pathname === '/api/telegram/notifications' && (req.method === 'PUT' || req.method === 'POST')) {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       const enabled = body.enabled !== false && body.enabled !== 0 && body.enabled !== '0';
       db.toggleTelegramNotifications(req.user.id, enabled);
       return sendJson(res, 200, { success: true, enabled });
     }
 
     if (pathname === '/api/telegram/staff-bind-token' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки чата штаба');
       }
@@ -2823,9 +2163,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/channel-bind-token' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может генерировать код привязки канала анонсов');
       }
@@ -2841,9 +2179,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/schedule' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2864,9 +2200,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/schedule' && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Только Р5 может изменять расписание уведомлений');
       }
@@ -2895,9 +2229,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/check-reminders' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2909,9 +2241,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     }
 
     if (pathname === '/api/telegram/check-morning-reminders' && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2928,9 +2258,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
     // ─────────────────────────────────────────────────────────
 
     if (pathname === '/api/notification-templates' && req.method === 'GET') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2940,9 +2268,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const tplMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)$/);
     if (tplMatch && req.method === 'PUT') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2956,9 +2282,7 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const tplResetMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/reset$/);
     if (tplResetMatch && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
@@ -2972,56 +2296,24 @@ function createRequestHandler(staticDir, s3Manager = null) {
 
     const tplTestMatch = pathname.match(/^\/api\/notification-templates\/([a-zA-Z0-9_]+)\/test$/);
     if (tplTestMatch && req.method === 'POST') {
-      if (!authenticate(req)) {
-        return sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
-      }
+      if (!requireAuth(req, res)) return;
       if (req.user.rank !== 'r4' && req.user.rank !== 'r5') {
         return sendError(res, 403, 'FORBIDDEN', 'Требуются права офицера (Р4/Р5)');
       }
       const key = tplTestMatch[1];
-      const tpl = db.getNotificationTemplate(key);
-      if (!tpl) {
-        return sendError(res, 404, 'NOT_FOUND', 'Шаблон не найден');
-      }
-
-      const botToken = db.getAppSetting('telegram_bot_token');
-      if (!botToken) {
-        return sendError(res, 400, 'NO_BOT_TOKEN', 'Токен Telegram бота не настроен в системе');
-      }
-
-      let targetChatId = null;
-      if (tpl.channel === 'personal') {
-        targetChatId = req.user.telegram_chat_id;
-        if (!targetChatId) {
-          return sendError(res, 400, 'NO_TELEGRAM_LINKED', 'Привяжите ваш Telegram аккаунт в Личном кабинете для получения тестовых сообщений');
-        }
-      } else {
-        targetChatId = db.getAppSetting('telegram_staff_chat_id');
-        if (!targetChatId) {
-          return sendError(res, 400, 'NO_STAFF_CHAT_LINKED', 'Чат штаба не привязан. Подключите чат штаба через PIN-код или укажите ID чата в настройках');
-        }
-        if (targetChatId && !isNaN(Number(targetChatId))) {
-          targetChatId = Number(targetChatId);
-        }
-      }
-
-      const templateText = body.template !== undefined ? body.template : tpl.template;
-      const parseMode = body.parseMode || body.parse_mode || tpl.parse_mode || 'HTML';
-      const sampleData = logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key] || {};
-      const renderedText = logic.renderTemplate(templateText, sampleData);
-
-      const sendRes = await telegram.sendTelegramMessage({
-        token: botToken,
-        chatId: targetChatId,
-        text: renderedText,
-        parseMode
+      const opRes = await notificationEngine.sendTemplateTest({
+        key,
+        user: req.user,
+        template: body.template,
+        parseMode: body.parseMode || body.parse_mode
       });
-
-      if (!sendRes.ok) {
-        return sendJson(res, 200, { success: false, error: sendRes.error });
+      if (!opRes.ok) {
+        if (opRes.status === 200) {
+          return sendJson(res, 200, { success: false, error: opRes.error });
+        }
+        return sendError(res, opRes.status || 400, opRes.error, opRes.message);
       }
-
-      return sendJson(res, 200, { success: true, messageId: sendRes.result?.message_id });
+      return sendJson(res, 200, { success: true, messageId: opRes.messageId });
     }
 
     // Unmatched API endpoint

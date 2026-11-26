@@ -5,6 +5,36 @@
 
 ---
 
+## [3.54.0] - 2026-11-25
+
+### Углубление архитектуры и рефакторинг (Changed)
+- **Изоляция серверного OCR и форматирования Telegram (`server/ocr-adapter.js`, `server/telegram-formats.js`)**:
+  - Серверная логика распознавания скриншотов вынесена в изолированный модуль `server/ocr-adapter.js`; `db.resolveAppBaseUrl` и потеряless-логика `migrateState` приведены в порядок.
+  - Форматирование карточек, таблиц, постов и ответов Telegram-бота централизовано в `server/telegram-formats.js`.
+- **Единый контур авторизации и RBAC (`server/auth-guard.js`)**:
+  - Вся логика токенов, RBAC-проверок, Telegram WebApp HMAC-аутентификации, санитизации полей и автовосстановления связей сектора (`healUserSectorLinks`) консолидирована в `server/auth-guard.js`.
+- **Унификация оркестрации событий и уведомлений (`server/event-ops.js`, `server/notification-engine.js`)**:
+  - `server/event-ops.js` объединил полный жизненный цикл событий, расписание сезона (поглощен `server/season-planner.js`), автоподбор, RSVP, завершение, сводки и отправку постер-сетки (`shareEventGrid`).
+  - `server/notification-engine.js` углублен для прямой работы с Mieru-прокси (`sendDirectMessage`, `sendChannelPhoto`, `sendTemplateTest`) без поверхностных CRUD-прокладок.
+- **Транзакционная прогрессия офицеров и единый реестр склада (`server/officer-progression.js`, `server/db.js`)**:
+  - В `server/db.js` добавлена поддержка транзакций `withTransaction` (включая вложенные `SAVEPOINT`); `getPlayersByUserId` сделан строго read-only, а восстановление связей вынесено в явный `healUserSectorLinks`.
+  - История операций склада унифицирована в таблице `stock_history_records` с сохранением обратной совместимости импорта/экспорта формата `kow_v2`.
+  - Все мутации офицеров (`addOfficer`, `updateOfficer`, `deleteOfficer`), атомарный сброс (`{ reset: true }`) и удаление с возвратом ресурсов (`{ refundStock: true }`) выполняются транзакционно на сервере; клиентские дублирующие расчёты дельт и двухшаговые `PUT`-потоки удалены из `client/app.js` и `client/tma.js`.
+- **Единый клиентский runtime и детерминированный запуск (`client/runtime.js`, `client/app.js`, `client/tma.js`, `client/index.html`, `client/sw.js`)**:
+  - Создан общий модуль `client/runtime.js` (`KowRuntime`): единый `isTmaMode`, `apiFetch` с обработкой 401/сети, нормализованный `getOfficerCatalog()`, общие пороги Матрицы `classifyMatrixRecommendation` и оркестратор `KowRuntime.boot()`.
+  - Удалены устаревшие `window.tma?.`-заглушки и `doTma*`-шимы между `client/app.js` и `client/tma.js`, обновлен прекеш Service Worker (`/runtime.js`, `kow-cache-v3.54.0`).
+
+### Исправлено (Fixed)
+- **Безопасность и доступ (`server/auth-guard.js`, `server/server.js`)**: учтен статус блокировки `is_blocked` при входе через Telegram WebApp, устранено зависание ответа `GET /api/vip-tiers`, добавлена санитизация `userId` / `user_id` и защита чувствительных полей `rank` / `id`.
+- **Надежность прогрессии и истории (`server/officer-progression.js`, `server/db.js`, `server/bot-controller.js`, `server/event-ops.js`)**: сохранены `levelPuzzles` и `skillCoupons` при изолированном откате навыков, устранена повторная/лишняя запись истории при обновлении профиля игрока, исправлена ветка пересчета результатов события и устранено дублирование оповещения об отказе RSVP.
+- **Клиентские ошибки каталога (`client/app.js`, `client/tma.js`)**: заменены чтения `state.catalog` на `getOfficerCatalog()` (`officerCatalog`).
+
+### Удалено (Removed)
+- Удалены неиспользуемые клиентские файлы старого Smart Scanner (`client/smart-scanner.js`, `client/smart-scanner.test.js`, `client/ocr.js`) с сохранением рабочего `#modal-exchange-ocr` и серверного `POST /api/ocr/scan`.
+- Удалены избыточные `server/season-planner.js` и `server/season-planner.test.js` после объединения с `server/event-ops.js`.
+
+---
+
 ## [3.53.1] - 2026-11-24
 
 ### Исправлено (Fixed)

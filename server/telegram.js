@@ -10,21 +10,6 @@ const { URL } = require('node:url');
 
 const DEFAULT_TELEGRAM_API_BASE = 'https://api.telegram.org';
 
-let customTelegramFetch = null;
-let defaultProxyUrl = null;
-
-function setTelegramFetch(fn) {
-  customTelegramFetch = fn;
-}
-
-function setDefaultProxyUrl(proxyUrl) {
-  defaultProxyUrl = proxyUrl ? String(proxyUrl).trim() : null;
-}
-
-function getDefaultProxyUrl() {
-  return defaultProxyUrl || process.env.TELEGRAM_PROXY || null;
-}
-
 /**
  * Perform an HTTP/HTTPS request via a SOCKS5 or HTTP CONNECT proxy using pure native Node.js.
  * Zero external dependencies.
@@ -403,9 +388,29 @@ function requestViaProxy({
 }
 
 /**
- * Execute Telegram Bot API request safely without throwing uncaught exceptions.
+ * Create an isolated Telegram Bot API transport client instance.
+ * Encapsulates fetch adapter, default proxy URL, and long-polling state.
  */
-async function callTelegramApi(token, method, payload = null, options = {}) {
+function createTelegramClient({ fetchImpl = null, defaultProxyUrl: initialProxyUrl = null } = {}) {
+  let customTelegramFetch = fetchImpl;
+  let defaultProxyUrl = initialProxyUrl ? String(initialProxyUrl).trim() : null;
+
+  function setTelegramFetch(fn) {
+    customTelegramFetch = fn;
+  }
+
+  function setDefaultProxyUrl(proxyUrl) {
+    defaultProxyUrl = proxyUrl ? String(proxyUrl).trim() : null;
+  }
+
+  function getDefaultProxyUrl() {
+    return defaultProxyUrl || process.env.TELEGRAM_PROXY || null;
+  }
+
+  /**
+   * Execute Telegram Bot API request safely without throwing uncaught exceptions.
+   */
+  async function callTelegramApi(token, method, payload = null, options = {}) {
   if (!token || typeof token !== 'string') {
     return { ok: false, error: 'MISSING_BOT_TOKEN' };
   }
@@ -996,27 +1001,35 @@ function startTelegramPolling({
   };
 }
 
+  return {
+    callTelegramApi,
+    getTelegramMe,
+    sendTelegramMessage,
+    sendTelegramPhoto,
+    getTelegramFile,
+    downloadTelegramFile,
+    editTelegramMessageText,
+    deleteTelegramMessage,
+    answerTelegramCallback,
+    setTelegramChatMenuButton,
+    getTelegramUpdates,
+    deleteTelegramWebhook,
+    setTelegramWebhook,
+    getTelegramWebhookInfo,
+    startTelegramPolling,
+    stopTelegramPolling,
+    getTelegramPollingStatus,
+    setTelegramFetch,
+    setDefaultProxyUrl,
+    getDefaultProxyUrl
+  };
+}
+
+const defaultTelegramClient = createTelegramClient();
+
 module.exports = {
-  callTelegramApi,
-  getTelegramMe,
-  sendTelegramMessage,
-  sendTelegramPhoto,
-  getTelegramFile,
-  downloadTelegramFile,
-  editTelegramMessageText,
-  deleteTelegramMessage,
-  answerTelegramCallback,
-  setTelegramChatMenuButton,
-  getTelegramUpdates,
-  deleteTelegramWebhook,
-  setTelegramWebhook,
-  getTelegramWebhookInfo,
-  startTelegramPolling,
-  stopTelegramPolling,
-  getTelegramPollingStatus,
-  setTelegramFetch,
-  setDefaultProxyUrl,
-  getDefaultProxyUrl,
+  ...defaultTelegramClient,
   requestViaProxy,
-  DEFAULT_TELEGRAM_API_BASE
+  DEFAULT_TELEGRAM_API_BASE,
+  createTelegramClient
 };

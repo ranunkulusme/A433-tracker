@@ -11,21 +11,30 @@ function createNotificationEngine({
   db,
   logic,
   telegram,
+  telegramFormats,
   getAppBaseUrl
 } = {}) {
   if (!db) throw new Error('db is required for NotificationEngine');
   if (!logic) throw new Error('logic is required for NotificationEngine');
 
   const tg = telegram || require('./telegram.js');
-  const resolveBaseUrl = getAppBaseUrl || (() => {
-    const s = db.getAppSetting('telegram_webapp_url') || db.getAppSetting('app_base_url');
-    if (s && s.trim()) return s.trim().replace(/\/+$/, '');
-    if (process.env.TELEGRAM_WEBAPP_URL) return process.env.TELEGRAM_WEBAPP_URL.trim().replace(/\/+$/, '');
-    if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.trim().replace(/\/+$/, '');
-    return 'http://localhost:3000';
-  });
+  const tgFmt = telegramFormats || require('./telegram-formats.js');
+  const resolveBaseUrl = getAppBaseUrl || (() => db.resolveAppBaseUrl());
 
   const recentStaffRegistrations = new Map();
+
+  function normalizeChatId(chatId) {
+    if (chatId === null || chatId === undefined || chatId === '') return null;
+    const str = String(chatId).trim();
+    if (!str) return null;
+    return !isNaN(Number(str)) ? Number(str) : str;
+  }
+
+  function resolveSendOpts(options = {}) {
+    const mieruSettings = db.getMieruSettings ? db.getMieruSettings() : { enabled: false };
+    const proxyUrl = options.proxyUrl || (mieruSettings.enabled ? `socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}` : undefined);
+    return proxyUrl ? { proxyUrl } : {};
+  }
 
   async function dispatchNotification(eventKey, data = {}, options = {}) {
     try {
@@ -52,7 +61,7 @@ function createNotificationEngine({
       const parseMode = template.parse_mode || 'HTML';
       let replyMarkup = options.replyMarkup || undefined;
       if (!replyMarkup && eventKey === 'event_registration_opened' && data.eventId) {
-        replyMarkup = logic.formatEventRegistrationKeyboard(data.eventId);
+        replyMarkup = tgFmt.formatEventRegistrationKeyboard(data.eventId);
       }
       if (!replyMarkup && eventKey === 'staff_event_registration') {
         const linkUrl = String(data.link || `${resolveBaseUrl()}/#event/${data.eventId || ''}`).trim();
@@ -67,17 +76,12 @@ function createNotificationEngine({
         }
       }
 
-      const mieruSettings = db.getMieruSettings ? db.getMieruSettings() : { enabled: false };
-      const proxyUrl = options.proxyUrl || (mieruSettings.enabled ? `socks5://127.0.0.1:${mieruSettings.socks5Port || 1080}` : undefined);
-      const sendOpts = proxyUrl ? { proxyUrl } : {};
+      const sendOpts = resolveSendOpts(options);
 
       if (template.channel === 'staff') {
-        let staffChatId = db.getAppSetting('telegram_staff_chat_id');
+        const staffChatId = normalizeChatId(db.getAppSetting('telegram_staff_chat_id'));
         if (!staffChatId) {
           return { sent: false, reason: 'no_staff_chat_id' };
-        }
-        if (staffChatId && !isNaN(Number(staffChatId))) {
-          staffChatId = Number(staffChatId);
         }
 
         if (eventKey === 'staff_event_registration') {
@@ -146,12 +150,9 @@ function createNotificationEngine({
       }
 
       if (template.channel === 'announcement' || template.channel === 'channel') {
-        let channelChatId = db.getAppSetting('telegram_announcement_chat_id');
+        const channelChatId = normalizeChatId(db.getAppSetting('telegram_announcement_chat_id'));
         if (!channelChatId) {
           return { sent: false, reason: 'no_announcement_chat_id' };
-        }
-        if (channelChatId && !isNaN(Number(channelChatId))) {
-          channelChatId = Number(channelChatId);
         }
         const res = await tg.sendTelegramMessage({
           token,
@@ -466,43 +467,189 @@ function createNotificationEngine({
     }
   }
 
-  function getTemplates() {
-    return db.getNotificationTemplates();
+  async function sendDirectMessage({
+    channel = 'staff',
+    chatId = null,
+    text,
+    parseMode = 'HTML',
+    replyMarkup = undefined,
+    proxyUrl = undefined
+  } = {}) {
+    try {
+      if (!text) return { sent: false, reason: 'empty_text' };
+      const token = db.getAppSetting('telegram_bot_token');
+      if (!token) return { sent: false, reason: 'no_bot_token' };
+
+      let targetChatId = normalizeChatId(chatId);
+      if (!targetChatId) {
+        if (channel === 'staff') {
+          targetChatId = normalizeChatId(db.getAppSetting('telegram_staff_chat_id'));
+          if (!targetChatId) return { sent: false, reason: 'no_staff_chat_id' };
+        } else if (channel === 'announcement' || channel === 'channel') {
+          targetChatId = normalizeChatId(db.getAppSetting('telegram_announcement_chat_id'));
+          if (!targetChatId) return { sent: false, reason: 'no_announcement_chat_id' };
+        } else {
+          return { sent: false, reason: 'no_target_specified' };
+        }
+      }
+
+      const sendOpts = resolveSendOpts({ proxyUrl });
+      const res = await tg.sendTelegramMessage({
+        token,
+        chatId: targetChatId,
+        text,
+        parseMode,
+        replyMarkup
+      }, sendOpts);
+      return { sent: Boolean(res && res.ok), result: res };
+    } catch (err) {
+      console.warn('[Notification] Error in sendDirectMessage:', err.message);
+      return { sent: false, error: err.message };
+    }
   }
 
-  function getTemplate(key) {
-    return db.getNotificationTemplate(key);
-  }
+  async function sendChannelPhoto({
+    target = 'staff',
+    photo,
+    caption = '',
+    parseMode = 'HTML',
+    replyMarkup = undefined,
+    proxyUrl = undefined
+  } = {}) {
+    if (!photo || typeof photo !== 'string') {
+      return { ok: false, status: 400, error: 'VALIDATION_ERROR', message: 'Параметр imageBase64 обязателен' };
+    }
 
-  function saveTemplate(key, data) {
-    return db.updateNotificationTemplate ? db.updateNotificationTemplate(key, data) : db.saveNotificationTemplate(key, data);
-  }
+    const token = db.getAppSetting('telegram_bot_token');
+    if (!token) {
+      return { ok: false, status: 400, error: 'BOT_TOKEN_NOT_CONFIGURED', message: 'Токен бота не настроен в системе' };
+    }
 
-  function resetTemplate(key) {
-    return db.resetNotificationTemplate(key);
-  }
+    const normTarget = target ? String(target).trim().toLowerCase() : 'staff';
+    const staffChatId = normalizeChatId(db.getAppSetting('telegram_staff_chat_id'));
+    const announcementChatId = normalizeChatId(db.getAppSetting('telegram_announcement_chat_id'));
 
-  function testTemplate(key, samplePayload = {}) {
-    const tpl = db.getNotificationTemplate(key);
-    if (!tpl) return null;
-    const rendered = logic.renderTemplate(tpl.template, samplePayload);
+    const targetChats = [];
+    if (normTarget === 'staff') {
+      if (!staffChatId) {
+        return { ok: false, status: 400, error: 'STAFF_CHAT_NOT_CONFIGURED', message: 'Чат штаба не настроен в системе' };
+      }
+      targetChats.push(staffChatId);
+    } else if (normTarget === 'channel' || normTarget === 'announcement') {
+      if (!announcementChatId) {
+        return { ok: false, status: 400, error: 'ANNOUNCEMENT_CHAT_NOT_CONFIGURED', message: 'Канал анонсов не настроен в системе' };
+      }
+      targetChats.push(announcementChatId);
+    } else if (normTarget === 'both') {
+      if (!staffChatId && !announcementChatId) {
+        return { ok: false, status: 400, error: 'NO_CHATS_CONFIGURED', message: 'Ни чат штаба, ни канал анонсов не настроены в системе' };
+      }
+      if (staffChatId) targetChats.push(staffChatId);
+      if (announcementChatId) targetChats.push(announcementChatId);
+    } else {
+      return { ok: false, status: 400, error: 'INVALID_TARGET', message: 'Недопустимый канал назначения (staff, channel, both)' };
+    }
+
+    const sendOpts = resolveSendOpts({ proxyUrl });
+    const sendResults = [];
+    for (const destChatId of targetChats) {
+      const result = await tg.sendTelegramPhoto({
+        token,
+        chatId: destChatId,
+        photo,
+        caption,
+        parseMode,
+        replyMarkup
+      }, sendOpts);
+      if (result && result.ok) {
+        sendResults.push({ chatId: destChatId, messageId: result.result?.message_id });
+      }
+    }
+
+    if (sendResults.length === 0) {
+      return { ok: false, status: 502, error: 'TELEGRAM_ERROR', message: 'Ошибка отправки изображения в Telegram' };
+    }
+
     return {
-      template: tpl,
-      sampleData: samplePayload,
-      renderedText: rendered
+      ok: true,
+      sentCount: sendResults.length,
+      messageId: sendResults[0].messageId,
+      results: sendResults
+    };
+  }
+
+  async function sendTemplateTest({
+    key,
+    user = null,
+    template = undefined,
+    parseMode = undefined,
+    sampleData = undefined,
+    proxyUrl = undefined
+  } = {}) {
+    const tpl = db.getNotificationTemplate(key);
+    if (!tpl) {
+      return { ok: false, status: 404, error: 'NOT_FOUND', message: 'Шаблон не найден' };
+    }
+
+    const token = db.getAppSetting('telegram_bot_token');
+    if (!token) {
+      return { ok: false, status: 400, error: 'NO_BOT_TOKEN', message: 'Токен Telegram бота не настроен в системе' };
+    }
+
+    let targetChatId = null;
+    if (tpl.channel === 'personal') {
+      targetChatId = normalizeChatId(user && (user.telegramChatId || user.telegram_chat_id));
+      if (!targetChatId) {
+        return {
+          ok: false,
+          status: 400,
+          error: 'NO_TELEGRAM_LINKED',
+          message: 'Привяжите ваш Telegram аккаунт в Личном кабинете для получения тестовых сообщений'
+        };
+      }
+    } else {
+      targetChatId = normalizeChatId(db.getAppSetting('telegram_staff_chat_id'));
+      if (!targetChatId) {
+        return {
+          ok: false,
+          status: 400,
+          error: 'NO_STAFF_CHAT_LINKED',
+          message: 'Чат штаба не привязан. Подключите чат штаба через PIN-код или укажите ID чата в настройках'
+        };
+      }
+    }
+
+    const templateText = template !== undefined ? template : tpl.template;
+    const resolvedParseMode = parseMode || tpl.parse_mode || 'HTML';
+    const data = sampleData || (logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA && logic.NOTIFICATION_TEMPLATE_SAMPLE_DATA[key]) || {};
+    const renderedText = logic.renderTemplate(templateText, data);
+
+    const sendRes = await tg.sendTelegramMessage({
+      token,
+      chatId: targetChatId,
+      text: renderedText,
+      parseMode: resolvedParseMode
+    }, resolveSendOpts({ proxyUrl }));
+
+    if (!sendRes || !sendRes.ok) {
+      return { ok: false, status: 200, error: sendRes?.error || 'TELEGRAM_ERROR' };
+    }
+
+    return {
+      ok: true,
+      messageId: sendRes.result?.message_id,
+      renderedText
     };
   }
 
   return {
     dispatchNotification,
+    sendDirectMessage,
+    sendChannelPhoto,
+    sendTemplateTest,
     checkStaleStockReminders,
     checkScheduledStaleStockReminders,
-    checkScheduledEventMorningReminders,
-    getTemplates,
-    getTemplate,
-    saveTemplate,
-    resetTemplate,
-    testTemplate
+    checkScheduledEventMorningReminders
   };
 }
 

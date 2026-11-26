@@ -5,17 +5,16 @@
  * сквозной пропуск API-запросов напрямую в сеть.
  */
 
-const CACHE_NAME = 'kow-cache-v3.51.0';
+const CACHE_NAME = 'kow-cache-v3.54.0';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/style.css',
+  '/runtime.js',
   '/app.js',
   '/logic.js',
   '/tma.js',
-  '/smart-scanner.js',
-  '/ocr.js',
   '/vendor/i18next.min.js',
   '/i18n.js',
   '/manifest.json',

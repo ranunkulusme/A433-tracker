@@ -6,277 +6,9 @@
  * Decoupled from desktop desktop application monolith.
  */
 
-// ─── TELEGRAM MINI APP (TMA) SAFE RUNTIME & FALLBACKS ─────────────
+// ─── TELEGRAM MINI APP (TMA) RUNTIME STATE ─────────────────────
 let activeTmaTab = 'cabinet';
 let tmaEventsSubTab = 'upcoming';
-
-// Standalone safe doTmaApiFetch (independent of script load/execution order)
-async function doTmaApiFetch(url, options = {}) {
-  // If app.js is loaded and defined __appApiFetch, delegate to it
-  if (typeof window !== 'undefined' && typeof window.__appApiFetch === 'function') {
-    return window.__appApiFetch(url, options);
-  }
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('kow_token') : null;
-  const headers = { ...(options.headers || {}) };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  headers['Pragma'] = 'no-cache';
-  headers['Cache-Control'] = 'no-cache';
-
-  let body = options.body;
-  if (body && typeof body === 'object' && !(typeof FormData !== 'undefined' && body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(body);
-  }
-  const res = await fetch(url, { ...options, headers, body });
-  const contentType = res.headers.get('content-type') || '';
-  const data = contentType.includes('application/json') ? await res.json() : await res.text();
-  if (!res.ok) {
-    const message = (data && data.message) || (data && data.error) || res.statusText || 'API Error';
-    const err = new Error(message);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
-}
-
-// Global fallback so apiFetch, toast, state, currentUser are safely accessible without lexical identifier collisions
-const _tmaGlobal = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this);
-if (_tmaGlobal) {
-  if (typeof _tmaGlobal.apiFetch === 'undefined') {
-    _tmaGlobal.apiFetch = doTmaApiFetch;
-  }
-  if (typeof _tmaGlobal.currentUser === 'undefined') {
-    _tmaGlobal.currentUser = null;
-  }
-  if (typeof _tmaGlobal.state === 'undefined') {
-    _tmaGlobal.state = { players: [], catalog: [], events: [], currentRole: 'r3' };
-  }
-}
-if (typeof window !== 'undefined') {
-  if (typeof window.apiFetch === 'undefined') window.apiFetch = doTmaApiFetch;
-  if (typeof window.currentUser === 'undefined') window.currentUser = _tmaGlobal?.currentUser || null;
-  if (typeof window.state === 'undefined') window.state = _tmaGlobal?.state || { players: [], catalog: [], events: [], currentRole: 'r3' };
-}
-
-// Safe fallback for toast notifications
-function doTmaToast(msg, type = 'success') {
-  if (typeof window !== 'undefined' && typeof window.toast === 'function' && window.toast !== doTmaToast) {
-    return window.toast(msg, type);
-  }
-  if (typeof document !== 'undefined') {
-    const container = document.getElementById('toasts') || document.body;
-    const t = document.createElement('div');
-    t.className = `toast ${type || 'info'}`;
-    t.textContent = msg;
-    container.appendChild(t);
-    setTimeout(() => { try { t.remove(); } catch (_) {} }, 3500);
-  }
-}
-if (_tmaGlobal && typeof _tmaGlobal.toast === 'undefined') {
-  _tmaGlobal.toast = doTmaToast;
-}
-if (typeof window !== 'undefined' && typeof window.toast === 'undefined') {
-  window.toast = doTmaToast;
-}
-
-// Safe fallback for fmtNum
-function doTmaFmtNum(value, digits = 0) {
-  if (typeof window !== 'undefined' && typeof window.fmtNum === 'function' && window.fmtNum !== doTmaFmtNum) {
-    return window.fmtNum(value, digits);
-  }
-  if (value === null || value === undefined || isNaN(value)) return '0';
-  const n = Number(value);
-  if (digits > 0) {
-    return n.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  }
-  return n.toLocaleString('ru-RU');
-}
-if (_tmaGlobal && typeof _tmaGlobal.fmtNum === 'undefined') {
-  _tmaGlobal.fmtNum = doTmaFmtNum;
-}
-if (typeof window !== 'undefined' && typeof window.fmtNum === 'undefined') {
-  window.fmtNum = doTmaFmtNum;
-}
-
-// Safe fallback for escapeHtml
-function doTmaEscapeHtml(str) {
-  if (typeof window !== 'undefined' && typeof window.escapeHtml === 'function' && window.escapeHtml !== doTmaEscapeHtml) {
-    return window.escapeHtml(str);
-  }
-  if (typeof logic !== 'undefined' && typeof logic.escapeHtml === 'function') {
-    return logic.escapeHtml(str);
-  }
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-if (_tmaGlobal && typeof _tmaGlobal.escapeHtml === 'undefined') {
-  _tmaGlobal.escapeHtml = doTmaEscapeHtml;
-}
-if (typeof window !== 'undefined' && typeof window.escapeHtml === 'undefined') {
-  window.escapeHtml = doTmaEscapeHtml;
-}
-
-// Safe fallback for getCatalogOfficer
-function doTmaGetCatalogOfficer(id) {
-  if (typeof window !== 'undefined' && typeof window.getCatalogOfficer === 'function' && window.getCatalogOfficer !== doTmaGetCatalogOfficer) {
-    return window.getCatalogOfficer(id);
-  }
-  const catalog = (typeof state !== 'undefined' && (state.officerCatalog || state.catalog)) || [];
-  return catalog.find(o => String(o.id) === String(id)) || null;
-}
-if (_tmaGlobal && typeof _tmaGlobal.getCatalogOfficer === 'undefined') {
-  _tmaGlobal.getCatalogOfficer = doTmaGetCatalogOfficer;
-}
-if (typeof window !== 'undefined' && typeof window.getCatalogOfficer === 'undefined') {
-  window.getCatalogOfficer = doTmaGetCatalogOfficer;
-}
-
-// Safe fallback for parseEventBoundary
-function doTmaParseEventBoundary(val, isEnd = false) {
-  if (typeof logic !== 'undefined' && typeof logic.parseEventBoundary === 'function') {
-    return logic.parseEventBoundary(val, isEnd);
-  }
-  if (!val) return null;
-  if (val instanceof Date) return val.getTime();
-  if (typeof val === 'number') return val;
-  const str = String(val).trim();
-  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) {
-    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1, d = parseInt(m[3], 10);
-    return isEnd ? Date.UTC(y, mo, d, 23, 59, 59, 999) : Date.UTC(y, mo, d, 0, 0, 0, 0);
-  }
-  const p = new Date(str).getTime();
-  return isNaN(p) ? null : p;
-}
-if (_tmaGlobal && typeof _tmaGlobal.parseEventBoundary === 'undefined') {
-  _tmaGlobal.parseEventBoundary = doTmaParseEventBoundary;
-}
-if (typeof window !== 'undefined' && typeof window.parseEventBoundary === 'undefined') {
-  window.parseEventBoundary = doTmaParseEventBoundary;
-}
-
-// Safe fallback for getLocalizedOfficerType
-function doTmaGetLocalizedOfficerType(type) {
-  if (typeof window !== 'undefined' && typeof window.getLocalizedOfficerType === 'function' && window.getLocalizedOfficerType !== doTmaGetLocalizedOfficerType) {
-    return window.getLocalizedOfficerType(type);
-  }
-  if (typeof logic !== 'undefined' && typeof logic.getLocalizedOfficerType === 'function') {
-    return logic.getLocalizedOfficerType(type);
-  }
-  return type || '';
-}
-if (_tmaGlobal && typeof _tmaGlobal.getLocalizedOfficerType === 'undefined') {
-  _tmaGlobal.getLocalizedOfficerType = doTmaGetLocalizedOfficerType;
-}
-if (typeof window !== 'undefined' && typeof window.getLocalizedOfficerType === 'undefined') {
-  window.getLocalizedOfficerType = doTmaGetLocalizedOfficerType;
-}
-
-function isTmaMode() {
-  if (typeof window === 'undefined') return false;
-  if (window.TelegramWebviewProxy) {
-    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-    return true;
-  }
-  if (typeof navigator !== 'undefined' && /Telegram/i.test(navigator.userAgent || '')) {
-    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-    return true;
-  }
-  try {
-    const s = (window.location && window.location.search) ? window.location.search : '';
-    if (s && (s.indexOf('tma=1') !== -1 || s.indexOf('tma=') !== -1 || s === '?tma')) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-    if (typeof URLSearchParams !== 'undefined' && s) {
-      const params = new URLSearchParams(s);
-      if (params.get('tma') === '1' || params.has('tma')) {
-        try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-        return true;
-      }
-    }
-  } catch (_) {}
-  try {
-    const h = (window.location && window.location.hash) ? window.location.hash : '';
-    if (h && (h.indexOf('tgWebAppData') !== -1 || h.indexOf('tgWebAppPlatform') !== -1 || h.indexOf('tgWebAppVersion') !== -1 || h.indexOf('tma=1') !== -1 || h.indexOf('tma') !== -1)) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-  } catch (_) {}
-  const tg = window.Telegram?.WebApp;
-  if (tg) {
-    if (tg.initData && typeof tg.initData === 'string' && tg.initData.length > 0) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-    if (tg.initDataUnsafe && (tg.initDataUnsafe.user || tg.initDataUnsafe.query_id || tg.initDataUnsafe.start_param)) {
-      try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-      return true;
-    }
-  }
-  disableTmaView();
-  return false;
-}
-
-function disableTmaView() {
-  if (typeof sessionStorage !== 'undefined') {
-    try { sessionStorage.removeItem('kow_tma'); } catch (_) {}
-  }
-  if (typeof document !== 'undefined') {
-    if (typeof document.documentElement?.classList?.remove === 'function') {
-      document.documentElement.classList.remove('tma-mode');
-    }
-    if (typeof document.body?.classList?.remove === 'function') {
-      document.body.classList.remove('tma-mode');
-    }
-    const appEl = document.getElementById('app');
-    if (appEl && appEl.style && appEl.style.display === 'none') {
-      appEl.style.display = '';
-    }
-    const tmaEl = document.getElementById('tma-app');
-    if (tmaEl && tmaEl.style) {
-      tmaEl.style.display = 'none';
-    }
-  }
-}
-
-function enableTmaView() {
-  if (typeof document === 'undefined') return;
-  if (typeof sessionStorage !== 'undefined') {
-    try { sessionStorage.setItem('kow_tma', '1'); } catch (_) {}
-  }
-  if (document.documentElement) {
-    document.documentElement.classList.add('tma-mode');
-  }
-  if (document.body) {
-    document.body.classList.add('tma-mode');
-  }
-  const tmaEl = document.getElementById('tma-app');
-  if (tmaEl) {
-    tmaEl.style.display = 'flex';
-  }
-  const appEl = document.getElementById('app');
-  if (appEl) {
-    appEl.style.display = 'none';
-  }
-  const authModal = document.getElementById('modal-auth');
-  if (authModal) {
-    authModal.classList.remove('open');
-    authModal.style.display = 'none';
-  }
-  const overlay = document.getElementById('overlay');
-  if (overlay) {
-    overlay.classList.remove('open');
-    overlay.style.display = 'none';
-  }
-}
 
 // ─── TMA MULTI-LANGUAGE & LOCALIZATION HELPERS ───────────────────────
 function tmaT(key, opt) {
@@ -399,24 +131,6 @@ async function selectTmaLanguage(lang) {
   }
 }
 
-function setupTmaEnvironment() {
-  const tg = window.Telegram?.WebApp;
-  if (!tg) {
-    updateTmaLanguageUI();
-    return;
-  }
-  try {
-    if (typeof tg.ready === 'function') tg.ready();
-    if (typeof tg.expand === 'function') tg.expand();
-    if (typeof tg.setHeaderColor === 'function') tg.setHeaderColor('#171b22');
-    if (typeof tg.setBackgroundColor === 'function') tg.setBackgroundColor('#090a0f');
-    if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
-  } catch (err) {
-    console.warn('TMA SDK init error:', err);
-  }
-  updateTmaLanguageUI();
-}
-
 function tmaHaptic(type = 'light') {
   try {
     const hf = window.Telegram?.WebApp?.HapticFeedback;
@@ -448,7 +162,7 @@ async function initTmaAuth() {
     // 1. If Telegram initData is present, attempt WebApp auto-auth
     if (initData) {
       try {
-        const res = await doTmaApiFetch('/api/auth/telegram-webapp', {
+        const res = await apiFetch('/api/auth/telegram-webapp', {
           method: 'POST',
           body: { initData }
         });
@@ -488,7 +202,7 @@ async function initTmaAuth() {
     const existingToken = localStorage.getItem('kow_token');
     if (existingToken) {
       try {
-        const data = await doTmaApiFetch('/api/auth/me');
+        const data = await apiFetch('/api/auth/me');
         if (data && data.user) {
           currentUser = data.user;
           if (typeof window !== 'undefined') window.currentUser = currentUser;
@@ -509,7 +223,7 @@ async function initTmaAuth() {
           // If we have initData, bind this telegram account right now so next time it logs in via Step 1!
           if (initData && !currentUser?.telegramChatId && !currentUser?.telegram_chat_id) {
             try {
-              await doTmaApiFetch('/api/telegram/bind-webapp', {
+              await apiFetch('/api/telegram/bind-webapp', {
                 method: 'POST',
                 body: { initData }
               });
@@ -680,7 +394,7 @@ async function handleTmaLoginSubmit(event) {
     const body = { username, password };
     if (initData) body.initData = initData;
 
-    const res = await doTmaApiFetch('/api/auth/login', {
+    const res = await apiFetch('/api/auth/login', {
       method: 'POST',
       body
     });
@@ -706,7 +420,7 @@ async function handleTmaLoginSubmit(event) {
       // Auto-bind Telegram if WebApp initData is present and user is not yet bound!
       if (initData && !currentUser?.telegramChatId && !currentUser?.telegram_chat_id) {
         try {
-          await doTmaApiFetch('/api/telegram/bind-webapp', {
+          await apiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
             body: { initData }
           });
@@ -758,7 +472,7 @@ async function handleTmaRegisterSubmit(event) {
     const regBody = { username, password, playerName };
     if (initData) regBody.initData = initData;
 
-    const regRes = await doTmaApiFetch('/api/auth/register', {
+    const regRes = await apiFetch('/api/auth/register', {
       method: 'POST',
       body: regBody
     });
@@ -772,7 +486,7 @@ async function handleTmaRegisterSubmit(event) {
     // Auto login
     const loginBody = { username, password };
     if (initData) loginBody.initData = initData;
-    const loginRes = await doTmaApiFetch('/api/auth/login', {
+    const loginRes = await apiFetch('/api/auth/login', {
       method: 'POST',
       body: loginBody
     });
@@ -798,7 +512,7 @@ async function handleTmaRegisterSubmit(event) {
       // Auto bind telegram if WebApp initData is present and user is not yet bound
       if (initData && !currentUser?.telegramChatId && !currentUser?.telegram_chat_id) {
         try {
-          await doTmaApiFetch('/api/telegram/bind-webapp', {
+          await apiFetch('/api/telegram/bind-webapp', {
             method: 'POST',
             body: { initData }
           });
@@ -953,8 +667,8 @@ function renderTmaCabinetEventBanner(eventsList, playerObj) {
       if (e.status === 'completed' || e.isCompleted) { past.push(e); return; }
       const rawStart = e.startDate || e.dateFrom || e.dateStart;
       const rawEnd = e.endDate || e.dateTo || e.dateEnd;
-      const s = doTmaParseEventBoundary(rawStart, false) || 0;
-      const end = rawEnd ? doTmaParseEventBoundary(rawEnd, true) : (s ? s + 3 * 86400000 - 1 : 0);
+      const s = parseEventBoundary(rawStart, false) || 0;
+      const end = rawEnd ? parseEventBoundary(rawEnd, true) : (s ? s + 3 * 86400000 - 1 : 0);
       if (s && now < s) upcoming.push(e);
       else if (s && end && now >= s && now <= end) active.push(e);
       else if (end && now > end) past.push(e);
@@ -1344,8 +1058,8 @@ function renderTmaEvents() {
       if (ev.status === 'completed' || ev.isCompleted) { pastEvents.push(ev); return; }
       const rawStart = ev.startDate || ev.dateFrom || ev.dateStart;
       const rawEnd = ev.endDate || ev.dateTo || ev.dateEnd;
-      const s = doTmaParseEventBoundary(rawStart, false) || 0;
-      const end = rawEnd ? doTmaParseEventBoundary(rawEnd, true) : (s ? s + 3 * 86400000 - 1 : 0);
+      const s = parseEventBoundary(rawStart, false) || 0;
+      const end = rawEnd ? parseEventBoundary(rawEnd, true) : (s ? s + 3 * 86400000 - 1 : 0);
       if (s && now < s) upcomingEvents.push(ev);
       else if (s && end && now >= s && now <= end) activeEvents.push(ev);
       else if (end && now > end) pastEvents.push(ev);
@@ -1718,30 +1432,15 @@ function buildTmaMatrixRows() {
         };
       }
 
-      // Recommendation badge
-      let recBadge = { label: tmaT('tma.badge_4_10_place', '4–10 место'), style: 'background:rgba(107,114,128,0.18);color:#9ca3af;border:1px solid rgba(107,114,128,0.25)', rank: 4 };
-      if (def.deficitPuzzles === 0) {
-        recBadge = { label: tmaT('tma.badge_max', 'Максимум ✓'), style: 'background:rgba(34,197,94,0.18);color:#4ade80;border:1px solid rgba(34,197,94,0.3)', rank: 0 };
-      } else if (def.isOnlyPersonalPuzzles || def.deficitSummary?.isOnlyPersonalPuzzles) {
-        recBadge = { label: tmaT('tma.badge_only_personal', 'Только личные'), style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
-      } else if (def.costPerPuzzle === 0) {
-        recBadge = { label: tmaT('tma.badge_only_puzzles', 'Только пазлы'), style: 'background:rgba(156,163,175,0.15);color:#d1d5db;border:1px solid rgba(156,163,175,0.25)', rank: 5 };
-      } else if (def.deficitCoupons >= 12500) {
-        recBadge = { label: '🥇 ' + tmaT('tma.place_num', { place: 1 }, '1 место'), style: 'background:rgba(245,158,11,0.22);color:#fbbf24;border:1px solid rgba(245,158,11,0.35)', rank: 1 };
-      } else if (def.deficitCoupons >= 6500) {
-        recBadge = { label: '🥈 ' + tmaT('tma.place_num', { place: 2 }, '2 место'), style: 'background:rgba(148,163,184,0.2);color:#cbd5e1;border:1px solid rgba(148,163,184,0.3)', rank: 2 };
-      } else if (def.deficitCoupons >= 3500) {
-        recBadge = { label: '🥉 ' + tmaT('tma.place_num', { place: 3 }, '3 место'), style: 'background:rgba(180,83,9,0.25);color:#f59e0b;border:1px solid rgba(180,83,9,0.35)', rank: 3 };
-      }
+      // Recommendation badge via shared view-model
+      const recBadge = (typeof KowRuntime !== 'undefined' && typeof KowRuntime.classifyMatrixRecommendation === 'function')
+        ? KowRuntime.classifyMatrixRecommendation(def, tmaT)
+        : { label: tmaT('tma.badge_4_10_place', '4–10 место'), style: 'background:rgba(107,114,128,0.18);color:#9ca3af;border:1px solid rgba(107,114,128,0.25)', rank: 4 };
 
-      // Troop emoji icon (strictly 5 types)
-      let troopIcon = '🎖️';
-      const tNorm = (cat.type || '').trim().toLowerCase();
-      if (tNorm.includes('танк')) troopIcon = '🛡️';
-      else if (tNorm.includes('пехота')) troopIcon = '🪖';
-      else if (tNorm.includes('пт')) troopIcon = '🎯';
-      else if (tNorm.includes('гарнизон') || tNorm.includes('горнизон')) troopIcon = '🏰';
-      else if (tNorm.includes('осада')) troopIcon = '💥';
+      // Troop emoji icon via shared runtime mapper
+      const troopIcon = (typeof KowRuntime !== 'undefined' && typeof KowRuntime.getTroopIcon === 'function')
+        ? KowRuntime.getTroopIcon(cat.type)
+        : '🎖️';
 
       rows.push({
         player: p,
@@ -1992,13 +1691,13 @@ async function handleTmaRegisterEvent(eventId, desiredPlace = 0) {
   let officerId = undefined;
   if (player && typeof logic !== 'undefined' && typeof logic.selectOptimalEventOfficer === 'function') {
     const ev = (state.events || []).find(e => Number(e.id) === Number(eventId));
-    const opt = logic.selectOptimalEventOfficer({ player, catalog: state.catalog, eventDate: ev?.dateFrom });
+    const opt = logic.selectOptimalEventOfficer({ player, catalog: getOfficerCatalog(), eventDate: ev?.dateFrom });
     if (opt?.officerId) {
       officerId = opt.officerId;
     }
   }
   try {
-    await doTmaApiFetch(`/api/events/${eventId}/register`, {
+    await apiFetch(`/api/events/${eventId}/register`, {
       method: 'POST',
       body: { desiredPlace, sectorId, ...(officerId ? { officerId } : {}) }
     });
@@ -2034,7 +1733,7 @@ async function handleTmaUnregisterEvent(eventId) {
     const url = sectorId
       ? `/api/events/${eventId}/register?sectorId=${sectorId}`
       : `/api/events/${eventId}/register`;
-    await doTmaApiFetch(url, { method: 'DELETE' });
+    await apiFetch(url, { method: 'DELETE' });
     tmaHaptic('success');
     toast(tmaT('tma.toast_event_unreg_success', 'Заявка отменена'), 'info');
     await doTmaLoadData();
@@ -2060,7 +1759,7 @@ async function openTmaEventDetail(eventId) {
 
   let ev = (state.events || []).find(e => Number(e.id) === Number(eventId));
   try {
-    const fetched = await doTmaApiFetch(`/api/events/${eventId}`);
+    const fetched = await apiFetch(`/api/events/${eventId}`);
     if (fetched && fetched.id) {
       ev = fetched;
       const idx = (state.events || []).findIndex(e => Number(e.id) === Number(eventId));
@@ -2464,7 +2163,7 @@ async function runTmaEventAutopick() {
   tmaHaptic('medium');
   if (tmaEditEventId) {
     try {
-      const res = await doTmaApiFetch(`/api/events/${tmaEditEventId}/autopick`, { method: 'POST' });
+      const res = await apiFetch(`/api/events/${tmaEditEventId}/autopick`, { method: 'POST' });
       if (res && res.assignments) {
         for (const a of res.assignments) {
           const p = tmaEventEditorPlaces.find(pl => Number(pl.place) === Number(a.place));
@@ -2559,7 +2258,7 @@ async function submitTmaEventEditor() {
   const targetEventId = tmaEditEventId;
 
   try {
-    const saved = await doTmaApiFetch('/api/events', { method: 'POST', body: payload });
+    const saved = await apiFetch('/api/events', { method: 'POST', body: payload });
     tmaHaptic('success');
     toast(isEditingExisting ? '✅ Событие обновлено' : '✅ Событие создано', 'success');
     const finalEventId = targetEventId || saved?.id;
@@ -2584,7 +2283,7 @@ async function handleTmaDeleteEvent(eventId) {
   if (!confirm(tmaT('tma.confirm_delete_event', 'Удалить это событие альянса?'))) return;
   tmaHaptic('medium');
   try {
-    await doTmaApiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
+    await apiFetch(`/api/events/${eventId}`, { method: 'DELETE' });
     tmaHaptic('success');
     toast(tmaT('tma.toast_event_deleted', '🗑️ Событие удалено'), 'info');
     closeTmaEventEditorModal();
@@ -2601,7 +2300,7 @@ async function handleTmaDeleteEvent(eventId) {
 async function handleTmaRunAutopick(eventId) {
   tmaHaptic('medium');
   try {
-    await doTmaApiFetch(`/api/events/${eventId}/autopick`, { method: 'POST' });
+    await apiFetch(`/api/events/${eventId}/autopick`, { method: 'POST' });
     tmaHaptic('success');
     toast('⚡ Автоподбор выполнен штабом!', 'success');
     await doTmaLoadData();
@@ -2841,7 +2540,7 @@ async function handleTmaSwitchSector(sectorId) {
   try {
     const sId = Number(sectorId);
     if (!sId) return;
-    await doTmaApiFetch('/api/my-profile/active-sector', {
+    await apiFetch('/api/my-profile/active-sector', {
       method: 'POST',
       body: { sectorId: sId }
     });
@@ -2931,7 +2630,7 @@ async function submitTmaSectorEdit() {
   const targetId = tmaEditingSectorId || Number(currentUser?.playerId || myCabinetProfile?.id);
 
   try {
-    await doTmaApiFetch(endpoint, {
+    await apiFetch(endpoint, {
       method: 'PUT',
       body: {
         name,
@@ -3061,7 +2760,7 @@ async function submitTmaStockEdit() {
   const stock = { coupons, puzzles, chests, starCoupons, legendaryStars1, legendaryStars2, legendaryStars3 };
 
   try {
-    await doTmaApiFetch('/api/my-profile', {
+    await apiFetch('/api/my-profile', {
       method: 'PUT',
       body: { stock }
     });
@@ -3621,86 +3320,9 @@ async function submitTmaOfficerEdit() {
     : [1, 1, 1, 1];
   const isRetro = (tmaOfficerModalMode === 'retro');
 
-  let newStock = null;
-  let newInvested = null;
-
-  if (!isRetro && myCabinetProfile?.stock) {
-    if (tmaOfficerModalEditId) {
-      const oldOff = myCabinetProfile.officers?.find(o => String(o.id) === String(tmaOfficerModalEditId));
-      if (oldOff) {
-        const cat = getCatalogOfficer(oldOff.catalogId);
-        const rawCost = Number(cat?.couponPerPuzzle);
-        const costPerPuzzle = rawCost === 0 ? (cat?.upgradeType === 'special' ? 0 : 500) : (rawCost || (cat?.generation === 7 ? 600 : (cat?.generation >= 8 ? 720 : 500)));
-        const upgradeType = cat?.upgradeType || 'standard';
-        const starCouponCost = cat?.starCouponCost || (cat?.generation === 7 ? 300 : (cat?.generation <= 6 ? 250 : 360));
-        const maxMedals = (cat && (cat.medalsBeforeTraining || cat.medals_before_training)) || 690;
-
-        let curStock = { ...myCabinetProfile.stock };
-        const normInvFn = (typeof logic !== 'undefined' && logic.normalizeInvested) ? logic.normalizeInvested : normalizeInvested;
-        let curInv = normInvFn ? normInvFn(oldOff.invested || oldOff.invested_json) : { ...(oldOff.invested || {}) };
-        let hasChanges = false;
-
-        // 1. Level
-        if (oldOff.level !== level) {
-          const deltaFn = (typeof logic !== 'undefined' && logic.calculateLevelStockDelta) ? logic.calculateLevelStockDelta : calculateLevelStockDelta;
-          const levelStockDelta = deltaFn(oldOff.level, level, curStock, costPerPuzzle, upgradeType, curInv);
-          if (!levelStockDelta.canAfford) {
-            tmaHaptic('error');
-            toast(`❌ ${tmaT('tma.toast_not_enough_level_stock', { count: fmtNum(levelStockDelta.deficitPuzzles || 0) }, `Недостаточно ресурсов на складе для изменения уровня (не хватает ${fmtNum(levelStockDelta.deficitPuzzles || 0)} пазл.). Изменение отменено.`)}`, 'error');
-            return;
-          }
-          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (levelStockDelta.delta.coupons || 0));
-          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (levelStockDelta.delta.puzzles || 0));
-          if (levelStockDelta.newInvested) curInv = levelStockDelta.newInvested;
-          hasChanges = true;
-        }
-
-        // 2. Stars
-        const oldStars = Number(oldOff.stars) || 0;
-        if (oldStars !== stars) {
-          const deltaStarFn = (typeof logic !== 'undefined' && logic.calculateStarStockDelta) ? logic.calculateStarStockDelta : calculateStarStockDelta;
-          const starRes = deltaStarFn(oldStars, stars, curStock, starCouponCost, curInv);
-          if (!starRes.canAfford) {
-            tmaHaptic('error');
-            toast(`❌ ${tmaT('tma.toast_not_enough_stars_stock', 'Недостаточно ресурсов на складе для изменения звёзд. Изменение отменено.')}`, 'error');
-            return;
-          }
-          curStock.starCoupons = Math.max(0, (curStock.starCoupons || 0) + (starRes.delta.starCoupons || 0));
-          curStock.legendaryStars1 = Math.max(0, (curStock.legendaryStars1 || 0) + (starRes.delta.legendaryStars1 || 0));
-          curStock.legendaryStars2 = Math.max(0, (curStock.legendaryStars2 || 0) + (starRes.delta.legendaryStars2 || 0));
-          curStock.legendaryStars3 = Math.max(0, (curStock.legendaryStars3 || 0) + (starRes.delta.legendaryStars3 || 0));
-          if (starRes.newInvested) curInv = starRes.newInvested;
-          hasChanges = true;
-        }
-
-        // 3. Skills
-        const oldSkills = Array.isArray(oldOff.skills) && oldOff.skills.length === 4 ? oldOff.skills : [1, 1, 1, 1];
-        const hasSkillDiff = skills.some((s, idx) => s !== oldSkills[idx]);
-        if (hasSkillDiff) {
-          const deltaSkillFn = (typeof logic !== 'undefined' && logic.calculateSkillStockDelta) ? logic.calculateSkillStockDelta : calculateSkillStockDelta;
-          const skillRes = deltaSkillFn(oldSkills, skills, curStock, costPerPuzzle, upgradeType, maxMedals, curInv);
-          if (!skillRes.canAfford) {
-            tmaHaptic('error');
-            toast(`❌ ${tmaT('tma.toast_not_enough_skill_stock', { count: fmtNum(skillRes.deficitMedals || 0) }, `Недостаточно ресурсов на складе для изменения навыков (не хватает ${fmtNum(skillRes.deficitMedals || 0)} медалей). Изменение отменено.`)}`, 'error');
-            return;
-          }
-          curStock.coupons = Math.max(0, (curStock.coupons || 0) + (skillRes.delta.coupons || 0));
-          curStock.puzzles = Math.max(0, (curStock.puzzles || 0) + (skillRes.delta.puzzles || 0));
-          if (skillRes.newInvested) curInv = skillRes.newInvested;
-          hasChanges = true;
-        }
-
-        if (hasChanges) {
-          newStock = curStock;
-          newInvested = curInv;
-        }
-      }
-    }
-  }
-
   try {
     if (tmaOfficerModalEditId) {
-      const updatedOffData = await doTmaApiFetch(`/api/my-profile/officers/${tmaOfficerModalEditId}`, {
+      const updatedOffData = await apiFetch(`/api/my-profile/officers/${tmaOfficerModalEditId}`, {
         method: 'PUT',
         body: {
           level,
@@ -3708,60 +3330,21 @@ async function submitTmaOfficerEdit() {
           skills,
           personalPuzzles,
           onlyPersonalPuzzles,
-          deductStock: !isRetro,
-          ...(newInvested ? { invested: newInvested } : {})
+          deductStock: !isRetro
         }
       });
 
-      if (updatedOffData && updatedOffData.newStock) {
-        myCabinetProfile.stock = updatedOffData.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = updatedOffData.newStock;
-        }
-      } else if (newStock) {
-        myCabinetProfile.stock = newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = newStock;
-        }
-      }
-
-      const off = myCabinetProfile?.officers?.find(o => String(o.id) === String(tmaOfficerModalEditId));
-      if (off) {
-        if (updatedOffData && updatedOffData.id) Object.assign(off, updatedOffData);
-        else {
-          off.level = level;
-          off.stars = stars;
-          off.skills = skills;
-          off.personalPuzzles = personalPuzzles;
-          off.onlyPersonalPuzzles = onlyPersonalPuzzles;
-        }
-        if (newInvested) off.invested = newInvested;
-      }
-      if (state.players) {
-        for (const p of state.players) {
-          if (p.id === myCabinetProfile?.id && p.officers) {
-            const po = p.officers.find(o => String(o.id) === String(tmaOfficerModalEditId));
-            if (po) {
-              if (updatedOffData && updatedOffData.id) Object.assign(po, updatedOffData);
-              else {
-                po.level = level;
-                po.stars = stars;
-                po.skills = skills;
-                po.personalPuzzles = personalPuzzles;
-                po.onlyPersonalPuzzles = onlyPersonalPuzzles;
-              }
-              if (newInvested) po.invested = newInvested;
-            }
-          }
-        }
-      }
+      applyOfficerMutationResponse({
+        playerId: myCabinetProfile?.id,
+        officerId: tmaOfficerModalEditId,
+        response: updatedOffData,
+        fallbackPatch: { level, stars, skills, personalPuzzles, onlyPersonalPuzzles }
+      });
 
       setOfficerMode(tmaOfficerModalEditId, isRetro ? 'retro' : 'normal', { silent: true });
       tmaHaptic('success');
       closeTmaModals();
-      toast('Офицер обновлен', 'success');
+      toast('Офицер обновлен' + (updatedOffData?.stockDeducted ? ' (ресурсы списаны)' : ''), 'success');
       renderTmaCabinet();
       renderTmaOfficersPickerList();
       if (typeof renderMyCabinet === 'function') renderMyCabinet().catch(() => {});
@@ -3774,72 +3357,32 @@ async function submitTmaOfficerEdit() {
       }
       const cat = getCatalogOfficer(catalogId);
 
-      let initialStockDeduction = null;
-      if (!isRetro && myCabinetProfile?.stock) {
-        const initialFn = (typeof logic !== 'undefined' && logic.calculateInitialOfficerStockDeduction)
-          ? logic.calculateInitialOfficerStockDeduction
-          : calculateInitialOfficerStockDeduction;
-        if (initialFn) {
-          initialStockDeduction = initialFn({
-            officer: { level, stars, skills },
-            stock: myCabinetProfile.stock,
-            catalogOfficer: cat,
-            isRetrospective: false
-          });
-          if (!initialStockDeduction.canAfford) {
-            tmaHaptic('error');
-            toast(initialStockDeduction.error || '❌ Недостаточно ресурсов на складе для прокачки офицера', 'error');
-            return;
-          }
-        }
-      }
-
-      const payload = {
-        catalogId,
-        name: cat?.name || '',
-        level,
-        coupons: 0,
-        stars,
-        skills,
-        personalPuzzles,
-        onlyPersonalPuzzles,
-        deductStock: !isRetro,
-        ...(initialStockDeduction?.invested ? { invested: initialStockDeduction.invested } : {})
-      };
-
-      const createdOff = await doTmaApiFetch('/api/my-profile/officers', {
+      const createdOff = await apiFetch('/api/my-profile/officers', {
         method: 'POST',
-        body: payload
+        body: {
+          catalogId,
+          name: cat?.name || '',
+          level,
+          coupons: 0,
+          stars,
+          skills,
+          personalPuzzles,
+          onlyPersonalPuzzles,
+          deductStock: !isRetro
+        }
       });
 
+      applyOfficerMutationResponse({
+        playerId: myCabinetProfile?.id,
+        response: createdOff
+      });
       if (createdOff && createdOff.id) {
         setOfficerMode(createdOff.id, isRetro ? 'retro' : 'normal', { silent: true });
       }
 
-      if (createdOff && createdOff.newStock) {
-        myCabinetProfile.stock = createdOff.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = createdOff.newStock;
-        }
-      } else if (initialStockDeduction && initialStockDeduction.deductStock && initialStockDeduction.newStock) {
-        myCabinetProfile.stock = initialStockDeduction.newStock;
-        if (state.players) {
-          const me = state.players.find(p => p.id === myCabinetProfile.id);
-          if (me) me.stock = initialStockDeduction.newStock;
-        }
-      }
-
-      if (myCabinetProfile) {
-        myCabinetProfile.officers = myCabinetProfile.officers || [];
-        if (createdOff && createdOff.id && !myCabinetProfile.officers.some(o => String(o.id) === String(createdOff.id))) {
-          myCabinetProfile.officers.push(createdOff);
-        }
-      }
-
       tmaHaptic('success');
       closeTmaModals();
-      toast('Офицер добавлен в сектор' + (initialStockDeduction?.deductStock ? ' (ресурсы списаны)' : ''), 'success');
+      toast('Офицер добавлен в сектор' + (createdOff?.stockDeducted ? ' (ресурсы списаны)' : ''), 'success');
       renderTmaCabinet();
       renderTmaOfficersPickerList();
       if (typeof renderMyCabinet === 'function') renderMyCabinet().catch(() => {});
@@ -3850,15 +3393,10 @@ async function submitTmaOfficerEdit() {
   }
 }
 
-function closeTmaEventModal() {
-  const modal = document.getElementById('tma-event-modal');
-  if (modal) modal.style.display = 'none';
-}
-
 async function handleTmaConfirmRsvp(eventId, placeNum) {
   tmaHaptic('medium');
   try {
-    await doTmaApiFetch(`/api/events/${eventId}/rsvp`, {
+    await apiFetch(`/api/events/${eventId}/rsvp`, {
       method: 'POST',
       body: { place: Number(placeNum), status: 'confirmed' }
     });
@@ -3902,7 +3440,7 @@ async function handleTmaAssignPlace(eventId, playerId, newPlace) {
       assignments
     };
 
-    await doTmaApiFetch(`/api/events/${eventId}`, {
+    await apiFetch(`/api/events/${eventId}`, {
       method: 'PUT',
       body: payload
     });
@@ -3922,14 +3460,14 @@ async function handleTmaStaffRemoveParticipant(eventId, playerId) {
   tmaHaptic('medium');
   if (!confirm(tmaT('tma.confirm_remove_participant', 'Снять участника с события?'))) return;
   try {
-    await doTmaApiFetch(`/api/events/${eventId}/register?sectorId=${playerId}`, {
+    await apiFetch(`/api/events/${eventId}/register?sectorId=${playerId}`, {
       method: 'DELETE'
     });
 
     const ev = (state.events || []).find(e => Number(e.id) === Number(eventId));
     if (ev && Array.isArray(ev.assignments) && ev.assignments.some(a => Number(a.playerId) === Number(playerId))) {
       const assignments = ev.assignments.filter(a => Number(a.playerId) !== Number(playerId));
-      await doTmaApiFetch(`/api/events/${eventId}`, {
+      await apiFetch(`/api/events/${eventId}`, {
         method: 'PUT',
         body: {
           id: ev.id,
@@ -3992,14 +3530,13 @@ async function refreshTmaCurrentTab() {
 }
 
 
-if (typeof window !== "undefined") {
-  window.isTmaMode = isTmaMode;
-  window.enableTmaView = enableTmaView;
-  window.disableTmaView = disableTmaView;
-  window.setupTmaEnvironment = setupTmaEnvironment;
+if (typeof window !== 'undefined') {
   window.initTmaAuth = initTmaAuth;
   window.renderTmaApp = renderTmaApp;
   window.renderTmaUnboundScreen = renderTmaUnboundScreen;
+  window.renderTmaCabinet = renderTmaCabinet;
+  window.renderTmaEvents = renderTmaEvents;
+  window.renderTmaMatrix = renderTmaMatrix;
   window.switchTmaTab = switchTmaTab;
   window.switchTmaEventsSubTab = switchTmaEventsSubTab;
   window.handleTmaMainAction = handleTmaMainAction;
@@ -4057,32 +3594,25 @@ if (typeof window !== "undefined") {
   window.selectTmaLanguage = selectTmaLanguage;
 }
 
-// Auto-initialize TMA if launched inside Telegram WebApp
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  let tmaAutoLaunched = false;
-  const launchTmaIfActive = async () => {
-    if (tmaAutoLaunched) return;
-    if (typeof isTmaMode === 'function' && isTmaMode()) {
-      tmaAutoLaunched = true;
-      enableTmaView();
-      setupTmaEnvironment();
+if (typeof KowRuntime !== 'undefined' && typeof KowRuntime.registerTmaAdapter === 'function') {
+  KowRuntime.registerTmaAdapter({
+    launch: async () => {
       try {
         await initTmaAuth();
       } catch (err) {
         console.warn('[TMA] Auto-auth failed on launch:', err);
-        if (typeof renderTmaUnboundScreen === 'function') {
-          renderTmaUnboundScreen(err);
-        }
+        renderTmaUnboundScreen(err);
       }
-    } else {
-      if (typeof disableTmaView === 'function') {
-        disableTmaView();
-      }
+    },
+    methods: {
+      renderTmaApp,
+      renderTmaUnboundScreen,
+      renderTmaCabinet,
+      renderTmaEvents,
+      renderTmaMatrix,
+      refreshTmaCurrentTab,
+      updateTmaLanguageUI,
+      initTmaAuth
     }
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', launchTmaIfActive);
-  } else {
-    launchTmaIfActive();
-  }
+  });
 }
