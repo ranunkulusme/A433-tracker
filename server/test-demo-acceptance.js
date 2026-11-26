@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const logic = require('../shared/logic.js');
+const ocrAdapter = require('./ocr-adapter.js');
 
 const checklistResults = [];
 
@@ -272,7 +273,7 @@ async function runChecklistAcceptance() {
 Купоны звезды: 480
 Медали доподготовки: 480
 Медали подготовки: 900`;
-      const parsedShop = logic.parseExchangeShopScreenshotText(sampleOcrText);
+      const parsedShop = ocrAdapter.parseExchangeShopScreenshotText(sampleOcrText);
       assert(parsedShop, 'Результат парсинга не пустой');
       recordTest('3.5', 'OCR-сканер магазина обмена медалей', 'БЛОК 3', true, 'Парсер магазина распознал параметры');
     } catch (e) {
@@ -399,14 +400,14 @@ async function runChecklistAcceptance() {
 Power: 125,400,000
 Kill Points: 5,420,100
 VIP: 15`;
-      const parsedProf = logic.parseProfileScreenshotText(profileText);
+      const parsedProf = ocrAdapter.parseProfileScreenshotText(profileText);
       assert.equal(parsedProf.sector?.power, 125400000);
       assert.equal(parsedProf.sector?.vip, undefined, 'VIP строго игнорируется в профиле');
 
       const whText = `Купон готовности офицера: 150
 Легендарная звезда I: 10
 Легендарная звезда II: 5`;
-      const parsedWh = logic.parseWarehouseScreenshotText(whText);
+      const parsedWh = ocrAdapter.parseWarehouseScreenshotText(whText);
       assert.equal(parsedWh.stock?.coupons, 150);
       recordTest('5.5', 'Smart Scanner (OCR-сканер скриншотов профиля и склада)', 'БЛОК 5', true, 'Парсеры профиля и склада валидны');
     } catch (e) {
